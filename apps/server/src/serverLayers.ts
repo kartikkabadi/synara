@@ -13,6 +13,7 @@ import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderComma
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion";
 import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus";
 import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor";
+import { GoalContinuationReactorLive } from "./orchestration/Layers/GoalContinuationReactor";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer";
 
 import { DevServerManagerLive } from "./devServerManager";
@@ -93,6 +94,9 @@ export function makeServerRuntimeServicesLayer() {
   );
   // Shares the single memoized TerminalManager with the top-level TerminalLayerLive.
   const devServerManagerLayer = DevServerManagerLive.pipe(Layer.provide(TerminalLayerLive));
+  const goalContinuationReactorLayer = GoalContinuationReactorLive.pipe(
+    Layer.provideMerge(OrchestrationLayerLive),
+  );
   const sessionCredentialLayer = SessionCredentialServiceLive.pipe(
     Layer.provide(ServerSecretStoreLive),
   );
@@ -147,6 +151,7 @@ export function makeServerRuntimeServicesLayer() {
     providerCommandReactorLayer,
     threadDeletionReactorLayer,
     devServerManagerLayer,
+    goalContinuationReactorLayer,
     GitLayerLive,
     TextGenerationLayerLive,
     TerminalLayerLive,
