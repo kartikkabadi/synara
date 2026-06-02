@@ -8,6 +8,7 @@ import type {
   OrchestrationMessageSource,
   OrchestrationPendingInteraction,
   TurnDispatchMode,
+  OrchestrationGoal,
   OrchestrationLatestTurn,
   OrchestrationThreadPullRequest,
   OrchestrationProposedPlanId,
@@ -210,6 +211,7 @@ export interface Thread extends ThreadWorkspaceState {
   session: ThreadSession | null;
   messages: ChatMessage[];
   proposedPlans: ProposedPlan[];
+  goal?: OrchestrationGoal | null;
   error: string | null;
   createdAt: string;
   archivedAt?: string | null;
