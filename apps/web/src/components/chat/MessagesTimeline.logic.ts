@@ -197,6 +197,15 @@ export function deriveTerminalAssistantMessageIds(
   return terminalAssistantMessageIds;
 }
 
+// A hidden goal-continuation turn (Synara's analog of pi-goal's `display:false`): the
+// user-role message the goal loop injects to keep the agent working. It drives the next
+// turn but is never shown in the transcript — only the agent's response to it is.
+export function isHiddenGoalContinuationMessage(
+  message: Pick<ChatMessage, "role" | "source">,
+): boolean {
+  return message.role === "user" && message.source === "goal-continuation";
+}
+
 // Derives transcript rows from timeline entries while keeping live narration and
 // tool rows in visual chronology. Work already waiting when assistant text
 // arrives renders above that text; trailing work renders below it.
@@ -210,7 +219,11 @@ export function deriveMessagesTimelineRows(input: {
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
 }): MessagesTimelineRow[] {
   const nextRows: MessagesTimelineRow[] = [];
-  const timelineMessages = input.timelineEntries.flatMap((entry) =>
+  // Hidden goal-continuation turns never render (their assistant responses still do).
+  const timelineEntries = input.timelineEntries.filter(
+    (entry) => entry.kind !== "message" || !isHiddenGoalContinuationMessage(entry.message),
+  );
+  const timelineMessages = timelineEntries.flatMap((entry) =>
     entry.kind === "message" ? [entry.message] : [],
   );
   const durationStartByMessageId = computeMessageDurationStart(timelineMessages);
@@ -260,8 +273,8 @@ export function deriveMessagesTimelineRows(input: {
     pendingWorkGroup = null;
   };
 
-  for (let index = 0; index < input.timelineEntries.length; index += 1) {
-    const timelineEntry = input.timelineEntries[index];
+  for (let index = 0; index < timelineEntries.length; index += 1) {
+    const timelineEntry = timelineEntries[index];
     if (!timelineEntry) {
       continue;
     }
@@ -269,8 +282,8 @@ export function deriveMessagesTimelineRows(input: {
     if (timelineEntry.kind === "work") {
       const groupedEntries = [timelineEntry.entry];
       let cursor = index + 1;
-      while (cursor < input.timelineEntries.length) {
-        const nextEntry = input.timelineEntries[cursor];
+      while (cursor < timelineEntries.length) {
+        const nextEntry = timelineEntries[cursor];
         if (!nextEntry || nextEntry.kind !== "work") break;
         groupedEntries.push(nextEntry.entry);
         cursor += 1;
