@@ -708,7 +708,6 @@ describe("resolveAssistantMessageCopyState", () => {
   });
 });
 
-<<<<<<< HEAD
 describe("resolveAssistantMessageDisplayText", () => {
   it("suppresses the empty placeholder when the turn visibly completed an image", () => {
     expect(
