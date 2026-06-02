@@ -431,6 +431,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               createdAt: "2026-02-24T00:00:06.750Z",
             },
           ],
+          goal: null,
           pendingInteractions: [],
           checkpoints: [
             {

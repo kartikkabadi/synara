@@ -85,6 +85,7 @@ import Migration0066 from "./Migrations/066_DurableProviderRuntimeEvents.ts";
 import Migration0067 from "./Migrations/067_ProviderDeliveryReconciliation.ts";
 import Migration0068 from "./Migrations/068_GitHandoffOperations.ts";
 import Migration0069 from "./Migrations/069_ProjectPullRequestPins.ts";
+import Migration0070 from "./Migrations/070_ProjectionThreadGoal.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -169,6 +170,7 @@ export const migrationEntries = [
   [67, "ProviderDeliveryReconciliation", Migration0067],
   [68, "GitHandoffOperations", Migration0068],
   [69, "ProjectPullRequestPins", Migration0069],
+  [70, "ProjectionThreadGoal", Migration0070],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>
