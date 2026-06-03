@@ -24,6 +24,7 @@ function makeMockRuntime(input?: {
   readonly onSetModel?: (model: string) => Effect.Effect<void>;
   readonly modeState?: AcpSessionModeState;
   readonly onSetMode?: (modeId: string) => Effect.Effect<void>;
+  readonly cancel?: Effect.Effect<void, EffectAcpErrors.AcpError>;
 }) {
   return {
     handleRequestPermission: () => Effect.void,
@@ -54,7 +55,7 @@ function makeMockRuntime(input?: {
     prompt:
       input?.prompt ??
       (() => Effect.succeed({ stopReason: "end_turn" } as EffectAcpSchema.PromptResponse)),
-    cancel: Effect.void,
+    cancel: input?.cancel ?? Effect.void,
     setMode: (modeId: string) =>
       input
         ?.onSetMode?.(modeId)
@@ -280,6 +281,79 @@ describe("DevinAdapterLive", () => {
       ),
     );
   });
+
+  it.effect("rejects a second turn while a Devin ACP prompt is active", () =>
+    (() => {
+      let resolvePrompt!: (result: EffectAcpSchema.PromptResponse) => void;
+      const promptPromise = new Promise<EffectAcpSchema.PromptResponse>((resolve) => {
+        resolvePrompt = resolve;
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* DevinAdapter;
+        yield* adapter.startSession({
+          threadId,
+          provider: "devin",
+          cwd: "/tmp/project",
+          runtimeMode: "full-access",
+        });
+
+        yield* adapter.sendTurn({
+          threadId,
+          input: "keep working",
+        });
+        const error = yield* adapter
+          .sendTurn({
+            threadId,
+            input: "start another turn",
+          })
+          .pipe(Effect.flip);
+
+        assert.strictEqual(error._tag, "ProviderAdapterValidationError");
+        assert.match(error.message, /already has an active turn/);
+        yield* adapter.interruptTurn(threadId);
+      }).pipe(
+        Effect.provide(
+          makeDevinAdapterLive({
+            makeRuntime: () =>
+              Effect.succeed(
+                makeMockRuntime({
+                  prompt: () => Effect.promise(() => promptPromise),
+                  cancel: Effect.sync(() => {
+                    resolvePrompt({
+                      stopReason: "cancelled",
+                    } as EffectAcpSchema.PromptResponse);
+                  }),
+                }),
+              ),
+          }),
+        ),
+      );
+    })(),
+  );
+
+  it.effect("rejects rollback until Devin ACP exposes native revert semantics", () =>
+    Effect.gen(function* () {
+      const adapter = yield* DevinAdapter;
+      yield* adapter.startSession({
+        threadId,
+        provider: "devin",
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+
+      const error = yield* adapter.rollbackThread(threadId, 1).pipe(Effect.flip);
+
+      assert.strictEqual(error._tag, "ProviderAdapterRequestError");
+      assert.match(error.message, /rollback is unsupported/);
+      yield* adapter.stopSession(threadId);
+    }).pipe(
+      Effect.provide(
+        makeDevinAdapterLive({
+          makeRuntime: () => Effect.succeed(makeMockRuntime()),
+        }),
+      ),
+    ),
+  );
 
   it.effect("marks the session errored when ACP prompt fails", () => {
     let resolvePromptFailed!: () => void;

@@ -565,6 +565,13 @@ function makeProviderAdapter(
             issue: "Devin requires a non-empty prompt.",
           });
         }
+        if (ctx.activeTurnId !== undefined || ctx.activePromptFiber !== undefined) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "sendTurn",
+            issue: "Devin already has an active turn. Wait for it to finish or cancel it first.",
+          });
+        }
 
         const turnId = TurnId.makeUnsafe(crypto.randomUUID());
         const turnModel =
@@ -784,7 +791,7 @@ function makeProviderAdapter(
         ),
       rollbackThread: (threadId, numTurns) =>
         Effect.gen(function* () {
-          const ctx = yield* requireSession(threadId);
+          yield* requireSession(threadId);
           if (!Number.isInteger(numTurns) || numTurns < 1) {
             return yield* new ProviderAdapterValidationError({
               provider: PROVIDER,
@@ -792,12 +799,12 @@ function makeProviderAdapter(
               issue: "numTurns must be an integer >= 1.",
             });
           }
-          ctx.turns.splice(Math.max(0, ctx.turns.length - numTurns));
-          return {
-            threadId,
-            turns: ctx.turns,
-            ...(ctx.session.cwd ? { cwd: ctx.session.cwd } : {}),
-          };
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "rollbackThread",
+            detail:
+              "Devin ACP rollback is unsupported until Synara can map rollback to a native Devin session revert, fork, or rewind operation.",
+          });
         }),
       stopAll: () =>
         Effect.gen(function* () {
