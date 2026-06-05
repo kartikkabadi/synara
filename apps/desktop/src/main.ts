@@ -38,6 +38,7 @@ import type {
 import { autoUpdater, CancellationToken } from "electron-updater";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
+import { getMacTrafficLightPosition } from "@t3tools/shared/desktopChrome";
 import { NetService } from "@t3tools/shared/Net";
 import { RotatingFileSink } from "@t3tools/shared/logging";
 import { isBackendReadinessAborted, waitForHttpReady } from "./backendReadiness";
@@ -82,6 +83,7 @@ import {
 } from "./updatePendingCache";
 import {
   buildGitHubReleaseDownloadBaseUrl,
+  buildGitHubReleasesPageUrl,
   type LatestGitHubRelease,
   resolveGitHubUpdateSource,
   resolveLatestStableGitHubRelease,
@@ -119,6 +121,8 @@ const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
 const SHOW_IN_FOLDER_CHANNEL = "desktop:show-in-folder";
 const MENU_ACTION_CHANNEL = "desktop:menu-action";
+const ZOOM_FACTOR_CHANNEL = "desktop:zoom-factor";
+const ZOOM_FACTOR_CHANGED_CHANNEL = "desktop:zoom-factor-changed";
 const UPDATE_STATE_CHANNEL = "desktop:update-state";
 const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
 const UPDATE_CHECK_CHANNEL = "desktop:update-check";
@@ -156,6 +160,10 @@ const AUTO_UPDATE_DOWNLOAD_SETTLE_TIMEOUT_MS = 30 * 1000;
 const AUTO_UPDATE_STALLED_DOWNLOAD_CANCELLATION_SUPPRESSION_MS = 2 * 60 * 1000;
 const AUTO_UPDATE_FEED_CACHE_TTL_MS = 30 * 60 * 1000;
 const AUTO_UPDATE_FEED_REFRESH_TIMEOUT_MS = 10 * 1000;
+// How long we give quitAndInstall() to actually quit/relaunch the app before we
+// conclude the OS installer never started (unsigned/quarantined build, read-only
+// install dir, blocked NSIS run) and surface the manual-download fallback.
+const AUTO_UPDATE_INSTALL_WATCHDOG_MS = 15 * 1000;
 const BACKEND_FORCE_KILL_DELAY_MS = 8_000;
 const BACKEND_SHUTDOWN_TIMEOUT_MS = 10_000;
 const DESKTOP_UPDATE_CHANNEL = "latest";
@@ -557,6 +565,7 @@ let updateBackgroundedAtMs: number | null = null;
 let updateBackgroundBlurTimer: ReturnType<typeof setTimeout> | null = null;
 let updateCheckTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 let updateDownloadStallTimer: ReturnType<typeof setTimeout> | null = null;
+let updateInstallWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
 let updateDownloadCancellationToken: CancellationToken | null = null;
 let rejectUpdateDownloadStall: ((error: Error) => void) | null = null;
 let lastUpdateDownloadProgressSample: DownloadProgressSample | null = null;
@@ -578,6 +587,45 @@ function clearUpdaterInstallInFlightAfterError(): void {
   isUpdaterInstallPreparing = false;
   isUpdaterQuitAndInstallInFlight = false;
   isQuitting = false;
+}
+
+function clearUpdateInstallWatchdogTimer(): void {
+  if (updateInstallWatchdogTimer) {
+    clearTimeout(updateInstallWatchdogTimer);
+    updateInstallWatchdogTimer = null;
+  }
+}
+
+// quitAndInstall() is a fire-and-forget void call with no success signal: when
+// the OS installer silently fails the app never quits and the user is left with
+// no feedback (the "update doesn't work for some people" report). If the process
+// is still alive after the watchdog window, recover and surface an actionable
+// install failure so the UI can offer the manual-download fallback.
+function armInstallWatchdog(): void {
+  clearUpdateInstallWatchdogTimer();
+  updateInstallWatchdogTimer = setTimeout(() => {
+    updateInstallWatchdogTimer = null;
+    if (!isUpdaterQuitAndInstallInFlight) {
+      return;
+    }
+    clearUpdaterInstallInFlightAfterError();
+    // The backend was already stopped before quitAndInstall(); since the app is
+    // not actually quitting, bring it back so the recovered app is functional
+    // (renderer reconnects) instead of a zombie window with a dead backend.
+    startBackend();
+    // Polling was stopped before the install attempt; resume it so background
+    // update checks keep running after this recovery.
+    scheduleUpdatePoll();
+    setUpdateState(
+      reduceDesktopUpdateStateOnInstallFailure(
+        updateState,
+        "The update couldn’t be installed automatically.",
+      ),
+    );
+    console.error(
+      "[desktop-updater] quitAndInstall did not exit the app within the watchdog window; surfacing manual-download fallback.",
+    );
+  }, AUTO_UPDATE_INSTALL_WATCHDOG_MS);
 }
 
 protocol.registerSchemesAsPrivileged([
@@ -824,6 +872,17 @@ function resolveMenuTargetWindow(): BrowserWindow | null {
   return BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
 }
 
+function sendDesktopZoomFactor(webContents: Electron.WebContents): void {
+  if (webContents.isDestroyed()) return;
+  webContents.send(ZOOM_FACTOR_CHANGED_CHANNEL, webContents.getZoomFactor());
+}
+
+function attachDesktopZoomFactorSync(window: BrowserWindow): void {
+  const notify = () => sendDesktopZoomFactor(window.webContents);
+  window.webContents.on("zoom-changed", notify);
+  window.webContents.on("did-finish-load", notify);
+}
+
 function resetWindowZoomFromMenu(): void {
   resolveMenuTargetWindow()?.webContents.setZoomFactor(1);
 }
@@ -883,6 +942,20 @@ async function checkForUpdatesFromMenu(): Promise<void> {
       type: "info",
       title: "You're up to date!",
       message: `Synara ${updateState.currentVersion} is currently the newest version available.`,
+      buttons: ["OK"],
+    });
+  } else if (updateState.status === "downloading" || updateState.status === "available") {
+    void dialog.showMessageBox({
+      type: "info",
+      title: "Update found",
+      message: "Synara is preparing the update in the background.",
+      buttons: ["OK"],
+    });
+  } else if (updateState.status === "downloaded") {
+    void dialog.showMessageBox({
+      type: "info",
+      title: "Update ready",
+      message: "Click Update in the sidebar when you’re ready to restart and install it.",
       buttons: ["OK"],
     });
   } else if (updateState.status === "error") {
@@ -1211,6 +1284,19 @@ function clearUpdatePollTimer(): void {
   }
 }
 
+// Starts the periodic background update check. Used by configureAutoUpdater and
+// by the install watchdog recovery so polling resumes after a silent install
+// failure instead of staying off until the next app restart.
+function scheduleUpdatePoll(): void {
+  if (updatePollTimer) {
+    return;
+  }
+  updatePollTimer = setInterval(() => {
+    void checkForUpdates("poll");
+  }, AUTO_UPDATE_POLL_INTERVAL_MS);
+  updatePollTimer.unref();
+}
+
 function emitUpdateState(): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (window.isDestroyed()) continue;
@@ -1231,6 +1317,11 @@ function applyConfiguredGitHubUpdateFeed(latestRelease: LatestGitHubRelease): vo
   if (configuredGitHubUpdateSource === null) {
     return;
   }
+  // Keep the manual-download fallback pinned to the exact release we are about
+  // to offer, so a user whose in-app update fails lands on the matching assets.
+  setUpdateState({
+    releaseUrl: buildGitHubReleasesPageUrl(configuredGitHubUpdateSource, latestRelease.tag),
+  });
   autoUpdater.setFeedURL({
     provider: "generic",
     url: buildGitHubReleaseDownloadBaseUrl(configuredGitHubUpdateSource, latestRelease.tag),
@@ -1514,7 +1605,6 @@ async function downloadAvailableUpdate(): Promise<{
   }
   updateDownloadInFlight = true;
   setUpdateState(reduceDesktopUpdateStateOnDownloadStart(updateState));
-  autoUpdater.disableDifferentialDownload = true;
   // Keep existing cancellation suppressions across immediate retries; the old
   // updater cancellation can arrive after a new download has already started.
   lastUpdateDownloadProgressSample = null;
@@ -1576,6 +1666,25 @@ async function downloadAvailableUpdate(): Promise<{
   }
 }
 
+// Starts the automatic prepare step after a successful update check; install
+// stays user-controlled so active agent work is not interrupted by a restart.
+function prepareAvailableUpdateInBackground(reason: string): void {
+  if (updateDownloadInFlight || updateState.status !== "available") {
+    return;
+  }
+  void downloadAvailableUpdate()
+    .then((result) => {
+      if (result.accepted && result.completed) {
+        console.info(`[desktop-updater] Background update download completed (${reason}).`);
+      }
+    })
+    .catch((error) => {
+      console.error(
+        `[desktop-updater] Background update download crashed (${reason}): ${formatErrorMessage(error)}`,
+      );
+    });
+}
+
 async function installDownloadedUpdate(): Promise<{
   accepted: boolean;
   completed: boolean;
@@ -1600,6 +1709,7 @@ async function installDownloadedUpdate(): Promise<{
     await stopBackendAndWaitForExit();
     isUpdaterQuitAndInstallInFlight = true;
     autoUpdater.quitAndInstall();
+    armInstallWatchdog();
     return { accepted: true, completed: true };
   } catch (error: unknown) {
     const message = formatErrorMessage(error);
@@ -1630,6 +1740,11 @@ function configureAutoUpdater(): void {
   }
   updaterConfigured = true;
   configuredGitHubUpdateSource = resolveGitHubUpdateSource(appUpdateYml);
+  if (configuredGitHubUpdateSource !== null) {
+    // Seed the manual-download fallback with the "latest" releases page until a
+    // specific release tag is resolved by the feed refresher.
+    setUpdateState({ releaseUrl: buildGitHubReleasesPageUrl(configuredGitHubUpdateSource) });
+  }
 
   const githubToken =
     process.env.T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || "";
@@ -1654,10 +1769,9 @@ function configureAutoUpdater(): void {
   autoUpdater.channel = DESKTOP_UPDATE_CHANNEL;
   autoUpdater.allowPrerelease = DESKTOP_UPDATE_ALLOW_PRERELEASE;
   autoUpdater.allowDowngrade = false;
-  // We resolve the exact latest stable release when the feed cache is cold/stale
-  // and point the updater at that tag directly, so full downloads are more reliable
-  // than blockmap-based patching against a moving "latest" target.
-  autoUpdater.disableDifferentialDownload = true;
+  // The feed is pinned to an exact release tag before each check, so blockmap
+  // differential downloads can be used without racing a moving "latest" target.
+  autoUpdater.disableDifferentialDownload = false;
   let lastLoggedDownloadMilestone = -1;
 
   if (isArm64HostRunningIntelBuild(desktopRuntimeInfo)) {
@@ -1689,6 +1803,7 @@ function configureAutoUpdater(): void {
     );
     lastLoggedDownloadMilestone = -1;
     console.info(`[desktop-updater] Update available: ${info.version}`);
+    prepareAvailableUpdateInBackground(`available ${info.version}`);
   });
   autoUpdater.on("update-not-available", () => {
     clearUpdateCheckTimeoutTimer();
@@ -1762,10 +1877,7 @@ function configureAutoUpdater(): void {
   }, AUTO_UPDATE_STARTUP_DELAY_MS);
   updateStartupTimer.unref();
 
-  updatePollTimer = setInterval(() => {
-    void checkForUpdates("poll");
-  }, AUTO_UPDATE_POLL_INTERVAL_MS);
-  updatePollTimer.unref();
+  scheduleUpdatePoll();
 }
 function backendEnv(): NodeJS.ProcessEnv {
   return {
@@ -2032,6 +2144,11 @@ function registerIpcHandlers(): void {
     // live URL instead of trusting build-time or inherited renderer env.
     event.returnValue =
       normalizeDesktopWsUrl(backendWsUrl) ?? resolveDesktopWsUrlFromEnv(process.env);
+  });
+
+  ipcMain.removeAllListeners(ZOOM_FACTOR_CHANNEL);
+  ipcMain.on(ZOOM_FACTOR_CHANNEL, (event: IpcMainEvent) => {
+    event.returnValue = event.sender.getZoomFactor();
   });
 
   ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
@@ -2307,10 +2424,10 @@ function getTitleBarOptions(): BrowserWindowConstructorOptions {
   }
   return {
     titleBarStyle: "hiddenInset",
-    // y is tuned to share the vertical center of the renderer's top chrome bar
-    // (CHAT_SURFACE_HEADER_HEIGHT_CLASS in apps/web) so the lights line up with the
-    // leading toggle/arrow controls. Keep the two in sync when either changes.
-    trafficLightPosition: { x: 16, y: 19 },
+    // Derived from the shared chat-surface header geometry (@t3tools/shared/desktopChrome)
+    // so the native lights and the renderer's leading toggle/arrow controls always share
+    // the same vertical center. Tune the height/radius there, never the raw px here.
+    trafficLightPosition: getMacTrafficLightPosition(),
   };
 }
 
@@ -2337,6 +2454,7 @@ function createWindow(): BrowserWindow {
     },
   });
   browserManager.setWindow(window);
+  attachDesktopZoomFactorSync(window);
 
   window.webContents.on("context-menu", (event, params) => {
     event.preventDefault();

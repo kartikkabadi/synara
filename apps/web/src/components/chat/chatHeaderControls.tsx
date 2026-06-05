@@ -13,6 +13,9 @@
 
 import { forwardRef, type ComponentProps, type ReactNode } from "react";
 
+import { CHAT_SURFACE_HEADER_HEIGHT_PX } from "@t3tools/shared/desktopChrome";
+
+import { CentralIcon } from "~/lib/central-icons";
 import type { LucideIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
 
@@ -24,12 +27,23 @@ import { Button } from "../ui/button";
  * bottom borders line up across the vertical pane divider.
  *
  * Tall enough that the vertically-centered controls clear the macOS title bar with
- * breathing room below them rather than hugging the very top of the window. This
- * pairs with `trafficLightPosition.y` in apps/desktop/src/main.ts — the two values
- * are tuned together so the native traffic lights and the renderer's leading
- * controls share the same vertical center.
+ * breathing room below them rather than hugging the very top of the window.
+ *
+ * The pixel height is owned by `CHAT_SURFACE_HEADER_HEIGHT_PX` in
+ * `@t3tools/shared/desktopChrome` (the single source of truth the Electron main
+ * process also reads to center the native traffic lights). Tailwind only emits CSS
+ * for class names it can scan literally, so the class stays a literal here — but its
+ * TYPE is derived from the shared number, so the build fails if the two ever drift.
  */
-export const CHAT_SURFACE_HEADER_HEIGHT_CLASS = "h-[50px]";
+export const CHAT_SURFACE_HEADER_HEIGHT_CLASS: `h-[${typeof CHAT_SURFACE_HEADER_HEIGHT_PX}px]` =
+  "h-[46px]";
+
+/**
+ * Standard horizontal inset for a chat-surface top bar (chat / workspace / settings
+ * headers all sit their content at this x). Kept as one token so the leading controls
+ * line up across surfaces and the inset is tuned in a single place.
+ */
+export const CHAT_SURFACE_HEADER_PADDING_X_CLASS = "px-3 sm:px-5";
 
 /**
  * Bottom hairline shared by every chat-surface chrome bar (chat header, workspace
@@ -143,6 +157,97 @@ export const DOCK_TAB_ICON_HOVER_HIDE_CLASS_NAME =
 /** Hover glyph: thicker X centered inside the disc. */
 export const DOCK_TAB_CLOSE_GLYPH_CLASS_NAME =
   "absolute size-3.5 shrink-0 opacity-0 transition-opacity group-hover/dock-tab:opacity-100 group-focus-within/dock-tab:opacity-100";
+
+/**
+ * Shared flat tab chip for every chat surface that renders a row of closable tabs —
+ * the right-dock tab strip and both terminal tab bars (pane-local tabs + workspace
+ * group tabs). At rest the chip shows {@link icon}; hovering or focusing within the
+ * chip fades that glyph out and reveals a circular close affordance, but only when
+ * an {@link onClose} handler is supplied (tabs that can't be closed render a static
+ * icon slot instead).
+ *
+ * The icon→close-X reveal is driven entirely by the `group/dock-tab` named group
+ * the chip declares here, so the hover wiring lives in exactly one place. Call
+ * sites that hand-rolled the chip previously drifted to a mismatched group name
+ * (`group/tab`), which silently broke the reveal — funneling them through this
+ * component makes that class of bug unrepresentable.
+ *
+ * `leading`/`trailing` flank the truncating label (e.g. an activity indicator or a
+ * tab count badge); `labelClassName` lets a call site cap the label width.
+ */
+export function SurfaceTabChip({
+  icon,
+  label,
+  active,
+  title,
+  leading,
+  trailing,
+  className,
+  labelClassName,
+  closeLabel,
+  onSelect,
+  onClose,
+}: {
+  icon: ReactNode;
+  label: ReactNode;
+  active?: boolean | undefined;
+  title?: string | undefined;
+  leading?: ReactNode;
+  trailing?: ReactNode;
+  className?: string | undefined;
+  labelClassName?: string | undefined;
+  closeLabel?: string | undefined;
+  onSelect?: (() => void) | undefined;
+  onClose?: (() => void) | undefined;
+}) {
+  return (
+    <div
+      className={cn(
+        "group/dock-tab",
+        DOCK_TAB_CHIP_CLASS_NAME,
+        active && CHAT_SURFACE_CONTROL_ACTIVE_CLASS_NAME,
+        className,
+      )}
+    >
+      {onClose ? (
+        <button
+          type="button"
+          className={DOCK_TAB_ICON_SLOT_CLASS_NAME}
+          aria-label={closeLabel}
+          title={closeLabel}
+          onClick={(event) => {
+            event.stopPropagation();
+            onClose();
+          }}
+        >
+          <span
+            className={cn("flex items-center justify-center", DOCK_TAB_ICON_HOVER_HIDE_CLASS_NAME)}
+          >
+            {icon}
+          </span>
+          <CentralIcon name="cross-small" className={DOCK_TAB_CLOSE_GLYPH_CLASS_NAME} />
+        </button>
+      ) : (
+        <span className="flex size-4 shrink-0 items-center justify-center">{icon}</span>
+      )}
+      <button
+        type="button"
+        className={cn("flex min-w-0 items-center gap-1.5 text-left", labelClassName)}
+        title={title}
+        aria-pressed={active}
+        onClick={(event) => {
+          event.stopPropagation();
+          onSelect?.();
+        }}
+      >
+        {leading}
+        <span className="truncate">{label}</span>
+        {trailing}
+      </button>
+    </div>
+  );
+}
+
 export const CHAT_HEADER_ICON_CONTROL_CLASS_NAME =
   "!size-7 shrink-0 rounded-lg [&_svg,&_[data-slot=central-icon]]:mx-0";
 

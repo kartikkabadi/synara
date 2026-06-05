@@ -79,6 +79,7 @@ import type {
   ServerVoiceTranscriptionResult,
 } from "./server";
 import type {
+  TerminalAckOutputInput,
   TerminalClearInput,
   TerminalCloseInput,
   TerminalEvent,
@@ -164,6 +165,11 @@ export interface DesktopUpdateState {
   message: string | null;
   errorContext: "check" | "download" | "install" | null;
   canRetry: boolean;
+  // Public URL where the user can manually download the release when the
+  // in-app updater cannot apply it (silent installer failure, unsigned build,
+  // read-only install location, unsupported platform). Null when no GitHub
+  // update source is configured.
+  releaseUrl: string | null;
 }
 
 export interface DesktopUpdateActionResult {
@@ -276,6 +282,9 @@ export interface DesktopBridge {
     showInFolder: (path: string) => Promise<void>;
   };
   onMenuAction: (listener: (action: string) => void) => () => void;
+  /** Current `webContents` page zoom (1 = 100%). Used to keep macOS traffic-light gutter aligned. */
+  getZoomFactor: () => number;
+  onZoomFactorChange: (listener: (zoomFactor: number) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
   checkForUpdates: () => Promise<DesktopUpdateState>;
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
@@ -326,6 +335,7 @@ export interface NativeApi {
   terminal: {
     open: (input: TerminalOpenInput) => Promise<TerminalSessionSnapshot>;
     write: (input: TerminalWriteInput) => Promise<void>;
+    ackOutput: (input: TerminalAckOutputInput) => Promise<void>;
     resize: (input: TerminalResizeInput) => Promise<void>;
     clear: (input: TerminalClearInput) => Promise<void>;
     restart: (input: TerminalRestartInput) => Promise<TerminalSessionSnapshot>;
