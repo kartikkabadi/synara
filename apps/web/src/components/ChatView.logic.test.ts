@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   appendVoiceTranscriptToPrompt,
+  buildComposerMenuSelectionKey,
   filterSidechatTranscriptMessages,
   type LocalDispatchSnapshot,
   deriveComposerSendState,
@@ -12,6 +13,9 @@ import {
   isVoiceAuthExpiredMessage,
   resolveActiveThreadTitle,
   resolveCommittedProviderModel,
+  resolveDefaultEnvironmentPanelOpen,
+  resolveEnvironmentPanelVisible,
+  resolveProjectScriptTerminalTarget,
   resolveRuntimeModeAfterApprovalDecision,
   sanitizeVoiceErrorMessage,
   buildExpiredTerminalContextToastCopy,
@@ -22,6 +26,60 @@ import {
   shouldStartActiveTurnLayoutGrace,
   shouldRenderTerminalWorkspace,
 } from "./ChatView.logic";
+
+describe("composer menu selection", () => {
+  const items = [{ id: "skill:check-code" }, { id: "skill:sanity-check" }] as const;
+
+  it("builds a stable key from query and displayed item order", () => {
+    const baseKey = buildComposerMenuSelectionKey({
+      menuOpen: true,
+      picker: null,
+      triggerKind: "slash-command",
+      triggerQuery: "check",
+      items,
+    });
+
+    expect(
+      buildComposerMenuSelectionKey({
+        menuOpen: true,
+        picker: null,
+        triggerKind: "slash-command",
+        triggerQuery: "check",
+        items: [...items],
+      }),
+    ).toBe(baseKey);
+    expect(
+      buildComposerMenuSelectionKey({
+        menuOpen: true,
+        picker: null,
+        triggerKind: "slash-command",
+        triggerQuery: "chec",
+        items,
+      }),
+    ).not.toBe(baseKey);
+    expect(
+      buildComposerMenuSelectionKey({
+        menuOpen: true,
+        picker: null,
+        triggerKind: "slash-command",
+        triggerQuery: "check",
+        items: [...items].reverse(),
+      }),
+    ).not.toBe(baseKey);
+  });
+
+  it("returns null while the menu is closed", () => {
+    expect(
+      buildComposerMenuSelectionKey({
+        menuOpen: false,
+        picker: null,
+        triggerKind: "slash-command",
+        triggerQuery: "check",
+        items,
+      }),
+    ).toBeNull();
+  });
+});
 
 describe("voice helpers", () => {
   it("keeps manual titles visible for empty home chats", () => {
@@ -154,6 +212,59 @@ describe("voice helpers", () => {
       canStartVoiceNotes: false,
       showVoiceNotesControl: true,
     });
+  });
+});
+
+describe("environment panel visibility", () => {
+  it("opens normal chat threads by default", () => {
+    expect(
+      resolveDefaultEnvironmentPanelOpen({
+        environmentEnabled: true,
+        isCenteredEmptyLanding: false,
+        isTerminalPrimarySurface: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps empty landing and terminal-primary surfaces closed by default", () => {
+    expect(
+      resolveDefaultEnvironmentPanelOpen({
+        environmentEnabled: true,
+        isCenteredEmptyLanding: true,
+        isTerminalPrimarySurface: false,
+      }),
+    ).toBe(false);
+    expect(
+      resolveDefaultEnvironmentPanelOpen({
+        environmentEnabled: true,
+        isCenteredEmptyLanding: false,
+        isTerminalPrimarySurface: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("renders the panel when the user toggles it open on empty landing", () => {
+    expect(
+      resolveEnvironmentPanelVisible({
+        environmentEnabled: true,
+        environmentPanelOpen: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps the panel hidden when environment controls are disabled or closed", () => {
+    expect(
+      resolveEnvironmentPanelVisible({
+        environmentEnabled: false,
+        environmentPanelOpen: true,
+      }),
+    ).toBe(false);
+    expect(
+      resolveEnvironmentPanelVisible({
+        environmentEnabled: true,
+        environmentPanelOpen: false,
+      }),
+    ).toBe(false);
   });
 });
 
@@ -396,6 +507,63 @@ describe("shouldRenderTerminalWorkspace", () => {
         terminalOpen: true,
       }),
     ).toBe(false);
+  });
+});
+
+describe("resolveProjectScriptTerminalTarget", () => {
+  it("reuses the base terminal only when no terminal is open or running", () => {
+    const target = resolveProjectScriptTerminalTarget({
+      baseTerminalId: "default",
+      createTerminalId: () => "new-terminal",
+      hasRunningTerminal: false,
+      terminalOpen: false,
+    });
+
+    expect(target).toEqual({
+      shouldCreateNewTerminal: false,
+      terminalId: "default",
+    });
+  });
+
+  it("creates a fresh terminal when a live terminal could keep stale cwd or env", () => {
+    expect(
+      resolveProjectScriptTerminalTarget({
+        baseTerminalId: "default",
+        createTerminalId: () => "visible-script-terminal",
+        hasRunningTerminal: false,
+        terminalOpen: true,
+      }),
+    ).toEqual({
+      shouldCreateNewTerminal: true,
+      terminalId: "visible-script-terminal",
+    });
+
+    expect(
+      resolveProjectScriptTerminalTarget({
+        baseTerminalId: "default",
+        createTerminalId: () => "running-script-terminal",
+        hasRunningTerminal: true,
+        terminalOpen: false,
+      }),
+    ).toEqual({
+      shouldCreateNewTerminal: true,
+      terminalId: "running-script-terminal",
+    });
+  });
+
+  it("honors explicit requests for a new terminal", () => {
+    const target = resolveProjectScriptTerminalTarget({
+      baseTerminalId: "default",
+      createTerminalId: () => "forced-script-terminal",
+      hasRunningTerminal: false,
+      preferNewTerminal: true,
+      terminalOpen: false,
+    });
+
+    expect(target).toEqual({
+      shouldCreateNewTerminal: true,
+      terminalId: "forced-script-terminal",
+    });
   });
 });
 

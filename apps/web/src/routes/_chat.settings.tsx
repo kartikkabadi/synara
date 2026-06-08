@@ -13,6 +13,7 @@ import {
 import { createFileRoute, useSearch } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
+import { pluralize } from "@t3tools/shared/text";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   closestCenter,
@@ -92,6 +93,10 @@ import { isElectron } from "../env";
 import { useTheme } from "../hooks/useTheme";
 import { CentralIcon } from "../lib/central-icons";
 import { gitRemoveWorktreeMutationOptions } from "../lib/gitReactQuery";
+import {
+  deleteArchivedThreadFromClient,
+  deleteArchivedThreadsFromClient,
+} from "../lib/archivedThreadDelete";
 import {
   ArchiveIcon,
   ChevronDownIcon,
@@ -583,6 +588,10 @@ function SettingsRouteView() {
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const serverWorktreesQuery = useQuery(serverWorktreesQueryOptions());
   const removeWorktreeMutation = useMutation(gitRemoveWorktreeMutationOptions({ queryClient }));
+  const removeDeletedThreadFromClientState = useStore(
+    (store) => store.removeDeletedThreadFromClientState,
+  );
+  const syncServerShellSnapshot = useStore((store) => store.syncServerShellSnapshot);
   const syncServerReadModel = useStore((store) => store.syncServerReadModel);
   const threads = useStore(useMemo(() => createAllThreadsSelector(), []));
   const projects = useStore((store) => store.projects);
@@ -1221,7 +1230,7 @@ function SettingsRouteView() {
           ? [
               `Delete worktree "${displayName}"?`,
               "",
-              `${linkedActiveThreadCount} active and ${linkedArchivedThreadIds.length} archived conversation${linkedConversationCount === 1 ? " is" : "s are"} linked to this worktree.`,
+              `${linkedActiveThreadCount} active and ${linkedArchivedThreadIds.length} archived ${pluralize(linkedConversationCount, "conversation is", "conversations are")} linked to this worktree.`,
               linkedArchivedThreadIds.length > 0
                 ? "Archived conversations will be deleted first."
                 : "Deleting it can break reopening those chats in the same workspace.",
@@ -1237,13 +1246,12 @@ function SettingsRouteView() {
       }
 
       try {
-        for (const archivedThreadId of linkedArchivedThreadIds) {
-          await api.orchestration.dispatchCommand({
-            type: "thread.delete",
-            commandId: newCommandId(),
-            threadId: archivedThreadId,
-          });
-        }
+        await deleteArchivedThreadsFromClient({
+          api: api.orchestration,
+          threadIds: linkedArchivedThreadIds,
+          removeDeletedThreadFromClientState,
+          syncServerShellSnapshot,
+        });
 
         await removeWorktreeMutation.mutateAsync({
           cwd: input.workspaceRoot,
@@ -1258,7 +1266,7 @@ function SettingsRouteView() {
           title: "Worktree deleted",
           description:
             linkedArchivedThreadIds.length > 0
-              ? `${displayName} was removed and ${linkedArchivedThreadIds.length} archived conversation${linkedArchivedThreadIds.length === 1 ? "" : "s"} were deleted.`
+              ? `${displayName} was removed and ${linkedArchivedThreadIds.length} archived ${pluralize(linkedArchivedThreadIds.length, "conversation")} were deleted.`
               : `${displayName} was removed.`,
         });
       } catch (error) {
@@ -1269,7 +1277,12 @@ function SettingsRouteView() {
         });
       }
     },
-    [queryClient, removeWorktreeMutation],
+    [
+      queryClient,
+      removeDeletedThreadFromClientState,
+      removeWorktreeMutation,
+      syncServerShellSnapshot,
+    ],
   );
 
   const unarchiveThread = useCallback(async (threadId: ThreadId) => {
@@ -1295,34 +1308,38 @@ function SettingsRouteView() {
     }
   }, []);
 
-  const deleteArchivedThread = useCallback(async (threadId: ThreadId, threadTitle: string) => {
-    const api = readNativeApi();
-    if (!api) return;
+  const deleteArchivedThread = useCallback(
+    async (threadId: ThreadId, threadTitle: string) => {
+      const api = readNativeApi();
+      if (!api) return;
 
-    const confirmed = await api.dialogs.confirm(
-      `Permanently delete "${threadTitle}"?\n\nThis will remove the thread and its conversation history forever.`,
-    );
-    if (!confirmed) return;
+      const confirmed = await api.dialogs.confirm(
+        `Permanently delete "${threadTitle}"?\n\nThis will remove the thread and its conversation history forever.`,
+      );
+      if (!confirmed) return;
 
-    try {
-      await api.orchestration.dispatchCommand({
-        type: "thread.delete",
-        commandId: newCommandId(),
-        threadId,
-      });
-      toastManager.add({
-        type: "success",
-        title: "Thread deleted",
-        description: "The archived thread has been permanently removed.",
-      });
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Could not delete thread",
-        description: error instanceof Error ? error.message : "Unable to delete the thread.",
-      });
-    }
-  }, []);
+      try {
+        await deleteArchivedThreadFromClient({
+          api: api.orchestration,
+          threadId,
+          removeDeletedThreadFromClientState,
+          syncServerShellSnapshot,
+        });
+        toastManager.add({
+          type: "success",
+          title: "Thread deleted",
+          description: "The archived thread has been permanently removed.",
+        });
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Could not delete thread",
+          description: error instanceof Error ? error.message : "Unable to delete the thread.",
+        });
+      }
+    },
+    [removeDeletedThreadFromClientState, syncServerShellSnapshot],
+  );
 
   const handleArchivedThreadContextMenu = useCallback(
     async (threadId: ThreadId, threadTitle: string, position: { x: number; y: number }) => {
@@ -2333,7 +2350,7 @@ function SettingsRouteView() {
           description="Drag providers into your preferred picker order and hide the ones you don't use. The provider you're currently using on a thread always stays visible."
           status={
             hiddenProviderCount > 0
-              ? `${hiddenProviderCount} provider${hiddenProviderCount === 1 ? "" : "s"} hidden`
+              ? `${hiddenProviderCount} ${pluralize(hiddenProviderCount, "provider")} hidden`
               : isProviderOrderDirty
                 ? "Custom order"
                 : "All providers visible"
@@ -2396,7 +2413,7 @@ function SettingsRouteView() {
           description="Update installed provider tools that Synara can safely update."
           status={
             outdatedProviderCount > 0
-              ? `${outdatedProviderCount} update${outdatedProviderCount === 1 ? "" : "s"} available`
+              ? `${outdatedProviderCount} ${pluralize(outdatedProviderCount, "update")} available`
               : "No provider updates detected"
           }
         >
@@ -2471,7 +2488,7 @@ function SettingsRouteView() {
           description="Review provider versions and update tools. Open a row only when you need binary overrides."
           status={
             outdatedProviderCount > 0
-              ? `${outdatedProviderCount} update${outdatedProviderCount === 1 ? "" : "s"} available`
+              ? `${outdatedProviderCount} ${pluralize(outdatedProviderCount, "update")} available`
               : "No provider updates detected"
           }
           resetAction={

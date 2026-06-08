@@ -277,6 +277,28 @@ describe("TerminalManager", () => {
     manager.dispose();
   });
 
+  it("keeps a running terminal alive when open reattaches with different cwd or env", async () => {
+    const { manager, ptyAdapter, logsDir } = makeManager();
+    await manager.open(openInput());
+    const process = ptyAdapter.processes[0];
+    expect(process).toBeDefined();
+    if (!process) return;
+
+    const snapshot = await manager.open(
+      openInput({ cwd: logsDir, env: { SYNARA_TERMINAL_TEST: "changed" } }),
+    );
+
+    expect(snapshot.cwd).toBe(globalThis.process.cwd());
+    expect(snapshot.status).toBe("running");
+    expect(process.killSignals).toEqual([]);
+    expect(ptyAdapter.spawnInputs).toHaveLength(1);
+
+    await manager.write({ threadId: "thread-1", data: "echo alive\n" });
+    expect(process.writes).toContain("echo alive\n");
+
+    manager.dispose();
+  });
+
   it("preserves existing terminal size on open when size is omitted", async () => {
     const { manager, ptyAdapter } = makeManager();
     await manager.open(openInput({ cols: 100, rows: 24 }));
@@ -810,6 +832,28 @@ describe("TerminalManager", () => {
         ),
       ).toBe(true);
     }
+
+    manager.dispose();
+  });
+
+  it("emits nested PTY spawn failure details", async () => {
+    const { manager, ptyAdapter } = makeManager();
+    const events: TerminalEvent[] = [];
+    manager.on("event", (event) => {
+      events.push(event);
+    });
+    ptyAdapter.spawnFailures.push(new Error("native binding missing"));
+
+    const snapshot = await manager.open(openInput());
+
+    expect(snapshot.status).toBe("error");
+    expect(
+      events.some(
+        (event) =>
+          event.type === "error" &&
+          event.message === "Failed to spawn PTY process: native binding missing",
+      ),
+    ).toBe(true);
 
     manager.dispose();
   });

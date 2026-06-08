@@ -12,6 +12,8 @@ import {
   GitCreateDetachedWorktreeResult,
   GitCreateWorktreeInput,
   GitCreateWorktreeResult,
+  GitHubRepositoryInput,
+  GitHubRepositoryResult,
   GitHandoffThreadInput,
   GitHandoffThreadResult,
   GitInitInput,
@@ -83,6 +85,8 @@ import {
   ServerConfig,
   ServerConfigStreamEvent,
   ServerDiagnosticsResult,
+  ServerGenerateThreadRecapInput,
+  ServerGenerateThreadRecapResult,
   ServerGetEnvironmentResult,
   ServerGetProviderUsageSnapshotInput,
   ServerGetProviderUsageSnapshotResult,
@@ -258,6 +262,12 @@ export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
 export const WsGitStatusRpc = Rpc.make(WS_METHODS.gitStatus, {
   payload: GitStatusInput,
   success: GitStatusResult,
+  error: WsRpcError,
+});
+
+export const WsGitGithubRepositoryRpc = Rpc.make(WS_METHODS.gitGithubRepository, {
+  payload: GitHubRepositoryInput,
+  success: GitHubRepositoryResult,
   error: WsRpcError,
 });
 
@@ -494,6 +504,12 @@ export const WsServerTranscribeVoiceRpc = Rpc.make(WS_METHODS.serverTranscribeVo
   error: WsRpcError,
 });
 
+export const WsServerGenerateThreadRecapRpc = Rpc.make(WS_METHODS.serverGenerateThreadRecap, {
+  payload: ServerGenerateThreadRecapInput,
+  success: ServerGenerateThreadRecapResult,
+  error: WsRpcError,
+});
+
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
   payload: KeybindingRule,
   success: ServerUpsertKeybindingResult,
@@ -602,6 +618,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectsWriteFileRpc,
   WsFilesystemBrowseRpc,
   WsShellOpenInEditorRpc,
+  WsGitGithubRepositoryRpc,
   WsGitStatusRpc,
   WsGitReadWorkingTreeDiffRpc,
   WsGitSummarizeDiffRpc,
@@ -641,6 +658,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetProviderUsageSnapshotRpc,
   WsServerGetDiagnosticsRpc,
   WsServerTranscribeVoiceRpc,
+  WsServerGenerateThreadRecapRpc,
   WsServerUpsertKeybindingRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeServerConfigRpc,

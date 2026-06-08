@@ -17,6 +17,7 @@ import {
   type ProviderSkillReference,
   type ProviderStartOptions,
   type ProviderUserInputAnswers,
+  type PinnedMessage,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   type ResolvedKeybindingsConfig,
@@ -64,6 +65,7 @@ import { type LegendListRef } from "@legendapp/list/react";
 import {
   GIT_WORKING_TREE_DIFF_LIVE_REFETCH_INTERVAL_MS,
   gitCreateWorktreeMutationOptions,
+  gitGithubRepositoryQueryOptions,
   gitBranchesQueryOptions,
 } from "~/lib/gitReactQuery";
 import { resolveProviderDiscoveryCwd } from "~/lib/providerDiscovery";
@@ -83,7 +85,8 @@ import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
 import {
   formatComposerMentionToken,
-  createComposerMentionTokenRegex,
+  filterPromptProviderMentionReferences,
+  filterPromptSkillReferences,
 } from "~/lib/composerMentions";
 import { getLocalFolderBrowseRootPath, isLocalFolderMentionQuery } from "~/lib/localFolderMentions";
 import {
@@ -114,6 +117,9 @@ import {
   enrichSubagentWorkEntries,
   resolveActiveThreadTitle,
   resolveCommittedProviderModel,
+  resolveDefaultEnvironmentPanelOpen,
+  resolveEnvironmentPanelVisible,
+  resolveProjectScriptTerminalTarget,
   shouldConsumePendingCustomBinaryConfirmation,
   shouldShowComposerModelBootstrapSkeleton,
 } from "./ChatView.logic";
@@ -159,6 +165,7 @@ import {
   deriveWorkLogEntries,
   hasActionableProposedPlan,
   hasLiveTurnTailWork,
+  isProviderFileEditWorkLogEntry,
   isLatestTurnSettled,
   WORK_LOG_PRESENTATION_VERSION,
   type ActiveTaskListState,
@@ -217,6 +224,7 @@ import {
   XIcon,
 } from "~/lib/icons";
 import { ComposerQueuedHeader } from "./chat/ComposerQueuedHeader";
+import { ComposerLiveChangesHeader } from "./chat/ComposerLiveChangesHeader";
 import { Button } from "./ui/button";
 import { Skeleton } from "./ui/skeleton";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
@@ -302,6 +310,7 @@ import {
   EnvironmentPanel,
   type EnvironmentPanelProps,
 } from "./chat/environment/EnvironmentPanel";
+import { usePinnedMessageActions } from "./chat/environment/usePinnedMessageActions";
 import { useIsDisposableThread } from "~/hooks/useIsDisposableThread";
 import {
   CHAT_SURFACE_HEADER_DIVIDER_CLASS_NAME,
@@ -312,7 +321,11 @@ import {
 import { SidebarHeaderNavigationControls } from "./SidebarHeaderNavigationControls";
 import { SidebarHeaderTrigger } from "./ui/sidebar";
 import { useDesktopTopBarTrafficLightGutterClassName } from "~/hooks/useDesktopTopBarGutter";
+import { useThreadRecap } from "~/hooks/useThreadRecap";
+import { useRepoDiffTotals } from "~/hooks/useRepoDiffTotals";
+import { useIsMobile } from "~/hooks/useMediaQuery";
 import { ChatTranscriptPane } from "./chat/ChatTranscriptPane";
+import type { MessagesTimelineController } from "./chat/MessagesTimeline";
 import { buildTurnDiffSummaryByAssistantMessageId } from "./chat/MessagesTimeline.logic";
 import { deriveAgentActivityTimelineState } from "./chat/agentActivity.logic";
 import { ComposerSlashStatusDialog } from "./chat/ComposerSlashStatusDialog";
@@ -335,6 +348,7 @@ import { ComposerSuggestions } from "./chat/ComposerSuggestions";
 import { DisclosureRegion } from "./ui/DisclosureRegion";
 import { TranscriptSelectionActionLayer } from "./chat/TranscriptSelectionActionLayer";
 import { ComposerActiveTaskListCard } from "./chat/ComposerActiveTaskListCard";
+import { ComposerColumnFrame } from "./chat/ComposerColumnFrame";
 import { useTranscriptAssistantSelectionAction } from "./chat/useTranscriptAssistantSelectionAction";
 import { getComposerProviderState } from "./chat/composerProviderRegistry";
 import {
@@ -354,6 +368,7 @@ import {
 import { getComposerTraitSelection } from "./chat/composerTraits";
 import { resolveRuntimeModelDescriptor } from "./chat/runtimeModelCapabilities";
 import { ProjectPicker } from "./chat/ProjectPicker";
+import { FolderClosed } from "./FolderClosed";
 import { ProviderHealthBanner } from "./chat/ProviderHealthBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import {
@@ -364,6 +379,7 @@ import {
 import {
   ACTIVE_TURN_LAYOUT_SETTLE_DELAY_MS,
   appendVoiceTranscriptToPrompt,
+  buildComposerMenuSelectionKey,
   describeVoiceRecordingStartError,
   isVoiceAuthExpiredMessage,
   sanitizeVoiceErrorMessage,
@@ -419,6 +435,8 @@ const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_MESSAGES: ChatMessage[] = [];
+const EMPTY_PINNED_MESSAGES: readonly PinnedMessage[] = [];
+const EMPTY_PINNED_TEXT: ReadonlyMap<MessageId, string> = new Map();
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_PROVIDER_NATIVE_COMMANDS: ProviderNativeCommandDescriptor[] = [];
@@ -600,10 +618,6 @@ function warnVoiceGuard(event: string, details?: Record<string, unknown>) {
   console.warn(`[voice] ${event}`);
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function normalizeDynamicModelSlug(provider: ProviderKind, slug: string): string {
   if (provider === "claudeAgent") {
     const withoutContextSuffix = slug.replace(/\[[^\]]+\]$/u, "");
@@ -693,102 +707,6 @@ function skillMentionPrefix(provider: string): string {
   return "/";
 }
 
-function promptIncludesSkillMention(prompt: string, skillName: string, provider: string): boolean {
-  const escapedSkillName = escapeRegExp(skillName);
-  const prefixes = provider === "pi" ? ["/skill:"] : ["/", "$"];
-  return prefixes.some((prefix) => {
-    const pattern = new RegExp(`(^|\\s)${escapeRegExp(prefix)}${escapedSkillName}(?=\\s|$)`, "i");
-    return pattern.test(prompt);
-  });
-}
-
-const PROMPT_MENTION_NAME_REGEX = createComposerMentionTokenRegex({
-  includeTrailingTokenAtEnd: true,
-});
-
-function collectPromptMentionNames(prompt: string): string[] {
-  const names: string[] = [];
-  for (const match of prompt.matchAll(PROMPT_MENTION_NAME_REGEX)) {
-    const mentionName = (match[2] ?? match[3] ?? "").trim();
-    if (mentionName.length > 0) {
-      names.push(mentionName);
-    }
-  }
-  return names;
-}
-
-function normalizeMentionNameKey(name: string): string {
-  return name.trim().toLowerCase();
-}
-
-function resolvePromptPluginMentions(params: {
-  prompt: string;
-  existingMentions: ReadonlyArray<ProviderMentionReference>;
-  providerPlugins: ReadonlyArray<ComposerPluginSuggestion>;
-}): ProviderMentionReference[] {
-  const promptMentionNames = collectPromptMentionNames(params.prompt);
-  if (promptMentionNames.length === 0) {
-    return [];
-  }
-
-  const uniquePromptMentionNames: string[] = [];
-  const seenPromptMentionNames = new Set<string>();
-  for (const mentionName of promptMentionNames) {
-    const key = normalizeMentionNameKey(mentionName);
-    if (seenPromptMentionNames.has(key)) {
-      continue;
-    }
-    seenPromptMentionNames.add(key);
-    uniquePromptMentionNames.push(mentionName);
-  }
-
-  const existingMentionsByName = new Map<string, ProviderMentionReference[]>();
-  for (const mention of params.existingMentions) {
-    const key = normalizeMentionNameKey(mention.name);
-    const bucket = existingMentionsByName.get(key);
-    if (bucket) {
-      bucket.push(mention);
-    } else {
-      existingMentionsByName.set(key, [mention]);
-    }
-  }
-
-  const providerMentionsByName = new Map<string, ProviderMentionReference[]>();
-  for (const suggestion of params.providerPlugins) {
-    const key = normalizeMentionNameKey(suggestion.plugin.name);
-    const bucket = providerMentionsByName.get(key);
-    if (bucket) {
-      bucket.push(suggestion.mention);
-    } else {
-      providerMentionsByName.set(key, [suggestion.mention]);
-    }
-  }
-
-  const resolvedMentions: ProviderMentionReference[] = [];
-  const seenPaths = new Set<string>();
-
-  for (const mentionName of uniquePromptMentionNames) {
-    const key = normalizeMentionNameKey(mentionName);
-    const existingMention = (existingMentionsByName.get(key) ?? []).find(
-      (candidate) => !seenPaths.has(candidate.path),
-    );
-    if (existingMention) {
-      seenPaths.add(existingMention.path);
-      resolvedMentions.push(existingMention);
-      continue;
-    }
-
-    const discoveredMentions = providerMentionsByName.get(key) ?? [];
-    if (discoveredMentions.length === 1) {
-      const discoveredMention = discoveredMentions[0]!;
-      seenPaths.add(discoveredMention.path);
-      resolvedMentions.push(discoveredMention);
-    }
-  }
-
-  return resolvedMentions;
-}
-
 const providerMentionReferencesEqual = (
   left: ReadonlyArray<ProviderMentionReference>,
   right: ReadonlyArray<ProviderMentionReference>,
@@ -852,6 +770,7 @@ interface ChatViewProps {
   panelState?: SplitViewPanePanelState;
   onToggleDiffPanel?: () => void;
   onToggleBrowserPanel?: () => void;
+  onOpenBrowserUrl?: (url: string) => void;
   onOpenTurnDiffPanel?: (turnId: TurnId, filePath?: string) => void;
   onSplitSurface?: () => void;
   onMaximizeSurface?: () => void;
@@ -867,6 +786,7 @@ export default function ChatView({
   panelState,
   onToggleDiffPanel,
   onToggleBrowserPanel,
+  onOpenBrowserUrl,
   onOpenTurnDiffPanel,
   onSplitSurface,
   onMaximizeSurface,
@@ -899,6 +819,8 @@ export default function ChatView({
   const composerImages = composerDraft.images;
   const composerAssistantSelections = composerDraft.assistantSelections;
   const composerTerminalContexts = composerDraft.terminalContexts;
+  const composerSkills = composerDraft.skills;
+  const composerMentions = composerDraft.mentions;
   const queuedComposerTurns = composerDraft.queuedTurns;
   const {
     isRecording: isVoiceRecording,
@@ -955,6 +877,8 @@ export default function ChatView({
   const setComposerDraftTerminalContexts = useComposerDraftStore(
     (store) => store.setTerminalContexts,
   );
+  const setComposerDraftSkills = useComposerDraftStore((store) => store.setSkills);
+  const setComposerDraftMentions = useComposerDraftStore((store) => store.setMentions);
   const clearComposerDraftPersistedAttachments = useComposerDraftStore(
     (store) => store.clearPersistedAttachments,
   );
@@ -1037,11 +961,43 @@ export default function ChatView({
     detectComposerTrigger(prompt, prompt.length),
   );
   const [selectedComposerSkills, setSelectedComposerSkills] = useState<ProviderSkillReference[]>(
-    [],
+    () => composerSkills,
   );
   const [selectedComposerMentions, setSelectedComposerMentions] = useState<
     ProviderMentionReference[]
-  >([]);
+  >(() => composerMentions);
+  const selectedComposerSkillsRef = useRef<ProviderSkillReference[]>(selectedComposerSkills);
+  const selectedComposerMentionsRef = useRef<ProviderMentionReference[]>(selectedComposerMentions);
+  selectedComposerSkillsRef.current = selectedComposerSkills;
+  selectedComposerMentionsRef.current = selectedComposerMentions;
+  const updateSelectedComposerSkills = useCallback(
+    (
+      next:
+        | ProviderSkillReference[]
+        | ((existing: ProviderSkillReference[]) => ProviderSkillReference[]),
+    ) => {
+      const existing = selectedComposerSkillsRef.current;
+      const resolved = typeof next === "function" ? next(existing) : next;
+      selectedComposerSkillsRef.current = resolved;
+      setSelectedComposerSkills(resolved);
+      setComposerDraftSkills(threadId, resolved);
+    },
+    [setComposerDraftSkills, threadId],
+  );
+  const updateSelectedComposerMentions = useCallback(
+    (
+      next:
+        | ProviderMentionReference[]
+        | ((existing: ProviderMentionReference[]) => ProviderMentionReference[]),
+    ) => {
+      const existing = selectedComposerMentionsRef.current;
+      const resolved = typeof next === "function" ? next(existing) : next;
+      selectedComposerMentionsRef.current = resolved;
+      setSelectedComposerMentions(resolved);
+      setComposerDraftMentions(threadId, resolved);
+    },
+    [setComposerDraftMentions, threadId],
+  );
   const [lastInvokedScriptByProjectId, setLastInvokedScriptByProjectId] = useLocalStorage(
     LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
     {},
@@ -1058,6 +1014,7 @@ export default function ChatView({
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
   const [isTraitsPickerOpen, setIsTraitsPickerOpen] = useState(false);
   const legendListRef = useRef<LegendListRef | null>(null);
+  const timelineControllerRef = useRef<MessagesTimelineController | null>(null);
   const isAtEndRef = useRef(true);
   const autoFollowThreadIdRef = useRef<ThreadId | null>(null);
   const pendingInteractionAnchorRef = useRef<{
@@ -1256,6 +1213,11 @@ export default function ChatView({
     activeThread?.session ?? null,
   );
   const latestTurnSettled = latestTurnSettledByProvider && !hasLiveTurnTail;
+  // `latestTurnSettled` is also false when there is NO started turn (a brand-new
+  // chat), because `isLatestTurnSettled` treats a non-existent turn as unsettled.
+  // Gate "live turn" UI on an actually-started turn so the working-tree diff strip
+  // doesn't leak onto a fresh chat just because the repo happens to be dirty.
+  const latestTurnLive = Boolean(activeLatestTurn?.startedAt) && !latestTurnSettled;
   const activeProjectId = activeThread?.projectId ?? draftThread?.projectId ?? null;
   const activeProject = useStore(
     useMemo(() => createProjectSelector(activeProjectId), [activeProjectId]),
@@ -1290,7 +1252,7 @@ export default function ChatView({
   const diffEnvironmentPending = diffEnvironmentState.pending;
   const diffDisabledReason = diffEnvironmentState.disabledReason;
   const repoDiffBadgeRefreshIntervalMs =
-    isFocusedPane && !latestTurnSettled && !diffEnvironmentPending && !resolvedDiffOpen
+    isFocusedPane && latestTurnLive && !diffEnvironmentPending && !resolvedDiffOpen
       ? GIT_WORKING_TREE_DIFF_LIVE_REFETCH_INTERVAL_MS
       : false;
   const activeThreadAssociatedWorktree = useMemo(
@@ -1444,6 +1406,10 @@ export default function ChatView({
     : null;
   const selectedProvider: ProviderKind =
     lockedProvider ?? selectedProviderByThreadId ?? threadProvider ?? settings.defaultProvider;
+  const previousSelectedProviderRef = useRef<{
+    threadId: ThreadId;
+    provider: ProviderKind;
+  } | null>(null);
   const voiceTranscriptionRequestIdRef = useRef(0);
   const voiceThreadIdRef = useRef(threadId);
   const voiceProviderRef = useRef<ProviderKind>(selectedProvider);
@@ -1860,6 +1826,10 @@ export default function ChatView({
   const rawWorkLogEntries = useMemo(
     () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities, WORK_LOG_PRESENTATION_VERSION],
+  );
+  const activeTurnHasFileChangeWork = useMemo(
+    () => rawWorkLogEntries.some(isProviderFileEditWorkLogEntry),
+    [rawWorkLogEntries],
   );
   const hasWorkLogSubagents = useMemo(
     () => rawWorkLogEntries.some((entry) => (entry.subagents?.length ?? 0) > 0),
@@ -2328,6 +2298,37 @@ export default function ChatView({
       ),
     [activeThread?.proposedPlans, agentActivityTimelineState.timelineWorkEntries, timelineMessages],
   );
+  // --- Pinned messages & notes (per-thread, server-synced through sidepanel commands) ---
+  const pinnedMessages = activeThread?.pinnedMessages ?? EMPTY_PINNED_MESSAGES;
+  const threadNotes = activeThread?.notes ?? "";
+  const pinnedMessageIds = useMemo(
+    () => new Set(pinnedMessages.map((pin) => pin.messageId)),
+    [pinnedMessages],
+  );
+  // Resolve the live text of currently-pinned messages so the panel can derive auto-labels
+  // and flag pins whose source message is no longer in the transcript.
+  const pinnedMessageTextById = useMemo(() => {
+    if (pinnedMessageIds.size === 0) {
+      return EMPTY_PINNED_TEXT;
+    }
+    const map = new Map<MessageId, string>();
+    for (const message of timelineMessages) {
+      if (pinnedMessageIds.has(message.id)) {
+        map.set(message.id, message.text);
+      }
+    }
+    return map;
+  }, [pinnedMessageIds, timelineMessages]);
+  const {
+    handleTogglePinMessage,
+    handleTogglePinnedMessageDone,
+    handleUnpinMessage,
+    handleRenamePinnedMessage,
+    handleNotesChange,
+  } = usePinnedMessageActions({ activeThreadId, pinnedMessages });
+  const handleJumpToPinnedMessage = useCallback((messageId: MessageId) => {
+    timelineControllerRef.current?.scrollToMessage(messageId);
+  }, []);
   // Empty top-level threads render the centered landing composer instead of the transcript pane.
   // Home-scoped chats get the global "What should we work on?" copy plus the project picker,
   // while project-scoped drafts reuse the same centered layout with folder-specific copy.
@@ -2685,6 +2686,24 @@ export default function ChatView({
     normalComposerMenuItems,
   ]);
   const composerMenuOpen = Boolean(composerTrigger || composerCommandPicker);
+  const composerMenuSelectionKey = useMemo(
+    () =>
+      buildComposerMenuSelectionKey({
+        menuOpen: composerMenuOpen,
+        picker: composerCommandPicker,
+        triggerKind: effectiveComposerTriggerKind,
+        triggerQuery: effectiveComposerTrigger?.query ?? "",
+        items: composerMenuItems,
+      }),
+    [
+      composerCommandPicker,
+      composerMenuItems,
+      composerMenuOpen,
+      effectiveComposerTrigger?.query,
+      effectiveComposerTriggerKind,
+    ],
+  );
+  const firstComposerMenuItemId = composerMenuItems[0]?.id ?? null;
   const activeComposerMenuItem = useMemo(
     () =>
       composerMenuItems.find((item) => item.id === composerHighlightedItemId) ??
@@ -2870,6 +2889,11 @@ export default function ChatView({
   }, [activeProjectCwd, activeThreadWorktreePath]);
   // Default true while loading to avoid toolbar flicker.
   const isGitRepo = branchesQuery.data?.isRepo ?? true;
+  const repoDiffTotals = useRepoDiffTotals({
+    gitCwd: threadWorkspaceCwd,
+    isGitRepo,
+    refetchInterval: repoDiffBadgeRefreshIntervalMs,
+  });
   const splitTerminalShortcutLabel = useMemo(
     () =>
       shortcutLabelForCommand(keybindings, "terminal.splitRight") ??
@@ -2900,11 +2924,11 @@ export default function ChatView({
     () => shortcutLabelForCommand(keybindings, "chat.split"),
     [keybindings],
   );
-  // Composer picker shortcuts are hard-coded in the keydown handler below
-  // (Mod+Shift+M opens the model picker, Mod+Shift+E opens the reasoning picker).
-  // Build their display labels directly so the tooltips match the handler exactly.
+  // The combined picker uses the same configurable keybinding command that the
+  // keydown handler resolves, keeping synced keybindings and tooltip labels aligned.
   const modelPickerShortcutLabel = useMemo(
     () =>
+      shortcutLabelForCommand(keybindings, "modelPicker.toggle") ??
       formatShortcutLabel({
         key: "m",
         metaKey: false,
@@ -2913,7 +2937,7 @@ export default function ChatView({
         altKey: false,
         modKey: true,
       }),
-    [],
+    [keybindings],
   );
   const onToggleDiff = useCallback(() => {
     if (diffEnvironmentPending && !diffOpen) {
@@ -2935,6 +2959,27 @@ export default function ChatView({
       },
     });
   }, [diffEnvironmentPending, diffOpen, navigate, onToggleDiffPanel, threadId]);
+  // Open-only diff action (no toggle): used by affordances like the live-changes
+  // "Review" strip where a second click should never close an already-open panel.
+  const onOpenDiff = useCallback(() => {
+    if (diffEnvironmentPending || resolvedDiffOpen) {
+      return;
+    }
+    if (onToggleDiffPanel) {
+      onToggleDiffPanel();
+      return;
+    }
+    void navigate({
+      to: "/$threadId",
+      params: { threadId },
+      replace: true,
+      search: (previous) => ({
+        ...stripDiffSearchParams(previous),
+        panel: "diff",
+        diff: "1",
+      }),
+    });
+  }, [diffEnvironmentPending, navigate, onToggleDiffPanel, resolvedDiffOpen, threadId]);
   const onToggleBrowser = useCallback(() => {
     if (onToggleBrowserPanel) {
       onToggleBrowserPanel();
@@ -2950,6 +2995,33 @@ export default function ChatView({
       },
     });
   }, [browserOpen, navigate, onToggleBrowserPanel, threadId]);
+  const openBrowserUrl = useCallback(
+    (url: string) => {
+      const api = readNativeApi();
+      void api?.browser.open({ threadId, initialUrl: url }).catch((error) => {
+        toastManager.add({
+          type: "error",
+          title: "Could not open repository",
+          description:
+            error instanceof Error ? error.message : "The in-app browser could not open GitHub.",
+        });
+      });
+      if (onOpenBrowserUrl) {
+        onOpenBrowserUrl(url);
+        return;
+      }
+      void navigate({
+        to: "/$threadId",
+        params: { threadId },
+        replace: true,
+        search: (previous) => ({
+          ...stripDiffSearchParams(previous),
+          panel: "browser",
+        }),
+      });
+    },
+    [navigate, onOpenBrowserUrl, threadId],
+  );
 
   const envLocked = Boolean(
     activeThread &&
@@ -2975,6 +3047,9 @@ export default function ChatView({
     terminalWorkspaceOpen &&
     (terminalState.workspaceLayout === "terminal-only" ||
       terminalState.workspaceActiveTab === "terminal");
+  const isTerminalPrimarySurface = terminalState.entryPoint === "terminal";
+  const isTerminalEnvironmentContext =
+    isTerminalPrimarySurface || terminalWorkspaceTerminalTabActive;
   const shouldShowProviderHealthBanner = shouldRenderProviderHealthBanner({
     threadEntryPoint: terminalState.entryPoint,
     terminalWorkspaceTerminalTabActive,
@@ -3485,11 +3560,38 @@ export default function ChatView({
   // The terminal's panel toggle mirrors the right dock's collapse control: it shows
   // or hides the side panel only when this thread already has a pane to show.
   const rightDockOpen = useRightDockStore((store) => selectRightDockState(threadId)(store).open);
+  const isMobileViewport = useIsMobile();
   // The Environment panel replaces the old header diff toggle + footer pickers for normal
   // threads; disposable (temporary/draft) threads keep the legacy inline controls.
   const isDisposableThread = useIsDisposableThread(threadId);
   const environmentEnabled = !isDisposableThread;
-  const [environmentPanelOpen, setEnvironmentPanelOpen] = useState(false);
+  const environmentDefaultOpen = resolveDefaultEnvironmentPanelOpen({
+    environmentEnabled,
+    isCenteredEmptyLanding,
+    isTerminalPrimarySurface,
+  });
+  const [environmentPanelOpen, setEnvironmentPanelOpen] = useState(() => environmentDefaultOpen);
+  useLayoutEffect(() => {
+    // Terminal threads keep the Environment panel closed by default so the full
+    // workspace stays untouched until the user explicitly toggles the overlay.
+    // Each normal chat thread starts open; empty/disposable views stay hidden.
+    setEnvironmentPanelOpen(environmentDefaultOpen);
+  }, [environmentDefaultOpen, threadId]);
+  const environmentPanelVisible = resolveEnvironmentPanelVisible({
+    environmentEnabled,
+    environmentPanelOpen,
+  });
+  const githubRepositoryQuery = useQuery(
+    gitGithubRepositoryQueryOptions(gitBranchSourceCwd, environmentPanelVisible),
+  );
+  const threadRecap = useThreadRecap({
+    thread: activeThread,
+    cwd: threadWorkspaceCwd,
+    enabled: environmentPanelVisible,
+    latestTurnSettled,
+    codexHomePath: settings.codexHomePath || null,
+    providerOptions: providerOptionsForDispatch ?? null,
+  });
   const hasRightDockPanes = useRightDockStore(
     (store) => selectRightDockState(threadId)(store).panes.length > 0,
   );
@@ -3619,10 +3721,14 @@ export default function ChatView({
         terminalState.activeTerminalId ||
         terminalState.terminalIds[0] ||
         DEFAULT_THREAD_TERMINAL_ID;
-      const isBaseTerminalBusy = terminalState.runningTerminalIds.includes(baseTerminalId);
-      const wantsNewTerminal = Boolean(options?.preferNewTerminal) || isBaseTerminalBusy;
-      const shouldCreateNewTerminal = wantsNewTerminal;
-      const targetTerminalId = shouldCreateNewTerminal ? randomTerminalId() : baseTerminalId;
+      const { shouldCreateNewTerminal, terminalId: targetTerminalId } =
+        resolveProjectScriptTerminalTarget({
+          baseTerminalId,
+          createTerminalId: randomTerminalId,
+          hasRunningTerminal: terminalState.runningTerminalIds.length > 0,
+          preferNewTerminal: options?.preferNewTerminal,
+          terminalOpen: terminalState.terminalOpen,
+        });
 
       setTerminalOpen(true);
       if (shouldCreateNewTerminal) {
@@ -3639,21 +3745,14 @@ export default function ChatView({
         worktreePath: options?.worktreePath ?? activeThread.worktreePath ?? null,
         ...(options?.env ? { extraEnv: options.env } : {}),
       });
-      const openTerminalInput: Parameters<typeof api.terminal.open>[0] = shouldCreateNewTerminal
-        ? {
-            threadId: activeThreadId,
-            terminalId: targetTerminalId,
-            cwd: targetCwd,
-            env: runtimeEnv,
-            cols: SCRIPT_TERMINAL_COLS,
-            rows: SCRIPT_TERMINAL_ROWS,
-          }
-        : {
-            threadId: activeThreadId,
-            terminalId: targetTerminalId,
-            cwd: targetCwd,
-            env: runtimeEnv,
-          };
+      const openTerminalInput: Parameters<typeof api.terminal.open>[0] = {
+        threadId: activeThreadId,
+        terminalId: targetTerminalId,
+        cwd: targetCwd,
+        env: runtimeEnv,
+        cols: SCRIPT_TERMINAL_COLS,
+        rows: SCRIPT_TERMINAL_ROWS,
+      };
 
       try {
         const terminalCommandIdentity = deriveTerminalCommandIdentity(script.command);
@@ -3688,6 +3787,7 @@ export default function ChatView({
       storeSetTerminalMetadata,
       setLastInvokedScriptByProjectId,
       terminalState.activeTerminalId,
+      terminalState.terminalOpen,
       terminalState.runningTerminalIds,
       terminalState.terminalIds,
     ],
@@ -4249,16 +4349,14 @@ export default function ChatView({
   }, [activeThread?.id]);
 
   useEffect(() => {
-    if (!composerMenuOpen) {
+    if (!composerMenuOpen || composerMenuSelectionKey === null) {
       setComposerHighlightedItemId(null);
       return;
     }
-    setComposerHighlightedItemId((existing) =>
-      existing && composerMenuItems.some((item) => item.id === existing)
-        ? existing
-        : (composerMenuItems[0]?.id ?? null),
-    );
-  }, [composerMenuItems, composerMenuOpen]);
+    // Query/order changes reset Enter/Tab to the ranked first row; identical
+    // recomputes do not override a highlight moved by arrow keys or pointer.
+    setComposerHighlightedItemId(firstComposerMenuItemId);
+  }, [composerMenuOpen, composerMenuSelectionKey, firstComposerMenuItemId]);
 
   useEffect(() => {
     setIsRevertingCheckpoint(false);
@@ -4327,28 +4425,43 @@ export default function ChatView({
     setComposerCursor((existing) => clampCollapsedComposerCursor(prompt, existing));
   }, [prompt]);
 
-  useEffect(() => {
-    setSelectedComposerSkills((existing) =>
-      existing.filter((skill) => promptIncludesSkillMention(prompt, skill.name, selectedProvider)),
-    );
-  }, [prompt, selectedProvider]);
+  useLayoutEffect(() => {
+    updateSelectedComposerSkills(composerSkills);
+    updateSelectedComposerMentions(composerMentions);
+  }, [
+    composerMentions,
+    composerSkills,
+    threadId,
+    updateSelectedComposerMentions,
+    updateSelectedComposerSkills,
+  ]);
 
   useEffect(() => {
-    setSelectedComposerMentions((existing) => {
-      const nextMentions = resolvePromptPluginMentions({
-        prompt,
-        existingMentions: existing,
-        providerPlugins,
-      });
+    updateSelectedComposerSkills((existing) =>
+      filterPromptSkillReferences(prompt, existing, selectedProvider),
+    );
+  }, [prompt, selectedProvider, updateSelectedComposerSkills]);
+
+  useEffect(() => {
+    updateSelectedComposerMentions((existing) => {
+      const nextMentions = filterPromptProviderMentionReferences(prompt, existing);
       return providerMentionReferencesEqual(existing, nextMentions) ? existing : nextMentions;
     });
-  }, [prompt, providerPlugins]);
+  }, [prompt, updateSelectedComposerMentions]);
 
-  // Clear selected skills when switching providers — skills are provider-specific.
+  // Provider references are provider-specific; keep draft restores from looking like manual switches.
   useEffect(() => {
-    setSelectedComposerSkills([]);
-    setSelectedComposerMentions([]);
-  }, [selectedProvider]);
+    const previous = previousSelectedProviderRef.current;
+    previousSelectedProviderRef.current = {
+      threadId,
+      provider: selectedProvider,
+    };
+    if (!previous || previous.threadId !== threadId || previous.provider === selectedProvider) {
+      return;
+    }
+    updateSelectedComposerSkills([]);
+    updateSelectedComposerMentions([]);
+  }, [selectedProvider, threadId, updateSelectedComposerMentions, updateSelectedComposerSkills]);
 
   useLayoutEffect(() => {
     // ChatView stays mounted across thread switches, so clear thread-local overlays before paint.
@@ -4378,8 +4491,6 @@ export default function ChatView({
     setComposerHighlightedItemId(null);
     setComposerCursor(collapseExpandedComposerCursor(promptRef.current, promptRef.current.length));
     setComposerTrigger(detectComposerTrigger(promptRef.current, promptRef.current.length));
-    setSelectedComposerSkills([]);
-    setSelectedComposerMentions([]);
     dragDepthRef.current = 0;
     setIsDragOverComposer(false);
     setExpandedImage(null);
@@ -4668,36 +4779,12 @@ export default function ChatView({
         void onInterrupt();
         return;
       }
-      const useMetaForMod = isMacPlatform(navigator.platform);
       const composerPickerShortcutActive =
         !isTerminalFocused() &&
         !isVoiceRecording &&
         !isVoiceTranscribing &&
         !isComposerApprovalState &&
         canHandleComposerPickerShortcut(event, composerFormRef.current);
-      if (
-        composerPickerShortcutActive &&
-        event.shiftKey &&
-        !event.altKey &&
-        event.metaKey === useMetaForMod &&
-        event.ctrlKey === !useMetaForMod
-      ) {
-        const normalizedKey = event.key.toLowerCase();
-        if (normalizedKey === "m") {
-          event.preventDefault();
-          event.stopPropagation();
-          handleModelPickerOpenChange(true);
-          scheduleComposerFocus();
-          return;
-        }
-        if (normalizedKey === "e") {
-          event.preventDefault();
-          event.stopPropagation();
-          handleTraitsPickerOpenChange(true);
-          scheduleComposerFocus();
-          return;
-        }
-      }
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),
@@ -4711,6 +4798,24 @@ export default function ChatView({
         context: shortcutContext,
       });
       if (!command) return;
+
+      if (command === "modelPicker.toggle") {
+        if (!composerPickerShortcutActive) return;
+        event.preventDefault();
+        event.stopPropagation();
+        handleModelPickerOpenChange(true);
+        scheduleComposerFocus();
+        return;
+      }
+
+      if (command === "traitsPicker.toggle") {
+        if (!composerPickerShortcutActive) return;
+        event.preventDefault();
+        event.stopPropagation();
+        handleTraitsPickerOpenChange(true);
+        scheduleComposerFocus();
+        return;
+      }
 
       if (command === "terminal.toggle") {
         event.preventDefault();
@@ -5253,13 +5358,13 @@ export default function ChatView({
     (threadId: ThreadId) => {
       promptRef.current = "";
       clearComposerDraftContent(threadId);
-      setSelectedComposerSkills([]);
-      setSelectedComposerMentions([]);
+      updateSelectedComposerSkills([]);
+      updateSelectedComposerMentions([]);
       setComposerHighlightedItemId(null);
       setComposerCursor(0);
       setComposerTrigger(null);
     },
-    [clearComposerDraftContent],
+    [clearComposerDraftContent, updateSelectedComposerMentions, updateSelectedComposerSkills],
   );
 
   const restoreQueuedTurnToComposer = useCallback(
@@ -5291,11 +5396,11 @@ export default function ChatView({
         if (queuedTurn.terminalContexts.length > 0) {
           addComposerTerminalContextsToDraft(queuedTurn.terminalContexts);
         }
-        setSelectedComposerSkills(queuedTurn.skills);
-        setSelectedComposerMentions(queuedTurn.mentions);
+        updateSelectedComposerSkills(queuedTurn.skills);
+        updateSelectedComposerMentions(queuedTurn.mentions);
       } else {
-        setSelectedComposerSkills([]);
-        setSelectedComposerMentions([]);
+        updateSelectedComposerSkills([]);
+        updateSelectedComposerMentions([]);
       }
       setComposerDraftModelSelection(activeThread.id, queuedTurn.modelSelection);
       setComposerDraftRuntimeMode(activeThread.id, queuedTurn.runtimeMode);
@@ -5316,6 +5421,8 @@ export default function ChatView({
       setComposerDraftModelSelection,
       setComposerDraftPrompt,
       setComposerDraftRuntimeMode,
+      updateSelectedComposerMentions,
+      updateSelectedComposerSkills,
     ],
   );
 
@@ -5388,8 +5495,10 @@ export default function ChatView({
       queuedChatTurn?.assistantSelections ?? composerAssistantSelections;
     const composerTerminalContextsForSend =
       queuedChatTurn?.terminalContexts ?? composerTerminalContexts;
-    const selectedComposerSkillsForSend = queuedChatTurn?.skills ?? selectedComposerSkills;
-    const selectedComposerMentionsForSend = queuedChatTurn?.mentions ?? selectedComposerMentions;
+    const selectedComposerSkillsForSend =
+      queuedChatTurn?.skills ?? selectedComposerSkillsRef.current;
+    const selectedComposerMentionsForSend =
+      queuedChatTurn?.mentions ?? selectedComposerMentionsRef.current;
     const selectedProviderForSend = queuedChatTurn?.selectedProvider ?? selectedProvider;
     const selectedModelForSend = queuedChatTurn?.selectedModel ?? selectedModel;
     const selectedPromptEffortForSend =
@@ -5411,12 +5520,18 @@ export default function ChatView({
       assistantSelectionCount: composerAssistantSelectionsForSend.length,
       terminalContexts: composerTerminalContextsForSend,
     });
-    if (showPlanFollowUpPrompt && activeProposedPlan) {
+    // Plan-follow-up handling only applies to the live composer. An already-queued
+    // chat turn is explicitly a chat message and must always go through the normal
+    // chat path below — routing it here would drop its attachments and ignore the
+    // model/runtime/interaction mode it was queued with. (Queued plan follow-ups are
+    // a separate "plan-follow-up" kind dispatched via onSubmitPlanFollowUp directly,
+    // so they never reach onSend.)
+    if (queuedChatTurn === null && showPlanFollowUpPrompt && activeProposedPlan) {
       const followUp = resolvePlanFollowUpSubmission({
         draftText: trimmed,
         planMarkdown: activeProposedPlan.planMarkdown,
       });
-      if (hasLiveTurn && dispatchMode === "queue" && queuedChatTurn === null) {
+      if (hasLiveTurn && dispatchMode === "queue") {
         clearComposerInput(activeThread.id);
         enqueueQueuedComposerTurn(activeThread.id, {
           id: randomUUID(),
@@ -5691,14 +5806,15 @@ export default function ChatView({
       effort: selectedPromptEffortForSend,
       text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
     });
-    const mentionedSkillsForSend = selectedComposerSkillsForSend.filter((skill) =>
-      promptIncludesSkillMention(outgoingMessageText, skill.name, selectedProviderForSend),
+    const mentionedSkillsForSend = filterPromptSkillReferences(
+      outgoingMessageText,
+      selectedComposerSkillsForSend,
+      selectedProviderForSend,
     );
-    const mentionedPluginMentionsForSend = resolvePromptPluginMentions({
-      prompt: outgoingMessageText,
-      existingMentions: selectedComposerMentionsForSend,
-      providerPlugins,
-    });
+    const mentionedPluginMentionsForSend = filterPromptProviderMentionReferences(
+      outgoingMessageText,
+      selectedComposerMentionsForSend,
+    );
     const turnAttachmentsPromise = Promise.all([
       ...composerAssistantSelectionsSnapshot.map((selection) =>
         Promise.resolve({
@@ -5734,6 +5850,10 @@ export default function ChatView({
         text: outgoingMessageText,
         dispatchMode,
         ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
+        ...(mentionedSkillsForSend.length > 0 ? { skills: mentionedSkillsForSend } : {}),
+        ...(mentionedPluginMentionsForSend.length > 0
+          ? { mentions: mentionedPluginMentionsForSend }
+          : {}),
         createdAt: messageCreatedAt,
         streaming: false,
         source: "native",
@@ -5755,11 +5875,17 @@ export default function ChatView({
         description: toastCopy.description,
       });
     }
-    promptRef.current = "";
-    clearComposerDraftContent(threadIdForSend);
-    setComposerHighlightedItemId(null);
-    setComposerCursor(0);
-    setComposerTrigger(null);
+    // A queued turn dispatches from its own stored snapshot, so the live composer
+    // may hold content the user is actively typing (or about to queue). Only reset
+    // the composer on a live send; clearing it during a queued auto-dispatch would
+    // delete the user's in-progress draft.
+    if (queuedChatTurn === null) {
+      promptRef.current = "";
+      clearComposerDraftContent(threadIdForSend);
+      setComposerHighlightedItemId(null);
+      setComposerCursor(0);
+      setComposerTrigger(null);
+    }
 
     let createdServerThreadForLocalDraft = false;
     let turnStartSucceeded = false;
@@ -5962,8 +6088,8 @@ export default function ChatView({
           addComposerAssistantSelectionToDraft(selection);
         }
         addComposerTerminalContextsToDraft(composerTerminalContextsSnapshot);
-        setSelectedComposerSkills(composerSkillsSnapshot);
-        setSelectedComposerMentions(composerMentionsSnapshot);
+        updateSelectedComposerSkills(composerSkillsSnapshot);
+        updateSelectedComposerMentions(composerMentionsSnapshot);
         setComposerTrigger(detectComposerTrigger(promptForSend, promptForSend.length));
       }
       setThreadError(
@@ -6799,6 +6925,7 @@ export default function ChatView({
       if (isLocalDraftThread) {
         setDraftThreadContext(threadId, {
           envMode: mode,
+          ...(mode === "local" ? { worktreePath: null } : {}),
           ...(nextBranch ? { branch: nextBranch } : {}),
         });
       }
@@ -7220,7 +7347,7 @@ export default function ChatView({
           trigger,
           base: `${skillMentionPrefix(selectedProvider)}${item.skill.name} `,
           onApplied: () => {
-            setSelectedComposerSkills((existing) => {
+            updateSelectedComposerSkills((existing) => {
               const nextSkill = {
                 name: item.skill.name,
                 path: item.skill.path,
@@ -7239,9 +7366,9 @@ export default function ChatView({
         applyComposerTriggerReplacement({
           snapshot,
           trigger,
-          base: `@${item.label} `,
+          base: `${formatComposerMentionToken(item.mention.name)} `,
           onApplied: () => {
-            setSelectedComposerMentions((existing) => {
+            updateSelectedComposerMentions((existing) => {
               const nextMention = item.mention;
               const nextWithoutSameName = existing.filter(
                 (mention) => mention.name !== nextMention.name,
@@ -7278,8 +7405,8 @@ export default function ChatView({
       setComposerCommandPicker,
       localFolderBrowseRootPath,
       selectedProvider,
-      setSelectedComposerMentions,
-      setSelectedComposerSkills,
+      updateSelectedComposerMentions,
+      updateSelectedComposerSkills,
       resolveActiveComposerTrigger,
     ],
   );
@@ -7639,12 +7766,51 @@ export default function ChatView({
       ? { onCheckoutPullRequestRequest: openPullRequestDialog }
       : {}),
   };
+  const showEmptyLandingBranchToolbar =
+    isCenteredEmptyLanding && Boolean(activeProject) && !isHomeChatContainer && isGitRepo;
+  const emptyLandingProjectChip =
+    !isEmptyChatLanding && activeProjectDisplayName ? (
+      <span className="inline-flex min-w-0 max-w-56 shrink items-center gap-2 overflow-hidden rounded-md px-2 py-1 text-[length:var(--app-font-size-ui-sm,11px)] font-normal text-[var(--color-text-foreground-secondary)] sm:max-w-64">
+        <FolderClosed className="size-3.5 shrink-0" />
+        <span className="min-w-0 truncate">{activeProjectDisplayName}</span>
+      </span>
+    ) : null;
+  const emptyLandingControls =
+    isCenteredEmptyLanding &&
+    (isEmptyChatLanding || emptyLandingProjectChip || showEmptyLandingBranchToolbar) ? (
+      <div
+        className={cn(
+          "chat-composer-shell relative mt-0 flex flex-wrap items-center gap-x-2 gap-y-1 !rounded-t-none !rounded-b-[var(--composer-radius)] bg-[color-mix(in_srgb,var(--color-background-elevated-secondary)_76%,var(--color-background-surface)_24%)] px-2 pb-1.5 pt-2 shadow-[0_18px_36px_-26px_rgba(0,0,0,0.78)] before:pointer-events-none before:absolute before:inset-x-0 before:-top-3 before:h-3 before:bg-inherit before:content-['']",
+          COMPOSER_COLUMN_FRAME_CLASS_NAME,
+        )}
+      >
+        {isEmptyChatLanding ? (
+          <ProjectPicker
+            align="start"
+            side="top"
+            showResetToHome={Boolean(resolvedThreadWorktreePath)}
+            selectedWorkspaceRoot={resolvedThreadWorktreePath}
+            onSelectWorkspaceRoot={handleSelectWorkspaceRoot}
+            onResetToHome={handleResetWorkspaceToHome}
+          />
+        ) : (
+          emptyLandingProjectChip
+        )}
+        {showEmptyLandingBranchToolbar ? (
+          <BranchToolbar
+            {...branchToolbarProps}
+            className="mx-0 !w-auto min-w-0 shrink-0 !justify-start !px-0 !pb-0 !pt-0"
+          />
+        ) : null}
+      </div>
+    ) : null;
 
   // Shared inputs for both Environment panel surfaces (the header Popover when the dock is
   // open, and the docked right column when it is closed) so the two never drift.
   const environmentPanelProps: Omit<EnvironmentPanelProps, "open" | "variant"> = {
     gitCwd: threadWorkspaceCwd,
     openInCwd: threadWorkspaceCwd,
+    githubRepository: githubRepositoryQuery.data?.repository ?? null,
     isGitRepo,
     keybindings,
     availableEditors,
@@ -7652,33 +7818,47 @@ export default function ChatView({
     showGitActions,
     diffOpen: resolvedDiffOpen,
     diffDisabledReason,
-    diffBadgeRefreshIntervalMs: repoDiffBadgeRefreshIntervalMs,
+    diffTotals: repoDiffTotals,
     branchToolbar: branchToolbarProps,
+    recap: threadRecap,
+    pinnedMessages,
+    pinnedMessageTextById,
+    notes: threadNotes,
     onToggleDiff,
+    onOpenGithubRepository: openBrowserUrl,
+    onJumpToPinnedMessage: handleJumpToPinnedMessage,
+    onTogglePinnedMessageDone: handleTogglePinnedMessageDone,
+    onUnpinMessage: handleUnpinMessage,
+    onRenamePinnedMessage: handleRenamePinnedMessage,
+    onNotesChange: handleNotesChange,
     onClose: () => setEnvironmentPanelOpen(false),
   };
   // Full-width single chat: overlay plus transcript/composer inset. Floating overlay when the
   // column is already narrow — right dock open or a split pane (same as header compact mode).
-  const environmentUsesFloatingOverlay = rightDockOpen || surfaceMode === "split";
-  const environmentAppliesContentInset =
-    environmentEnabled && environmentPanelOpen && !environmentUsesFloatingOverlay;
+  // Empty landing and terminal surfaces always float so opening Environment never shifts layout.
+  const environmentUsesFloatingOverlay =
+    isCenteredEmptyLanding ||
+    isTerminalEnvironmentContext ||
+    isMobileViewport ||
+    rightDockOpen ||
+    surfaceMode === "split";
+  const environmentAppliesContentInset = environmentPanelVisible && !environmentUsesFloatingOverlay;
   const environmentOverlayVariant = environmentUsesFloatingOverlay ? "floating" : "docked";
   const environmentHeaderState = environmentEnabled
     ? {
-        open: environmentPanelOpen,
+        open: environmentPanelVisible,
         onOpenChange: setEnvironmentPanelOpen,
       }
     : null;
 
+  const showComposerLiveChangesHeader =
+    latestTurnLive && activeTurnHasFileChangeWork && repoDiffTotals.fileCount > 0;
+  const showComposerActiveTaskListCard = Boolean(activeTaskList && !planSidebarOpen);
+
   // Composer layout keeps the task list and footer actions in one render path so
   // follow-up prompts and normal chat mode stay visually in sync.
-  const taskListAboveComposer = Boolean(activeTaskList && !planSidebarOpen);
-  // When a task card or queued rows sit flush above the composer, the whole stack
-  // must read as one continuous rounded surface: the composer drops its top radius
-  // and the topmost row owns the rounded top so they don't look like separate chips.
-  const composerHasStackedHeader = taskListAboveComposer || queuedComposerTurns.length > 0;
-  const renderActiveTaskListCard = () =>
-    activeTaskList && !planSidebarOpen ? (
+  const renderActiveTaskListCard = (attachedToPrevious: boolean) =>
+    activeTaskList && showComposerActiveTaskListCard ? (
       <ComposerActiveTaskListCard
         activeTaskList={activeTaskList}
         cardRef={activeTaskListCardRef}
@@ -7686,13 +7866,13 @@ export default function ChatView({
         compact={activeTaskListCompact}
         onCompactChange={setActiveTaskListCompact}
         onOpenSidebar={() => setPlanSidebarOpen(true)}
+        attachedToPrevious={attachedToPrevious}
       />
     ) : null;
 
   const composerSection =
     secondaryChromeReady && shouldRenderChatPaneContent ? (
       <>
-        {renderActiveTaskListCard()}
         <form
           ref={composerFormRef}
           onSubmit={onSend}
@@ -7700,18 +7880,26 @@ export default function ChatView({
           data-chat-composer-form="true"
           data-chat-pane-scope={paneScopeId}
         >
-          <div className={COMPOSER_COLUMN_FRAME_CLASS_NAME}>
+          <ComposerColumnFrame>
+            {showComposerLiveChangesHeader ? (
+              <ComposerLiveChangesHeader
+                fileCount={repoDiffTotals.fileCount}
+                additions={repoDiffTotals.additions}
+                deletions={repoDiffTotals.deletions}
+                onReview={onOpenDiff}
+              />
+            ) : null}
+            {renderActiveTaskListCard(showComposerLiveChangesHeader)}
             <ComposerQueuedHeader
               queuedTurns={queuedComposerTurns}
-              taskListAboveComposer={taskListAboveComposer}
               onSteer={onSteerQueuedComposerTurn}
               onRemove={removeQueuedComposerTurn}
               onEdit={onEditQueuedComposerTurn}
+              attachedToPrevious={showComposerLiveChangesHeader || showComposerActiveTaskListCard}
             />
             <div
               className={cn(
                 COMPOSER_INPUT_SHELL_CLASS_NAME,
-                composerHasStackedHeader && "!rounded-t-none",
                 composerProviderState.composerFrameClassName,
                 composerMenuOpen && !isComposerApprovalState && "overflow-visible",
               )}
@@ -7723,14 +7911,13 @@ export default function ChatView({
               <div
                 className={cn(
                   COMPOSER_INPUT_SURFACE_CLASS_NAME,
-                  composerHasStackedHeader && "!rounded-t-none",
                   isDragOverComposer ? "!bg-[var(--color-background-control)]" : "",
                   composerProviderState.composerSurfaceClassName,
                   composerMenuOpen && !isComposerApprovalState && "overflow-visible",
                 )}
               >
                 <ComposerInputBanners
-                  roundedTopReset={composerHasStackedHeader}
+                  roundedTopReset={false}
                   activeApproval={activePendingApproval}
                   pendingApprovalCount={pendingApprovals.length}
                   pendingUserInputs={pendingUserInputs}
@@ -8130,25 +8317,9 @@ export default function ChatView({
                 )}
               </div>
             </div>
-          </div>
+          </ComposerColumnFrame>
         </form>
-        {isEmptyChatLanding ? (
-          <div
-            className={cn(
-              "mt-2 flex items-center justify-start gap-3 px-3",
-              COMPOSER_COLUMN_FRAME_CLASS_NAME,
-            )}
-          >
-            <ProjectPicker
-              align="start"
-              side="top"
-              showResetToHome={Boolean(resolvedThreadWorktreePath)}
-              selectedWorkspaceRoot={resolvedThreadWorktreePath}
-              onSelectWorkspaceRoot={handleSelectWorkspaceRoot}
-              onResetToHome={handleResetWorkspaceToHome}
-            />
-          </div>
-        ) : null}
+        {emptyLandingControls}
       </>
     ) : (
       <div
@@ -8206,7 +8377,7 @@ export default function ChatView({
           handoffBadgeSourceProvider={handoffBadgeSourceProvider}
           handoffBadgeTargetProvider={handoffBadgeTargetProvider}
           gitCwd={threadWorkspaceCwd}
-          diffBadgeRefreshIntervalMs={repoDiffBadgeRefreshIntervalMs}
+          diffTotals={repoDiffTotals}
           showGitActions={showGitActions}
           diffOpen={resolvedDiffOpen}
           diffDisabledReason={diffDisabledReason}
@@ -8322,7 +8493,7 @@ export default function ChatView({
                     </h2>
                   </div>
                   {composerSection}
-                  {isGitRepo && !environmentEnabled ? (
+                  {isGitRepo && !environmentEnabled && !isCenteredEmptyLanding ? (
                     <div className={COMPOSER_COLUMN_FRAME_CLASS_NAME}>
                       <BranchToolbar {...branchToolbarProps} />
                     </div>
@@ -8355,6 +8526,9 @@ export default function ChatView({
                     activeTurnInProgress={activeTurnInProgress}
                     activeTurnStartedAt={activeWorkStartedAt}
                     listRef={legendListRef}
+                    timelineControllerRef={timelineControllerRef}
+                    pinnedMessageIds={pinnedMessageIds}
+                    onTogglePinMessage={handleTogglePinMessage}
                     timelineEntries={timelineEntries}
                     turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
                     onOpenTurnDiff={onOpenTurnDiff}
@@ -8471,7 +8645,7 @@ export default function ChatView({
           {environmentEnabled ? (
             <EnvironmentPanel
               {...environmentPanelProps}
-              open={environmentPanelOpen}
+              open={environmentPanelVisible}
               variant={environmentOverlayVariant}
             />
           ) : null}

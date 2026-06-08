@@ -740,6 +740,17 @@ label:has(> select#reasoning-effort) select {
   text-underline-offset: 0.18em;
 }
 
+.chat-markdown a.chat-markdown__file-link {
+  font-weight: 500;
+}
+
+.chat-markdown a.chat-markdown__file-link .chat-markdown__file-link-icon {
+  width: 1em;
+  height: 1em;
+  margin-right: 0.3em;
+  vertical-align: -0.15em;
+}
+
 .chat-markdown blockquote {
   border-left: 2px solid var(--border);
   padding-left: 0.8rem;
@@ -1156,7 +1167,7 @@ label:has(> select#reasoning-effort) select {
 /* Keep diff chrome aligned with the user-configured code font, not the base mono fallback. */
 diffs-container {
   --diffs-font-family: var(--font-chat-code-family);
-  --diffs-header-font-family: var(--font-chat-code-family);
+  --diffs-header-font-family: var(--font-ui-family);
 }
 
 /* Diffs theme bridge (match diff surfaces to app palette) */
@@ -1229,6 +1240,11 @@ diffs-container {
   border-bottom-right-radius: 0;
   border-top-left-radius: calc(var(--composer-radius) - 1px);
   border-top-right-radius: calc(var(--composer-radius) - 1px);
+}
+
+.chat-composer-stacked-top[data-composer-stacked-attached="true"] {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 
 .chat-composer-surface {
