@@ -48,6 +48,7 @@ import {
 import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
 import { type AcpSessionMode, parsePermissionRequest } from "../acp/AcpRuntimeModel.ts";
 import { makeDevinAcpRuntime, type DevinAcpRuntimeSettings } from "../acp/DevinAcpSupport.ts";
+import { applyDevinModeSelection } from "../acp/DevinModeMapper.ts";
 import { DEVIN_FALLBACK_MODELS, normalizeDevinModelSlug } from "../acp/DevinModelCatalog.ts";
 import { DevinAdapter, type DevinAdapterShape } from "../Services/DevinAdapter.ts";
 import type { ProviderThreadTurnSnapshot } from "../Services/ProviderAdapter.ts";
@@ -55,9 +56,6 @@ import type { EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = "devin" as const;
 const DEVIN_RESUME_VERSION = 1 as const;
-const DEVIN_PLAN_MODE_ALIASES = ["plan"];
-const DEVIN_FULL_ACCESS_MODE_ALIASES = ["bypass", "bypass permissions"];
-const DEVIN_CODE_MODE_ALIASES = ["accept-edits", "code", "accept edits"];
 
 export interface DevinAcpRuntimeFactoryInput {
   readonly devinSettings: DevinAcpRuntimeSettings;
@@ -138,66 +136,6 @@ function settlePendingApprovalsAsCancelled(
     (pending) => Deferred.succeed(pending.decision, "cancel" as const),
     { discard: true },
   ).pipe(Effect.andThen(Effect.sync(() => pendingApprovals.clear())));
-}
-
-function normalizedModeText(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ");
-}
-
-function findDevinModeByAliases(
-  modes: ReadonlyArray<AcpSessionMode>,
-  aliases: ReadonlyArray<string>,
-): AcpSessionMode | undefined {
-  const normalizedAliases = aliases.map(normalizedModeText);
-  return modes.find((mode) => {
-    const haystack = normalizedModeText(`${mode.id} ${mode.name} ${mode.description ?? ""}`);
-    return normalizedAliases.some((alias) => haystack.includes(alias));
-  });
-}
-
-function resolveDevinModeId(input: {
-  readonly modes: ReadonlyArray<AcpSessionMode>;
-  readonly runtimeMode: RuntimeMode;
-  readonly interactionMode?: ProviderInteractionMode | undefined;
-}): string | undefined {
-  if (input.interactionMode === "plan") {
-    return findDevinModeByAliases(input.modes, DEVIN_PLAN_MODE_ALIASES)?.id;
-  }
-  if (input.runtimeMode === "full-access") {
-    return (
-      findDevinModeByAliases(input.modes, DEVIN_FULL_ACCESS_MODE_ALIASES)?.id ??
-      findDevinModeByAliases(input.modes, DEVIN_CODE_MODE_ALIASES)?.id
-    );
-  }
-  return findDevinModeByAliases(input.modes, DEVIN_CODE_MODE_ALIASES)?.id;
-}
-
-function applyDevinModeSelection(input: {
-  readonly runtime: AcpSessionRuntimeShape;
-  readonly threadId: ThreadId;
-  readonly runtimeMode: RuntimeMode;
-  readonly interactionMode?: ProviderInteractionMode | undefined;
-}): Effect.Effect<void, ProviderAdapterError> {
-  return Effect.gen(function* () {
-    const modeState = yield* input.runtime.getModeState;
-    if (!modeState) return;
-    const modeId = resolveDevinModeId({
-      modes: modeState.availableModes,
-      runtimeMode: input.runtimeMode,
-      ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
-    });
-    if (!modeId || modeId === modeState.currentModeId) return;
-    yield* input.runtime
-      .setMode(modeId)
-      .pipe(
-        Effect.mapError((error) =>
-          mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_mode", error),
-        ),
-      );
-  });
 }
 
 function makeDefaultRuntimeFactory(input: DevinAcpRuntimeFactoryInput) {

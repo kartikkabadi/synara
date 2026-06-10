@@ -21,8 +21,8 @@ update your row when done.
 
 | Plan | Title                                                                                  | Priority | Effort | Depends on | Status      |
 | ---- | -------------------------------------------------------------------------------------- | -------- | ------ | ---------- | ----------- |
-| 001 | Single source of truth for Devin models (DevinModelCatalog + runtime-first listModels) | P1 | M | — | DONE |
-| 002  | Extract DevinModeMapper                                                                | P2       | S      | —          | TODO        |
+| 001  | Single source of truth for Devin models (DevinModelCatalog + runtime-first listModels) | P1       | M      | —          | DONE        |
+| 002  | Extract DevinModeMapper                                                                | P2       | S      | —          | DONE        |
 | 003  | Structured user-input via ACP form elicitation                                         | P1       | M      | —          | TODO        |
 | 004  | Native slash-command discovery via `available_commands_update`                         | P2       | M      | —          | TODO        |
 | 005  | Align Devin health auth with runtime auth (WINDSURF_API_KEY)                           | P3       | S      | —          | TODO        |
