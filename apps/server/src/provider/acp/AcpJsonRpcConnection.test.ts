@@ -61,6 +61,54 @@ process.stdin.on("data", (chunk) => {
 });
 `;
 
+// Minimal raw NDJSON ACP agent whose session/new response advertises config
+// options without any category "model" entry. The shared
+// scripts/acp-mock-agent.ts always advertises a model option, so this
+// test-only helper exercises the no-model-config-id path. Run via `bun -e`.
+const noModelConfigAgentScript = `
+let buffer = "";
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  for (let index = buffer.indexOf("\\n"); index >= 0; index = buffer.indexOf("\\n")) {
+    const line = buffer.slice(0, index).trim();
+    buffer = buffer.slice(index + 1);
+    if (!line) continue;
+    const message = JSON.parse(line);
+    if (message.method === "initialize") {
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: { protocolVersion: 1, agentCapabilities: {} },
+      });
+    } else if (message.method === "authenticate") {
+      send({ jsonrpc: "2.0", id: message.id, result: {} });
+    } else if (message.method === "session/new") {
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {
+          sessionId: "mock-session-1",
+          configOptions: [
+            {
+              id: "mode",
+              name: "Mode",
+              category: "mode",
+              type: "select",
+              currentValue: "ask",
+              options: [{ value: "ask", name: "Ask" }],
+            },
+          ],
+        },
+      });
+    } else if (message.id !== undefined) {
+      send({ jsonrpc: "2.0", id: message.id, result: {} });
+    }
+  }
+});
+`;
+
 describe("AcpSessionRuntime", () => {
   it.effect("merges custom initialize client capabilities into the ACP handshake", () => {
     const requestEvents: Array<AcpSessionRequestLogEvent> = [];
@@ -472,6 +520,53 @@ describe("AcpSessionRuntime", () => {
       Effect.provide(NodeServices.layer),
     ),
   );
+
+  it.effect("setModel fails clearly when no model config option is advertised", () => {
+    const requestEvents: Array<AcpSessionRequestLogEvent> = [];
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime;
+      const started = yield* runtime.start();
+      expect(started.modelConfigId).toBeUndefined();
+
+      const error = yield* runtime.setModel("composer-2").pipe(Effect.flip);
+      expect(error._tag).toBe("AcpRequestError");
+      if (error._tag === "AcpRequestError") {
+        expect(error.code).toBe(-32602);
+        expect(error.message).toContain("did not advertise a model config option");
+        expect(error.data).toMatchObject({
+          requestedModel: "composer-2",
+          configOptionIds: ["mode"],
+        });
+      }
+
+      expect(
+        requestEvents.some(
+          (event) =>
+            event.method === "session/set_config_option" &&
+            event.status === "started" &&
+            (event.payload as { configId?: string }).configId === "model",
+        ),
+      ).toBe(false);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: bunExe,
+            args: ["-e", noModelConfigAgentScript],
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+          authMethodId: "test",
+          requestLogger: (event) =>
+            Effect.sync(() => {
+              requestEvents.push(event);
+            }),
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    );
+  });
 
   it.effect("rejects invalid config option values before sending session/set_config_option", () => {
     const tempDir = mkdtempSync(path.join(os.tmpdir(), "acp-runtime-"));
