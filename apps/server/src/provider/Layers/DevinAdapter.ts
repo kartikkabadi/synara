@@ -452,6 +452,8 @@ function makeProviderAdapter(
           Stream.mapEffect(acp.getEvents(), (event) =>
             Effect.gen(function* () {
               switch (event._tag) {
+                // Modes and commands are fetched on-demand (getModeState / getAvailableCommands);
+                // the notification-level updates are redundant and intentionally not surfaced.
                 case "ModeChanged":
                 case "AvailableCommandsUpdated":
                   return;
