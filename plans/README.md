@@ -28,7 +28,7 @@ path arguments to Vitest.
 | 003  | Structured user-input via ACP form elicitation                                         | P1       | M      | —          | DONE        |
 | 004  | Native slash-command discovery via `available_commands_update`                         | P2       | M      | —          | DONE        |
 | 005  | Align Devin health auth with runtime auth (WINDSURF_API_KEY)                           | P3       | S      | —          | DONE        |
-| 010  | Replace invalid path-forwarded `bun run test` commands in Devin plans                  | P1       | S      | —          | BLOCKED (REVIEW.md invalid command is out of scope) |
+| 010  | Replace invalid path-forwarded `bun run test` commands in Devin plans                  | P1       | S      | —          | DONE        |
 | 006  | Harden Devin ACP form elicitation with adapter tests and server-side answer validation | P1       | M      | —          | DONE        |
 | 007  | Make Devin slash-command discovery thread-scoped and prove runtime command updates     | P1       | S      | —          | DONE        |
 | 008  | Stop guessing ACP model config id when the session does not advertise one              | P2       | S      | —          | TODO        |

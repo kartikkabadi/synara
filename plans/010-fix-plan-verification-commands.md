@@ -85,6 +85,9 @@ unless the operator explicitly asks; this plan only edits markdown command text.
 - `plans/003-devin-user-input-elicitation.md`
 - `plans/004-devin-slash-command-discovery.md`
 - `plans/005-devin-health-auth-alignment.md`
+- `plans/REVIEW.md` (command text only — added 2026-06-11 to resolve the BLOCKED
+  state: the Step 1 verify and Done criterion #1 already grep this file, so its
+  omission from this list was a plan-authoring error, not an intentional boundary)
 - `plans/README.md`
 
 **Out of scope** (do NOT touch):

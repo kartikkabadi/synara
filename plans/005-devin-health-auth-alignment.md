@@ -156,7 +156,10 @@ In `ProviderHealth.test.ts`, following the existing Devin fixture style:
 
 ### Step 4: Final verification pass
 
-Once: `bun fmt && bun lint && bun typecheck && bun run test -- apps/server/src/provider`
+Once each, as separate final verification passes:
+
+- `bunx vitest run apps/server/src/provider/**/*.test.ts`
+- `bun fmt && bun lint && bun typecheck`
 
 **Verify**: all exit 0.
 

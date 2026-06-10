@@ -95,7 +95,7 @@ No `listCommands` is implemented (the adapter interface's optional
 | ---------------------- | ---------------------------------------------------------------------- | --------------------------------- |
 | Install                | `bun install`                                                          | exit 0                            |
 | Runtime model tests    | `bunx vitest run apps/server/src/provider/acp/AcpRuntimeModel.test.ts` | all pass                          |
-| ACP runtime + adapters | `bun run test -- apps/server/src/provider`                             | all pass (Cursor/Grok unaffected) |
+| ACP runtime + adapters | `bunx vitest run apps/server/src/provider/**/*.test.ts`                | all pass (Cursor/Grok unaffected) |
 | Final gate (once)      | `bun fmt && bun lint && bun typecheck`                                 | all exit 0                        |
 
 NEVER run `bun test`; always `bun run test` / `bunx vitest run <file>`.
@@ -189,7 +189,7 @@ dropped; empty list yields event with `commands: []`.
    tests may construct runtimes differently — check before editing). Add
    `getAvailableCommands: Effect.succeed(input?.availableCommands ?? [])`.
 
-**Verify**: `bun run test -- apps/server/src/provider/acp` → all pass (no behavior
+**Verify**: `bunx vitest run apps/server/src/provider/acp/**/*.test.ts` → all pass (no behavior
 change for existing events).
 
 ### Step 3: Implement Devin `listCommands` + flip the capability
@@ -254,7 +254,10 @@ optional `availableCommands` input, per step 2.5):
 
 ### Step 5: Final verification pass
 
-Once: `bun fmt && bun lint && bun typecheck && bun run test -- apps/server/src/provider`
+Once each, as separate final verification passes:
+
+- `bunx vitest run apps/server/src/provider/**/*.test.ts`
+- `bun fmt && bun lint && bun typecheck`
 
 **Verify**: all exit 0. Pay attention to Cursor/Grok adapter tests — they must be
 untouched and green.
@@ -270,7 +273,7 @@ fixture style; `DevinAdapter.test.ts` mock-runtime style.
 - [ ] `grep -n "getAvailableCommands" apps/server/src/provider/acp/AcpSessionRuntime.ts` → interface + implementation
 - [ ] `grep -n "supportsNativeSlashCommandDiscovery: true" apps/server/src/provider/Layers/DevinAdapter.ts` → 2 matches (capabilities + composer capabilities)
 - [ ] `grep -rn "DevinCommandCatalog" apps/` → no matches (no invented static catalog)
-- [ ] `bun run test -- apps/server/src/provider` → all pass including new tests
+- [ ] `bunx vitest run apps/server/src/provider/**/*.test.ts` → all pass including new tests
 - [ ] `bun fmt && bun lint && bun typecheck` → exit 0 (single final pass)
 - [ ] `git status` clean outside in-scope list; `plans/README.md` updated
 

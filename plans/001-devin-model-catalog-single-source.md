@@ -112,7 +112,7 @@ Repo conventions: Effect-TS everywhere (`Effect.gen`, tagged errors from `apps/s
 | Purpose                   | Command (run from repo root `/tmp/synara-pr`)                          | Expected on success |
 | ------------------------- | ---------------------------------------------------------------------- | ------------------- |
 | Install                   | `bun install`                                                          | exit 0              |
-| Targeted tests            | `bun run test -- apps/server/src/provider`                             | all pass            |
+| Targeted tests            | `bunx vitest run apps/server/src/provider/**/*.test.ts`                | all pass            |
 | Single test file          | `bunx vitest run apps/server/src/provider/Layers/DevinAdapter.test.ts` | all pass            |
 | Final gate (once, at end) | `bun fmt && bun lint && bun typecheck`                                 | all exit 0          |
 
@@ -294,7 +294,10 @@ Add tests following the existing `it.effect(...).pipe(Effect.provide(makeDevinAd
 
 ### Step 7: Final verification pass
 
-Run, once: `bun fmt && bun lint && bun typecheck && bun run test -- apps/server/src/provider packages/shared packages/contracts`
+Run, once each, as separate final verification passes:
+
+- `bunx vitest run apps/server/src/provider/**/*.test.ts packages/shared/src/**/*.test.ts packages/contracts/src/**/*.test.ts`
+- `bun fmt && bun lint && bun typecheck`
 
 **Verify**: all exit 0.
 

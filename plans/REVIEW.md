@@ -52,8 +52,9 @@ NOT implement fixes — you report findings.
    reason is real.
 2. Verification commands (repo root):
    - `bun install`
-   - `bun run test -- apps/server/src/provider packages/shared packages/contracts`
-     (NEVER `bun test` — wrong runner)
+   - `bunx vitest run apps/server/src/provider/**/*.test.ts packages/shared/src/**/*.test.ts packages/contracts/src/**/*.test.ts`
+     (NEVER `bun test` — wrong runner; the root `bun run test` script does not
+     forward path arguments to Vitest)
    - `bun fmt && bun lint && bun typecheck` (run once)
 
 ### Pass 2 — diff review (read every changed file)
