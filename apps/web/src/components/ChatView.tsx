@@ -529,6 +529,10 @@ function getProviderStartOptionsCustomBinaryPath(
       return normalizeCustomBinaryPath(providerOptions?.codex?.binaryPath);
     case "claudeAgent":
       return normalizeCustomBinaryPath(providerOptions?.claudeAgent?.binaryPath);
+    case "cursor":
+      return normalizeCustomBinaryPath(providerOptions?.cursor?.binaryPath);
+    case "devin":
+      return normalizeCustomBinaryPath(providerOptions?.devin?.binaryPath);
     case "gemini":
       return normalizeCustomBinaryPath(providerOptions?.gemini?.binaryPath);
     case "grok":
@@ -537,10 +541,6 @@ function getProviderStartOptionsCustomBinaryPath(
       return normalizeCustomBinaryPath(providerOptions?.kilo?.binaryPath);
     case "opencode":
       return normalizeCustomBinaryPath(providerOptions?.opencode?.binaryPath);
-    case "devin":
-      return normalizeCustomBinaryPath(providerOptions?.devin?.binaryPath);
-    case "cursor":
-      return normalizeCustomBinaryPath(providerOptions?.cursor?.binaryPath);
     case "pi":
       return normalizeCustomBinaryPath(providerOptions?.pi?.binaryPath);
   }
@@ -1449,11 +1449,11 @@ export default function ChatView({
       codex: resolveHint("codex"),
       claudeAgent: resolveHint("claudeAgent"),
       cursor: resolveHint("cursor"),
+      devin: resolveHint("devin"),
       gemini: resolveHint("gemini"),
       grok: resolveHint("grok"),
       kilo: resolveHint("kilo"),
       opencode: resolveHint("opencode"),
-      devin: resolveHint("devin"),
       pi: resolveHint("pi"),
     };
   }, [
@@ -1572,6 +1572,11 @@ export default function ChatView({
         customModelsByProvider.cursor,
         composerModelHintByProvider.cursor,
       ),
+      devin: getAppModelOptions(
+        "devin",
+        customModelsByProvider.devin,
+        composerModelHintByProvider.devin,
+      ),
       gemini: getAppModelOptions(
         "gemini",
         customModelsByProvider.gemini,
@@ -1591,11 +1596,6 @@ export default function ChatView({
         "opencode",
         customModelsByProvider.opencode,
         composerModelHintByProvider.opencode,
-      ),
-      devin: getAppModelOptions(
-        "devin",
-        customModelsByProvider.devin,
-        composerModelHintByProvider.devin,
       ),
       pi: getAppModelOptions("pi", customModelsByProvider.pi, composerModelHintByProvider.pi),
     };
@@ -1623,11 +1623,11 @@ export default function ChatView({
       "claudeAgent",
       "codex",
       "cursor",
+      "devin",
       "gemini",
       "grok",
       "kilo",
       "opencode",
-      "devin",
       "pi",
     ] as const) {
       const dynamicModels = dynamicSources[provider]?.models;

@@ -89,11 +89,11 @@ const PROVIDER_DISCOVERY_ORDER: ReadonlyArray<ProviderKind> = [
   "codex",
   "claudeAgent",
   "cursor",
+  "devin",
   "gemini",
   "grok",
   "kilo",
   "opencode",
-  "devin",
   "pi",
 ];
 const KNOWN_PLUGIN_BRANDS: Record<string, PluginBrandArtwork> = {
@@ -397,11 +397,11 @@ export function PluginLibrary() {
   const codexCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("codex"));
   const claudeCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("claudeAgent"));
   const cursorCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("cursor"));
+  const devinCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("devin"));
   const geminiCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("gemini"));
   const grokCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("grok"));
   const kiloCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("kilo"));
   const openCodeCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("opencode"));
-  const devinCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("devin"));
   const piCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("pi"));
 
   const providerCapabilities = useMemo<Record<ProviderKind, ProviderCapabilities>>(
@@ -417,6 +417,10 @@ export function PluginLibrary() {
       cursor: {
         plugins: supportsPluginDiscovery(cursorCapabilitiesQuery.data),
         skills: supportsSkillDiscovery(cursorCapabilitiesQuery.data),
+      },
+      devin: {
+        plugins: supportsPluginDiscovery(devinCapabilitiesQuery.data),
+        skills: supportsSkillDiscovery(devinCapabilitiesQuery.data),
       },
       gemini: {
         plugins: supportsPluginDiscovery(geminiCapabilitiesQuery.data),
@@ -434,10 +438,6 @@ export function PluginLibrary() {
         plugins: supportsPluginDiscovery(openCodeCapabilitiesQuery.data),
         skills: supportsSkillDiscovery(openCodeCapabilitiesQuery.data),
       },
-      devin: {
-        plugins: supportsPluginDiscovery(devinCapabilitiesQuery.data),
-        skills: supportsSkillDiscovery(devinCapabilitiesQuery.data),
-      },
       pi: {
         plugins: supportsPluginDiscovery(piCapabilitiesQuery.data),
         skills: supportsSkillDiscovery(piCapabilitiesQuery.data),
@@ -447,11 +447,11 @@ export function PluginLibrary() {
       claudeCapabilitiesQuery.data,
       codexCapabilitiesQuery.data,
       cursorCapabilitiesQuery.data,
+      devinCapabilitiesQuery.data,
       geminiCapabilitiesQuery.data,
       grokCapabilitiesQuery.data,
       kiloCapabilitiesQuery.data,
       openCodeCapabilitiesQuery.data,
-      devinCapabilitiesQuery.data,
       piCapabilitiesQuery.data,
     ],
   );

@@ -189,8 +189,8 @@ const PROVIDER_SELECT_OPTIONS = [
   "devin",
   "gemini",
   "grok",
-  "opencode",
   "kilo",
+  "opencode",
   "pi",
 ] as const satisfies readonly ProviderKind[];
 
