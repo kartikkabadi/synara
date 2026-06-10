@@ -417,7 +417,7 @@ describe("DevinAdapterLive", () => {
         runtimeMode: "full-access",
       });
 
-      const result = yield* adapter.listModels();
+      const result = yield* adapter.listModels!({ provider: "devin" });
 
       assert.strictEqual(result.source, "devin.acp");
       assert.strictEqual(result.cached, false);
@@ -462,7 +462,7 @@ describe("DevinAdapterLive", () => {
     Effect.gen(function* () {
       const adapter = yield* DevinAdapter;
 
-      const result = yield* adapter.listModels();
+      const result = yield* adapter.listModels!({ provider: "devin" });
 
       assert.strictEqual(result.source, "devin.fallback");
       assert.strictEqual(result.cached, true);
@@ -486,7 +486,7 @@ describe("DevinAdapterLive", () => {
         runtimeMode: "full-access",
       });
 
-      const result = yield* adapter.listModels();
+      const result = yield* adapter.listModels!({ provider: "devin" });
 
       assert.strictEqual(result.source, "devin.fallback");
       assert.strictEqual(result.cached, true);
