@@ -244,9 +244,7 @@ export function userInputAnswersToElicitationContent(
 
 function normalizeStringValue(value: string | ReadonlyArray<string>): string {
   if (typeof value === "string") return value;
-  // For string fields, take only the first element to avoid concatenating
-  // multi-select values into a malformed string.
-  return value.length > 0 ? value[0] : "";
+  return value.join(", ");
 }
 
 function normalizeBooleanValue(value: string | ReadonlyArray<string>): boolean | undefined {

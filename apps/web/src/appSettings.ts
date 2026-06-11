@@ -420,6 +420,7 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
       "opencode",
       settings.openCodeBinaryPath,
     ),
+    devinBinaryPath: normalizeProviderBinaryPathOverride("devin", settings.devinBinaryPath),
     piBinaryPath: normalizeProviderBinaryPathOverride("pi", settings.piBinaryPath),
     chatFontSizePx: normalizeChatFontSizePx(settings.chatFontSizePx),
     terminalFontSizePx: normalizeTerminalFontSizePx(settings.terminalFontSizePx),

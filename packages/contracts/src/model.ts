@@ -614,6 +614,17 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
       },
     },
     {
+      slug: "gpt-5-3-codex-medium",
+      name: "GPT-5.3 Codex Medium",
+      capabilities: {
+        reasoningEffortLevels: [],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+        contextWindowOptions: [],
+      },
+    },
+    {
       slug: "gemini-3-5-flash-medium",
       name: "Gemini 3.5 Flash Medium",
       capabilities: {
