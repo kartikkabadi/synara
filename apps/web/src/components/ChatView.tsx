@@ -539,6 +539,10 @@ function getProviderStartOptionsCustomBinaryPath(
       return normalizeCustomBinaryPath(providerOptions?.codex?.binaryPath);
     case "claudeAgent":
       return normalizeCustomBinaryPath(providerOptions?.claudeAgent?.binaryPath);
+    case "cursor":
+      return normalizeCustomBinaryPath(providerOptions?.cursor?.binaryPath);
+    case "devin":
+      return normalizeCustomBinaryPath(providerOptions?.devin?.binaryPath);
     case "gemini":
       return normalizeCustomBinaryPath(providerOptions?.gemini?.binaryPath);
     case "grok":
@@ -547,8 +551,6 @@ function getProviderStartOptionsCustomBinaryPath(
       return normalizeCustomBinaryPath(providerOptions?.kilo?.binaryPath);
     case "opencode":
       return normalizeCustomBinaryPath(providerOptions?.opencode?.binaryPath);
-    case "cursor":
-      return normalizeCustomBinaryPath(providerOptions?.cursor?.binaryPath);
     case "pi":
       return normalizeCustomBinaryPath(providerOptions?.pi?.binaryPath);
   }
@@ -1475,6 +1477,7 @@ export default function ChatView({
       codex: resolveHint("codex"),
       claudeAgent: resolveHint("claudeAgent"),
       cursor: resolveHint("cursor"),
+      devin: resolveHint("devin"),
       gemini: resolveHint("gemini"),
       grok: resolveHint("grok"),
       kilo: resolveHint("kilo"),
@@ -1538,6 +1541,13 @@ export default function ChatView({
       enabled: selectedProvider === "pi" || lockedProvider === "pi" || isModelPickerOpen,
     }),
   );
+  const devinDynamicModelsQuery = useQuery(
+    providerModelsQueryOptions({
+      provider: "devin",
+      binaryPath: settings.devinBinaryPath || null,
+      enabled: selectedProvider === "devin" || lockedProvider === "devin" || isModelPickerOpen,
+    }),
+  );
   const claudeDynamicAgentsQuery = useQuery(
     providerAgentsQueryOptions({ provider: "claudeAgent" }),
   );
@@ -1590,6 +1600,11 @@ export default function ChatView({
         customModelsByProvider.cursor,
         composerModelHintByProvider.cursor,
       ),
+      devin: getAppModelOptions(
+        "devin",
+        customModelsByProvider.devin,
+        composerModelHintByProvider.devin,
+      ),
       gemini: getAppModelOptions(
         "gemini",
         customModelsByProvider.gemini,
@@ -1628,6 +1643,7 @@ export default function ChatView({
       grok: grokDynamicModelsQuery.data,
       kilo: kiloDynamicModelsQuery.data,
       opencode: openCodeDynamicModelsQuery.data,
+      devin: devinDynamicModelsQuery.data,
       pi: piDynamicModelsQuery.data,
     };
 
@@ -1635,6 +1651,7 @@ export default function ChatView({
       "claudeAgent",
       "codex",
       "cursor",
+      "devin",
       "gemini",
       "grok",
       "kilo",
@@ -1668,6 +1685,7 @@ export default function ChatView({
     cursorDynamicModelsQuery.data,
     cursorRuntimeModels,
     customModelsByProvider,
+    devinDynamicModelsQuery.data,
     geminiModelsQuery.data,
     grokDynamicModelsQuery.data,
     kiloDynamicModelsQuery.data,
@@ -1691,12 +1709,14 @@ export default function ChatView({
       grok: grokDynamicModelsQuery.data?.models ?? [],
       kilo: kiloDynamicModelsQuery.data?.models ?? [],
       opencode: openCodeDynamicModelsQuery.data?.models ?? [],
+      devin: devinDynamicModelsQuery.data?.models ?? [],
       pi: piDynamicModelsQuery.data?.models ?? [],
     }),
     [
       claudeDynamicModelsQuery.data?.models,
       codexDynamicModelsQuery.data?.models,
       cursorRuntimeModels,
+      devinDynamicModelsQuery.data?.models,
       geminiModelsQuery.data?.models,
       grokDynamicModelsQuery.data?.models,
       kiloDynamicModelsQuery.data?.models,
@@ -1712,6 +1732,7 @@ export default function ChatView({
     grok: grokDynamicModelsQuery,
     kilo: kiloDynamicModelsQuery,
     opencode: openCodeDynamicModelsQuery,
+    devin: devinDynamicModelsQuery,
     pi: piDynamicModelsQuery,
   } as const;
   const selectedRuntimeModel = useMemo(

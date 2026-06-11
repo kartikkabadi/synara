@@ -15,6 +15,100 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const mockAgentPath = path.join(__dirname, "../../../scripts/acp-mock-agent.ts");
 const bunExe = "bun";
 
+// Minimal raw NDJSON ACP agent for the available_commands_update test below.
+// The shared scripts/acp-mock-agent.ts never emits that notification, so this
+// test-only helper answers the start handshake and pushes a session/update
+// with slash commands right after session/new. Run via `bun -e`.
+const availableCommandsAgentScript = `
+let buffer = "";
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  for (let index = buffer.indexOf("\\n"); index >= 0; index = buffer.indexOf("\\n")) {
+    const line = buffer.slice(0, index).trim();
+    buffer = buffer.slice(index + 1);
+    if (!line) continue;
+    const message = JSON.parse(line);
+    if (message.method === "initialize") {
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: { protocolVersion: 1, agentCapabilities: {} },
+      });
+    } else if (message.method === "authenticate") {
+      send({ jsonrpc: "2.0", id: message.id, result: {} });
+    } else if (message.method === "session/new") {
+      send({ jsonrpc: "2.0", id: message.id, result: { sessionId: "mock-session-1" } });
+      send({
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "mock-session-1",
+          update: {
+            sessionUpdate: "available_commands_update",
+            availableCommands: [
+              { name: "/revert", description: "Revert changes" },
+              { name: "/steps", description: "" },
+            ],
+          },
+        },
+      });
+    } else if (message.id !== undefined) {
+      send({ jsonrpc: "2.0", id: message.id, result: {} });
+    }
+  }
+});
+`;
+
+// Minimal raw NDJSON ACP agent whose session/new response advertises config
+// options without any category "model" entry. The shared
+// scripts/acp-mock-agent.ts always advertises a model option, so this
+// test-only helper exercises the no-model-config-id path. Run via `bun -e`.
+const noModelConfigAgentScript = `
+let buffer = "";
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  for (let index = buffer.indexOf("\\n"); index >= 0; index = buffer.indexOf("\\n")) {
+    const line = buffer.slice(0, index).trim();
+    buffer = buffer.slice(index + 1);
+    if (!line) continue;
+    const message = JSON.parse(line);
+    if (message.method === "initialize") {
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: { protocolVersion: 1, agentCapabilities: {} },
+      });
+    } else if (message.method === "authenticate") {
+      send({ jsonrpc: "2.0", id: message.id, result: {} });
+    } else if (message.method === "session/new") {
+      send({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {
+          sessionId: "mock-session-1",
+          configOptions: [
+            {
+              id: "mode",
+              name: "Mode",
+              category: "mode",
+              type: "select",
+              currentValue: "ask",
+              options: [{ value: "ask", name: "Ask" }],
+            },
+          ],
+        },
+      });
+    } else if (message.id !== undefined) {
+      send({ jsonrpc: "2.0", id: message.id, result: {} });
+    }
+  }
+});
+`;
+
 describe("AcpSessionRuntime", () => {
   it.effect("merges custom initialize client capabilities into the ACP handshake", () => {
     const requestEvents: Array<AcpSessionRequestLogEvent> = [];
@@ -388,6 +482,85 @@ describe("AcpSessionRuntime", () => {
                 protocolEvents.push(event);
               }),
           },
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    );
+  });
+
+  it.effect("stores ACP available_commands_update and exposes it via getAvailableCommands", () =>
+    Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime;
+      yield* runtime.start();
+
+      // Deterministic sync: the runtime publishes the parsed update on its
+      // event stream, so the ref is guaranteed set once the event arrives.
+      const notes = Array.from(yield* Stream.runCollect(Stream.take(runtime.getEvents(), 1)));
+      expect(notes.map((note) => note._tag)).toEqual(["AvailableCommandsUpdated"]);
+
+      const commands = yield* runtime.getAvailableCommands;
+      expect(commands).toEqual([
+        { name: "/revert", description: "Revert changes" },
+        { name: "/steps" },
+      ]);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: bunExe,
+            args: ["-e", availableCommandsAgentScript],
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+          authMethodId: "test",
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    ),
+  );
+
+  it.effect("setModel fails clearly when no model config option is advertised", () => {
+    const requestEvents: Array<AcpSessionRequestLogEvent> = [];
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime;
+      const started = yield* runtime.start();
+      expect(started.modelConfigId).toBeUndefined();
+
+      const error = yield* runtime.setModel("composer-2").pipe(Effect.flip);
+      expect(error._tag).toBe("AcpRequestError");
+      if (error._tag === "AcpRequestError") {
+        expect(error.code).toBe(-32602);
+        expect(error.message).toContain("did not advertise a model config option");
+        expect(error.data).toMatchObject({
+          requestedModel: "composer-2",
+          configOptionIds: ["mode"],
+        });
+      }
+
+      expect(
+        requestEvents.some(
+          (event) =>
+            event.method === "session/set_config_option" &&
+            event.status === "started" &&
+            (event.payload as { configId?: string }).configId === "model",
+        ),
+      ).toBe(false);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: bunExe,
+            args: ["-e", noModelConfigAgentScript],
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "t3-test", version: "0.0.0" },
+          authMethodId: "test",
+          requestLogger: (event) =>
+            Effect.sync(() => {
+              requestEvents.push(event);
+            }),
         }),
       ),
       Effect.scoped,

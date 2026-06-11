@@ -10,7 +10,11 @@ import {
   ServiceMap,
   Stream,
 } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import {
+  ChildProcess,
+  type ChildProcessSpawner as ChildProcessSpawnerTypes,
+} from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import * as EffectAcpClient from "effect-acp/client";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
@@ -23,6 +27,7 @@ import {
   mergeToolCallState,
   parseSessionModeState,
   parseSessionUpdateEvent,
+  type AcpAvailableCommand,
   type AcpParsedSessionEvent,
   type AcpSessionModeState,
   type AcpToolCallState,
@@ -73,6 +78,8 @@ export interface AcpSessionRuntimeStartResult {
     | EffectAcpSchema.NewSessionResponse
     | EffectAcpSchema.ResumeSessionResponse;
   readonly modelConfigId: string | undefined;
+  /** True when session/load failed and we fell back to session/new. */
+  readonly resumeFailed?: boolean;
 }
 
 export interface AcpSessionRuntimeShape {
@@ -95,6 +102,7 @@ export interface AcpSessionRuntimeShape {
   readonly getEvents: () => Stream.Stream<AcpParsedSessionEvent, never>;
   readonly getModeState: Effect.Effect<AcpSessionModeState | undefined>;
   readonly getConfigOptions: Effect.Effect<ReadonlyArray<EffectAcpSchema.SessionConfigOption>>;
+  readonly getAvailableCommands: Effect.Effect<ReadonlyArray<AcpAvailableCommand>>;
   readonly prompt: (
     payload: Omit<EffectAcpSchema.PromptRequest, "sessionId">,
   ) => Effect.Effect<EffectAcpSchema.PromptResponse, EffectAcpErrors.AcpError>;
@@ -115,6 +123,8 @@ export interface AcpSessionRuntimeShape {
     method: string,
     payload: unknown,
   ) => Effect.Effect<void, EffectAcpErrors.AcpError>;
+  /** Resolves with the child process exit code when the ACP process exits (crash or normal). */
+  readonly exitCode: Effect.Effect<ChildProcessSpawnerTypes.ExitCode>;
 }
 
 interface AcpStartedState extends AcpSessionRuntimeStartResult {}
@@ -167,6 +177,7 @@ const makeAcpSessionRuntime = (
     const toolCallsRef = yield* Ref.make(new Map<string, AcpToolCallState>());
     const assistantSegmentRef = yield* Ref.make<AcpAssistantSegmentState>({ nextSegmentIndex: 0 });
     const configOptionsRef = yield* Ref.make(sessionConfigOptionsFromSetup(undefined));
+    const availableCommandsRef = yield* Ref.make<ReadonlyArray<AcpAvailableCommand>>([]);
     const startStateRef = yield* Ref.make<AcpStartState>({ _tag: "NotStarted" });
 
     const logRequest = (event: AcpSessionRequestLogEvent) =>
@@ -239,6 +250,7 @@ const makeAcpSessionRuntime = (
         modeStateRef,
         toolCallsRef,
         assistantSegmentRef,
+        availableCommandsRef,
         params: notification,
       }),
     );
@@ -380,6 +392,19 @@ const makeAcpSessionRuntime = (
         initializePayload,
         acp.agent.initialize(initializePayload),
       );
+
+      // Warn if the agent reports a higher protocol version than we requested.
+      const serverProtocolVersion = (initializeResult as { protocolVersion?: unknown })
+        .protocolVersion;
+      if (
+        typeof serverProtocolVersion === "number" &&
+        serverProtocolVersion > initializePayload.protocolVersion
+      ) {
+        yield* Effect.logWarning(
+          `ACP agent reports protocolVersion=${serverProtocolVersion} but client requested ${initializePayload.protocolVersion}. Some features may not work correctly.`,
+        );
+      }
+
       const authMethodId =
         options.resolveAuthMethodId !== undefined
           ? yield* options.resolveAuthMethodId(initializeResult)
@@ -405,6 +430,7 @@ const makeAcpSessionRuntime = (
       );
 
       let sessionId: string;
+      let resumeFailed = false;
       let sessionSetupResult:
         | EffectAcpSchema.LoadSessionResponse
         | EffectAcpSchema.NewSessionResponse
@@ -423,7 +449,12 @@ const makeAcpSessionRuntime = (
         if (Exit.isSuccess(resumed)) {
           sessionId = options.resumeSessionId;
           sessionSetupResult = resumed.value;
+          resumeFailed = false;
         } else {
+          resumeFailed = true;
+          yield* Effect.logWarning(
+            `ACP session/load failed for ${options.resumeSessionId}, falling back to session/new`,
+          );
           const createPayload = {
             cwd: options.cwd,
             mcpServers: [],
@@ -458,6 +489,7 @@ const makeAcpSessionRuntime = (
         initializeResult,
         sessionSetupResult,
         modelConfigId: extractModelConfigId(sessionSetupResult),
+        ...(resumeFailed ? { resumeFailed: true } : {}),
       } satisfies AcpStartedState;
       return nextState;
     });
@@ -510,10 +542,12 @@ const makeAcpSessionRuntime = (
       handleUnknownExtNotification: acp.handleUnknownExtNotification,
       handleExtRequest: acp.handleExtRequest,
       handleExtNotification: acp.handleExtNotification,
+      exitCode: child.exitCode.pipe(Effect.orDie),
       start: () => start,
       getEvents: () => Stream.fromQueue(eventQueue),
       getModeState: Ref.get(modeStateRef),
       getConfigOptions: Ref.get(configOptionsRef),
+      getAvailableCommands: Ref.get(availableCommandsRef),
       prompt: (payload) =>
         getStartedState.pipe(
           Effect.flatMap((started) => {
@@ -559,7 +593,25 @@ const makeAcpSessionRuntime = (
       setConfigOption,
       setModel: (model) =>
         getStartedState.pipe(
-          Effect.flatMap((started) => setConfigOption(started.modelConfigId ?? "model", model)),
+          Effect.flatMap((started) => {
+            if (!started.modelConfigId) {
+              return Ref.get(configOptionsRef).pipe(
+                Effect.flatMap((configOptions) =>
+                  Effect.fail(
+                    new EffectAcpErrors.AcpRequestError({
+                      code: -32602,
+                      errorMessage: "ACP session did not advertise a model config option.",
+                      data: {
+                        requestedModel: model,
+                        configOptionIds: configOptions.map((option) => option.id),
+                      },
+                    }),
+                  ),
+                ),
+              );
+            }
+            return setConfigOption(started.modelConfigId, model);
+          }),
           Effect.asVoid,
         ),
       request: (method, payload) =>
@@ -597,12 +649,14 @@ const handleSessionUpdate = ({
   modeStateRef,
   toolCallsRef,
   assistantSegmentRef,
+  availableCommandsRef,
   params,
 }: {
   readonly queue: Queue.Queue<AcpParsedSessionEvent>;
   readonly modeStateRef: Ref.Ref<AcpSessionModeState | undefined>;
   readonly toolCallsRef: Ref.Ref<Map<string, AcpToolCallState>>;
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
+  readonly availableCommandsRef: Ref.Ref<ReadonlyArray<AcpAvailableCommand>>;
   readonly params: EffectAcpSchema.SessionNotification;
 }): Effect.Effect<void> =>
   Effect.gen(function* () {
@@ -613,6 +667,9 @@ const handleSessionUpdate = ({
       );
     }
     for (const event of parsed.events) {
+      if (event._tag === "AvailableCommandsUpdated") {
+        yield* Ref.set(availableCommandsRef, event.commands);
+      }
       if (event._tag === "ToolCallUpdated") {
         yield* closeActiveAssistantSegment({
           queue,
