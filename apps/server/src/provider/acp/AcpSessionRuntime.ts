@@ -10,7 +10,11 @@ import {
   ServiceMap,
   Stream,
 } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import {
+  ChildProcess,
+  type ChildProcessSpawner as ChildProcessSpawnerTypes,
+} from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import * as EffectAcpClient from "effect-acp/client";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
@@ -74,6 +78,8 @@ export interface AcpSessionRuntimeStartResult {
     | EffectAcpSchema.NewSessionResponse
     | EffectAcpSchema.ResumeSessionResponse;
   readonly modelConfigId: string | undefined;
+  /** True when session/load failed and we fell back to session/new. */
+  readonly resumeFailed?: boolean;
 }
 
 export interface AcpSessionRuntimeShape {
@@ -117,6 +123,8 @@ export interface AcpSessionRuntimeShape {
     method: string,
     payload: unknown,
   ) => Effect.Effect<void, EffectAcpErrors.AcpError>;
+  /** Resolves with the child process exit code when the ACP process exits (crash or normal). */
+  readonly exitCode: Effect.Effect<ChildProcessSpawnerTypes.ExitCode>;
 }
 
 interface AcpStartedState extends AcpSessionRuntimeStartResult {}
@@ -384,6 +392,19 @@ const makeAcpSessionRuntime = (
         initializePayload,
         acp.agent.initialize(initializePayload),
       );
+
+      // Warn if the agent reports a higher protocol version than we requested.
+      const serverProtocolVersion = (initializeResult as { protocolVersion?: unknown })
+        .protocolVersion;
+      if (
+        typeof serverProtocolVersion === "number" &&
+        serverProtocolVersion > initializePayload.protocolVersion
+      ) {
+        yield* Effect.logWarning(
+          `ACP agent reports protocolVersion=${serverProtocolVersion} but client requested ${initializePayload.protocolVersion}. Some features may not work correctly.`,
+        );
+      }
+
       const authMethodId =
         options.resolveAuthMethodId !== undefined
           ? yield* options.resolveAuthMethodId(initializeResult)
@@ -409,6 +430,7 @@ const makeAcpSessionRuntime = (
       );
 
       let sessionId: string;
+      let resumeFailed = false;
       let sessionSetupResult:
         | EffectAcpSchema.LoadSessionResponse
         | EffectAcpSchema.NewSessionResponse
@@ -427,7 +449,12 @@ const makeAcpSessionRuntime = (
         if (Exit.isSuccess(resumed)) {
           sessionId = options.resumeSessionId;
           sessionSetupResult = resumed.value;
+          resumeFailed = false;
         } else {
+          resumeFailed = true;
+          yield* Effect.logWarning(
+            `ACP session/load failed for ${options.resumeSessionId}, falling back to session/new`,
+          );
           const createPayload = {
             cwd: options.cwd,
             mcpServers: [],
@@ -462,6 +489,7 @@ const makeAcpSessionRuntime = (
         initializeResult,
         sessionSetupResult,
         modelConfigId: extractModelConfigId(sessionSetupResult),
+        ...(resumeFailed ? { resumeFailed: true } : {}),
       } satisfies AcpStartedState;
       return nextState;
     });
@@ -514,6 +542,7 @@ const makeAcpSessionRuntime = (
       handleUnknownExtNotification: acp.handleUnknownExtNotification,
       handleExtRequest: acp.handleExtRequest,
       handleExtNotification: acp.handleExtNotification,
+      exitCode: child.exitCode.pipe(Effect.orDie),
       start: () => start,
       getEvents: () => Stream.fromQueue(eventQueue),
       getModeState: Ref.get(modeStateRef),

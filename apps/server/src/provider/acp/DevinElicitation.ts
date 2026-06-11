@@ -243,11 +243,15 @@ export function userInputAnswersToElicitationContent(
 }
 
 function normalizeStringValue(value: string | ReadonlyArray<string>): string {
-  return typeof value === "string" ? value : value.join(", ");
+  if (typeof value === "string") return value;
+  // For string fields, take only the first element to avoid concatenating
+  // multi-select values into a malformed string.
+  return value.length > 0 ? value[0] : "";
 }
 
 function normalizeBooleanValue(value: string | ReadonlyArray<string>): boolean | undefined {
-  const raw = typeof value === "string" ? value : value.length === 1 ? value[0] : value.join(", ");
+  // For boolean fields, use only the first element of an array.
+  const raw = typeof value === "string" ? value : value.length > 0 ? value[0] : undefined;
   if (raw === undefined) return undefined;
   const lowered = raw.trim().toLowerCase();
   if (lowered === "yes" || lowered === "true") return true;

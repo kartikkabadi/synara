@@ -384,9 +384,9 @@ const INSTALL_PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     provider: "devin",
     title: "Devin",
     docs: [
-      { label: "Install", href: "https://cli.devin.ai/docs/installation" },
-      { label: "Auth", href: "https://cli.devin.ai/docs/reference/commands" },
-      { label: "Commands", href: "https://cli.devin.ai/docs/reference/commands" },
+      { label: "Install", href: "https://docs.devin.ai/cli/installation" },
+      { label: "Auth", href: "https://docs.devin.ai/cli/authentication" },
+      { label: "Commands", href: "https://docs.devin.ai/cli/reference" },
     ],
     binaryPathKey: "devinBinaryPath",
     binaryPlaceholder: "Devin binary path",

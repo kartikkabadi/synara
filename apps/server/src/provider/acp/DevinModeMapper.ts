@@ -33,8 +33,20 @@ function findDevinModeByAliases(
   aliases: ReadonlyArray<string>,
 ): AcpSessionMode | undefined {
   const normalizedAliases = aliases.map(normalizedModeText);
+
+  // Exact match on mode.id first (highest confidence).
+  for (const mode of modes) {
+    const normalizedId = normalizedModeText(mode.id);
+    if (normalizedAliases.some((alias) => normalizedId === alias)) return mode;
+  }
+  // Exact match on mode.name.
+  for (const mode of modes) {
+    const normalizedName = normalizedModeText(mode.name);
+    if (normalizedAliases.some((alias) => normalizedName === alias)) return mode;
+  }
+  // Substring fallback on id + name only (exclude description to avoid false positives).
   return modes.find((mode) => {
-    const haystack = normalizedModeText(`${mode.id} ${mode.name} ${mode.description ?? ""}`);
+    const haystack = normalizedModeText(`${mode.id} ${mode.name}`);
     return normalizedAliases.some((alias) => haystack.includes(alias));
   });
 }

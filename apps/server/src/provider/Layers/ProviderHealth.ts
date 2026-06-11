@@ -1632,6 +1632,9 @@ export const checkCursorProviderStatus = makeCheckCursorProviderStatus();
 
 // ── Devin health check ──────────────────────────────────────────────
 
+/** Minimum recommended Devin CLI version for reliable ACP support. */
+const DEVIN_MIN_RECOMMENDED_VERSION = "1.0.0";
+
 const DEVIN_API_KEY_AUTHENTICATED_STATUS = {
   status: "ready" as const,
   authStatus: "authenticated" as const,
@@ -1814,6 +1817,17 @@ export const makeCheckDevinProviderStatus = (
     const parsed = parseDevinAuthStatusFromOutput(authProbe.success.value, {
       hasApiKeyEnv: hasDevinApiKeyEnv(),
     });
+
+    // Warn if the CLI version is below the minimum recommended for ACP.
+    let versionAdvisory: string | undefined;
+    if (
+      parsedVersion &&
+      parsedVersion.localeCompare(DEVIN_MIN_RECOMMENDED_VERSION, undefined, { numeric: true }) < 0
+    ) {
+      versionAdvisory = `Devin CLI ${parsedVersion} is below the recommended minimum (${DEVIN_MIN_RECOMMENDED_VERSION}). Update with \`devin update\` for full ACP support.`;
+    }
+
+    const message = [parsed.message, versionAdvisory].filter(Boolean).join(" ");
     return {
       provider: DEVIN_PROVIDER,
       status: parsed.status,
@@ -1821,7 +1835,7 @@ export const makeCheckDevinProviderStatus = (
       authStatus: parsed.authStatus,
       version: parsedVersion,
       checkedAt,
-      ...(parsed.message ? { message: parsed.message } : {}),
+      ...(message ? { message } : {}),
     } satisfies ServerProviderStatus;
   });
 

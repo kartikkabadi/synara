@@ -127,6 +127,11 @@ export const GrokModelOptions = Schema.Struct({
 });
 export type GrokModelOptions = typeof GrokModelOptions.Type;
 
+/**
+ * Devin model options — intentionally empty. Devin model capabilities
+ * (reasoning effort, thinking budget, etc.) are managed server-side via
+ * ACP config options, not exposed as client-side toggles.
+ */
 export const DevinModelOptions = Schema.Struct({});
 export type DevinModelOptions = typeof DevinModelOptions.Type;
 
@@ -626,7 +631,7 @@ export type ModelOptionsByProvider = typeof MODEL_OPTIONS_BY_PROVIDER;
 type BuiltInModelSlug = (typeof MODEL_OPTIONS_BY_PROVIDER)[ProviderKind][number]["slug"];
 export type ModelSlug = BuiltInModelSlug | (string & {});
 
-export type ProviderWithDefaultModel = Exclude<ProviderKind, "devin" | "pi">;
+export type ProviderWithDefaultModel = Exclude<ProviderKind, "pi">;
 
 export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderWithDefaultModel, ModelSlug> = {
   codex: "gpt-5.5",
@@ -636,6 +641,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderWithDefaultModel, ModelSl
   grok: "grok-build",
   kilo: "kilo/kilo-auto/free",
   opencode: "openai/gpt-5",
+  devin: "adaptive",
 };
 
 // Backward compatibility for existing Codex-only call sites.

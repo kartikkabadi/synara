@@ -15,7 +15,18 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { Deferred, Effect, Exit, Fiber, Layer, PubSub, Scope, Stream } from "effect";
+import {
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  PubSub,
+  Scope,
+  Stream,
+} from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
@@ -57,9 +68,14 @@ import { DEVIN_FALLBACK_MODELS, normalizeDevinModelSlug } from "../acp/DevinMode
 import { DevinAdapter, type DevinAdapterShape } from "../Services/DevinAdapter.ts";
 import type { ProviderThreadTurnSnapshot } from "../Services/ProviderAdapter.ts";
 import type { EventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import serverPackageJson from "../../../package.json" with { type: "json" };
 
 const PROVIDER = "devin" as const;
 const DEVIN_RESUME_VERSION = 1 as const;
+/** Maximum turns retained in-memory per session to prevent unbounded growth. */
+const MAX_TURNS_PER_SESSION = 200;
+/** Timeout for pending approvals/elicitations before auto-cancelling (5 minutes). */
+const PENDING_DECISION_TIMEOUT_MS = 5 * 60 * 1000;
 
 export interface DevinAcpRuntimeFactoryInput {
   readonly devinSettings: DevinAcpRuntimeSettings;
@@ -105,6 +121,8 @@ interface DevinSessionContext {
   activeTurnId: TurnId | undefined;
   activePromptFiber: Fiber.Fiber<void, never> | undefined;
   activeTurnFailedToolDetail: string | undefined;
+  /** Cached model list extracted from config options, updated on session start. */
+  cachedModels: ReadonlyArray<{ slug: string; name: string }> | undefined;
   stopped: boolean;
 }
 
@@ -128,6 +146,13 @@ function readDevinResumeSessionId(resumeCursor: unknown): string | undefined {
   return typeof cursor.sessionId === "string" && cursor.sessionId.trim()
     ? cursor.sessionId.trim()
     : undefined;
+}
+
+function pushTurnCapped(ctx: DevinSessionContext, turn: ProviderThreadTurnSnapshot): void {
+  ctx.turns.push(turn);
+  if (ctx.turns.length > MAX_TURNS_PER_SESSION) {
+    ctx.turns.splice(0, ctx.turns.length - MAX_TURNS_PER_SESSION);
+  }
 }
 
 function clearActiveTurn(ctx: DevinSessionContext, turnId: TurnId): boolean {
@@ -191,7 +216,7 @@ function makeDefaultRuntimeFactory(input: DevinAcpRuntimeFactoryInput) {
     childProcessSpawner: input.childProcessSpawner,
     cwd: input.cwd,
     ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
-    clientInfo: { name: "Synara", version: "0.0.0" },
+    clientInfo: { name: "Synara", version: serverPackageJson.version },
     ...acpNativeLoggers,
   }).pipe(
     Effect.mapError(
@@ -323,8 +348,11 @@ function makeProviderAdapter(
                 }),
               );
 
-              const resolved = yield* Deferred.await(decision);
+              const maybeResolved = yield* Deferred.await(decision).pipe(
+                Effect.timeoutOption(Duration.millis(PENDING_DECISION_TIMEOUT_MS)),
+              );
               pendingApprovals.delete(requestId);
+              const resolved = Option.getOrElse(maybeResolved, () => "cancel" as const);
               yield* publish(
                 makeAcpRequestResolvedEvent({
                   stamp: yield* makeEventStamp(),
@@ -373,8 +401,14 @@ function makeProviderAdapter(
                   payload: request,
                 },
               });
-              const resolved = yield* Deferred.await(answers);
+              const maybeAnswers = yield* Deferred.await(answers).pipe(
+                Effect.timeoutOption(Duration.millis(PENDING_DECISION_TIMEOUT_MS)),
+              );
               pendingUserInputs.delete(requestId);
+              const resolved = Option.getOrElse(
+                maybeAnswers,
+                () => ({}) as ProviderUserInputAnswers,
+              );
               yield* publish({
                 type: "user-input.resolved",
                 ...(yield* makeEventStamp()),
@@ -445,6 +479,7 @@ function makeProviderAdapter(
           activeTurnId: undefined,
           activePromptFiber: undefined,
           activeTurnFailedToolDetail: undefined,
+          cachedModels: undefined,
           stopped: false,
         };
 
@@ -547,6 +582,26 @@ function makeProviderAdapter(
         sessions.set(input.threadId, ctx);
         sessionScopeTransferred = true;
 
+        // Detect unexpected ACP process exits (crash, OOM-kill, segfault).
+        yield* Effect.gen(function* () {
+          const exitCode = yield* acp.exitCode;
+          if (ctx.stopped) return;
+          yield* Effect.logError(
+            `Devin ACP process exited unexpectedly (code=${exitCode}) for thread ${input.threadId}`,
+          );
+          yield* publish({
+            type: "session.state.changed",
+            ...(yield* makeEventStamp()),
+            provider: PROVIDER,
+            threadId: input.threadId,
+            payload: {
+              state: "error",
+              reason: `Devin CLI process exited unexpectedly (exit code ${exitCode}). Please restart the session.`,
+            },
+          });
+          yield* stopSessionInternal(ctx);
+        }).pipe(Effect.forkIn(sessionScope));
+
         yield* publish({
           type: "session.started",
           ...(yield* makeEventStamp()),
@@ -554,6 +609,22 @@ function makeProviderAdapter(
           threadId: input.threadId,
           payload: { resume: started.initializeResult },
         });
+        if (started.resumeFailed) {
+          yield* Effect.logWarning(
+            `Devin session resume failed for thread ${input.threadId}, started fresh session ${started.sessionId}`,
+          );
+          yield* publish({
+            type: "session.state.changed",
+            ...(yield* makeEventStamp()),
+            provider: PROVIDER,
+            threadId: input.threadId,
+            payload: {
+              state: "warning",
+              reason:
+                "Could not resume your previous Devin session. A new session was started — previous context was not carried over.",
+            },
+          });
+        }
         yield* publish({
           type: "session.state.changed",
           ...(yield* makeEventStamp()),
@@ -569,6 +640,10 @@ function makeProviderAdapter(
           payload: { providerThreadId: started.sessionId },
         });
 
+        // Eagerly populate model cache from initial config options.
+        const initialConfigOptions = yield* acp.getConfigOptions;
+        ctx.cachedModels = extractDevinModelsFromConfigOptions(initialConfigOptions);
+
         return session;
       }).pipe(Effect.scoped);
 
@@ -583,6 +658,8 @@ function makeProviderAdapter(
             issue: "Devin requires a non-empty prompt.",
           });
         }
+        // Concurrency guard: at most one active prompt per session to avoid
+        // flooding the ACP stdio pipe with overlapping RPC calls.
         if (ctx.activeTurnId !== undefined || ctx.activePromptFiber !== undefined) {
           return yield* new ProviderAdapterValidationError({
             provider: PROVIDER,
@@ -647,7 +724,7 @@ function makeProviderAdapter(
             onFailure: (error) =>
               Effect.gen(function* () {
                 if (!clearActiveTurn(ctx, turnId)) return;
-                ctx.turns.push({ id: turnId, items: [{ prompt: promptParts, error }] });
+                pushTurnCapped(ctx, { id: turnId, items: [{ prompt: promptParts, error }] });
                 ctx.session = {
                   ...ctx.session,
                   status: "error",
@@ -671,7 +748,7 @@ function makeProviderAdapter(
               Effect.gen(function* () {
                 const failedToolDetail = ctx.activeTurnFailedToolDetail;
                 if (!clearActiveTurn(ctx, turnId)) return;
-                ctx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] });
+                pushTurnCapped(ctx, { id: turnId, items: [{ prompt: promptParts, result }] });
                 const {
                   lastError: _lastError,
                   activeTurnId: _activeTurnId,
@@ -718,7 +795,10 @@ function makeProviderAdapter(
                 updatedAt: yield* nowIso(),
                 ...(model ? { model } : {}),
               };
-              ctx.turns.push({ id: turnId, items: [{ prompt: promptParts, interrupted: true }] });
+              pushTurnCapped(ctx, {
+                id: turnId,
+                items: [{ prompt: promptParts, interrupted: true }],
+              });
               yield* publish({
                 type: "turn.completed",
                 ...(yield* makeEventStamp()),
@@ -852,22 +932,31 @@ function makeProviderAdapter(
       getComposerCapabilities: () =>
         Effect.succeed({
           provider: PROVIDER,
+          // Skills/mentions/plugins: Devin ACP does not currently expose these;
+          // enable when the protocol supports them.
           supportsSkillMentions: false,
           supportsSkillDiscovery: false,
           supportsNativeSlashCommandDiscovery: true,
           supportsPluginMentions: false,
           supportsPluginDiscovery: false,
           supportsRuntimeModelList: true,
+          // Thread compaction and import are not yet mapped to Devin ACP operations.
           supportsThreadCompaction: false,
-          supportsThreadImport: true,
+          supportsThreadImport: false,
         } satisfies ProviderComposerCapabilities),
       listModels: () =>
         Effect.gen(function* () {
+          // Return cached model list when available to avoid re-extracting from config options.
           for (const ctx of sessions.values()) {
             if (ctx.stopped) continue;
+            if (ctx.cachedModels && ctx.cachedModels.length > 0) {
+              return { models: ctx.cachedModels, source: "devin.acp", cached: true };
+            }
+            // Fallback: read config options if cache not yet populated.
             const configOptions = yield* ctx.acp.getConfigOptions;
             const models = extractDevinModelsFromConfigOptions(configOptions);
             if (models.length > 0) {
+              ctx.cachedModels = models;
               return { models, source: "devin.acp", cached: false };
             }
           }
@@ -885,8 +974,11 @@ function makeProviderAdapter(
             }
             return { commands: [], source: "devin.acp", cached: false };
           }
+          // Without a threadId, only return commands from sessions sharing the same cwd
+          // to avoid leaking workspace-specific commands across projects.
           for (const candidate of sessions.values()) {
             if (candidate.stopped) continue;
+            if (input.cwd && candidate.session.cwd !== input.cwd) continue;
             const commands = yield* candidate.acp.getAvailableCommands;
             if (commands.length > 0) {
               return { commands, source: "devin.acp", cached: false };

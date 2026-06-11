@@ -32,6 +32,49 @@ export const DEVIN_WINDSURF_API_KEY_AUTH_METHOD_ID = "windsurf-api-key";
 export const DEVIN_CACHED_TOKEN_AUTH_METHOD_IDS = ["cached_token", "devin", "devin_login"] as const;
 export const DEVIN_API_KEY_ENV_KEYS = ["WINDSURF_API_KEY"] as const;
 
+/** Env var prefixes and names to pass through to the Devin ACP child process. */
+const DEVIN_ENV_ALLOWLIST_PREFIXES = ["DEVIN_", "WINDSURF_"] as const;
+const DEVIN_ENV_ALLOWLIST_NAMES = new Set([
+  "PATH",
+  "HOME",
+  "USER",
+  "SHELL",
+  "LANG",
+  "TERM",
+  "TMPDIR",
+  "XDG_RUNTIME_DIR",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "NODE_EXTRA_CA_CERTS",
+  "SSL_CERT_FILE",
+  "HTTPS_PROXY",
+  "HTTP_PROXY",
+  "NO_PROXY",
+  // Windows equivalents
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "TEMP",
+  "TMP",
+  "SystemRoot",
+  "PATHEXT",
+  "COMSPEC",
+]);
+
+function buildDevinSpawnEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    if (
+      DEVIN_ENV_ALLOWLIST_NAMES.has(key) ||
+      DEVIN_ENV_ALLOWLIST_PREFIXES.some((prefix) => key.startsWith(prefix))
+    ) {
+      env[key] = value;
+    }
+  }
+  return env;
+}
+
 export function buildDevinAcpSpawnInput(
   devinSettings: DevinAcpRuntimeSettings | null | undefined,
   cwd: string,
@@ -40,6 +83,7 @@ export function buildDevinAcpSpawnInput(
     command: devinSettings?.binaryPath?.trim() || "devin",
     args: ["acp"],
     cwd,
+    env: buildDevinSpawnEnv(),
   };
 }
 
