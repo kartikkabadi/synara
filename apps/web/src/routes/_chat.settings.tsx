@@ -41,6 +41,8 @@ import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { CSS } from "@dnd-kit/utilities";
 import {
   type AppSettings,
+  DEFAULT_UI_DENSITY,
+  type UiDensity,
   MAX_CHAT_FONT_SIZE_PX,
   MAX_TERMINAL_FONT_SIZE_PX,
   getCustomModelsForProvider,
@@ -101,6 +103,7 @@ import { SidebarInset } from "../components/ui/sidebar";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
 import { useTheme } from "../hooks/useTheme";
+import { isUiDensity } from "../lib/appDensity";
 import { CentralIcon } from "../lib/central-icons";
 import { gitRemoveWorktreeMutationOptions } from "../lib/gitReactQuery";
 import {
@@ -150,7 +153,7 @@ import {
 } from "../settingsPanelStyles";
 import { useStore } from "../store";
 import ReleaseHistoryDialog from "../components/ReleaseHistoryDialog";
-import { createAllThreadsSelector } from "../storeSelectors";
+import { createAllThreadsMessagelessSelector, createThreadShellsSelector } from "../storeSelectors";
 import { formatRelativeTime } from "../lib/relativeTime";
 import { formatWorktreePathForDisplay } from "../worktreeCleanup";
 import { sameProviderOrder } from "../providerOrdering";
@@ -160,6 +163,28 @@ import {
 } from "../providerUpdates";
 
 // ── Settings taxonomy ──────────────────────────────────────────────────────
+
+const UI_DENSITY_OPTIONS = [
+  {
+    value: "compact",
+    label: "Compact",
+    description: "Tighter spacing in the sidebar, composer, and settings rows.",
+  },
+  {
+    value: "comfortable",
+    label: "Comfortable",
+    description: "Balanced spacing for everyday use.",
+  },
+  {
+    value: "spacious",
+    label: "Spacious",
+    description: "More breathing room across the main workspace surfaces.",
+  },
+] as const satisfies ReadonlyArray<{
+  value: UiDensity;
+  label: string;
+  description: string;
+}>;
 
 const THEME_OPTIONS = [
   {
@@ -631,16 +656,23 @@ function SettingsRouteView() {
   );
   const syncServerShellSnapshot = useStore((store) => store.syncServerShellSnapshot);
   const syncServerReadModel = useStore((store) => store.syncServerReadModel);
-  const threads = useStore(useMemo(() => createAllThreadsSelector(), []));
+  // Shell-level subscription on purpose: the full-thread selector invalidates on every
+  // streaming message/activity tick, which would re-render this whole route while a
+  // turn is running. Settings only needs thread metadata (and message emptiness below).
+  const threadShells = useStore(useMemo(() => createThreadShellsSelector(), []));
+  const allThreadsMessageless = useStore(useMemo(() => createAllThreadsMessagelessSelector(), []));
   const projects = useStore((store) => store.projects);
   const threadsHydrated = useStore((store) => store.threadsHydrated);
-  const archivedThreads = threads.filter((thread) => thread.archivedAt != null);
+  const archivedThreads = useMemo(
+    () => threadShells.filter((thread) => thread.archivedAt != null),
+    [threadShells],
+  );
   const shouldOfferRecoveryTools = useMemo(() => {
     if (!threadsHydrated || projects.length === 0) {
       return false;
     }
-    return threads.length === 0 || threads.every((thread) => thread.messages.length === 0);
-  }, [projects.length, threads, threadsHydrated]);
+    return threadShells.length === 0 || allThreadsMessageless;
+  }, [allThreadsMessageless, projects.length, threadShells.length, threadsHydrated]);
 
   const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
   const [isRepairingLocalState, setIsRepairingLocalState] = useState(false);
@@ -772,38 +804,44 @@ function SettingsRouteView() {
     activeSection === "general" && settingsTarget === SETTINGS_TARGETS.environmentPanel,
     environmentPanelRef,
   );
-  const managedWorktrees = serverWorktreesQuery.data?.worktrees ?? [];
-  const worktreesByWorkspaceRoot = managedWorktrees.reduce<
-    Array<{
-      workspaceRoot: string;
-      worktrees: Array<{
-        path: string;
-        linkedThreads: typeof threads;
-      }>;
-    }>
-  >((groups, worktree) => {
-    const linkedThreads = threads.filter((thread) => {
-      const candidatePaths = [
-        normalizeManagedWorktreePath(thread.worktreePath),
-        normalizeManagedWorktreePath(thread.associatedWorktreePath),
-      ];
-      return candidatePaths.includes(worktree.path);
-    });
-    const existingGroup = groups.find((group) => group.workspaceRoot === worktree.workspaceRoot);
-    const nextWorktree = {
-      path: worktree.path,
-      linkedThreads,
-    };
-    if (existingGroup) {
-      existingGroup.worktrees.push(nextWorktree);
-    } else {
-      groups.push({
-        workspaceRoot: worktree.workspaceRoot,
-        worktrees: [nextWorktree],
-      });
-    }
-    return groups;
-  }, []);
+  const managedWorktrees = serverWorktreesQuery.data?.worktrees;
+  const worktreesByWorkspaceRoot = useMemo(
+    () =>
+      (managedWorktrees ?? []).reduce<
+        Array<{
+          workspaceRoot: string;
+          worktrees: Array<{
+            path: string;
+            linkedThreads: typeof threadShells;
+          }>;
+        }>
+      >((groups, worktree) => {
+        const linkedThreads = threadShells.filter((thread) => {
+          const candidatePaths = [
+            normalizeManagedWorktreePath(thread.worktreePath),
+            normalizeManagedWorktreePath(thread.associatedWorktreePath),
+          ];
+          return candidatePaths.includes(worktree.path);
+        });
+        const existingGroup = groups.find(
+          (group) => group.workspaceRoot === worktree.workspaceRoot,
+        );
+        const nextWorktree = {
+          path: worktree.path,
+          linkedThreads,
+        };
+        if (existingGroup) {
+          existingGroup.worktrees.push(nextWorktree);
+        } else {
+          groups.push({
+            workspaceRoot: worktree.workspaceRoot,
+            worktrees: [nextWorktree],
+          });
+        }
+        return groups;
+      }, []),
+    [managedWorktrees, threadShells],
+  );
 
   const gitTextGenerationModelOptions = getGitTextGenerationModelOptions(settings);
   const currentGitTextGenerationProvider = settings.textGenerationProvider ?? "codex";
@@ -837,13 +875,17 @@ function SettingsRouteView() {
     settings.customKiloModels.length +
     settings.customOpenCodeModels.length +
     settings.customPiModels.length;
-  const savedCustomModelRows = MODEL_PROVIDER_SETTINGS.flatMap((providerSettings) =>
-    getCustomModelsForProvider(settings, providerSettings.provider).map((slug) => ({
-      key: `${providerSettings.provider}:${slug}`,
-      provider: providerSettings.provider,
-      providerTitle: providerSettings.title,
-      slug,
-    })),
+  const savedCustomModelRows = useMemo(
+    () =>
+      MODEL_PROVIDER_SETTINGS.flatMap((providerSettings) =>
+        getCustomModelsForProvider(settings, providerSettings.provider).map((slug) => ({
+          key: `${providerSettings.provider}:${slug}`,
+          provider: providerSettings.provider,
+          providerTitle: providerSettings.title,
+          slug,
+        })),
+      ),
+    [settings],
   );
   const visibleCustomModelRows = showAllCustomModels
     ? savedCustomModelRows
@@ -881,6 +923,7 @@ function SettingsRouteView() {
     ...(settings.showWorkspaceSection !== defaults.showWorkspaceSection
       ? ["Workspace section"]
       : []),
+    ...(settings.uiDensity !== defaults.uiDensity ? ["UI density"] : []),
     ...(settings.chatFontSizePx !== defaults.chatFontSizePx ? ["Base font size"] : []),
     ...(settings.terminalFontSizePx !== defaults.terminalFontSizePx ? ["Terminal font size"] : []),
     ...(settings.terminalFontFamily !== defaults.terminalFontFamily ? ["Terminal font"] : []),
@@ -1639,7 +1682,8 @@ function SettingsRouteView() {
           {renderBooleanSettingRow({
             settingKey: "showEnvironmentEditor",
             title: "Editor",
-            description: "Show the Open in editor picker in the chat Environment panel.",
+            description:
+              "Show the Editor section (in-app editor view and Open in editor picker) in the chat Environment panel.",
             resetLabel: "editor section",
             ariaLabel: "Show the Editor section in the Environment panel",
           })}
@@ -1724,6 +1768,36 @@ function SettingsRouteView() {
 
         <SettingsCard>
           <SettingsRow
+            title="UI density"
+            description="Control spacing in the sidebar, composer, chat gutters, and settings rows without changing font size."
+            resetAction={
+              settings.uiDensity !== defaults.uiDensity ? (
+                <SettingResetButton
+                  label="UI density"
+                  onClick={() =>
+                    updateSettings({
+                      uiDensity: DEFAULT_UI_DENSITY,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <SettingsSegmentedControl
+                value={settings.uiDensity}
+                onValueChange={(value) => {
+                  if (!isUiDensity(value)) {
+                    return;
+                  }
+                  updateSettings({ uiDensity: value });
+                }}
+                ariaLabel="UI density"
+                options={UI_DENSITY_OPTIONS}
+              />
+            }
+          />
+
+          <SettingsRow
             title="Base font size"
             description="Adjust the app text base in pixels. Chat and UI typography scale proportionally from this value."
             resetAction={
@@ -1742,10 +1816,12 @@ function SettingsRouteView() {
               <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
                 <Input
                   type="number"
+                  size="sm"
                   min={MIN_CHAT_FONT_SIZE_PX}
                   max={MAX_CHAT_FONT_SIZE_PX}
                   step={1}
                   inputMode="numeric"
+                  variant="soft"
                   className="w-full text-right sm:w-20"
                   value={String(settings.chatFontSizePx)}
                   onChange={(event) => {
@@ -1781,10 +1857,12 @@ function SettingsRouteView() {
               <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
                 <Input
                   type="number"
+                  size="sm"
                   min={MIN_TERMINAL_FONT_SIZE_PX}
                   max={MAX_TERMINAL_FONT_SIZE_PX}
                   step={1}
                   inputMode="numeric"
+                  variant="soft"
                   className="w-full text-right sm:w-20"
                   value={String(settings.terminalFontSizePx)}
                   onChange={(event) => {
@@ -1830,6 +1908,8 @@ function SettingsRouteView() {
                   }}
                 >
                   <AutocompleteInput
+                    size="sm"
+                    variant="soft"
                     showTrigger
                     showClear={settings.terminalFontFamily.length > 0}
                     spellCheck={false}
@@ -2359,6 +2439,8 @@ function SettingsRouteView() {
               </Select>
               <Input
                 id="custom-model-slug"
+                size="sm"
+                variant="soft"
                 value={selectedCustomModelInput}
                 onChange={(event) => {
                   const value = event.target.value;
@@ -2813,6 +2895,8 @@ function SettingsRouteView() {
                               </span>
                               <Input
                                 id={`provider-install-${providerSettings.binaryPathKey}`}
+                                size="sm"
+                                variant="soft"
                                 className="mt-1"
                                 value={binaryPathValue}
                                 onChange={(event) =>
@@ -2856,6 +2940,8 @@ function SettingsRouteView() {
                                 </span>
                                 <Input
                                   id={`provider-install-${providerSettings.homePathKey}`}
+                                  size="sm"
+                                  variant="soft"
                                   className="mt-1"
                                   value={codexHomePath}
                                   onChange={(event) =>
@@ -2884,6 +2970,8 @@ function SettingsRouteView() {
                                 </span>
                                 <Input
                                   id={`provider-install-${providerSettings.agentDirKey}`}
+                                  size="sm"
+                                  variant="soft"
                                   className="mt-1"
                                   value={piAgentDir}
                                   onChange={(event) =>
@@ -2912,6 +3000,8 @@ function SettingsRouteView() {
                                 </span>
                                 <Input
                                   id={`provider-install-${providerSettings.apiEndpointKey}`}
+                                  size="sm"
+                                  variant="soft"
                                   className="mt-1"
                                   value={cursorApiEndpoint}
                                   onChange={(event) =>
@@ -2940,6 +3030,8 @@ function SettingsRouteView() {
                                 </span>
                                 <Input
                                   id={`provider-install-${providerSettings.serverUrlKey}`}
+                                  size="sm"
+                                  variant="soft"
                                   className="mt-1"
                                   value={
                                     providerSettings.serverUrlKey === "kiloServerUrl"
@@ -2974,6 +3066,8 @@ function SettingsRouteView() {
                                 </span>
                                 <Input
                                   id={`provider-install-${providerSettings.serverPasswordKey}`}
+                                  size="sm"
+                                  variant="soft"
                                   className="mt-1"
                                   value={
                                     providerSettings.serverPasswordKey === "kiloServerPassword"

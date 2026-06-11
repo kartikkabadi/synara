@@ -22,7 +22,6 @@ import GitActionsControl from "../GitActionsControl";
 import {
   ArrowRightIcon,
   CheckIcon,
-  Columns2Icon,
   HandoffIcon,
   HistoryIcon,
   MessageCircleIcon,
@@ -115,11 +114,6 @@ interface ChatHeaderProps {
     kind: "split" | "maximize";
     label: string;
     shortcutLabel: string | null;
-    onClick: () => void;
-  } | null;
-  viewModeAction?: {
-    label: string;
-    active: boolean;
     onClick: () => void;
   } | null;
   changeThreadAction?: {
@@ -385,7 +379,7 @@ function EditorRailTabs(props: {
   };
 
   return (
-    <div className="flex min-w-0 shrink items-center gap-2 [-webkit-app-region:no-drag]">
+    <div className="flex min-w-0 flex-1 items-center gap-2 [-webkit-app-region:no-drag]">
       <div className="flex shrink-0 items-center gap-0.5">
         <Menu modal={false}>
           <MenuTrigger
@@ -425,8 +419,9 @@ function EditorRailTabs(props: {
       </div>
       {shouldShowTabs ? (
         // Same chip tabs as the right dock's pane strip so every tab row in the
-        // app reads identically — centered in the header, no detached borders.
-        <div className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        // app reads identically. Pushed to the header's right edge (ml-auto) so the
+        // title and new/history controls stay grouped on the left.
+        <div className="ml-auto flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {chatTabs.map((thread, index) => (
             <SurfaceTabChip
               key={thread.id}
@@ -514,7 +509,6 @@ export const ChatHeader = memo(function ChatHeader({
   isSidechat = false,
   environment = null,
   chatLayoutAction = null,
-  viewModeAction = null,
   changeThreadAction = null,
   editorChatControls = null,
   onRunProjectScript,
@@ -695,8 +689,8 @@ export const ChatHeader = memo(function ChatHeader({
                   <IconButton
                     variant="chrome"
                     size="icon-xs"
-                    label="Close selected sidechat"
-                    tooltip="Close selected sidechat"
+                    label="Close selected Side"
+                    tooltip="Close selected Side"
                     tooltipSide="bottom"
                     className="size-5 rounded-lg [-webkit-app-region:no-drag] [&_svg]:size-3"
                     onClick={(event) => {
@@ -817,26 +811,6 @@ export const ChatHeader = memo(function ChatHeader({
               }
             />
             <TooltipPopup side="bottom">{inlineChatLayoutAction.label}</TooltipPopup>
-          </Tooltip>
-        ) : null}
-
-        {!isDisposableThread && viewModeAction ? (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <ChatHeaderButton
-                  type="button"
-                  tone="outline"
-                  aria-pressed={viewModeAction.active}
-                  onClick={viewModeAction.onClick}
-                  className={compact ? "gap-1" : "gap-1.5"}
-                >
-                  <Columns2Icon className="size-3.5" />
-                  {!compact ? <span className="truncate font-normal">Editor</span> : null}
-                </ChatHeaderButton>
-              }
-            />
-            <TooltipPopup side="bottom">{viewModeAction.label}</TooltipPopup>
           </Tooltip>
         ) : null}
 

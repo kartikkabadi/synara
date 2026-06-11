@@ -52,7 +52,11 @@ import {
 import { ServerConfig } from "../../config";
 import { ServerSettingsService } from "../../serverSettings";
 import { isWindowsShellCommandMissingResult } from "../../shell-command-detection";
-import { normalizeGeminiCapabilityProbeResult, probeGeminiCapabilities } from "../geminiAcpProbe";
+import {
+  buildGeminiProbeEnv,
+  normalizeGeminiCapabilityProbeResult,
+  probeGeminiCapabilities,
+} from "../geminiAcpProbe";
 import { DEFAULT_CURSOR_AGENT_BINARY, resolveCursorAgentBinaryPath } from "../acp/CursorAcpCommand";
 import { hasDevinApiKeyEnv } from "../acp/DevinAcpSupport";
 import { hasGrokApiKeyEnv } from "../acp/GrokAcpSupport";
@@ -750,7 +754,7 @@ const runClaudeCommand = (args: ReadonlyArray<string>, executable = "claude") =>
   );
 
 const runGeminiCommand = (args: ReadonlyArray<string>, executable = "gemini") =>
-  runProviderCommand(executable, args).pipe(
+  runProviderCommand(executable, args, buildGeminiProbeEnv()).pipe(
     Effect.flatMap((result) =>
       isWindowsShellCommandMissingResult({ code: result.code, stderr: result.stderr })
         ? Effect.fail(new Error(`spawn ${executable} ENOENT`))

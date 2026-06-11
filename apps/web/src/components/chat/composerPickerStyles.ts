@@ -98,7 +98,8 @@ export const CHAT_MAIN_VIEWPORT_SHELL_CLASS_NAME =
 /** Shared max width for the chat column (transcript + composer). */
 export const CHAT_COLUMN_MAX_WIDTH_CLASS_NAME = COMPOSER_MAX_WIDTH_CLASS_NAME;
 /** Horizontal padding shared by the transcript and composer columns. */
-export const CHAT_COLUMN_GUTTER_CLASS_NAME = "px-3 sm:px-5";
+export const CHAT_COLUMN_GUTTER_CLASS_NAME =
+  "px-[var(--app-density-chat-gutter-x,0.75rem)] sm:px-[var(--app-density-chat-gutter-x-lg,1.25rem)]";
 /** Centers the chat column and applies the shared max width. */
 export const CHAT_COLUMN_FRAME_CLASS_NAME = `mx-auto w-full min-w-0 ${COMPOSER_MAX_WIDTH_CLASS_NAME}`;
 
@@ -131,12 +132,12 @@ export const COMPOSER_STACKED_SURFACE_BORDER_CLASS_NAME = [
   "dark:border-[color:color-mix(in_srgb,var(--color-border-heavy)_50%,transparent)]",
 ].join(" ");
 
-/** Border + shadow chrome for the composer surface: a real border follows
- *  squircle/corner-shape geometry more evenly than an outer ring (box-shadow).
- *  Dark mode drops the border and leans on the shadow for separation. */
-export const COMPOSER_SURFACE_CHROME_CLASS_NAME = `border ${COMPOSER_SURFACE_BORDER_CLASS_NAME} ${COMPOSER_SURFACE_SHADOW_CLASS_NAME} dark:border-0`;
+/** Border + shadow chrome for raised opaque surfaces (composer shell, kanban cards):
+ *  a real border follows squircle/corner-shape geometry more evenly than an outer
+ *  ring (box-shadow). Dark mode drops the border and leans on the shadow for separation. */
+export const RAISED_SURFACE_CHROME_CLASS_NAME = `border ${COMPOSER_SURFACE_BORDER_CLASS_NAME} ${COMPOSER_SURFACE_SHADOW_CLASS_NAME} dark:border-0`;
 
-export const COMPOSER_INPUT_SURFACE_CLASS_NAME = `chat-composer-surface ${COMPOSER_SURFACE_CHROME_CLASS_NAME} transition-colors duration-200`;
+export const COMPOSER_INPUT_SURFACE_CLASS_NAME = `chat-composer-surface ${RAISED_SURFACE_CHROME_CLASS_NAME} transition-colors duration-200`;
 
 /** Active segment fill in the sidebar Threads/Workspace picker. */
 export const SIDEBAR_SEGMENTED_PICKER_ACTIVE_CLASS_NAME =
@@ -198,6 +199,10 @@ export const ENVIRONMENT_CONTENT_INSET_MOTION_CLASS =
 export const COMPOSER_COMMAND_MENU_FLOATING_WRAPPER_CLASS_NAME =
   "pointer-events-auto absolute inset-x-0 bottom-full z-20 mb-2 overflow-visible px-1 pt-2";
 
+/** Inline command menu slot for compact composers rendered near the top of a scrollable dialog. */
+export const COMPOSER_COMMAND_MENU_INLINE_WRAPPER_CLASS_NAME =
+  "pointer-events-auto relative z-20 mb-2 overflow-visible px-1";
+
 /** Default command menu row — transparent until hover or keyboard highlight.
  *  Highlight tints the surface darker (button-secondary), matching every other
  *  composer picker. The `elevated-secondary-opaque` token lightens toward white,
@@ -223,13 +228,28 @@ export const COMPOSER_EDITOR_TEXT_CLASS_NAME = "text-[length:var(--app-font-size
 export const COMPOSER_EDITOR_TYPOGRAPHY_CLASS_NAME = `font-system-ui ${COMPOSER_EDITOR_TEXT_CLASS_NAME} ${COMPOSER_EDITOR_LINE_HEIGHT_CLASS_NAME}`;
 /** Muted empty-state copy for the composer prompt editor. */
 export const COMPOSER_PLACEHOLDER_TEXT_CLASS_NAME = "text-muted-foreground/40";
-export const COMPOSER_EDITOR_MIN_HEIGHT_CLASS_NAME = "min-h-[2lh]";
+export const COMPOSER_EDITOR_MIN_HEIGHT_CLASS_NAME =
+  "min-h-[var(--app-density-composer-editor-min-height,2lh)]";
 /** Lexical wraps lines in `<p>` nodes; reset default margins so text sits flush above the footer. */
 export const COMPOSER_EDITOR_CONTENT_RESET_CLASS_NAME = "[&_p]:m-0";
 /** Shared padding around the composer prompt editor. */
-export const COMPOSER_EDITOR_PADDING_CLASS_NAME = "relative pl-3 pr-3.5 pt-3 pb-2";
+export const COMPOSER_EDITOR_PADDING_CLASS_NAME = [
+  "relative",
+  "pl-[var(--app-density-composer-editor-padding-x,0.75rem)]",
+  "pr-[var(--app-density-composer-editor-padding-x-end,0.875rem)]",
+  "pt-[var(--app-density-composer-editor-padding-top,0.75rem)]",
+  "pb-[var(--app-density-composer-editor-padding-bottom,0.5rem)]",
+].join(" ");
 /** Bottom bar row — flush to the composer shell edges. */
-export const COMPOSER_FOOTER_ROW_CLASS_NAME =
-  "flex items-center justify-between pl-1.5 pr-2 pb-1.5";
-export const COMPOSER_FOOTER_APPROVAL_ROW_CLASS_NAME =
-  "flex items-center justify-end gap-2 pl-1.5 pr-2 pb-1.5";
+export const COMPOSER_FOOTER_ROW_CLASS_NAME = [
+  "flex items-center justify-between",
+  "pl-[var(--app-density-composer-footer-padding,0.375rem)]",
+  "pr-[var(--app-density-composer-footer-padding-end,0.5rem)]",
+  "pb-[var(--app-density-composer-footer-padding,0.375rem)]",
+].join(" ");
+export const COMPOSER_FOOTER_APPROVAL_ROW_CLASS_NAME = [
+  "flex items-center justify-end gap-2",
+  "pl-[var(--app-density-composer-footer-padding,0.375rem)]",
+  "pr-[var(--app-density-composer-footer-padding-end,0.5rem)]",
+  "pb-[var(--app-density-composer-footer-padding,0.375rem)]",
+].join(" ");
