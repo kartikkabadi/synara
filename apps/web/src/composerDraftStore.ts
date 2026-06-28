@@ -79,6 +79,7 @@ const COMPOSER_PROVIDER_KINDS = [
   "codex",
   "claudeAgent",
   "cursor",
+  "devin",
   "gemini",
   "grok",
   "kilo",
@@ -1156,6 +1157,14 @@ function makeModelSelection(
           ? { options: options as Extract<ModelSelection, { provider: "opencode" }>["options"] }
           : {}),
       };
+    case "devin":
+      return {
+        provider,
+        model,
+        ...(options
+          ? { options: options as Extract<ModelSelection, { provider: "devin" }>["options"] }
+          : {}),
+      };
     case "pi":
       return {
         provider,
@@ -1612,10 +1621,15 @@ export function resolvePreferredComposerModelSelection(input: {
       : null) ??
     (input.projectModelSelection?.provider === preferredProvider
       ? input.projectModelSelection
-      : null) ?? {
-      provider: preferredProvider === "pi" ? "codex" : preferredProvider,
-      model: getDefaultModel(preferredProvider === "pi" ? "codex" : preferredProvider),
-    }
+      : null) ??
+    (() => {
+      const fallbackProvider = preferredProvider === "pi" ? "codex" : preferredProvider;
+      const fallbackModel = getDefaultModel(fallbackProvider);
+      return {
+        provider: fallbackModel === null ? "codex" : fallbackProvider,
+        model: fallbackModel ?? getDefaultModel("codex"),
+      };
+    })()
   );
 }
 

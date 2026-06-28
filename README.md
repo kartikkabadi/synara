@@ -18,7 +18,7 @@ It brings chats, terminals, browser previews, diffs, branches, provider sessions
 ## How to use
 
 > [!WARNING]
-> You need to have [Codex CLI](https://github.com/openai/codex) installed and authorized for Codex sessions to work.
+> Install and authenticate the CLI for the provider you want to use. Codex sessions require [Codex CLI](https://github.com/openai/codex). Devin requires Devin CLI authenticated with `devin auth login`; Synara runs it through `devin acp`, and model availability depends on your Devin/Windsurf account/team settings.
 
 Install the [desktop app from the Releases page](https://github.com/Emanuele-web04/Synara/releases), or download it from [trysynara.com](https://www.trysynara.com/).
 
