@@ -13,9 +13,9 @@ import {
 } from "effect";
 import {
   ChildProcess,
+  ChildProcessSpawner,
   type ChildProcessSpawner as ChildProcessSpawnerTypes,
 } from "effect/unstable/process";
-import { ChildProcessSpawner } from "effect/unstable/process";
 import * as EffectAcpClient from "effect-acp/client";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";

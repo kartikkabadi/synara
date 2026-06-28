@@ -1,5 +1,5 @@
 import { describe, it, assert } from "@effect/vitest";
-import { Deferred, Duration, Effect, Fiber, Option, Stream } from "effect";
+import { Effect, Fiber, Option, Stream } from "effect";
 import type * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 import {
