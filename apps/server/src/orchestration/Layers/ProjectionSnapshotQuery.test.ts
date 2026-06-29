@@ -432,6 +432,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             },
           ],
           goal: null,
+          loop: null,
           pendingInteractions: [],
           checkpoints: [
             {

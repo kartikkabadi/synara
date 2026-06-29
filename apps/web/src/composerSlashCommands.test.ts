@@ -460,6 +460,7 @@ describe("composerSlashCommands", () => {
       "feedback",
       "automation",
       "goal",
+      "loop",
     ]);
   });
 
