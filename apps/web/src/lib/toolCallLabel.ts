@@ -294,6 +294,31 @@ function collectDescriptorCandidates(
   }
 }
 
+// Read-only inspection command tools. Source of truth for both the command
+// labels below and the action-state classification (inspect → "reading").
+const READ_FILE_COMMAND_TOOLS = new Set(["cat", "nl", "head", "tail", "sed", "less", "more"]);
+const SEARCH_COMMAND_TOOLS = new Set(["rg", "grep", "ag", "ack"]);
+const FIND_COMMAND_TOOLS = new Set(["find", "fd"]);
+const LIST_COMMAND_TOOLS = new Set(["ls"]);
+
+function isInspectCommandTool(tool: string): boolean {
+  return (
+    READ_FILE_COMMAND_TOOLS.has(tool) ||
+    SEARCH_COMMAND_TOOLS.has(tool) ||
+    FIND_COMMAND_TOOLS.has(tool) ||
+    LIST_COMMAND_TOOLS.has(tool)
+  );
+}
+
+// Whether a shell command is a read-only inspection (read/search/find/list).
+// Reuses the same command unwrapping as deriveReadableCommandDisplay so the
+// timeline search icon stays in sync with the derived command label.
+export function isInspectCommand(rawCommand: string): boolean {
+  const command = stripCommandDisplayWrappers(unwrapShellCommandIfPresent(rawCommand));
+  const [tool] = splitToolAndArgs(firstShellCommandSegment(command));
+  return isInspectCommandTool(tool);
+}
+
 // Derives the compact command sentence shown inline while preserving the full command for hover/detail UI.
 export function deriveReadableCommandDisplay(
   rawCommand: string,
