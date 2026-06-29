@@ -170,7 +170,11 @@ export function VoiceDictationPopup() {
           <div className="flex items-center gap-2">
             <MicIcon className="size-4 text-muted-foreground" />
             <span className="text-xs font-medium text-foreground">
-              {isRecording ? "Recording..." : isTranscribing ? "Transcribing..." : "Voice dictation"}
+              {isRecording
+                ? "Recording..."
+                : isTranscribing
+                  ? "Transcribing..."
+                  : "Voice dictation"}
             </span>
             {isRecording && (
               <span className="ml-auto text-xs text-muted-foreground">
@@ -191,12 +195,22 @@ export function VoiceDictationPopup() {
           )}
           <div className="flex gap-2">
             {!isRecording && !isTranscribing && (
-              <Button size="sm" variant="default" className="flex-1" onClick={() => void startRecording()}>
+              <Button
+                size="sm"
+                variant="default"
+                className="flex-1"
+                onClick={() => void startRecording()}
+              >
                 Start recording
               </Button>
             )}
             {isRecording && (
-              <Button size="sm" variant="default" className="flex-1" onClick={() => void handleTranscribe()}>
+              <Button
+                size="sm"
+                variant="default"
+                className="flex-1"
+                onClick={() => void handleTranscribe()}
+              >
                 Stop & transcribe
               </Button>
             )}

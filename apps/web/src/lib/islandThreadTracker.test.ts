@@ -145,7 +145,12 @@ describe("selectActiveIslandThread", () => {
 
   it("excludes archived threads", () => {
     const threads = [
-      makeThread({ id: "t1", session: runningSession(), archivedAt: "2026-01-02", createdAt: "2026-01-02T00:00:00Z" }),
+      makeThread({
+        id: "t1",
+        session: runningSession(),
+        archivedAt: "2026-01-02",
+        createdAt: "2026-01-02T00:00:00Z",
+      }),
       makeThread({ id: "t2", hasPendingApprovals: true, createdAt: "2026-01-01T00:00:00Z" }),
     ];
     expect(selectActiveIslandThread(threads)?.id).toBe("t2");

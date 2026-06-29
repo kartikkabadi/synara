@@ -30,39 +30,42 @@ const DOT_MATRIX_COLOR_PRESETS: Record<
 > = {
   "solid-theme": {
     fill: "var(--color-dot-on)",
-    glow: "var(--color-dot-on)"
+    glow: "var(--color-dot-on)",
   },
   "solid-mint": {
     fill: "#34d399",
-    glow: "#34d399"
+    glow: "#34d399",
   },
   "grad-sunset": {
     fill: "linear-gradient(135deg, #ff5f6d 0%, #ffc371 52%, #ffe29a 100%)",
-    glow: "#ff8b73"
+    glow: "#ff8b73",
   },
   "grad-ocean": {
     fill: "linear-gradient(140deg, #00c6ff 0%, #0072ff 48%, #4facfe 100%)",
-    glow: "#2f8fff"
+    glow: "#2f8fff",
   },
   "grad-neon": {
     fill: "linear-gradient(145deg, #b4ff39 0%, #39ffb6 46%, #00d4ff 100%)",
-    glow: "#59ffc8"
+    glow: "#59ffc8",
   },
   "grad-aurora": {
     fill: "linear-gradient(145deg, #ff3cac 0%, #784ba0 45%, #2b86c5 100%)",
-    glow: "#9c64bf"
+    glow: "#9c64bf",
   },
   "grad-fire": {
     fill: "linear-gradient(145deg, #ff512f 0%, #dd2476 45%, #ffb347 100%)",
-    glow: "#f96a5f"
+    glow: "#f96a5f",
   },
   "grad-prism": {
     fill: "linear-gradient(145deg, #12c2e9 0%, #c471ed 45%, #f64f59 100%)",
-    glow: "#9e7de8"
-  }
+    glow: "#9e7de8",
+  },
 };
 
-export function resolveDmxColorTokens(color: string, colorPreset?: DotMatrixColorPreset): {
+export function resolveDmxColorTokens(
+  color: string,
+  colorPreset?: DotMatrixColorPreset,
+): {
   resolvedColor: string;
   dotFill: string;
 } {
@@ -174,7 +177,7 @@ const PATTERN_INDEXES: Record<MatrixPattern, number[]> = {
   outline: OUTLINE_INDEXES,
   rose: ROSE_INDEXES,
   cross: CROSS_INDEXES,
-  rings: RINGS_INDEXES
+  rings: RINGS_INDEXES,
 };
 
 export function getPatternIndexes(pattern: MatrixPattern = "diamond"): number[] {
@@ -188,7 +191,7 @@ export function rowMajorIndex(row: number, col: number): number {
 export function indexToCoord(index: number): { row: number; col: number } {
   return {
     row: Math.floor(index / MATRIX_SIZE),
-    col: index % MATRIX_SIZE
+    col: index % MATRIX_SIZE,
   };
 }
 
@@ -224,7 +227,7 @@ export function harmonicPhase(row: number, col: number, a: number, b: number): n
 export function lissajousOffset(
   row: number,
   col: number,
-  amplitude = 2.25
+  amplitude = 2.25,
 ): { x: number; y: number; phase: number } {
   const x = Math.sin((row + 1) * 1.15 + (col + 1) * 2.2) * amplitude;
   const y = Math.cos((row + 1) * 2.45 + (col + 1) * 0.95) * amplitude;
@@ -235,7 +238,7 @@ export function lissajousOffset(
 export function spiralOffset(
   angle: number,
   radiusNormalizedValue: number,
-  amplitude = 2.8
+  amplitude = 2.8,
 ): { x: number; y: number; phase: number } {
   const spin = angle + radiusNormalizedValue * Math.PI * 2.1;
   const radius = radiusNormalizedValue * amplitude;
@@ -376,7 +379,7 @@ function buildOuterRingClockwiseOrderToIndexMap(): number[] {
     [4, 0],
     [3, 0],
     [2, 0],
-    [1, 0]
+    [1, 0],
   ];
 
   for (let t = 0; t < coords.length; t += 1) {
@@ -397,7 +400,7 @@ function buildMiddleRingAntiClockwiseOrderToIndexMap(): number[] {
     [3, 3],
     [2, 3],
     [1, 3],
-    [1, 2]
+    [1, 2],
   ];
 
   for (let t = 0; t < coords.length; t += 1) {
@@ -409,7 +412,8 @@ function buildMiddleRingAntiClockwiseOrderToIndexMap(): number[] {
 }
 
 const OUTER_RING_CLOCKWISE_ORDER: readonly number[] = buildOuterRingClockwiseOrderToIndexMap();
-const MIDDLE_RING_ANTI_CLOCKWISE_ORDER: readonly number[] = buildMiddleRingAntiClockwiseOrderToIndexMap();
+const MIDDLE_RING_ANTI_CLOCKWISE_ORDER: readonly number[] =
+  buildMiddleRingAntiClockwiseOrderToIndexMap();
 
 export function outerRingClockwiseOrderValue(index: number): number {
   return OUTER_RING_CLOCKWISE_ORDER[index]!;
@@ -473,7 +477,7 @@ function buildRowWaveSnakeOrderToIndexMap(): number[] {
     { col: 1, dir: "up" },
     { col: 3, dir: "down" },
     { col: 2, dir: "up" },
-    { col: 4, dir: "down" }
+    { col: 4, dir: "down" },
   ];
 
   let t = 0;
@@ -556,13 +560,14 @@ export function remapOpacityToTriplet(
   opacity: number,
   opacityBase: number | undefined,
   opacityMid: number | undefined,
-  opacityPeak: number | undefined
+  opacityPeak: number | undefined,
 ): number {
   if (!Number.isFinite(opacity)) {
     return opacity;
   }
 
-  const hasOverrides = opacityBase !== undefined || opacityMid !== undefined || opacityPeak !== undefined;
+  const hasOverrides =
+    opacityBase !== undefined || opacityMid !== undefined || opacityPeak !== undefined;
   const safeOpacity = Math.min(1, Math.max(0, opacity));
   if (!hasOverrides) {
     return safeOpacity;
@@ -595,7 +600,10 @@ export function remapOpacityToTriplet(
 export const DMX_BLOOM_OPACITY_MIN = 0.6;
 
 export function opacityToBloomLevel(remappedOpacity: number): number {
-  return Math.max(0, Math.min(1, (remappedOpacity - DMX_BLOOM_OPACITY_MIN) / (1 - DMX_BLOOM_OPACITY_MIN)));
+  return Math.max(
+    0,
+    Math.min(1, (remappedOpacity - DMX_BLOOM_OPACITY_MIN) / (1 - DMX_BLOOM_OPACITY_MIN)),
+  );
 }
 
 export function remappedOpacityQualifiesForBloom(remappedOpacity: number): boolean {
@@ -629,7 +637,7 @@ export function dmxDotBloomParts(
   halo: number | undefined,
   ob: number | undefined,
   om: number | undefined,
-  op: number | undefined
+  op: number | undefined,
 ): { level: number; bloomDot: boolean } {
   const haloN = clampHalo(halo);
   if (!isActive) {
@@ -639,14 +647,14 @@ export function dmxDotBloomParts(
   const fromBloom = bloom ? opacityToBloomLevel(remapped) : 0;
   return {
     level: fromBloom,
-    bloomDot: haloN > 0 || (bloom && remappedOpacityQualifiesForBloom(remapped))
+    bloomDot: haloN > 0 || (bloom && remappedOpacityQualifiesForBloom(remapped)),
   };
 }
 
 function getMatrix5Layout(
   size: number,
   dotSize: number,
-  cellPadding?: number
+  cellPadding?: number,
 ): { gap: number; matrixSpan: number } {
   const n = MATRIX_SIZE;
   if (cellPadding != null) {
@@ -659,7 +667,7 @@ function getMatrix5Layout(
 }
 
 function resolveDmxBoxOuterDim(
-  options: { boxSize?: number | undefined; minSize?: number | undefined } | null | undefined
+  options: { boxSize?: number | undefined; minSize?: number | undefined } | null | undefined,
 ): { outerDim: number; useWrapper: boolean } {
   const b = options?.boxSize;
   const hasBox = b != null && b > 0 && Number.isFinite(b);
@@ -715,7 +723,7 @@ export function DotMatrixBase({
   opacityPeak,
   cellPadding,
   boxSize,
-  minSize
+  minSize,
 }: DotMatrixBaseProps) {
   const patternIndexes = new Set(getPatternIndexes(pattern));
   const safeSpeed = speed > 0 ? speed : 1;
@@ -743,10 +751,10 @@ export function DotMatrixBase({
     ...(op !== undefined && { ["--dmx-opacity-peak" as const]: op }),
     ...(useWrapper
       ? {
-        transform: `scale(${scale})`,
-        transformOrigin: "center center" as const
-      }
-      : { minWidth: minSize, minHeight: minSize })
+          transform: `scale(${scale})`,
+          transformOrigin: "center center" as const,
+        }
+      : { minWidth: minSize, minHeight: minSize }),
   } as unknown as CSSProperties;
 
   const dots = Array.from({ length: MATRIX_SIZE * MATRIX_SIZE }).map((_, index) => {
@@ -761,17 +769,17 @@ export function DotMatrixBase({
 
     const animationState = animationResolver
       ? animationResolver({
-        index,
-        row,
-        col,
-        distanceFromCenter: distance,
-        angleFromCenter: angle,
-        radiusNormalized: radiusNormalizedValue,
-        manhattanDistance: manhattan,
-        phase,
-        isActive,
-        reducedMotion
-      })
+          index,
+          row,
+          col,
+          distanceFromCenter: distance,
+          angleFromCenter: angle,
+          radiusNormalized: radiusNormalizedValue,
+          manhattanDistance: manhattan,
+          phase,
+          isActive,
+          reducedMotion,
+        })
       : {};
 
     const resolvedAnimationStyle = animationState.style ? { ...animationState.style } : undefined;
@@ -784,14 +792,15 @@ export function DotMatrixBase({
         const remappedOpacity = remapOpacityToTriplet(rawOpacity, ob, om, op);
         stylePatch = { ...stylePatch, opacity: remappedOpacity };
         const parts = dmxDotBloomParts(true, rawOpacity, bloom, halo, ob, om, op);
-        (stylePatch as CSSProperties & { "--dmx-bloom-level"?: number })["--dmx-bloom-level"] = parts.level;
+        (stylePatch as CSSProperties & { "--dmx-bloom-level"?: number })["--dmx-bloom-level"] =
+          parts.level;
         isBloomDot = parts.bloomDot;
       } else {
         const parts = dmxDotBloomParts(true, 0, bloom, halo, ob, om, op);
         if (parts.level > 0) {
           stylePatch = {
             ...(stylePatch ?? {}),
-            ["--dmx-bloom-level" as const]: parts.level
+            ["--dmx-bloom-level" as const]: parts.level,
           } as CSSProperties & { "--dmx-bloom-level"?: number };
         }
         isBloomDot = parts.bloomDot;
@@ -812,12 +821,12 @@ export function DotMatrixBase({
       ...stylePatch,
       ...(!isActive
         ? {
-          opacity: 0,
-          visibility: "hidden" as const,
-          pointerEvents: "none" as const,
-          animation: "none"
-        }
-        : {})
+            opacity: 0,
+            visibility: "hidden" as const,
+            pointerEvents: "none" as const,
+            animation: "none",
+          }
+        : {}),
     } as CSSProperties;
 
     return (
@@ -829,7 +838,7 @@ export function DotMatrixBase({
           !isActive && "dmx-inactive",
           isBloomDot && "dmx-bloom-dot",
           dotClassName,
-          animationState.className
+          animationState.className,
         )}
         style={dotStyle}
       />
@@ -844,11 +853,13 @@ export function DotMatrixBase({
         muted && "dmx-muted",
         dmxBloomRootActive(bloom, halo) && "dmx-bloom",
         dmxBloomHaloSpreadClass(halo),
-        !useWrapper && className
+        !useWrapper && className,
       )}
       style={dmxVarStyle}
     >
-      <div className="dmx-grid" style={{ gap }}>{dots}</div>
+      <div className="dmx-grid" style={{ gap }}>
+        {dots}
+      </div>
     </div>
   );
 
@@ -867,7 +878,7 @@ export function DotMatrixBase({
           height: outerDim,
           minWidth: minSize,
           minHeight: minSize,
-          overflow: "hidden"
+          overflow: "hidden",
         }}
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
@@ -888,13 +899,15 @@ export function DotMatrixBase({
         muted && "dmx-muted",
         dmxBloomRootActive(bloom, halo) && "dmx-bloom",
         dmxBloomHaloSpreadClass(halo),
-        className
+        className,
       )}
       style={dmxVarStyle}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
-      <div className="dmx-grid" style={{ gap }}>{dots}</div>
+      <div className="dmx-grid" style={{ gap }}>
+        {dots}
+      </div>
     </div>
   );
 }
@@ -914,8 +927,8 @@ export function createPathWaveResolver(getPathNorm: NormFn): DotAnimationResolve
       return {
         style: {
           ...style,
-          opacity: 0.12 + path * 0.72
-        }
+          opacity: 0.12 + path * 0.72,
+        },
       };
     }
 
@@ -936,10 +949,14 @@ export function createPathWaveComponent(displayName: string, getPathNorm: NormFn
     ...rest
   }: PathWaveComponentProps) {
     const reducedMotion = usePrefersReducedMotion();
-    const { phase: matrixPhase, onMouseEnter, onMouseLeave } = useDotMatrixPhases({
+    const {
+      phase: matrixPhase,
+      onMouseEnter,
+      onMouseLeave,
+    } = useDotMatrixPhases({
       animated: Boolean(animated && !reducedMotion),
       hoverAnimated: Boolean(hoverAnimated && !reducedMotion),
-      speed
+      speed,
     });
     return (
       <DotMatrixBase

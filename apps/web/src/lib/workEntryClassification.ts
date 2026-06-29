@@ -8,18 +8,11 @@
 import type { WorkLogEntry } from "~/session-logic";
 import { isFileChangeWorkLogEntry } from "~/session-logic";
 
-export type WorkEntryCategory =
-  | "thinking"
-  | "reading"
-  | "editing"
-  | "running-command"
-  | "error";
+export type WorkEntryCategory = "thinking" | "reading" | "editing" | "running-command" | "error";
 
 // Provider read tools (e.g. Claude's `Read`) arrive as generic dynamic tool calls
 // without a `file-read` requestKind, so match their tool name to classify as reading.
-export function isFileReadToolEntry(
-  workEntry: Pick<WorkLogEntry, "toolName">,
-): boolean {
+export function isFileReadToolEntry(workEntry: Pick<WorkLogEntry, "toolName">): boolean {
   const name = (workEntry.toolName ?? "").toLowerCase().replace(/[^a-z]/g, "");
   return name === "read" || name === "readfile" || name === "viewfile";
 }
@@ -33,14 +26,7 @@ export function isFileReadToolEntry(
 // "running-command". Add isInspectCommand import from toolCallLabel.ts after merging
 // upstream/main to split inspect commands (ls/cat/git status) into "reading".
 export function classifyWorkEntry(
-  workEntry: Pick<
-    WorkLogEntry,
-    | "requestKind"
-    | "itemType"
-    | "command"
-    | "toolName"
-    | "tone"
-  >,
+  workEntry: Pick<WorkLogEntry, "requestKind" | "itemType" | "command" | "toolName" | "tone">,
 ): WorkEntryCategory {
   if (workEntry.requestKind === "command") return "running-command";
   if (workEntry.requestKind === "file-read") return "reading";

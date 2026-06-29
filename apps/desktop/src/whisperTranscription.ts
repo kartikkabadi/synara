@@ -26,8 +26,7 @@ const MODEL_SHA256: Record<string, string> = {
 
 const MODEL_URLS: Record<string, string> = {
   "base-q5_1": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin",
-  "base.en-q5_1":
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q5_1.bin",
+  "base.en-q5_1": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q5_1.bin",
 };
 
 const MODEL_FILENAMES: Record<string, string> = {
@@ -49,10 +48,7 @@ function modelPath(modelName: string): string {
 function resolveWhisperCliBinary(): string | null {
   if (process.platform === "darwin") {
     // Check common Homebrew paths, then PATH.
-    const homebrewPaths = [
-      "/opt/homebrew/bin/whisper-cli",
-      "/usr/local/bin/whisper-cli",
-    ];
+    const homebrewPaths = ["/opt/homebrew/bin/whisper-cli", "/usr/local/bin/whisper-cli"];
     for (const p of homebrewPaths) {
       try {
         if (Fs.existsSync(p)) return p;
@@ -257,9 +253,7 @@ export interface WhisperTranscribeOptions {
 // Transcribe audio via whisper-cli, spawned per-request.
 // stdin receives 16kHz WAV (resampled from 24kHz). stdout returns text.
 // 60s timeout kills hung processes. No persistent process, no cleanup needed.
-export async function transcribeViaWhisper(
-  options: WhisperTranscribeOptions,
-): Promise<string> {
+export async function transcribeViaWhisper(options: WhisperTranscribeOptions): Promise<string> {
   const binary = resolveWhisperCliBinary();
   if (!binary) {
     throw new Error(
@@ -274,39 +268,48 @@ export async function transcribeViaWhisper(
   const wav16k = resampleWav24kTo16k(options.audioBuffer);
 
   // Build prompt from custom dictionary for accuracy biasing.
-  const prompt = options.dictionary && options.dictionary.length > 0
-    ? options.dictionary.slice(0, 200).join(", ")
-    : undefined;
+  const prompt =
+    options.dictionary && options.dictionary.length > 0
+      ? options.dictionary.slice(0, 200).join(", ")
+      : undefined;
 
   const args = [
-    "-f", "-", // read WAV from stdin
-    "-m", model,
-    "-l", "auto", // auto language detection
+    "-f",
+    "-", // read WAV from stdin
+    "-m",
+    model,
+    "-l",
+    "auto", // auto language detection
     "-nt", // no timestamps
     "-np", // no progress
     ...(prompt ? ["--prompt", prompt] : []),
   ];
 
   return new Promise<string>((resolve, reject) => {
-    const child = ChildProcess.execFile(binary, args, {
-      timeout: WHISPER_TRANSCRIPTION_TIMEOUT_MS,
-      maxBuffer: 1024 * 1024,
-      windowsHide: true,
-    }, (error, stdout, stderr) => {
-      if (error) {
-        const message = error.message.includes("TIMED_OUT")
-          ? "Transcription timed out. Please try again."
-          : `Transcription failed: ${error.message}`;
-        reject(new Error(message));
-        return;
-      }
-      const text = stdout.trim();
-      if (!text) {
-        reject(new Error("Nothing heard. Please try recording again."));
-        return;
-      }
-      resolve(text);
-    });
+    const child = ChildProcess.execFile(
+      binary,
+      args,
+      {
+        timeout: WHISPER_TRANSCRIPTION_TIMEOUT_MS,
+        maxBuffer: 1024 * 1024,
+        windowsHide: true,
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          const message = error.message.includes("TIMED_OUT")
+            ? "Transcription timed out. Please try again."
+            : `Transcription failed: ${error.message}`;
+          reject(new Error(message));
+          return;
+        }
+        const text = stdout.trim();
+        if (!text) {
+          reject(new Error("Nothing heard. Please try recording again."));
+          return;
+        }
+        resolve(text);
+      },
+    );
 
     // Pipe 16kHz WAV to stdin.
     child.stdin?.write(wav16k);
