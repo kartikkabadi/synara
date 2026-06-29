@@ -5,7 +5,6 @@ export interface LoopReactorShape {
   readonly drain: Effect.Effect<void>;
 }
 
-export class LoopReactor extends ServiceMap.Service<
-  LoopReactor,
-  LoopReactorShape
->()("t3/orchestration/Services/LoopReactor") {}
+export class LoopReactor extends ServiceMap.Service<LoopReactor, LoopReactorShape>()(
+  "t3/orchestration/Services/LoopReactor",
+) {}

@@ -180,7 +180,10 @@ const make = Effect.gen(function* () {
     // completion audit. Match against the normalized last line (strip markdown formatting
     // and whitespace) so providers that bold/code-wrap the sentinel still detect correctly.
     const lastLine = assistantMessage.text.trimEnd().split(/\r?\n/).at(-1)?.trim();
-    if (lastLine !== undefined && normalizeSentinelCandidate(lastLine) === ORCHESTRATION_GOAL_COMPLETION_SENTINEL) {
+    if (
+      lastLine !== undefined &&
+      normalizeSentinelCandidate(lastLine) === ORCHESTRATION_GOAL_COMPLETION_SENTINEL
+    ) {
       yield* orchestrationEngine.dispatch({
         type: "thread.goal.complete",
         commandId: serverCommandId("goal-complete"),

@@ -2,10 +2,7 @@ import type { ProviderKind, ThreadId } from "@t3tools/contracts";
 import { Cause, Duration, Effect, Layer, Option, Schedule, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
-import {
-  CompactionReactor,
-  type CompactionReactorShape,
-} from "../Services/CompactionReactor.ts";
+import { CompactionReactor, type CompactionReactorShape } from "../Services/CompactionReactor.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";

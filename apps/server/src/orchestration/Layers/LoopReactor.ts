@@ -9,10 +9,7 @@ import {
 import { Cause, Duration, Effect, Fiber, Layer, Option, Schedule, Stream } from "effect";
 import { makeDrainableWorker, type DrainableWorker } from "@t3tools/shared/DrainableWorker";
 
-import {
-  LoopReactor,
-  type LoopReactorShape,
-} from "../Services/LoopReactor.ts";
+import { LoopReactor, type LoopReactorShape } from "../Services/LoopReactor.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 
@@ -213,9 +210,7 @@ const make = Effect.gen(function* () {
         const remainingMs = intervalMs - elapsedMs;
         const wakeEffect: Effect.Effect<void, never, never> = Effect.sleep(
           Duration.millis(remainingMs),
-        ).pipe(
-          Effect.flatMap(() => worker?.enqueue(threadId) ?? Effect.void),
-        );
+        ).pipe(Effect.flatMap(() => worker?.enqueue(threadId) ?? Effect.void));
         const fiber = yield* Effect.forkDetach(wakeEffect);
         wakeUpFibers.set(threadId, fiber as Fiber.Fiber<void, never>);
         return;
