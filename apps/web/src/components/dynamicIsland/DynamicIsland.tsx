@@ -4,12 +4,7 @@
 // Why: Gives the user at-a-glance awareness of what the agent is doing without
 //      switching to the thread's tab. Auto-expands on approvals/user-input/plans.
 
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type ApprovalRequestId,
   type ProviderApprovalDecision,
@@ -140,10 +135,7 @@ function useTrackedThreadActionState(
 ): ActionState | null {
   return useMemo(() => {
     if (!thread) return null;
-    const entries = deriveWorkLogEntries(
-      thread.activities,
-      thread.latestTurn?.turnId ?? undefined,
-    );
+    const entries = deriveWorkLogEntries(thread.activities, thread.latestTurn?.turnId ?? undefined);
     const lastEntry = entries.at(-1);
     if (!lastEntry) {
       return mapWorkLogToActionState(
@@ -221,7 +213,6 @@ export function DynamicIsland() {
     if (!idleThread) return null;
     return (
       <IdleIslandPill
-        idleThread={idleThread}
         recentThreads={recentThreads}
         hovered={idleHovered}
         onHoverChange={setIdleHovered}
@@ -231,7 +222,6 @@ export function DynamicIsland() {
 
   return (
     <IslandShell
-      mode={mode}
       expanded={expanded}
       onHoverChange={setHovered}
       actionState={actionState}
@@ -240,19 +230,17 @@ export function DynamicIsland() {
       {mode === "approval" && <IslandApprovalPanel thread={activeThread} />}
       {mode === "user-input" && <IslandUserInputPanel thread={activeThread} />}
       {mode === "plan" && <IslandPlanPanel thread={activeThread} />}
-      {mode === "expanded" && <IslandExpandedContent thread={activeThread} actionState={actionState} />}
+      {mode === "expanded" && <IslandExpandedContent thread={activeThread} />}
     </IslandShell>
   );
 }
 
 // Tiny always-visible 4px pill for idle hover.
 function IdleIslandPill({
-  idleThread,
   recentThreads,
   hovered,
   onHoverChange,
 }: {
-  idleThread: Thread;
   recentThreads: Thread[];
   hovered: boolean;
   onHoverChange: (v: boolean) => void;
@@ -290,14 +278,12 @@ function IdleIslandPill({
 }
 
 function IslandShell({
-  mode,
   expanded,
   onHoverChange,
   actionState,
   thread,
   children,
 }: {
-  mode: IslandMode;
   expanded: boolean;
   onHoverChange: (v: boolean) => void;
   actionState: ActionState;
@@ -305,7 +291,6 @@ function IslandShell({
   children: React.ReactNode;
 }) {
   const Loader = actionState.loader;
-  const isAutoExpanded = mode === "approval" || mode === "user-input" || mode === "plan";
 
   return (
     <div
@@ -340,13 +325,7 @@ function IslandShell({
   );
 }
 
-function IslandExpandedContent({
-  thread,
-  actionState,
-}: {
-  thread: Thread;
-  actionState: ActionState;
-}) {
+function IslandExpandedContent({ thread }: { thread: Thread }) {
   const entries = useMemo(
     () => deriveWorkLogEntries(thread.activities, thread.latestTurn?.turnId ?? undefined),
     [thread.activities, thread.latestTurn?.turnId],
@@ -366,7 +345,11 @@ function IslandExpandedContent({
       </div>
       <div className="flex flex-col gap-1">
         {last4.map((entry) => (
-          <div key={entry.id} className="truncate text-xs text-muted-foreground" title={entry.label}>
+          <div
+            key={entry.id}
+            className="truncate text-xs text-muted-foreground"
+            title={entry.label}
+          >
             {entry.label}
           </div>
         ))}
@@ -434,7 +417,12 @@ function IslandMiniChat({ thread }: { thread: Thread }) {
           placeholder="Send a message..."
           className="flex-1 rounded-md border border-border/40 bg-background/60 px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         />
-        <Button size="sm" variant="default" disabled={sending || !text.trim()} onClick={() => void send()}>
+        <Button
+          size="sm"
+          variant="default"
+          disabled={sending || !text.trim()}
+          onClick={() => void send()}
+        >
           Send
         </Button>
       </div>
@@ -479,27 +467,58 @@ function IslandApprovalPanel({ thread }: { thread: Thread }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="text-xs font-semibold text-foreground">
-        {current.requestKind === "command" ? "Command approval" :
-         current.requestKind === "file-read" ? "File read approval" :
-         "File change approval"}
-        {approvals.length > 1 && <span className="ml-1 text-muted-foreground">({1}/{approvals.length})</span>}
+        {current.requestKind === "command"
+          ? "Command approval"
+          : current.requestKind === "file-read"
+            ? "File read approval"
+            : "File change approval"}
+        {approvals.length > 1 && (
+          <span className="ml-1 text-muted-foreground">
+            ({1}/{approvals.length})
+          </span>
+        )}
       </div>
       {current.detail && (
-        <div className="rounded-md bg-muted/40 p-2 text-xs text-muted-foreground" title={current.detail}>
-          <pre className="whitespace-pre-wrap break-words font-mono text-[10px]">{current.detail}</pre>
+        <div
+          className="rounded-md bg-muted/40 p-2 text-xs text-muted-foreground"
+          title={current.detail}
+        >
+          <pre className="whitespace-pre-wrap break-words font-mono text-[10px]">
+            {current.detail}
+          </pre>
         </div>
       )}
       <div className="grid grid-cols-2 gap-1.5">
-        <Button size="sm" variant="ghost" disabled={respondingIds.has(current.requestId)} onClick={() => void onRespond(current.requestId, "cancel")}>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={respondingIds.has(current.requestId)}
+          onClick={() => void onRespond(current.requestId, "cancel")}
+        >
           Cancel turn
         </Button>
-        <Button size="sm" variant="destructive-outline" disabled={respondingIds.has(current.requestId)} onClick={() => void onRespond(current.requestId, "decline")}>
+        <Button
+          size="sm"
+          variant="destructive-outline"
+          disabled={respondingIds.has(current.requestId)}
+          onClick={() => void onRespond(current.requestId, "decline")}
+        >
           Decline
         </Button>
-        <Button size="sm" variant="outline" disabled={respondingIds.has(current.requestId)} onClick={() => void onRespond(current.requestId, "acceptForSession")}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={respondingIds.has(current.requestId)}
+          onClick={() => void onRespond(current.requestId, "acceptForSession")}
+        >
           Always allow
         </Button>
-        <Button size="sm" variant="default" disabled={respondingIds.has(current.requestId)} onClick={() => void onRespond(current.requestId, "accept")}>
+        <Button
+          size="sm"
+          variant="default"
+          disabled={respondingIds.has(current.requestId)}
+          onClick={() => void onRespond(current.requestId, "accept")}
+        >
           Approve once
         </Button>
       </div>
@@ -574,7 +593,9 @@ function IslandUserInputPanel({ thread }: { thread: Thread }) {
                   }}
                 >
                   <div className="font-medium">{opt.label}</div>
-                  {opt.description && <div className="text-[10px] text-muted-foreground">{opt.description}</div>}
+                  {opt.description && (
+                    <div className="text-[10px] text-muted-foreground">{opt.description}</div>
+                  )}
                 </button>
               );
             })}

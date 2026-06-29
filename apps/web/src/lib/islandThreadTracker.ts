@@ -12,7 +12,11 @@ import { isThreadRunningTurn } from "~/session-logic";
 export function isThreadIslandActive(
   thread: Pick<
     Thread,
-    "session" | "hasPendingApprovals" | "hasPendingUserInput" | "hasActionableProposedPlan" | "archivedAt"
+    | "session"
+    | "hasPendingApprovals"
+    | "hasPendingUserInput"
+    | "hasActionableProposedPlan"
+    | "archivedAt"
   >,
 ): boolean {
   if (thread.archivedAt) return false;
@@ -25,7 +29,9 @@ export function isThreadIslandActive(
 
 // "Most-recently-active" timestamp: max of latestTurn.startedAt, last activity
 // createdAt, updatedAt, createdAt. Handles null/undefined by falling back.
-export function threadActivityTimestamp(thread: Pick<Thread, "latestTurn" | "activities" | "updatedAt" | "createdAt">): string {
+export function threadActivityTimestamp(
+  thread: Pick<Thread, "latestTurn" | "activities" | "updatedAt" | "createdAt">,
+): string {
   const candidates: string[] = [];
   if (thread.latestTurn?.startedAt) candidates.push(thread.latestTurn.startedAt);
   const lastActivity = thread.activities?.at(-1);
@@ -57,10 +63,7 @@ export function selectIdleIslandThread(threads: ReadonlyArray<Thread>): Thread |
 }
 
 // Recent threads for idle hover list (excluding archived, sorted by recency).
-export function selectRecentIslandThreads(
-  threads: ReadonlyArray<Thread>,
-  limit = 5,
-): Thread[] {
+export function selectRecentIslandThreads(threads: ReadonlyArray<Thread>, limit = 5): Thread[] {
   const visible = threads.filter((t) => !t.archivedAt);
   return visible
     .sort((a, b) => threadActivityTimestamp(b).localeCompare(threadActivityTimestamp(a)))

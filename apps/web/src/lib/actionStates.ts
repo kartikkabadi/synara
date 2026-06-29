@@ -12,25 +12,13 @@ import { DotmSquare13 } from "~/components/ui/dotm-square-13";
 import { DotmSquare17 } from "~/components/ui/dotm-square-17";
 import type { DotMatrixCommonProps } from "~/lib/dotmatrix-core";
 import type { WorkLogEntry } from "~/session-logic";
-import {
-  classifyWorkEntry,
-  type WorkEntryCategory,
-} from "~/lib/workEntryClassification";
+import { classifyWorkEntry, type WorkEntryCategory } from "~/lib/workEntryClassification";
 
-export type ActionStateName =
-  | "thinking"
-  | "reading"
-  | "editing"
-  | "running-command"
-  | "error";
+export type ActionStateName = "thinking" | "reading" | "editing" | "running-command" | "error";
 
 // Compact island view merges thinking+reading into "processing" — at 16px the
 // distinction between the two loaders is invisible. Expanded view shows the full 5.
-export type CompactActionStateName =
-  | "processing"
-  | "editing"
-  | "running-command"
-  | "error";
+export type CompactActionStateName = "processing" | "editing" | "running-command" | "error";
 
 export interface ActionState {
   state: ActionStateName;
@@ -46,10 +34,7 @@ export type LoaderColorPreset = "synara" | "spectrum" | "mono";
 // Synara: accent-based (uses the app accent color for all states, error in red).
 // Spectrum: distinct hues per state (maximum distinguishability).
 // Mono: grayscale + accent for error (subtle, for users who want minimal color).
-const ACTION_COLOR_PRESETS: Record<
-  LoaderColorPreset,
-  Record<ActionStateName, string>
-> = {
+const ACTION_COLOR_PRESETS: Record<LoaderColorPreset, Record<ActionStateName, string>> = {
   synara: {
     thinking: "var(--accent)",
     reading: "var(--accent)",
@@ -98,16 +83,15 @@ const STATE_TO_LOADER: Record<ActionStateName, ComponentType<DotMatrixCommonProp
 // Strip control characters (RTL override, zero-width, etc.) and truncate.
 // Full original text is available via the `title` attribute on hover in the UI.
 function sanitizeLabel(value: string): string {
-  // eslint-disable-next-line no-control-regex
-  const stripped = value.replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, "");
+  const stripped = value.replace(
+    /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g,
+    "",
+  );
   const trimmed = stripped.trim();
   return trimmed.length > 80 ? `${trimmed.slice(0, 77)}...` : trimmed;
 }
 
-export function actionColorFor(
-  state: ActionStateName,
-  preset: LoaderColorPreset,
-): string {
+export function actionColorFor(state: ActionStateName, preset: LoaderColorPreset): string {
   return ACTION_COLOR_PRESETS[preset][state];
 }
 

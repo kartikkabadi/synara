@@ -34,7 +34,7 @@ const FRAME_MASKS: readonly string[] = [
   // W
   "....." + "....." + "xxo.." + "....." + ".....",
   // NW
-  "x...." + ".x..." + "..o.." + "....." + "....."
+  "x...." + ".x..." + "..o.." + "....." + ".....",
 ];
 
 const FRAME_SEQUENCE: readonly number[] = [0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7];
@@ -51,10 +51,14 @@ export function DotmSquare13({
   ...rest
 }: DotmSquare13Props) {
   const reducedMotion = usePrefersReducedMotion();
-  const { phase: matrixPhase, onMouseEnter, onMouseLeave } = useDotMatrixPhases({
+  const {
+    phase: matrixPhase,
+    onMouseEnter,
+    onMouseLeave,
+  } = useDotMatrixPhases({
     animated: Boolean(animated && !reducedMotion),
     hoverAnimated: Boolean(hoverAnimated && !reducedMotion),
-    speed
+    speed,
   });
   const sequenceLength = FRAME_SEQUENCE.length;
   const step = useSteppedCycle({

@@ -2120,9 +2120,7 @@ function SettingsRouteView() {
             settings.loaderColorPreset !== defaults.loaderColorPreset ? (
               <SettingResetButton
                 label="loader colors"
-                onClick={() =>
-                  updateSettings({ loaderColorPreset: defaults.loaderColorPreset })
-                }
+                onClick={() => updateSettings({ loaderColorPreset: defaults.loaderColorPreset })}
               />
             ) : null
           }

@@ -380,7 +380,7 @@ export function deriveComposerVoiceState(input: {
   const localEnabled = input.localVoiceDictationEnabled === true;
   const canRenderVoiceNotes = localEnabled || input.authStatus !== "unauthenticated";
   const canStartVoiceNotes =
-    (localEnabled || (input.authStatus !== "unauthenticated")) &&
+    (localEnabled || input.authStatus !== "unauthenticated") &&
     input.voiceTranscriptionAvailable !== false;
 
   return {
