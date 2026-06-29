@@ -1625,6 +1625,7 @@ function normalizeThreadFromReadModel(
   const messages = normalizeChatMessages(incoming.messages, previous?.messages);
   const proposedPlans = normalizeProposedPlans(incoming.proposedPlans, previous?.proposedPlans);
   const goal = incoming.goal ?? null;
+  const loop = incoming.loop ?? null;
   const latestTurn = normalizeLatestTurn(incoming.latestTurn, previous?.latestTurn);
   const handoff =
     previous?.handoff && incoming.handoff && deepEqualJson(previous.handoff, incoming.handoff)
@@ -1733,7 +1734,8 @@ function normalizeThreadFromReadModel(
     previous.notes === notes &&
     previous.turnDiffSummaries === turnDiffSummaries &&
     previous.activities === activities &&
-    deepEqualJson(previous.goal ?? null, goal)
+    deepEqualJson(previous.goal ?? null, goal) &&
+    deepEqualJson(previous.loop ?? null, loop)
   ) {
     return previous;
   }
@@ -1750,6 +1752,7 @@ function normalizeThreadFromReadModel(
     messages,
     proposedPlans,
     goal,
+    loop,
     error,
     createdAt: incoming.createdAt,
     archivedAt: incoming.archivedAt ?? null,
@@ -3802,6 +3805,49 @@ function applyOrchestrationEvent(
                   (thread.updatedAt ?? thread.createdAt) > goalUpdatedAt
                     ? thread.updatedAt
                     : goalUpdatedAt,
+              }
+            : thread,
+        options,
+      );
+    }
+
+    case "thread.loop-created":
+      return applyThreadUpdate(
+        state,
+        event.payload.threadId,
+        (thread) => ({
+          ...thread,
+          loop: event.payload.loop,
+          updatedAt:
+            (thread.updatedAt ?? thread.createdAt) > event.payload.loop.updatedAt
+              ? thread.updatedAt
+              : event.payload.loop.updatedAt,
+        }),
+        options,
+      );
+
+    case "thread.loop-paused":
+    case "thread.loop-resumed":
+    case "thread.loop-cleared": {
+      const nextLoopStatus =
+        event.type === "thread.loop-paused"
+          ? "paused"
+          : event.type === "thread.loop-resumed"
+            ? "active"
+            : "cleared";
+      const loopUpdatedAt = event.payload.updatedAt;
+      return applyThreadUpdate(
+        state,
+        event.payload.threadId,
+        (thread) =>
+          thread.loop
+            ? {
+                ...thread,
+                loop: { ...thread.loop, status: nextLoopStatus, updatedAt: loopUpdatedAt },
+                updatedAt:
+                  (thread.updatedAt ?? thread.createdAt) > loopUpdatedAt
+                    ? thread.updatedAt
+                    : loopUpdatedAt,
               }
             : thread,
         options,
