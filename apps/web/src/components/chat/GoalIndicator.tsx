@@ -1,3 +1,4 @@
+import type { ReactElement } from "react";
 import type { OrchestrationGoal } from "@t3tools/contracts";
 
 const GOAL_STATUS_LABEL: Record<OrchestrationGoal["status"], string> = {
@@ -8,19 +9,35 @@ const GOAL_STATUS_LABEL: Record<OrchestrationGoal["status"], string> = {
   cleared: "cleared",
 };
 
+function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return String(tokens);
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds >= 3600) return `${(seconds / 3600).toFixed(1)}h`;
+  if (seconds >= 60) return `${Math.floor(seconds / 60)}m`;
+  return `${seconds}s`;
+}
+
 /**
  * Compact composer chip for the thread's persisted goal (the agent-agnostic port of
- * pi-goal / Codex goals). Mirrors pi-goal's footer status: shows the lifecycle status and
- * turn count while a goal is live. Hidden when there is no goal or it has been cleared.
+ * pi-goal / Codex goals). Mirrors pi-goal's footer status: shows the lifecycle status,
+ * turn count, and running spend (tokens + time) while a goal is live. Hidden when there
+ * is no goal or it has been cleared.
  */
 export function GoalIndicator({
   goal,
 }: {
   goal: OrchestrationGoal | null | undefined;
-}): React.ReactElement | null {
+}): ReactElement | null {
   if (!goal || goal.status === "cleared") {
     return null;
   }
+
+  const budgetHint =
+    goal.tokenBudget !== null ? ` / ${formatTokens(goal.tokenBudget)}` : "";
 
   return (
     <span
@@ -32,6 +49,10 @@ export function GoalIndicator({
       <span aria-hidden>🎯</span>
       <span className="sr-only sm:not-sr-only">Goal: {GOAL_STATUS_LABEL[goal.status]}</span>
       <span className="text-muted-foreground/70">{goal.turnCount} turns</span>
+      <span className="text-muted-foreground/70">
+        {formatTokens(goal.tokensUsed)}{budgetHint} tokens
+      </span>
+      <span className="text-muted-foreground/70">{formatDuration(goal.timeUsedSeconds)}</span>
     </span>
   );
 }

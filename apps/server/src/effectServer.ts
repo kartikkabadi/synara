@@ -31,6 +31,7 @@ import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnap
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor";
 import { GoalContinuationReactor } from "./orchestration/Services/GoalContinuationReactor";
 import { reconcileRestartStuckTurns } from "./orchestration/startupTurnReconciliation";
+import { reconcileRestartActiveGoals } from "./orchestration/startupGoalReconciliation";
 import { ProviderSessionReaper } from "./provider/Services/ProviderSessionReaper";
 import { ProviderService, type ProviderServiceShape } from "./provider/Services/ProviderService";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
@@ -199,6 +200,11 @@ export const createEffectServer = Effect.fn(function* () {
       (cause) => new ServerLifecycleError({ operation: "recoverGitHandoffOperations", cause }),
     ),
   );
+  // Re-enqueue active goals into the continuation reactor so they resume without
+  // waiting for a manual message. Runs after stuck-turn healing (so terminal turns
+  // are resolved first) and before markCommandReady (so goals are unblocked before
+  // clients connect). The reactor staggers dispatches to avoid a restart load spike.
+  yield* reconcileRestartActiveGoals;
   yield* runtimeStartup.markCommandReady;
 
   yield* lifecycleEvents.publish({
