@@ -106,6 +106,10 @@ export const ServerSettings = Schema.Struct({
     pi: PiServerProviderSettings.pipe(Schema.withDecodingDefault(() => ({}))),
   }).pipe(Schema.withDecodingDefault(() => ({}))),
   skills: SkillsServerSettings.pipe(Schema.withDecodingDefault(() => ({}))),
+  autoCompactionEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
+  autoCompactionThreshold: Schema.Number.pipe(Schema.withDecodingDefault(() => 80)),
+  loopCompactionThreshold: Schema.Number.pipe(Schema.withDecodingDefault(() => 50)),
+  autoCompactionCooldownSeconds: Schema.Number.pipe(Schema.withDecodingDefault(() => 30)),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -180,6 +184,10 @@ export const ServerSettingsPatch = Schema.Struct({
       disabled: Schema.optionalKey(Schema.Array(Schema.String.check(Schema.isMaxLength(256)))),
     }),
   ),
+  autoCompactionEnabled: Schema.optionalKey(Schema.Boolean),
+  autoCompactionThreshold: Schema.optionalKey(Schema.Number),
+  loopCompactionThreshold: Schema.optionalKey(Schema.Number),
+  autoCompactionCooldownSeconds: Schema.optionalKey(Schema.Number),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 

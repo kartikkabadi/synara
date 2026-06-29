@@ -29,6 +29,7 @@ import { startClaudeCredentialKeepalive } from "./provider/claudeCredentialKeepa
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { ProviderHealthLive } from "./provider/Layers/ProviderHealth";
 import { ProviderSessionReaperLive } from "./provider/Layers/ProviderSessionReaper";
+import { CompactionReactorLive } from "./orchestration/Layers/CompactionReactor";
 import { Server } from "./effectServer";
 import { ServerLoggerLive } from "./serverLogger";
 import { ServerSettingsService } from "./serverSettings";
@@ -248,12 +249,20 @@ const LayerLive = (input: CliInput) => {
     Layer.provideMerge(runtimeServicesLayer),
     Layer.provideMerge(providerLayer),
   );
+  // CompactionReactor triggers provider-native compactThread, so it needs both
+  // the orchestration snapshot (from runtimeServicesLayer) and ProviderService
+  // (from providerLayer). Same top-level wiring as providerSessionReaperLayer.
+  const compactionReactorLayer = CompactionReactorLive.pipe(
+    Layer.provideMerge(runtimeServicesLayer),
+    Layer.provideMerge(providerLayer),
+  );
 
   return Layer.empty.pipe(
     Layer.provideMerge(runtimeServicesLayer),
     Layer.provideMerge(providerLayer),
     Layer.provideMerge(providerHealthLayer),
     Layer.provideMerge(providerSessionReaperLayer),
+    Layer.provideMerge(compactionReactorLayer),
     Layer.provideMerge(SqlitePersistence.layerConfig),
     Layer.provideMerge(ServerLoggerLive),
     Layer.provideMerge(AnalyticsServiceLayerLive),

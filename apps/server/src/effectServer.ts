@@ -23,6 +23,7 @@ import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReac
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor";
 import { GoalContinuationReactor } from "./orchestration/Services/GoalContinuationReactor";
+import { CompactionReactor } from "./orchestration/Services/CompactionReactor";
 import { reconcileRestartStuckTurns } from "./orchestration/startupTurnReconciliation";
 import { reconcileRestartActiveGoals } from "./orchestration/startupGoalReconciliation";
 import { ProviderSessionReaper } from "./provider/Services/ProviderSessionReaper";
@@ -53,6 +54,7 @@ export interface ServerShape {
     | ServerSettingsService
     | ThreadDeletionReactor
     | GoalContinuationReactor
+    | CompactionReactor
   >;
   readonly stopSignal: Effect.Effect<void, never>;
 }
@@ -79,6 +81,7 @@ export const createEffectServer = Effect.fn(function* () {
   const serverSettings = yield* ServerSettingsService;
   const threadDeletionReactor = yield* ThreadDeletionReactor;
   const goalContinuationReactor = yield* GoalContinuationReactor;
+  const compactionReactor = yield* CompactionReactor;
   const readiness = yield* makeServerReadiness;
 
   yield* keybindings.syncDefaultKeybindingsOnStartup.pipe(
@@ -138,6 +141,7 @@ export const createEffectServer = Effect.fn(function* () {
   yield* Scope.provide(automationRunReactor.start(), subscriptionsScope);
   yield* Scope.provide(threadDeletionReactor.start(), subscriptionsScope);
   yield* Scope.provide(goalContinuationReactor.start(), subscriptionsScope);
+  yield* Scope.provide(compactionReactor.start(), subscriptionsScope);
   yield* Scope.provide(providerSessionReaper.start(), subscriptionsScope);
   yield* readiness.markOrchestrationSubscriptionsReady;
   yield* readiness.markTerminalSubscriptionsReady;
