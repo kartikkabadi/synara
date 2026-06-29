@@ -12,6 +12,7 @@ import { makeDrainableWorker, type DrainableWorker } from "@t3tools/shared/Drain
 import { LoopReactor, type LoopReactorShape } from "../Services/LoopReactor.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 
 // Same trigger set as GoalContinuationReactor: events that mean "a turn may have
 // just settled" or "the loop/interaction state changed in a way that should
@@ -44,11 +45,14 @@ const serverCommandId = (tag: string): CommandId =>
 const loopIterationMessageId = (): MessageId =>
   MessageId.makeUnsafe(`loop-iteration:${crypto.randomUUID()}`);
 
-const LOOP_ERROR_PAUSE_THRESHOLD = 3;
+const LOOP_ERROR_RETRY_LIMIT = 3;
+// Exponential backoff delays for retry-on-error: 30s, 60s, 120s.
+const LOOP_ERROR_BACKOFF_MS = [30_000, 60_000, 120_000];
 
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  const settingsService = yield* ServerSettingsService;
 
   // We act at most once per completed turn per thread.
   const lastHandledTurnId = new Map<ThreadId, TurnId>();
@@ -129,11 +133,14 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    // Error handling: track consecutive terminal turn errors. Pause after
-    // LOOP_ERROR_PAUSE_THRESHOLD so the user knows the loop is stuck.
+    // Error handling: retry with exponential backoff (30s, 60s, 120s).
+    // After LOOP_ERROR_RETRY_LIMIT retries, pause the loop so the user knows
+    // it's stuck. Without the wake-up fiber, the loop would silently stall
+    // after the first error (no new turn dispatches → no trigger event →
+    // counter never increments).
     if (latestTurn.state === "error") {
       const count = (consecutiveErrors.get(threadId) ?? 0) + 1;
-      if (count >= LOOP_ERROR_PAUSE_THRESHOLD) {
+      if (count > LOOP_ERROR_RETRY_LIMIT) {
         consecutiveErrors.delete(threadId);
         lastHandledTurnId.delete(threadId);
         const existing = wakeUpFibers.get(threadId);
@@ -154,7 +161,56 @@ const make = Effect.gen(function* () {
         return;
       }
       consecutiveErrors.set(threadId, count);
-      lastHandledTurnId.set(threadId, latestTurn.turnId);
+      // Schedule a retry: after backoff, dispatch a new iteration. The new
+      // turn either completes (counter resets on the next trigger) or errors
+      // again (counter increments on the next trigger). This avoids silent
+      // stall — the loop actively retries instead of waiting for external
+      // triggers that never come.
+      const existing = wakeUpFibers.get(threadId);
+      if (existing) {
+        yield* Fiber.interrupt(existing);
+      }
+      const backoffMs = LOOP_ERROR_BACKOFF_MS[count - 1] ?? 120_000;
+      const retryEffect = Effect.sleep(Duration.millis(backoffMs)).pipe(
+        Effect.flatMap(() =>
+          orchestrationEngine.dispatch({
+            type: "thread.turn.start",
+            commandId: serverCommandId("loop-retry"),
+            threadId,
+            message: {
+              messageId: loopIterationMessageId(),
+              role: "user",
+              text: loop.prompt,
+              attachments: [],
+            },
+            inputSource: "loop-iteration",
+            runtimeMode: thread.runtimeMode,
+            interactionMode: "default",
+            dispatchMode: "queue",
+            createdAt: new Date().toISOString(),
+          }),
+        ),
+        Effect.asVoid,
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : Effect.logWarning("loop retry dispatch failed", {
+                threadId,
+                cause: Cause.pretty(cause),
+              }),
+        ),
+      );
+      // ponytail: cast needed because catchCause preserves the error channel
+      // via failCause (for interrupt propagation), but all non-interrupt errors
+      // are caught and logged. The fiber is stored for cancellation on
+      // clear/pause/next-trigger.
+      const fiber = (yield* Effect.forkDetach(retryEffect)) as Fiber.Fiber<void, never>;
+      wakeUpFibers.set(threadId, fiber);
+      yield* Effect.logWarning("loop retrying after turn error", {
+        threadId,
+        count,
+        backoffMs,
+      });
       return;
     }
 
@@ -185,11 +241,12 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    // Pre-dispatch usage check: if context usage is above 80%, skip this iteration.
-    // The CompactionReactor will compact, and the loop re-evaluates on the
-    // compaction's thread.activity-appended event.
+    // Pre-dispatch usage check: if context usage is above the loop compaction
+    // threshold, skip this iteration. The CompactionReactor will compact, and
+    // the loop re-evaluates on the compaction's thread.activity-appended event.
+    const settings = yield* settingsService.getSettings;
     const usedPercent = latestUsedPercent(thread);
-    if (usedPercent !== null && usedPercent >= 80) {
+    if (usedPercent !== null && usedPercent >= settings.loopCompactionThreshold) {
       // Don't mark as handled — re-evaluate when compaction drops usage.
       return;
     }
