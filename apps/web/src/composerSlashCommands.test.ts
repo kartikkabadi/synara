@@ -16,6 +16,7 @@ import {
   parseFastSlashCommandAction,
   parseForkSlashCommandArgs,
   parseGoalSlashCommand,
+  parseLoopSlashCommand,
   shouldHideProviderNativeCommandFromComposerMenu,
 } from "./composerSlashCommands";
 
@@ -65,6 +66,56 @@ describe("composerSlashCommands", () => {
       objective: "Ship it",
       tokenBudget: 100,
     });
+  });
+
+  it("parses /loop subcommands and create form", () => {
+    expect(parseLoopSlashCommand("")).toEqual({ kind: "status" });
+    expect(parseLoopSlashCommand("status")).toEqual({ kind: "status" });
+    expect(parseLoopSlashCommand("pause")).toEqual({ kind: "pause" });
+    expect(parseLoopSlashCommand("resume")).toEqual({ kind: "resume" });
+    expect(parseLoopSlashCommand("clear")).toEqual({ kind: "clear" });
+    expect(parseLoopSlashCommand("5m find and fix bugs")).toEqual({
+      kind: "create",
+      prompt: "find and fix bugs",
+      intervalSeconds: 300,
+    });
+    expect(parseLoopSlashCommand("1h rebuild the index")).toEqual({
+      kind: "create",
+      prompt: "rebuild the index",
+      intervalSeconds: 3600,
+    });
+    // Case-insensitive lifecycle keywords.
+    expect(parseLoopSlashCommand("PAUSE")).toEqual({ kind: "pause" });
+  });
+
+  it("returns an invalid create action when the interval is missing or malformed", () => {
+    expect(parseLoopSlashCommand("find and fix bugs")).toEqual({
+      kind: "create",
+      prompt: "",
+      intervalSeconds: 0,
+    });
+    expect(parseLoopSlashCommand("5m")).toEqual({
+      kind: "create",
+      prompt: "",
+      intervalSeconds: 0,
+    });
+    expect(parseLoopSlashCommand("5 find and fix bugs")).toEqual({
+      kind: "create",
+      prompt: "",
+      intervalSeconds: 0,
+    });
+  });
+
+  it("offers /loop to non-Claude providers", () => {
+    const codexCommands = getAvailableComposerSlashCommands({
+      provider: "codex",
+      supportsFastSlashCommand: true,
+      canOfferCompactCommand: true,
+      canOfferReviewCommand: true,
+      canOfferForkCommand: true,
+      canOfferSideCommand: true,
+    });
+    expect(codexCommands).toContain("loop");
   });
 
   it("offers /goal to non-Claude providers but not Claude (which has a native /goal)", () => {

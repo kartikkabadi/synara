@@ -7,6 +7,7 @@ import {
   deriveMessagesTimelineRows,
   deriveTerminalAssistantMessageIds,
   isHiddenGoalContinuationMessage,
+  isHiddenLoopIterationMessage,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
   type MessagesTimelineRow,
@@ -615,6 +616,17 @@ describe("isHiddenGoalContinuationMessage", () => {
   });
 });
 
+describe("isHiddenLoopIterationMessage", () => {
+  it("matches only user-role loop-iteration messages", () => {
+    expect(isHiddenLoopIterationMessage({ role: "user", source: "loop-iteration" })).toBe(true);
+    expect(isHiddenLoopIterationMessage({ role: "assistant", source: "loop-iteration" })).toBe(
+      false,
+    );
+    expect(isHiddenLoopIterationMessage({ role: "user", source: "native" })).toBe(false);
+    expect(isHiddenLoopIterationMessage({ role: "user" })).toBe(false);
+  });
+});
+
 describe("deriveMessagesTimelineRows", () => {
   type MessageTimelineRow = Extract<MessagesTimelineRow, { kind: "message" }>;
 
@@ -707,6 +719,20 @@ describe("deriveMessagesTimelineRows", () => {
     },
   });
 
+  const loopIterationEntry = (id: string, createdAt: string): TimelineEntry => ({
+    id: `entry-${id}`,
+    kind: "message",
+    createdAt,
+    message: {
+      id: MessageId.makeUnsafe(id),
+      role: "user",
+      text: "internal loop iteration",
+      createdAt,
+      streaming: false,
+      source: "loop-iteration",
+    },
+  });
+
   it("hides hidden goal-continuation turns but keeps their assistant response", () => {
     const rows = deriveMessagesTimelineRows({
       ...baseInput,
@@ -729,6 +755,30 @@ describe("deriveMessagesTimelineRows", () => {
     // The injected continuation message itself never renders...
     expect(messageRow(rows, "uc1")).toBeUndefined();
     // ...but the real user turn and the agent's response to the continuation both remain.
+    expect(messageRow(rows, "u1")).toBeDefined();
+    expect(messageRow(rows, "a2")).toBeDefined();
+  });
+
+  it("hides hidden loop-iteration turns but keeps their assistant response", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [
+        userEntry("u1", "2026-01-01T00:00:00Z"),
+        assistantEntry("a1", "2026-01-01T00:00:01Z", {
+          turnId: "t1",
+          text: "first",
+          completedAt: "2026-01-01T00:00:01Z",
+        }),
+        loopIterationEntry("li1", "2026-01-01T00:00:10Z"),
+        assistantEntry("a2", "2026-01-01T00:00:11Z", {
+          turnId: "t2",
+          text: "second",
+          completedAt: "2026-01-01T00:00:12Z",
+        }),
+      ],
+    });
+
+    expect(messageRow(rows, "li1")).toBeUndefined();
     expect(messageRow(rows, "u1")).toBeDefined();
     expect(messageRow(rows, "a2")).toBeDefined();
   });
