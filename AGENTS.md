@@ -84,3 +84,17 @@ Docs:
 - Codex-Monitor (Tauri, feature-complete, strong reference implementation): https://github.com/Dimillian/CodexMonitor
 
 Use these as implementation references when designing protocol handling, UX flows, and operational safeguards.
+
+## Cursor Cloud specific instructions
+
+Toolchain is managed by `mise` (Node + Bun pinned in `.mise.toml`) and is already on `PATH` for new shells (activated in `~/.bashrc`). The startup update script runs `bun install`. Standard tasks are unchanged: see root `package.json` scripts (`bun run dev`, `bun run lint`, `bun run typecheck`, `bun run test`, `bun run build`). Per the rules above, run `bun run test` (never `bun test`).
+
+Non-obvious caveats discovered in this environment:
+
+- Running the dev stack headless: the `t3` server CLI puts the controlling terminal into raw mode on startup. If it is launched in a background process group that still has a controlling TTY (e.g. directly in a tmux pane, or piped through `tee`), it receives `SIGTTOU` and is left in the `T` (stopped) state *before* it binds its HTTP/WebSocket port — so the server logs stop right after "orchestration engine started", the port never opens, and the UI never connects. Launch it detached from any controlling terminal. Working pattern (inside a tmux pane, so the process survives the shell):
+  `setsid bash -c "TURBO_UI=stream env -u T3CODE_AUTH_TOKEN T3CODE_NO_BROWSER=1 bun run dev -- --home-dir ./.synara-dev > /tmp/synara-dev.log 2>&1 < /dev/null"`
+  `TURBO_UI=stream` avoids turbo's interactive TUI; redirecting stdin from `/dev/null` and logging to a file keeps it non-interactive.
+- Default dev ports: server `3773`, web (Vite) `5733`. The Vite dev server binds IPv6 `localhost` only (`[::1]:5733`) — open `http://localhost:5733` or `http://[::1]:5733`; `http://127.0.0.1:5733` will NOT connect. The backend binds all interfaces on `3773`.
+- First cold load of the Vite dev server is heavy (very large module graph); the browser can show `ERR_INSUFFICIENT_RESOURCES` or a long blank/loading screen on the very first hit. Just wait and/or reload the same URL — once Vite has transformed/cached modules, subsequent loads are fast.
+- Provider agent CLIs (`codex`, `claude`, `gemini`, `cursor`, `grok`, `kilo`, `opencode`, `pi`) are NOT installed and require the user's own subscriptions/auth, so live agent chat turns cannot run here. Everything else works without a provider: the app boots, auto-bootstraps a project from the cwd, and the integrated terminal (`Ctrl/Cmd+J`), thread creation, etc. are all functional.
+- One `apps/server` test fails only in this environment: `GitCore > reuses an existing remote when the target URL only differs by a trailing slash after .git`. The cloud VM's `~/.gitconfig` has GitHub-auth `url.<token>.insteadOf` rewrites that rewrite the test's `git@github.com:` URL, so `git remote -v` returns a different URL and the dedup check sees a mismatch. It passes with a neutral global config (e.g. `GIT_CONFIG_GLOBAL=/dev/null`); it is not a code issue.
