@@ -27,6 +27,7 @@ import { LoopReactor } from "./orchestration/Services/LoopReactor";
 import { CompactionReactor } from "./orchestration/Services/CompactionReactor";
 import { reconcileRestartStuckTurns } from "./orchestration/startupTurnReconciliation";
 import { reconcileRestartActiveGoals } from "./orchestration/startupGoalReconciliation";
+import { reconcileRestartActiveLoops } from "./orchestration/startupLoopReconciliation";
 import { ProviderSessionReaper } from "./provider/Services/ProviderSessionReaper";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
@@ -158,6 +159,9 @@ export const createEffectServer = Effect.fn(function* () {
   // are resolved first) and before markCommandReady (so goals are unblocked before
   // clients connect). The reactor staggers dispatches to avoid a restart load spike.
   yield* reconcileRestartActiveGoals;
+  // Re-enqueue active loops into the loop reactor so they resume without waiting
+  // for a manual message. Same pattern as goal reconciliation above.
+  yield* reconcileRestartActiveLoops;
   yield* runtimeStartup.markCommandReady;
 
   yield* lifecycleEvents.publish({

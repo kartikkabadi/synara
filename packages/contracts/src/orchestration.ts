@@ -500,7 +500,8 @@ export const ORCHESTRATION_GOAL_COMPLETION_SENTINEL = "<goal-complete/>";
 // Loop state (session-scoped, ephemeral run + persisted state for UI snapshot).
 // Mirrors OrchestrationGoal's shape: the state is projected via domain events so
 // the UI can show loop status; the run (in-memory interval timer) is ephemeral and
-// lost on server restart. Startup loop reconciliation clears stale active loops.
+// lost on server restart. Startup loop reconciliation re-enqueues active loops so
+// the reactor recreates the wake-up fiber and resumes the interval.
 export const OrchestrationLoopStatus = Schema.Literals(["active", "paused", "cleared"]);
 export type OrchestrationLoopStatus = typeof OrchestrationLoopStatus.Type;
 
