@@ -208,9 +208,9 @@ const make = Effect.gen(function* () {
           yield* Fiber.interrupt(existing);
         }
         const remainingMs = intervalMs - elapsedMs;
-        const wakeEffect: Effect.Effect<void, never, never> = Effect.sleep(
-          Duration.millis(remainingMs),
-        ).pipe(Effect.flatMap(() => worker?.enqueue(threadId) ?? Effect.void));
+        const wakeEffect = Effect.sleep(Duration.millis(remainingMs)).pipe(
+          Effect.flatMap(() => worker?.enqueue(threadId) ?? Effect.void),
+        );
         const fiber = yield* Effect.forkDetach(wakeEffect);
         wakeUpFibers.set(threadId, fiber as Fiber.Fiber<void, never>);
         return;
@@ -273,6 +273,15 @@ const make = Effect.gen(function* () {
   return {
     start,
     drain: worker.drain,
+    reconcile: (threadIds) =>
+      Effect.forEach(
+        threadIds,
+        (threadId) =>
+          Effect.sleep(Duration.millis(500)).pipe(
+            Effect.andThen(() => worker!.enqueue(threadId as ThreadId)),
+          ),
+        { discard: true },
+      ),
   } satisfies LoopReactorShape;
 });
 
