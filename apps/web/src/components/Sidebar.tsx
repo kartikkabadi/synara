@@ -518,6 +518,7 @@ function WorktreeBadgeGlyph({ className }: { className?: string }) {
 // colored status dot. Thread rows and project headers use the same glyph so a
 // collapsed project still advertises active child chats.
 function SidebarStatusTrailingGlyph({ status }: { status: ThreadStatusPill }) {
+  const { settings } = useAppSettings();
   if (status.label === "Completed") {
     return (
       <HiOutlineCheckCircle
@@ -527,7 +528,7 @@ function SidebarStatusTrailingGlyph({ status }: { status: ThreadStatusPill }) {
     );
   }
   if (status.pulse) {
-    return <ThreadRunningSpinner />;
+    return <ThreadRunningSpinner loaderStyle={settings.loaderStyle} />;
   }
   return (
     <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", status.dotClass)} />
