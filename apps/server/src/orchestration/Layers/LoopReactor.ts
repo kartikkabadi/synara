@@ -212,7 +212,7 @@ const make = Effect.gen(function* () {
           Effect.flatMap(() => worker?.enqueue(threadId) ?? Effect.void),
         );
         const fiber = yield* Effect.forkDetach(wakeEffect);
-        wakeUpFibers.set(threadId, fiber as Fiber.Fiber<void, never>);
+        wakeUpFibers.set(threadId, fiber);
         return;
       }
     }
