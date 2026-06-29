@@ -85,6 +85,18 @@ export function shouldHideProviderNativeCommandFromComposerMenu(
   );
 }
 
+// Whether the provider's native `/review` command can actually be dispatched when the
+// user types `/review` as a prompt. opencode exposes `review` in its native command list,
+// but its ACP agent silently drops `/`-prefixed prompts for unrecognized slash commands
+// (opencode issue #27528). There is no native command dispatch RPC for non-Codex
+// providers — selecting a native command just inserts `/${command} ` as text, which
+// opencode's ACP parser then drops. Returning false here routes opencode to the text
+// fallback prompt (not `/`-prefixed, processed as a normal coding request). Revert the
+// opencode exclusion when opencode fixes #27528 upstream.
+export function nativeReviewDispatchable(provider: ProviderKind): boolean {
+  return provider !== "opencode";
+}
+
 export function getProviderNativeSlashCommandSearchTerms(
   provider: ProviderKind,
   command: string,

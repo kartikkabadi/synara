@@ -10,6 +10,7 @@ import {
   getAvailableComposerSlashCommands,
   hasProviderNativeSlashCommand,
   isBuiltInComposerSlashCommand,
+  nativeReviewDispatchable,
   parseComposerSlashInvocation,
   parseComposerSlashInvocationForCommands,
   parseFastSlashCommandAction,
@@ -223,6 +224,24 @@ describe("composerSlashCommands", () => {
     expect(availableCommands).toContain("review");
     expect(shouldHideProviderNativeCommandFromComposerMenu("codex", "review")).toBe(true);
     expect(shouldHideProviderNativeCommandFromComposerMenu("codex", "status")).toBe(false);
+  });
+
+  it("routes opencode /review to the text fallback (ACP silent-drop, #218)", () => {
+    // opencode exposes `review` in its native command list, but its ACP agent silently
+    // drops `/`-prefixed prompts for unrecognized slash commands (opencode #27528). The
+    // native command cannot be dispatched via ACP, so nativeReviewDispatchable must return
+    // false for opencode — this makes /review fall through to the text fallback prompt
+    // (not `/`-prefixed, processed as a normal coding request).
+    expect(nativeReviewDispatchable("opencode")).toBe(false);
+    // All other providers that expose `review` can dispatch it (Codex via startReview
+    // JSON-RPC; others via ACP when their parser handles it).
+    expect(nativeReviewDispatchable("codex")).toBe(true);
+    expect(nativeReviewDispatchable("claudeAgent")).toBe(true);
+    expect(nativeReviewDispatchable("cursor")).toBe(true);
+    expect(nativeReviewDispatchable("gemini")).toBe(true);
+    expect(nativeReviewDispatchable("grok")).toBe(true);
+    expect(nativeReviewDispatchable("kilo")).toBe(true);
+    expect(nativeReviewDispatchable("pi")).toBe(true);
   });
 
   it("keeps app-level /automation available even if a provider exposes a native collision", () => {

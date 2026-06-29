@@ -189,6 +189,7 @@ import {
   canOfferSideSlashCommand,
   canOfferReviewSlashCommand,
   hasProviderNativeSlashCommand,
+  nativeReviewDispatchable,
   resolveComposerSlashRootBranch,
 } from "../composerSlashCommands";
 import {
@@ -3026,9 +3027,18 @@ export default function ChatView({
     return composerTrigger;
   }, [composerTrigger, providerNativeCommandNames, selectedProvider]);
   const effectiveComposerTriggerKind = effectiveComposerTrigger?.kind ?? null;
+  // opencode exposes `review` in its native command list, but its ACP agent silently
+  // drops `/`-prefixed prompts for unrecognized slash commands (opencode issue #27528).
+  // There is no native command dispatch RPC for non-Codex providers — selecting a native
+  // command just inserts `/${command} ` as text, which opencode's ACP parser then drops.
+  // Exclude opencode so `/review` falls through to the text fallback prompt (which is not
+  // `/`-prefixed and is processed as a normal coding request). Revert this exclusion when
+  // opencode fixes #27528 upstream.
   const supportsTextNativeReviewCommand = useMemo(
-    () => providerNativeCommands.some((command) => command.name.toLowerCase() === "review"),
-    [providerNativeCommands],
+    () =>
+      nativeReviewDispatchable(selectedProvider) &&
+      providerNativeCommands.some((command) => command.name.toLowerCase() === "review"),
+    [providerNativeCommands, selectedProvider],
   );
   const providerSkills = providerSkillsQuery.data?.skills ?? EMPTY_PROVIDER_SKILLS;
   const selectedModelCaps = useMemo(
