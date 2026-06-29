@@ -118,12 +118,13 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    // Loop-active threads use a lower threshold (context grows predictably).
-    // Goals and normal threads use the general threshold. The loop field is
-    // added when LoopReactor lands; until then, all threads use the general
-    // threshold. The loopCompactionThreshold setting is already in the schema
-    // so LoopReactor can opt in without a migration.
-    const threshold = settings.autoCompactionThreshold;
+    // Loop-active threads use a lower threshold (context grows predictably
+    // during indefinite iteration). Goals and normal threads use the general
+    // threshold.
+    const threshold =
+      thread.loop && thread.loop.status === "active"
+        ? settings.loopCompactionThreshold
+        : settings.autoCompactionThreshold;
 
     if (usedPercent < threshold) {
       return;

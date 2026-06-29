@@ -3,6 +3,7 @@ import type {
   OrchestrationEvent,
   OrchestrationReadModel,
   ProjectKind,
+  ProviderKind,
   ThreadMarker,
 } from "@synara/contracts";
 import {
@@ -39,6 +40,23 @@ import {
 } from "./commandInvariants.ts";
 
 const nowIso = () => new Date().toISOString();
+
+// Static provider compaction capability map (mirrors CompactionReactor's
+// PROVIDER_COMPACTION_CAPABILITY). The decider can't read the runtime
+// `compactsAutomatically` flag from the read model, so it uses this
+// compile-time constant to block loop creation on providers that can't
+// compact AND don't auto-compact (Claude, Grok, Kilo). Without this guard,
+// the loop would hit the context limit and stall within a few iterations.
+const PROVIDER_CAN_LOOP: Record<ProviderKind, boolean> = {
+  codex: true,
+  claudeAgent: false,
+  cursor: true,
+  gemini: true,
+  grok: false,
+  kilo: false,
+  opencode: true,
+  pi: true,
+};
 const DEFAULT_ASSISTANT_DELIVERY_MODE = "buffered" as const;
 const STUDIO_PROJECT_KIND_SET = new Set<ProjectKind>(["studio"]);
 // Kinds that claim exclusive ownership of a workspace root. Chat containers are excluded: they
@@ -1724,6 +1742,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             "A goal already exists on this thread; complete or clear it before creating another.",
         });
       }
+      // Goal + Loop mutual exclusion: one continuation per thread. Both
+      // reactors would interleave dispatches with different prompts, causing
+      // neither to run consistently.
+      if (thread.loop && thread.loop.status === "active") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A loop is active on this thread. `/loop clear` or `/loop pause` first.",
+        });
+      }
       const goal = {
         id: command.goalId,
         objective: command.objective,
@@ -1870,6 +1897,24 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: "A loop already exists on this thread; clear it before creating another.",
+        });
+      }
+      // Goal + Loop mutual exclusion (symmetric guard — see thread.goal.create).
+      if (thread.goal && thread.goal.status === "active") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A goal is active on this thread. `/goal clear` or `/goal pause` first.",
+        });
+      }
+      // Block loop creation on providers that can't compact and don't
+      // auto-compact. Without compaction, the loop hits the context limit
+      // within a few iterations and stalls.
+      const provider = thread.modelSelection.provider as ProviderKind;
+      if (!PROVIDER_CAN_LOOP[provider]) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "This provider doesn't support compaction — the loop will hit the context limit. Use Codex, OpenCode, Pi, Cursor, or Gemini instead.",
         });
       }
       const loop = {

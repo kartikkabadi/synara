@@ -174,4 +174,36 @@ describe("orchestration decider — goals", () => {
     const event = await Effect.runPromise(decide(resumeCommand, pausedModel));
     expect((event as OrchestrationEvent).type).toBe("thread.goal-resumed");
   });
+
+  it("rejects creating a goal while a loop is active", async () => {
+    const readModel = await seedReadModel([
+      threadCreatedEvent,
+      makeEvent({
+        sequence: 2,
+        type: "thread.loop-created",
+        payload: {
+          threadId: "thread-1",
+          loop: {
+            prompt: "Find and fix bugs",
+            intervalSeconds: 300,
+            status: "active",
+            iterationsRun: 0,
+            createdAt: NOW,
+            updatedAt: NOW,
+          },
+        },
+      }),
+    ]);
+    const command = {
+      type: "thread.goal.create",
+      commandId: CommandId.makeUnsafe("cmd-goal-create"),
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      goalId: "goal-2",
+      objective: "Fix tests",
+      createdAt: NOW,
+    } satisfies Extract<OrchestrationCommand, { type: "thread.goal.create" }>;
+
+    const exit = await Effect.runPromiseExit(decide(command, readModel));
+    expect(Exit.isFailure(exit)).toBe(true);
+  });
 });
