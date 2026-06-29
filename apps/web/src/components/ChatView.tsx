@@ -399,6 +399,7 @@ import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./Compose
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { ChatHeader } from "./chat/ChatHeader";
 import { GoalIndicator } from "./chat/GoalIndicator";
+import { LoopIndicator } from "./chat/LoopIndicator";
 import { dispatchThreadNotes } from "~/pinnedMessages";
 import {
   mergeProjectInstructionsIntoThreadNotes,
@@ -10671,6 +10672,7 @@ export default function ChatView({
                           ) : null}
 
                           <GoalIndicator goal={activeThread?.goal} />
+                          <LoopIndicator loop={activeThread?.loop} />
 
                           {activeTaskList || sidebarProposedPlan || planSidebarOpen ? (
                             <Button
