@@ -81,12 +81,17 @@ export function useComposerVoiceController(
         voiceTranscriptionAvailable: activeProviderStatus?.voiceTranscriptionAvailable,
         isRecording: isVoiceRecording,
         isTranscribing: isVoiceTranscribing,
+        ...(selectedProvider !== "codex" && appSettings.voiceDictationEnabled
+          ? { localVoiceDictationEnabled: true }
+          : {}),
       }),
     [
       activeProviderStatus?.authStatus,
       activeProviderStatus?.voiceTranscriptionAvailable,
       isVoiceRecording,
       isVoiceTranscribing,
+      selectedProvider,
+      appSettings.voiceDictationEnabled,
     ],
   );
 
