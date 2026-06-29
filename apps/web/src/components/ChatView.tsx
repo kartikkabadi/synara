@@ -5659,9 +5659,17 @@ export default function ChatView({
         return;
       }
       const result = await api.server.transcribeVoice({
-        provider: "codex",
+        provider: selectedProvider,
         cwd: activeProject.cwd,
         ...(activeThread ? { threadId: activeThread.id } : {}),
+        ...(selectedProvider !== "codex"
+          ? {
+              voiceDictationModel: settings.voiceDictationModel,
+              ...(settings.voiceDictionary.length > 0
+                ? { voiceDictionary: settings.voiceDictionary }
+                : {}),
+            }
+          : {}),
         ...payload,
       });
       if (!isCurrentVoiceRequest()) {

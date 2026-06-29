@@ -10,6 +10,12 @@ export const MAC_INHERITED_ENTITLEMENTS_PATH =
   "apps/desktop/resources/entitlements.mac.inherit.plist";
 const MAC_DMG_ICON_PATH = "icon.icns";
 export const NODE_PTY_ASAR_UNPACK_GLOBS = ["node_modules/node-pty/**"] as const;
+// ponytail: whisper-cli binary for Windows/Linux voice dictation is not bundled yet.
+//   Mac users install via Homebrew (brew install whisper-cpp). Windows/Linux users
+//   get a clear error message pointing them to the install instructions. When CI
+//   is ready to download + place binaries in apps/desktop/resources/whisper/<platform>/,
+//   add extraResources config here to bundle them. resolveWhisperCliBinary() already
+//   checks process.resourcesPath/whisper/ on non-Mac platforms.
 
 export interface DesktopPlatformBuildConfig {
   readonly asarUnpack?: ReadonlyArray<string>;
