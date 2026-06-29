@@ -52,9 +52,11 @@ export const reconcileRestartActiveGoals: Effect.Effect<
     threadIds: activeGoalThreadIds,
   });
 
-  yield* goalReactor.reconcile(activeGoalThreadIds).pipe(
-    Effect.catchCause((cause) =>
-      Effect.logWarning("restart goal reconciliation failed to enqueue threads", { cause }),
-    ),
-  );
+  yield* goalReactor
+    .reconcile(activeGoalThreadIds)
+    .pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("restart goal reconciliation failed to enqueue threads", { cause }),
+      ),
+    );
 });

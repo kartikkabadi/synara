@@ -501,11 +501,7 @@ export const ORCHESTRATION_GOAL_COMPLETION_SENTINEL = "<goal-complete/>";
 // Mirrors OrchestrationGoal's shape: the state is projected via domain events so
 // the UI can show loop status; the run (in-memory interval timer) is ephemeral and
 // lost on server restart. Startup loop reconciliation clears stale active loops.
-export const OrchestrationLoopStatus = Schema.Literals([
-  "active",
-  "paused",
-  "cleared",
-]);
+export const OrchestrationLoopStatus = Schema.Literals(["active", "paused", "cleared"]);
 export type OrchestrationLoopStatus = typeof OrchestrationLoopStatus.Type;
 
 export const OrchestrationLoop = Schema.Struct({

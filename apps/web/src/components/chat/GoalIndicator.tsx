@@ -36,8 +36,7 @@ export function GoalIndicator({
     return null;
   }
 
-  const budgetHint =
-    goal.tokenBudget !== null ? ` / ${formatTokens(goal.tokenBudget)}` : "";
+  const budgetHint = goal.tokenBudget !== null ? ` / ${formatTokens(goal.tokenBudget)}` : "";
 
   return (
     <span
@@ -50,7 +49,8 @@ export function GoalIndicator({
       <span className="sr-only sm:not-sr-only">Goal: {GOAL_STATUS_LABEL[goal.status]}</span>
       <span className="text-muted-foreground/70">{goal.turnCount} turns</span>
       <span className="text-muted-foreground/70">
-        {formatTokens(goal.tokensUsed)}{budgetHint} tokens
+        {formatTokens(goal.tokensUsed)}
+        {budgetHint} tokens
       </span>
       <span className="text-muted-foreground/70">{formatDuration(goal.timeUsedSeconds)}</span>
     </span>

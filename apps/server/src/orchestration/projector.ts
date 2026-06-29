@@ -758,7 +758,13 @@ export function projectEvent(
         const loop = thread.loop;
         const loopIterationPatch =
           loop && loop.status === "active" && payload.source === "loop-iteration"
-            ? { loop: { ...loop, iterationsRun: loop.iterationsRun + 1, updatedAt: event.occurredAt } }
+            ? {
+                loop: {
+                  ...loop,
+                  iterationsRun: loop.iterationsRun + 1,
+                  updatedAt: event.occurredAt,
+                },
+              }
             : {};
 
         return {
