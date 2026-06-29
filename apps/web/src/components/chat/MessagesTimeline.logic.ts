@@ -206,6 +206,15 @@ export function isHiddenGoalContinuationMessage(
   return message.role === "user" && message.source === "goal-continuation";
 }
 
+// A hidden loop-iteration turn: same treatment as goal-continuation. The loop
+// reactor injects the same prompt every N minutes; hiding the repeated user
+// message keeps the transcript clean — only the agent's responses show.
+export function isHiddenLoopIterationMessage(
+  message: Pick<ChatMessage, "role" | "source">,
+): boolean {
+  return message.role === "user" && message.source === "loop-iteration";
+}
+
 // Derives transcript rows from timeline entries while keeping live narration and
 // tool rows in visual chronology. Work already waiting when assistant text
 // arrives renders above that text; trailing work renders below it.
@@ -219,9 +228,13 @@ export function deriveMessagesTimelineRows(input: {
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
 }): MessagesTimelineRow[] {
   const nextRows: MessagesTimelineRow[] = [];
-  // Hidden goal-continuation turns never render (their assistant responses still do).
+  // Hidden goal-continuation and loop-iteration turns never render (their assistant
+  // responses still do).
   const timelineEntries = input.timelineEntries.filter(
-    (entry) => entry.kind !== "message" || !isHiddenGoalContinuationMessage(entry.message),
+    (entry) =>
+      entry.kind !== "message" ||
+      (!isHiddenGoalContinuationMessage(entry.message) &&
+        !isHiddenLoopIterationMessage(entry.message)),
   );
   const timelineMessages = timelineEntries.flatMap((entry) =>
     entry.kind === "message" ? [entry.message] : [],

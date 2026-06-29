@@ -365,6 +365,7 @@ describe("composerSlashCommands", () => {
       "subagents",
       "automation",
       "goal",
+      "loop",
     ]);
   });
 

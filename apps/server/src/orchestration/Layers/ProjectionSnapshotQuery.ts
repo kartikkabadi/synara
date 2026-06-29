@@ -6,6 +6,7 @@ import {
   NonNegativeInt,
   OrchestrationCheckpointFile,
   OrchestrationGoal,
+  OrchestrationLoop,
   OrchestrationProjectShell,
   OrchestrationProposedPlanId,
   OrchestrationReadModel,
@@ -92,6 +93,10 @@ const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadGoalDbRowSchema = Schema.Struct({
   threadId: ThreadId,
   goal: Schema.fromJsonString(OrchestrationGoal),
+});
+const ProjectionThreadLoopDbRowSchema = Schema.Struct({
+  threadId: ThreadId,
+  loop: Schema.fromJsonString(OrchestrationLoop),
 });
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
@@ -638,6 +643,7 @@ function toProjectedThread(input: {
   readonly messages: ReadonlyArray<OrchestrationMessage>;
   readonly proposedPlans: ReadonlyArray<OrchestrationProposedPlan>;
   readonly goal: OrchestrationGoal | null;
+  readonly loop: OrchestrationLoop | null;
   readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
   readonly checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>;
   readonly session: OrchestrationSession | null;
@@ -679,6 +685,7 @@ function toProjectedThread(input: {
     messages: input.messages,
     proposedPlans: input.proposedPlans,
     goal: input.goal,
+    loop: input.loop,
     activities: input.activities,
     checkpoints: input.checkpoints,
     ...(threadRow.pinnedMessages !== null ? { pinnedMessages: threadRow.pinnedMessages } : {}),
@@ -891,6 +898,19 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           thread_id AS "threadId",
           goal_json AS "goal"
         FROM projection_thread_goal
+        ORDER BY thread_id ASC
+      `,
+  });
+
+  const listThreadLoopRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionThreadLoopDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          loop_json AS "loop"
+        FROM projection_thread_loop
         ORDER BY thread_id ASC
       `,
   });
@@ -1306,6 +1326,19 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  const listThreadLoopRowsByThread = SqlSchema.findAll({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionThreadLoopDbRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          loop_json AS "loop"
+        FROM projection_thread_loop
+        WHERE thread_id = ${threadId}
+      `,
+  });
+
   const listThreadActivityRowsByThread = SqlSchema.findAll({
     Request: ThreadIdLookupInput,
     Result: ProjectionThreadActivityDbRowSchema,
@@ -1660,6 +1693,19 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             goalsByThread.set(row.threadId, row.goal);
           }
 
+          const loopRows = yield* listThreadLoopRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getSnapshot:listThreadLoops:query",
+                "ProjectionSnapshotQuery.getSnapshot:listThreadLoops:decodeRows",
+              ),
+            ),
+          );
+          const loopsByThread = new Map<string, OrchestrationLoop>();
+          for (const row of loopRows) {
+            loopsByThread.set(row.threadId, row.loop);
+          }
+
           const threads: ReadonlyArray<OrchestrationThread> = threadRows.map((row) =>
             toProjectedThread({
               threadRow: row,
@@ -1667,6 +1713,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               messages: messages.byThread.get(row.threadId) ?? [],
               proposedPlans: proposedPlans.byThread.get(row.threadId) ?? [],
               goal: goalsByThread.get(row.threadId) ?? null,
+              loop: loopsByThread.get(row.threadId) ?? null,
               activities: activities.byThread.get(row.threadId) ?? [],
               checkpoints: checkpoints.byThread.get(row.threadId) ?? [],
               session: sessions.byThread.get(row.threadId) ?? null,
@@ -1794,6 +1841,19 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             goalsByThread.set(row.threadId, row.goal);
           }
 
+          const loopRows = yield* listThreadLoopRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listThreadLoops:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listThreadLoops:decodeRows",
+              ),
+            ),
+          );
+          const loopsByThread = new Map<string, OrchestrationLoop>();
+          for (const row of loopRows) {
+            loopsByThread.set(row.threadId, row.loop);
+          }
+
           const threads: ReadonlyArray<OrchestrationThread> = threadRows.map((row) =>
             toProjectedThread({
               threadRow: row,
@@ -1801,6 +1861,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               messages: [],
               proposedPlans: proposedPlans.byThread.get(row.threadId) ?? [],
               goal: goalsByThread.get(row.threadId) ?? null,
+              loop: loopsByThread.get(row.threadId) ?? null,
               activities: [],
               checkpoints: [],
               session: sessions.byThread.get(row.threadId) ?? null,
@@ -2291,6 +2352,15 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ),
       );
 
+      const loopRows = yield* listThreadLoopRowsByThread({ threadId }).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.getThreadDetailById:listLoops:query",
+            "ProjectionSnapshotQuery.getThreadDetailById:listLoops:decodeRows",
+          ),
+        ),
+      );
+
       const thread = toProjectedThread({
         threadRow: threadRow.value,
         latestTurn: Option.match(latestTurnRow, {
@@ -2300,6 +2370,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         messages: messageRows.map((row) => toProjectedMessage(row)),
         proposedPlans: proposedPlanRows.map((row) => toProjectedProposedPlan(row)),
         goal: goalRows[0]?.goal ?? null,
+        loop: loopRows[0]?.loop ?? null,
         activities: activityRows.map((row) => toProjectedActivity(row)),
         checkpoints: checkpointRows.map((row) => toProjectedCheckpoint(row)),
         session: Option.match(sessionRow, {

@@ -424,6 +424,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             },
           ],
           goal: null,
+          loop: null,
           checkpoints: [
             {
               turnId: asTurnId("turn-1"),

@@ -187,6 +187,12 @@ const COMPOSER_SLASH_COMMAND_DEFINITIONS: Record<
     description: "Set a persisted goal the agent keeps working toward until it's complete",
     source: "app",
   },
+  loop: {
+    command: "loop",
+    label: "/loop",
+    description: "Re-send a prompt every N minutes (e.g. /loop 5m find and fix bugs)",
+    source: "app",
+  },
 };
 
 export function isBuiltInComposerSlashCommand(value: string): value is ComposerSlashCommand {
@@ -388,6 +394,7 @@ export function getAvailableComposerSlashCommands(input: {
           "automation",
           // Claude ships a native /goal; other providers get Synara's agent-agnostic one.
           "goal",
+          "loop",
         ]
       : [
           // Claude owns most slash-command UX natively; sidechat remains app-level because it
@@ -458,6 +465,39 @@ export function parseGoalSlashCommand(args: string): GoalSlashCommandAction {
     objective = objective.slice(0, budgetMatch.index).trim();
   }
   return { kind: "create", objective, tokenBudget };
+}
+
+export type LoopSlashCommandAction =
+  | { kind: "status" }
+  | { kind: "pause" }
+  | { kind: "resume" }
+  | { kind: "clear" }
+  | { kind: "create"; prompt: string; intervalSeconds: number };
+
+// `/loop` (status), `/loop pause|resume|clear`, or `/loop <interval> <prompt>`.
+// Interval: `<n>m` or `<n>h` (1m–60m range). Example: `/loop 5m find and fix bugs`.
+export function parseLoopSlashCommand(args: string): LoopSlashCommandAction {
+  const trimmed = args.trim();
+  if (!trimmed) {
+    return { kind: "status" };
+  }
+  const lifecycleKind = (["status", "pause", "resume", "clear"] as const).find(
+    (keyword) => keyword === trimmed.toLowerCase(),
+  );
+  if (lifecycleKind) {
+    return { kind: lifecycleKind };
+  }
+
+  // Parse interval: first token must match <n>m or <n>h.
+  const intervalMatch = /^(\d+)(m|h)\s+(.+)$/is.exec(trimmed);
+  if (!intervalMatch || !intervalMatch[1] || !intervalMatch[2] || !intervalMatch[3]) {
+    return { kind: "create", prompt: "", intervalSeconds: 0 };
+  }
+  const num = Number(intervalMatch[1]);
+  const unit = intervalMatch[2].toLowerCase();
+  const intervalSeconds = unit === "h" ? num * 3600 : num * 60;
+  const prompt = intervalMatch[3].trim();
+  return { kind: "create", prompt, intervalSeconds };
 }
 
 // `/fork` optionally accepts only an explicit target shorthand like `/fork local`.

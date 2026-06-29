@@ -248,6 +248,10 @@ export const OrchestrationMessageSource = Schema.Literals([
   // A hidden continuation turn injected by the goal loop. The web hides/dims these,
   // mirroring pi-goal's `display: false` continuation messages.
   "goal-continuation",
+  // A hidden iteration turn injected by the loop reactor. Same treatment as
+  // goal-continuation: the web hides these so the transcript isn't spammed with
+  // the repeated loop prompt.
+  "loop-iteration",
 ]);
 export type OrchestrationMessageSource = typeof OrchestrationMessageSource.Type;
 
@@ -493,6 +497,30 @@ export type OrchestrationGoal = typeof OrchestrationGoal.Type;
 // adapted to a text channel because Synara cannot inject tools across all providers).
 export const ORCHESTRATION_GOAL_COMPLETION_SENTINEL = "<goal-complete/>";
 
+// Loop state (session-scoped, ephemeral run + persisted state for UI snapshot).
+// Mirrors OrchestrationGoal's shape: the state is projected via domain events so
+// the UI can show loop status; the run (in-memory interval timer) is ephemeral and
+// lost on server restart. Startup loop reconciliation clears stale active loops.
+export const OrchestrationLoopStatus = Schema.Literals([
+  "active",
+  "paused",
+  "cleared",
+]);
+export type OrchestrationLoopStatus = typeof OrchestrationLoopStatus.Type;
+
+export const OrchestrationLoop = Schema.Struct({
+  prompt: TrimmedNonEmptyString,
+  intervalSeconds: PositiveInt,
+  status: OrchestrationLoopStatus,
+  // Number of hidden iteration turns the loop reactor has injected. Derived from
+  // thread.message-sent events with source === "loop-iteration" (same pattern as
+  // goal continuationCount).
+  iterationsRun: NonNegativeInt,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationLoop = typeof OrchestrationLoop.Type;
+
 export const OrchestrationSessionStatus = Schema.Literals([
   "idle",
   "starting",
@@ -704,6 +732,9 @@ export const OrchestrationThread = Schema.Struct({
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(Schema.withDecodingDefault(() => [])),
   goal: Schema.optional(Schema.NullOr(OrchestrationGoal)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  loop: Schema.optional(Schema.NullOr(OrchestrationLoop)).pipe(
     Schema.withDecodingDefault(() => null),
   ),
   activities: Schema.Array(OrchestrationThreadActivity),
@@ -1268,6 +1299,36 @@ const ThreadGoalCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadLoopCreateCommand = Schema.Struct({
+  type: Schema.Literal("thread.loop.create"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  prompt: TrimmedNonEmptyString,
+  intervalSeconds: PositiveInt,
+  createdAt: IsoDateTime,
+});
+
+const ThreadLoopPauseCommand = Schema.Struct({
+  type: Schema.Literal("thread.loop.pause"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
+const ThreadLoopResumeCommand = Schema.Struct({
+  type: Schema.Literal("thread.loop.resume"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
+const ThreadLoopClearCommand = Schema.Struct({
+  type: Schema.Literal("thread.loop.clear"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
@@ -1301,6 +1362,10 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadGoalResumeCommand,
   ThreadGoalClearCommand,
   ThreadGoalCompleteCommand,
+  ThreadLoopCreateCommand,
+  ThreadLoopPauseCommand,
+  ThreadLoopResumeCommand,
+  ThreadLoopClearCommand,
   ThreadSessionStopCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
@@ -1339,6 +1404,10 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadGoalResumeCommand,
   ThreadGoalClearCommand,
   ThreadGoalCompleteCommand,
+  ThreadLoopCreateCommand,
+  ThreadLoopPauseCommand,
+  ThreadLoopResumeCommand,
+  ThreadLoopClearCommand,
   ThreadSessionStopCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
@@ -1481,6 +1550,10 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.goal-resumed",
   "thread.goal-cleared",
   "thread.goal-completed",
+  "thread.loop-created",
+  "thread.loop-paused",
+  "thread.loop-resumed",
+  "thread.loop-cleared",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -1813,6 +1886,18 @@ export const ThreadGoalLifecyclePayload = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 
+// Loop events mirror goal events: created carries the full loop snapshot, lifecycle
+// transitions carry just the thread id + timestamp.
+export const ThreadLoopCreatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  loop: OrchestrationLoop,
+});
+
+export const ThreadLoopLifecyclePayload = Schema.Struct({
+  threadId: ThreadId,
+  updatedAt: IsoDateTime,
+});
+
 export const OrchestrationEventMetadata = Schema.Struct({
   providerTurnId: Schema.optional(TrimmedNonEmptyString),
   providerItemId: Schema.optional(ProviderItemId),
@@ -2029,6 +2114,26 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.goal-completed"),
     payload: ThreadGoalLifecyclePayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.loop-created"),
+    payload: ThreadLoopCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.loop-paused"),
+    payload: ThreadLoopLifecyclePayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.loop-resumed"),
+    payload: ThreadLoopLifecyclePayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.loop-cleared"),
+    payload: ThreadLoopLifecyclePayload,
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;

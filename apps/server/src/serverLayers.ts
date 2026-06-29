@@ -13,6 +13,7 @@ import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRun
 import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus";
 import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor";
 import { GoalContinuationReactorLive } from "./orchestration/Layers/GoalContinuationReactor";
+import { LoopReactorLive } from "./orchestration/Layers/LoopReactor";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer";
 
 import { DevServerManagerLive } from "./devServerManager";
@@ -78,6 +79,9 @@ export function makeServerRuntimeServicesLayer() {
   const goalContinuationReactorLayer = GoalContinuationReactorLive.pipe(
     Layer.provideMerge(OrchestrationLayerLive),
   );
+  const loopReactorLayer = LoopReactorLive.pipe(
+    Layer.provideMerge(OrchestrationLayerLive),
+  );
   const sessionCredentialLayer = SessionCredentialServiceLive.pipe(
     Layer.provide(ServerSecretStoreLive),
   );
@@ -123,6 +127,7 @@ export function makeServerRuntimeServicesLayer() {
     threadDeletionReactorLayer,
     devServerManagerLayer,
     goalContinuationReactorLayer,
+    loopReactorLayer,
     GitLayerLive,
     TextGenerationLayerLive,
     TerminalLayerLive,

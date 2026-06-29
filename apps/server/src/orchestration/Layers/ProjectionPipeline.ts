@@ -45,6 +45,7 @@ import {
   ProjectionThreadProposedPlanRepository,
 } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
 import { ProjectionThreadGoalRepository } from "../../persistence/Services/ProjectionThreadGoal.ts";
+import { ProjectionThreadLoopRepository } from "../../persistence/Services/ProjectionThreadLoop.ts";
 import { ProjectionThreadSessionRepository } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import {
   type ProjectionTurn,
@@ -64,6 +65,7 @@ import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
 import { ProjectionThreadGoalRepositoryLive } from "../../persistence/Layers/ProjectionThreadGoal.ts";
+import { ProjectionThreadLoopRepositoryLive } from "../../persistence/Layers/ProjectionThreadLoop.ts";
 import {
   applyGoalTurnAccounting,
   incrementGoalContinuation,
@@ -95,6 +97,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   threadMessages: "projection.thread-messages",
   threadProposedPlans: "projection.thread-proposed-plans",
   threadGoal: "projection.thread-goal",
+  threadLoop: "projection.thread-loop",
   threadActivities: "projection.thread-activities",
   threadSessions: "projection.thread-sessions",
   threadTurns: "projection.thread-turns",
@@ -593,6 +596,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
   const projectionThreadMessageRepository = yield* ProjectionThreadMessageRepository;
   const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
   const projectionThreadGoalRepository = yield* ProjectionThreadGoalRepository;
+  const projectionThreadLoopRepository = yield* ProjectionThreadLoopRepository;
   const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
   const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
@@ -1347,6 +1351,68 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
       }
     });
 
+  const applyThreadLoopProjection: ProjectorDefinition["apply"] = (event, _attachmentSideEffects) =>
+    Effect.gen(function* () {
+      switch (event.type) {
+        case "thread.loop-created":
+          yield* projectionThreadLoopRepository.upsert({
+            threadId: event.payload.threadId,
+            loop: event.payload.loop,
+          });
+          return;
+
+        case "thread.loop-paused":
+        case "thread.loop-resumed":
+        case "thread.loop-cleared": {
+          const existing = yield* projectionThreadLoopRepository.getByThreadId({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existing)) {
+            return;
+          }
+          const status =
+            event.type === "thread.loop-paused"
+              ? "paused"
+              : event.type === "thread.loop-resumed"
+                ? "active"
+                : "cleared";
+          yield* projectionThreadLoopRepository.upsert({
+            threadId: event.payload.threadId,
+            loop: {
+              ...existing.value.loop,
+              status,
+              updatedAt: event.payload.updatedAt,
+            },
+          });
+          return;
+        }
+
+        case "thread.message-sent": {
+          if (event.payload.source !== "loop-iteration") {
+            return;
+          }
+          const existing = yield* projectionThreadLoopRepository.getByThreadId({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existing) || existing.value.loop.status !== "active") {
+            return;
+          }
+          yield* projectionThreadLoopRepository.upsert({
+            threadId: event.payload.threadId,
+            loop: {
+              ...existing.value.loop,
+              iterationsRun: existing.value.loop.iterationsRun + 1,
+              updatedAt: event.occurredAt,
+            },
+          });
+          return;
+        }
+
+        default:
+          return;
+      }
+    });
+
   const applyThreadActivitiesProjection: ProjectorDefinition["apply"] = (
     event,
     _attachmentSideEffects,
@@ -1894,6 +1960,11 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
       apply: applyThreadGoalProjection,
     },
     {
+      name: ORCHESTRATION_PROJECTOR_NAMES.threadLoop,
+      phase: "hot",
+      apply: applyThreadLoopProjection,
+    },
+    {
       name: ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
       phase: "hot",
       apply: applyThreadActivitiesProjection,
@@ -2169,6 +2240,7 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionThreadMessageRepositoryLive),
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),
   Layer.provideMerge(ProjectionThreadGoalRepositoryLive),
+  Layer.provideMerge(ProjectionThreadLoopRepositoryLive),
   Layer.provideMerge(ProjectionThreadActivityRepositoryLive),
   Layer.provideMerge(ProjectionThreadSessionRepositoryLive),
   Layer.provideMerge(ProjectionTurnRepositoryLive),

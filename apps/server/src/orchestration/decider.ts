@@ -1800,6 +1800,122 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.loop.create": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (thread.loop && thread.loop.status !== "cleared") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A loop already exists on this thread; clear it before creating another.",
+        });
+      }
+      const loop = {
+        prompt: command.prompt,
+        intervalSeconds: command.intervalSeconds,
+        status: "active" as const,
+        iterationsRun: 0,
+        createdAt: command.createdAt,
+        updatedAt: command.createdAt,
+      };
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.loop-created",
+        payload: {
+          threadId: command.threadId,
+          loop,
+        },
+      };
+    }
+
+    case "thread.loop.pause": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (!thread.loop || thread.loop.status !== "active") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "No active loop to pause.",
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.loop-paused",
+        payload: {
+          threadId: command.threadId,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.loop.resume": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (!thread.loop || thread.loop.status !== "paused") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "No paused loop to resume.",
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.loop-resumed",
+        payload: {
+          threadId: command.threadId,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.loop.clear": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (!thread.loop || thread.loop.status === "cleared") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "No loop to clear.",
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.loop-cleared",
+        payload: {
+          threadId: command.threadId,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
     default: {
       command satisfies never;
       const fallback = command as never as { type: string };

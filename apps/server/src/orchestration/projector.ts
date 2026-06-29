@@ -29,6 +29,8 @@ import {
   ThreadActivityAppendedPayload,
   ThreadGoalCreatedPayload,
   ThreadGoalLifecyclePayload,
+  ThreadLoopCreatedPayload,
+  ThreadLoopLifecyclePayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
   ThreadInteractionModeSetPayload,
@@ -752,11 +754,19 @@ export function projectEvent(
             ? { goal: incrementGoalContinuation(goal, event.occurredAt) }
             : {};
 
+        // Count hidden loop-iteration turns against the active loop.
+        const loop = thread.loop;
+        const loopIterationPatch =
+          loop && loop.status === "active" && payload.source === "loop-iteration"
+            ? { loop: { ...loop, iterationsRun: loop.iterationsRun + 1, updatedAt: event.occurredAt } }
+            : {};
+
         return {
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             messages: cappedMessages,
             ...goalContinuationPatch,
+            ...loopIterationPatch,
             updatedAt: event.occurredAt,
           }),
         };
@@ -1121,6 +1131,49 @@ export function projectEvent(
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
               goal: transitionGoalStatus(thread.goal, nextStatus, payload.updatedAt),
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+    }
+
+    case "thread.loop-created":
+      return decodeForEvent(ThreadLoopCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              loop: payload.loop,
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.loop-paused":
+    case "thread.loop-resumed":
+    case "thread.loop-cleared": {
+      const nextLoopStatus =
+        event.type === "thread.loop-paused"
+          ? "paused"
+          : event.type === "thread.loop-resumed"
+            ? "active"
+            : "cleared";
+      return decodeForEvent(ThreadLoopLifecyclePayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread || !thread.loop) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              loop: { ...thread.loop, status: nextLoopStatus, updatedAt: payload.updatedAt },
               updatedAt: event.occurredAt,
             }),
           };
