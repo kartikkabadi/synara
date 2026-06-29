@@ -309,8 +309,14 @@ export async function transcribeViaWhisper(options: WhisperTranscribeOptions): P
       },
     );
 
-    // Pipe 16kHz WAV to stdin.
-    child.stdin?.write(wav16k);
-    child.stdin?.end();
+    // Pipe 16kHz WAV to stdin. If stdin is unavailable (shouldn't happen with
+    // execFile but guard anyway), reject immediately rather than hang until timeout.
+    if (!child.stdin) {
+      reject(new Error("Failed to open whisper-cli stdin."));
+      child.kill();
+      return;
+    }
+    child.stdin.write(wav16k);
+    child.stdin.end();
   });
 }
