@@ -7,7 +7,7 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
-import { Cause, Effect, Layer, Option, Stream } from "effect";
+import { Cause, Duration, Effect, Layer, Option, Schedule, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { renderGoalContinuationPrompt } from "../goalContinuationPrompt.ts";
@@ -18,16 +18,30 @@ import {
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 
-// Domain events that mean "a turn may have just settled" for a thread. We re-read the
-// snapshot on each and decide from `latestTurn`, so either ordering (checkpoint-first or
-// session-idle-first) converges.
+// Domain events that mean "a turn may have just settled" or "the goal/interaction state
+// changed in a way that should re-evaluate continuation". We re-read the snapshot on each
+// and decide from `latestTurn`, so either ordering (checkpoint-first or session-idle-first)
+// converges.
 const TRIGGER_EVENT_TYPES = new Set<OrchestrationEvent["type"]>([
   "thread.turn-diff-completed",
   "thread.session-set",
+  // Resume: the reactor owns post-resume continuation dispatch (the web client only
+  // dispatches the first turn on goal create). Without this, `/goal resume` stalls
+  // indefinitely until a manual message or session restart fires a trigger.
+  "thread.goal-resumed",
+  // Plan mode exit: continuations skip while `interactionMode === "plan"`, but without
+  // this trigger the reactor never re-evaluates when the user exits plan mode. The event
+  // already exists (`orchestration.ts:1355`); just add it to the trigger set.
+  "thread.interaction-mode-set",
 ]);
 
 function triggerThreadId(event: OrchestrationEvent): ThreadId | null {
-  if (event.type === "thread.turn-diff-completed" || event.type === "thread.session-set") {
+  if (
+    event.type === "thread.turn-diff-completed" ||
+    event.type === "thread.session-set" ||
+    event.type === "thread.goal-resumed" ||
+    event.type === "thread.interaction-mode-set"
+  ) {
     return event.payload.threadId;
   }
   return null;
@@ -48,9 +62,21 @@ function findAssistantMessageForTurn(thread: OrchestrationThread, turnId: TurnId
     .find((entry) => entry.role === "assistant" && entry.turnId === turnId);
 }
 
-function turnHadToolActivity(thread: OrchestrationThread, turnId: TurnId): boolean {
-  return thread.activities.some((entry) => entry.turnId === turnId && entry.tone === "tool");
+// Strip markdown formatting (bold `**`, code blocks, backticks) and whitespace before
+// sentinel matching. Different providers format the sentinel differently (Claude bolds it,
+// Codex wraps in a code block, Gemini adds trailing whitespace). The sentinel approach's
+// whole point is cross-provider compatibility — exact plain-text match alone would only
+// work on providers that emit the sentinel verbatim.
+function normalizeSentinelCandidate(text: string): string {
+  return text
+    .trim()
+    .replace(/^```[a-zA-Z]*\n?|\n?```$/g, "")
+    .replace(/\*\*/g, "")
+    .replace(/`/g, "")
+    .trim();
 }
+
+const GOAL_ERROR_PAUSE_THRESHOLD = 3;
 
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -59,6 +85,11 @@ const make = Effect.gen(function* () {
   // We act at most once per completed turn per thread. Recorded only once we commit to
   // an action, so a trigger that arrives while the agent is still busy can retry later.
   const lastHandledTurnId = new Map<ThreadId, TurnId>();
+  // Ephemeral per-thread consecutive-error counter. Reset on successful turn completion.
+  // After GOAL_ERROR_PAUSE_THRESHOLD consecutive terminal turn errors, pause the goal so
+  // the user knows it is stuck instead of silently burning budget on erroring continuations
+  // (Codex c62d792). In-memory only — lost on restart, which also clears the failing session.
+  const consecutiveErrors = new Map<ThreadId, number>();
 
   const handleThread = Effect.fn(function* (threadId: ThreadId) {
     const thread = Option.getOrUndefined(
@@ -73,11 +104,45 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    // Only act on a turn that has actually completed.
     const latestTurn = thread.latestTurn;
-    if (!latestTurn || latestTurn.state !== "completed") {
+    if (!latestTurn) {
       return;
     }
+
+    // Goal error handling: track consecutive terminal turn errors. Without this the stall
+    // is silent — the reactor returns early on non-completed turns, so the user sees no
+    // indication the goal is stuck. Worse, manual messages between errors reset the visible
+    // state and the reactor dispatches another continuation that errors again, burning
+    // budget. Pause after GOAL_ERROR_PAUSE_THRESHOLD so the user can `/goal resume` to retry.
+    if (latestTurn.state === "error") {
+      const count = (consecutiveErrors.get(threadId) ?? 0) + 1;
+      if (count >= GOAL_ERROR_PAUSE_THRESHOLD) {
+        consecutiveErrors.delete(threadId);
+        lastHandledTurnId.delete(threadId);
+        yield* orchestrationEngine.dispatch({
+          type: "thread.goal.pause",
+          commandId: serverCommandId("goal-pause-errors"),
+          threadId,
+          createdAt: new Date().toISOString(),
+        });
+        yield* Effect.logWarning("goal paused after consecutive turn errors", {
+          threadId,
+          count,
+        });
+        return;
+      }
+      consecutiveErrors.set(threadId, count);
+      lastHandledTurnId.set(threadId, latestTurn.turnId);
+      return;
+    }
+
+    // Only act on a turn that has actually completed.
+    if (latestTurn.state !== "completed") {
+      return;
+    }
+    // A successful completion resets the error counter.
+    consecutiveErrors.delete(threadId);
+
     if (lastHandledTurnId.get(threadId) === latestTurn.turnId) {
       return;
     }
@@ -112,10 +177,10 @@ const make = Effect.gen(function* () {
     }
 
     // Completion: the model emitted the sentinel as the final line of its reply after the
-    // completion audit. Require an exact last-line match (not a substring) so quoting the
-    // sentinel in prose, a code block, or a blocker explanation does not falsely complete.
+    // completion audit. Match against the normalized last line (strip markdown formatting
+    // and whitespace) so providers that bold/code-wrap the sentinel still detect correctly.
     const lastLine = assistantMessage.text.trimEnd().split(/\r?\n/).at(-1)?.trim();
-    if (lastLine === ORCHESTRATION_GOAL_COMPLETION_SENTINEL) {
+    if (lastLine !== undefined && normalizeSentinelCandidate(lastLine) === ORCHESTRATION_GOAL_COMPLETION_SENTINEL) {
       yield* orchestrationEngine.dispatch({
         type: "thread.goal.complete",
         commandId: serverCommandId("goal-complete"),
@@ -125,19 +190,6 @@ const make = Effect.gen(function* () {
       // Goal is terminal now; drop the per-thread bookkeeping so the map cannot grow
       // unboundedly across the server's lifetime.
       lastHandledTurnId.delete(threadId);
-      return;
-    }
-
-    // No-activity suppression: once continuations have started, a turn that produced no
-    // tool activity means the agent is spinning. Stop until the user nudges it (mirrors
-    // pi-goal's no-tool continuation suppression). This is a terminal decision for the
-    // turn, so record it as handled.
-    if (goal.continuationCount > 0 && !turnHadToolActivity(thread, latestTurn.turnId)) {
-      lastHandledTurnId.set(threadId, latestTurn.turnId);
-      yield* Effect.logDebug("goal continuation suppressed: no tool activity", {
-        threadId,
-        turnId: latestTurn.turnId,
-      });
       return;
     }
 
@@ -178,6 +230,11 @@ const make = Effect.gen(function* () {
   const worker = yield* makeDrainableWorker(handleThreadSafely);
 
   const start: GoalContinuationReactorShape["start"] = Effect.fn(function* () {
+    // Wrap the stream consumer in Effect.retry so a stream-level failure (PubSub closed,
+    // engine crash) doesn't permanently kill the reactor. The per-event Effect.catchCause
+    // already prevents per-event errors from killing the stream — this handles stream-level
+    // failures. The 1s delay prevents tight restart loops. Matches the verified pattern in
+    // ProviderSessionReaper.ts:79 (Schedule.spaced without Schedule.forever).
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
         if (!TRIGGER_EVENT_TYPES.has(event.type)) {
@@ -185,13 +242,22 @@ const make = Effect.gen(function* () {
         }
         const threadId = triggerThreadId(event);
         return threadId === null ? Effect.void : worker.enqueue(threadId);
-      }),
+      }).pipe(Effect.retry(Schedule.spaced(Duration.seconds(1)))),
     );
   });
 
   return {
     start,
     drain: worker.drain,
+    reconcile: (threadIds) =>
+      Effect.forEach(
+        threadIds,
+        (threadId) =>
+          Effect.sleep(Duration.millis(500)).pipe(
+            Effect.andThen(() => worker.enqueue(threadId as ThreadId)),
+          ),
+        { discard: true },
+      ),
   } satisfies GoalContinuationReactorShape;
 });
 
