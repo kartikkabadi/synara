@@ -58,6 +58,10 @@ export type MessagesTimelineRow =
       // pre-empt the composer's live changes strip mid-turn.
       assistantTurnInProgress?: boolean | undefined;
       revertTurnCount?: number | undefined;
+      // Set on assistant rows that follow a hidden loop-iteration user message.
+      // Drives the "Iteration N" label so repeated loop responses are visually
+      // grouped instead of appearing as a flat wall of identical messages.
+      loopIterationNumber?: number | undefined;
     }
   | {
       kind: "proposed-plan";
@@ -228,6 +232,14 @@ export function deriveMessagesTimelineRows(input: {
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
 }): MessagesTimelineRow[] {
   const nextRows: MessagesTimelineRow[] = [];
+  // Duration boundaries must include hidden goal-continuation and loop-iteration
+  // user messages — otherwise the assistant response after a hidden message
+  // calculates its duration from the previous *visible* assistant message,
+  // inflating "worked for" times (e.g. 1m5s instead of 4s).
+  const allTimelineMessages = input.timelineEntries.flatMap((entry) =>
+    entry.kind === "message" ? [entry.message] : [],
+  );
+  const durationStartByMessageId = computeMessageDurationStart(allTimelineMessages);
   // Hidden goal-continuation and loop-iteration turns never render (their assistant
   // responses still do).
   const timelineEntries = input.timelineEntries.filter(
@@ -239,9 +251,25 @@ export function deriveMessagesTimelineRows(input: {
   const timelineMessages = timelineEntries.flatMap((entry) =>
     entry.kind === "message" ? [entry.message] : [],
   );
-  const durationStartByMessageId = computeMessageDurationStart(timelineMessages);
-  const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(timelineMessages);
+  // Terminal assistant detection must see hidden user messages too — they are
+  // turn boundaries. Without them, multiple loop iterations would look like one
+  // continuous turn and collapse into a single group.
+  const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(allTimelineMessages);
   let pendingWorkGroup: Extract<MessagesTimelineRow, { kind: "work" }> | null = null;
+  // Pre-compute which assistant messages are responses to hidden loop-iteration
+  // user messages, and tag them with their 1-based iteration number. This lets
+  // the rendered transcript show "Iteration N" labels without the hidden user
+  // messages themselves appearing.
+  const loopIterationNumberByAssistantMessageId = new Map<string, number>();
+  let loopIterationCount = 0;
+  for (const entry of input.timelineEntries) {
+    if (entry.kind !== "message") continue;
+    if (isHiddenLoopIterationMessage(entry.message)) {
+      loopIterationCount += 1;
+    } else if (entry.message.role === "assistant" && loopIterationCount > 0) {
+      loopIterationNumberByAssistantMessageId.set(entry.message.id, loopIterationCount);
+    }
+  }
 
   const groupedEntriesEqual = (
     left: ReadonlyArray<WorkLogEntry>,
@@ -363,6 +391,13 @@ export function deriveMessagesTimelineRows(input: {
         timelineEntry.message.role === "user"
           ? input.revertTurnCountByUserMessageId.get(timelineEntry.message.id)
           : undefined,
+      ...(timelineEntry.message.role === "assistant" &&
+      loopIterationNumberByAssistantMessageId.has(timelineEntry.message.id)
+        ? {
+            loopIterationNumber:
+              loopIterationNumberByAssistantMessageId.get(timelineEntry.message.id),
+          }
+        : {}),
     });
   }
 
@@ -458,6 +493,10 @@ function collapseSettledTurns(
         continue;
       }
       if (prev.kind === "message" && prev.message.role === "assistant") {
+        // Stop at a terminal assistant from a previous turn — it is the end
+        // of a separate response (e.g. a loop-iteration reply), not a
+        // mini-turn within the current turn.
+        if (terminalAssistantMessageIds.has(prev.message.id)) break;
         foldIndices.push(scan);
         continue;
       }
@@ -734,7 +773,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.assistantCopyStreaming === bm.assistantCopyStreaming &&
         a.assistantTurnInProgress === bm.assistantTurnInProgress &&
         a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
-        a.revertTurnCount === bm.revertTurnCount
+        a.revertTurnCount === bm.revertTurnCount &&
+        a.loopIterationNumber === bm.loopIterationNumber
       );
     }
   }

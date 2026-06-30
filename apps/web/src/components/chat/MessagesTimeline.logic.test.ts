@@ -783,6 +783,68 @@ describe("deriveMessagesTimelineRows", () => {
     expect(messageRow(rows, "a2")).toBeDefined();
   });
 
+  it("calculates duration from hidden loop-iteration user message, not previous assistant", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [
+        userEntry("u1", "2026-01-01T00:00:00Z"),
+        assistantEntry("a1", "2026-01-01T00:00:01Z", {
+          turnId: "t1",
+          text: "first",
+          completedAt: "2026-01-01T00:00:05Z",
+        }),
+        // Hidden loop-iteration at 00:00:60 — should be the duration boundary for a2.
+        loopIterationEntry("li1", "2026-01-01T00:01:00Z"),
+        assistantEntry("a2", "2026-01-01T00:01:01Z", {
+          turnId: "t2",
+          text: "second",
+          completedAt: "2026-01-01T00:01:04Z",
+        }),
+      ],
+    });
+
+    const a2 = messageRow(rows, "a2");
+    expect(a2).toBeDefined();
+    // Duration start should be the hidden loop-iteration's createdAt, not a1's completedAt.
+    expect(a2!.durationStart).toBe("2026-01-01T00:01:00Z");
+  });
+
+  it("tags loop-iteration assistant responses with iteration number", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [
+        userEntry("u1", "2026-01-01T00:00:00Z"),
+        assistantEntry("a1", "2026-01-01T00:00:01Z", {
+          turnId: "t1",
+          text: "first",
+          completedAt: "2026-01-01T00:00:05Z",
+        }),
+        loopIterationEntry("li1", "2026-01-01T00:01:00Z"),
+        assistantEntry("a2", "2026-01-01T00:01:01Z", {
+          turnId: "t2",
+          text: "Hi.",
+          completedAt: "2026-01-01T00:01:04Z",
+        }),
+        loopIterationEntry("li2", "2026-01-01T00:02:00Z"),
+        assistantEntry("a3", "2026-01-01T00:02:01Z", {
+          turnId: "t3",
+          text: "Hi.",
+          completedAt: "2026-01-01T00:02:04Z",
+        }),
+      ],
+    });
+
+    // First assistant (before any loop) has no iteration number.
+    const a1 = messageRow(rows, "a1");
+    expect(a1?.loopIterationNumber).toBeUndefined();
+    // Second assistant (after 1st loop-iteration) is iteration 1.
+    const a2 = messageRow(rows, "a2");
+    expect(a2?.loopIterationNumber).toBe(1);
+    // Third assistant (after 2nd loop-iteration) is iteration 2.
+    const a3 = messageRow(rows, "a3");
+    expect(a3?.loopIterationNumber).toBe(2);
+  });
+
   it("folds a settled turn's narration and work into one collapsed group on the terminal message", () => {
     const rows = deriveMessagesTimelineRows({
       ...baseInput,
