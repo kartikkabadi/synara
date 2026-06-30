@@ -394,8 +394,9 @@ export function deriveMessagesTimelineRows(input: {
       ...(timelineEntry.message.role === "assistant" &&
       loopIterationNumberByAssistantMessageId.has(timelineEntry.message.id)
         ? {
-            loopIterationNumber:
-              loopIterationNumberByAssistantMessageId.get(timelineEntry.message.id),
+            loopIterationNumber: loopIterationNumberByAssistantMessageId.get(
+              timelineEntry.message.id,
+            ),
           }
         : {}),
     });

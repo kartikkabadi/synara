@@ -1,6 +1,7 @@
 import { type ReactElement, useCallback, useEffect, useRef, useState } from "react";
-import type { OrchestrationLoop } from "@t3tools/contracts";
+import { type OrchestrationLoop, type ThreadId } from "@t3tools/contracts";
 import { readNativeApi } from "~/nativeApi";
+import { newCommandId } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { toastManager } from "../ui/toast";
@@ -34,7 +35,7 @@ export function LoopIndicator({
   lastIterationCompletedAt,
 }: {
   loop: OrchestrationLoop | null | undefined;
-  threadId: string | null | undefined;
+  threadId: ThreadId | null | undefined;
   isWorking: boolean;
   lastIterationCompletedAt: string | null | undefined;
 }): ReactElement | null {
@@ -44,7 +45,7 @@ export function LoopIndicator({
       if (!api || !threadId) return;
       void api.orchestration.dispatchCommand({
         type,
-        commandId: `loop-indicator-${crypto.randomUUID()}`,
+        commandId: newCommandId(),
         threadId,
         createdAt: new Date().toISOString(),
       });
@@ -60,7 +61,9 @@ export function LoopIndicator({
       return;
     }
     const update = () => {
-      const elapsed = Math.floor((Date.now() - new Date(lastIterationCompletedAt).getTime()) / 1000);
+      const elapsed = Math.floor(
+        (Date.now() - new Date(lastIterationCompletedAt).getTime()) / 1000,
+      );
       setSecondsRemaining(Math.max(0, loop.intervalSeconds - elapsed));
     };
     update();
@@ -105,14 +108,14 @@ export function LoopIndicator({
           >
             <span aria-hidden>🔄</span>
             <span className="sr-only sm:not-sr-only">Loop: {LOOP_STATUS_LABEL[loop.status]}</span>
-            <span className="text-muted-foreground/70">every {formatInterval(loop.intervalSeconds)}</span>
+            <span className="text-muted-foreground/70">
+              every {formatInterval(loop.intervalSeconds)}
+            </span>
             <span className="text-muted-foreground/70">{loop.iterationsRun} runs</span>
             {showCountdown ? (
               <span className="text-muted-foreground/70">next in {secondsRemaining}s</span>
             ) : null}
-            {isRunning ? (
-              <span className="text-muted-foreground/70">running…</span>
-            ) : null}
+            {isRunning ? <span className="text-muted-foreground/70">running…</span> : null}
           </button>
         }
       />
