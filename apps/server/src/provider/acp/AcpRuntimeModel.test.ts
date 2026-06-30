@@ -500,9 +500,9 @@ describe("AcpRuntimeModel", () => {
       {
         _tag: "AvailableCommandsUpdated",
         commands: [
-          { name: "/revert", description: "Revert changes" },
-          { name: "/steps" },
-          { name: "/fork", description: "Fork session" },
+          { name: "revert", description: "Revert changes" },
+          { name: "steps" },
+          { name: "fork", description: "Fork session" },
         ],
         rawPayload: {
           sessionId: "session-1",
@@ -533,7 +533,7 @@ describe("AcpRuntimeModel", () => {
 
     expect(commands).toEqual([
       {
-        name: "/deploy",
+        name: "deploy",
         description: "Deploy the app",
         inputHint: "environment",
         inputMeta: { required: true, placeholder: "staging" },
@@ -556,7 +556,7 @@ describe("AcpRuntimeModel", () => {
     expect(result.events).toEqual([
       {
         _tag: "AvailableCommandsUpdated",
-        commands: [{ name: "/revert" }],
+        commands: [{ name: "revert" }],
         rawPayload: expect.any(Object),
       },
     ]);

@@ -546,8 +546,8 @@ describe("AcpSessionRuntime", () => {
 
       const commands = yield* runtime.getAvailableCommands;
       expect(commands).toEqual([
-        { name: "/revert", description: "Revert changes" },
-        { name: "/steps" },
+        { name: "revert", description: "Revert changes" },
+        { name: "steps" },
       ]);
     }).pipe(
       Effect.provide(

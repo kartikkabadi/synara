@@ -1891,14 +1891,32 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
         }
       }).pipe(
         Effect.provide(
-          mockSpawnerLayer((args) => {
-            const joined = args.join(" ");
-            if (joined === "--version") return { stdout: "devin 1.2.3\n", stderr: "", code: 0 };
-            if (joined === "auth status") {
-              throw new Error("spawn devin auth status EACCES");
-            }
-            throw new Error(`Unexpected args: ${joined}`);
-          }),
+          Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make((command) => {
+              const cmd = command as unknown as {
+                command: string;
+                args: ReadonlyArray<string>;
+              };
+              const joined = cmd.args.join(" ");
+              if (joined === "auth status") {
+                return Effect.fail(
+                  PlatformError.systemError({
+                    _tag: "PermissionDenied",
+                    module: "ChildProcess",
+                    method: "spawn",
+                    description: "spawn devin auth status EACCES",
+                  }),
+                );
+              }
+              if (joined === "--version") {
+                return Effect.succeed(
+                  mockHandle({ stdout: "devin 1.2.3\n", stderr: "", code: 0 }),
+                );
+              }
+              return Effect.fail(new Error(`Unexpected args: ${joined}`));
+            }),
+          ),
         ),
       ),
     );
