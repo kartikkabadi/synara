@@ -1428,6 +1428,15 @@ export default function ChatView({
     activities: threadActivities,
     session: activeThread?.session ?? null,
   });
+  // Last assistant completion timestamp, memoized so the LoopIndicator
+  // countdown doesn't re-scan the full message list on every render.
+  const lastAssistantCompletedAt = useMemo(
+    () =>
+      activeThread?.messages.findLast(
+        (message) => message.role === "assistant" && message.completedAt,
+      )?.completedAt,
+    [activeThread?.messages],
+  );
   const activeContextWindow = useMemo(
     () => deriveLatestContextWindowSnapshot(threadActivities),
     [threadActivities],
@@ -9829,11 +9838,7 @@ export default function ChatView({
                             loop={activeThread?.loop}
                             threadId={activeThreadId}
                             isWorking={isWorking}
-                            lastIterationCompletedAt={
-                              activeThread?.messages.findLast(
-                                (message) => message.role === "assistant" && message.completedAt,
-                              )?.completedAt
-                            }
+                            lastIterationCompletedAt={lastAssistantCompletedAt}
                           />
 
                           {activeTaskList || sidebarProposedPlan || planSidebarOpen ? (

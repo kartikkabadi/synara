@@ -68,9 +68,15 @@ export function LoopIndicator({
 
   // Warn the user once when a loop crosses 50 iterations so unintended loops
   // do not silently burn budget. The ref prevents duplicate toasts on re-render.
+  // Re-arm when the loop is absent/cleared or reset below 50 so a new loop on
+  // the same thread warns again.
   const warnedAt50 = useRef(false);
   useEffect(() => {
-    if (loop && loop.iterationsRun >= 50 && !warnedAt50.current) {
+    if (!loop || loop.status === "cleared" || loop.iterationsRun < 50) {
+      warnedAt50.current = false;
+      return;
+    }
+    if (!warnedAt50.current) {
       warnedAt50.current = true;
       toastManager.add({
         type: "warning",

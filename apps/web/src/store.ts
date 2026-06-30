@@ -2425,6 +2425,12 @@ function removeThreadState(state: AppState, threadId: ThreadId): AppState {
     state.threadSessionById ?? EMPTY_THREAD_SESSION_BY_ID;
   const { [threadId]: _removedTurnState, ...threadTurnStateById } =
     state.threadTurnStateById ?? EMPTY_THREAD_TURN_STATE_BY_ID;
+  // Goal state lives in a separate map (loop flows through the shell, which is
+  // already destructured above). Without this, deleting a thread leaves a
+  // dangling threadGoalById entry that getThreadFromState would keep
+  // reconstructing into a stale Thread.goal on a recycled thread id.
+  const { [threadId]: _removedGoal, ...threadGoalById } =
+    state.threadGoalById ?? EMPTY_THREAD_GOAL_BY_ID;
   const { [threadId]: _removedMessageIds, ...messageIdsByThreadId } =
     state.messageIdsByThreadId ?? EMPTY_MESSAGE_IDS_BY_THREAD;
   const { [threadId]: _removedMessages, ...messageByThreadId } =
@@ -2460,6 +2466,7 @@ function removeThreadState(state: AppState, threadId: ThreadId): AppState {
     threadShellById,
     threadSessionById,
     threadTurnStateById,
+    threadGoalById,
     messageIdsByThreadId,
     messageByThreadId,
     activityIdsByThreadId,
