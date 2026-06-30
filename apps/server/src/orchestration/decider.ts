@@ -1684,11 +1684,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       // Goal + Loop mutual exclusion: one continuation per thread. Both
       // reactors would interleave dispatches with different prompts, causing
-      // neither to run consistently.
-      if (thread.loop && thread.loop.status === "active") {
+      // neither to run consistently. A paused loop still owns the slot —
+      // resuming it later would interleave with an active goal — so block
+      // creation while the loop is active OR paused.
+      if (thread.loop && (thread.loop.status === "active" || thread.loop.status === "paused")) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: "A loop is active on this thread. `/loop clear` or `/loop pause` first.",
+          detail: "A loop is active or paused on this thread. `/loop clear` first.",
         });
       }
       const goal = {
@@ -1756,6 +1758,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: "No paused goal to resume.",
+        });
+      }
+      // Goal + Loop mutual exclusion on resume: a paused loop still owns the
+      // slot. Resuming the goal while a loop is paused would interleave both
+      // once the loop is resumed.
+      if (thread.loop && (thread.loop.status === "active" || thread.loop.status === "paused")) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A loop is active or paused on this thread. `/loop clear` first.",
         });
       }
       return {
@@ -1840,10 +1851,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       // Goal + Loop mutual exclusion (symmetric guard — see thread.goal.create).
-      if (thread.goal && thread.goal.status === "active") {
+      // A paused goal still owns the slot — resuming it later would interleave
+      // with an active loop — so block creation while the goal is active OR paused.
+      if (thread.goal && (thread.goal.status === "active" || thread.goal.status === "paused")) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: "A goal is active on this thread. `/goal clear` or `/goal pause` first.",
+          detail: "A goal is active or paused on this thread. `/goal clear` first.",
         });
       }
       // Block loop creation on providers that can't compact and don't
@@ -1917,6 +1930,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: "No paused loop to resume.",
+        });
+      }
+      // Goal + Loop mutual exclusion on resume (symmetric — see thread.goal.resume).
+      if (thread.goal && (thread.goal.status === "active" || thread.goal.status === "paused")) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A goal is active or paused on this thread. `/goal clear` first.",
         });
       }
       return {
