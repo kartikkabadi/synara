@@ -12,6 +12,7 @@ import type {
   ServerVoiceTranscriptionResult,
 } from "@t3tools/contracts";
 import { prepareWindowsSafeProcess } from "@t3tools/shared/windowsProcess";
+import { transcribeViaWhisper } from "./whisperTranscription";
 
 export const SERVER_TRANSCRIBE_VOICE_CHANNEL = "desktop:server-transcribe-voice";
 
@@ -295,10 +296,34 @@ async function transcribeVoiceViaDesktopBridge(
   return { text };
 }
 
+// Provider routing: Codex uses the existing ChatGPT transcription endpoint
+// (requires ChatGPT-authenticated Codex session). All other providers route
+// through the local whisper.cpp sidecar (offline, no auth needed). The web app
+// passes voiceDictationModel and voiceDictionary in the input — no desktop-side
+// settings store needed.
+async function transcribeVoiceWithRouting(
+  input: ServerVoiceTranscriptionInput,
+): Promise<ServerVoiceTranscriptionResult> {
+  // Codex provider: existing ChatGPT path (unchanged).
+  if (input.provider === "codex") {
+    return transcribeVoiceViaDesktopBridge(input);
+  }
+
+  // Non-Codex providers: local whisper.cpp sidecar.
+  const audioBuffer = decodeDesktopVoiceAudio(input);
+  const text = await transcribeViaWhisper({
+    audioBuffer,
+    modelName: input.voiceDictationModel ?? "base-q5_1",
+    dictionary: input.voiceDictionary ?? [],
+  });
+
+  return { text };
+}
+
 export function registerDesktopVoiceTranscriptionHandler(): void {
   ipcMain.removeHandler(SERVER_TRANSCRIBE_VOICE_CHANNEL);
   ipcMain.handle(
     SERVER_TRANSCRIBE_VOICE_CHANNEL,
-    async (_event, input: ServerVoiceTranscriptionInput) => transcribeVoiceViaDesktopBridge(input),
+    async (_event, input: ServerVoiceTranscriptionInput) => transcribeVoiceWithRouting(input),
   );
 }
