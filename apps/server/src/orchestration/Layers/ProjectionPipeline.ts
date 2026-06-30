@@ -1,4 +1,9 @@
-import { ApprovalRequestId, CommandId, type OrchestrationEvent } from "@synara/contracts";
+import {
+  ApprovalRequestId,
+  CommandId,
+  type OrchestrationEvent,
+  type ThreadId,
+} from "@synara/contracts";
 import {
   addPinnedMessage,
   removePinnedMessage,
@@ -488,6 +493,27 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig;
+
+  // Bump projection_threads.updated_at without rewriting the full row. Goal/loop
+  // lifecycle events don't change thread metadata, but the web's thread row
+  // timestamp (toProjectedThread) sources from updated_at, so without this bump
+  // a snapshot reload after `/goal pause` would show a stale thread.updatedAt
+  // and the UI wouldn't re-render the goal indicator.
+  const touchThreadUpdatedAt = (threadId: ThreadId, occurredAt: string) =>
+    Effect.gen(function* () {
+      const existing = yield* projectionThreadRepository.getById({ threadId });
+      if (Option.isNone(existing)) {
+        return;
+      }
+      // Don't rewind the timestamp — only bump forward.
+      if (occurredAt <= existing.value.updatedAt) {
+        return;
+      }
+      yield* projectionThreadRepository.upsert({
+        ...existing.value,
+        updatedAt: occurredAt,
+      });
+    });
 
   const applyProjectsProjection: ProjectorDefinition["apply"] = (event, _attachmentSideEffects) =>
     event.type === "project.created" ||
@@ -1016,6 +1042,10 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             threadId: event.payload.threadId,
             goal: event.payload.goal,
           });
+          // Bump the thread row so snapshot reloads see the goal lifecycle
+          // change in thread.updatedAt (toProjectedThread sources the thread
+          // timestamp from projection_threads.updated_at).
+          yield* touchThreadUpdatedAt(event.payload.threadId, event.occurredAt);
           return;
 
         case "thread.goal-paused":
@@ -1040,6 +1070,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             threadId: event.payload.threadId,
             goal: transitionGoalStatus(existing.value.goal, status, event.payload.updatedAt),
           });
+          yield* touchThreadUpdatedAt(event.payload.threadId, event.occurredAt);
           return;
         }
 
@@ -1100,6 +1131,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             threadId: event.payload.threadId,
             loop: event.payload.loop,
           });
+          yield* touchThreadUpdatedAt(event.payload.threadId, event.occurredAt);
           return;
 
         case "thread.loop-paused":
@@ -1125,6 +1157,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
               updatedAt: event.payload.updatedAt,
             },
           });
+          yield* touchThreadUpdatedAt(event.payload.threadId, event.occurredAt);
           return;
         }
 
