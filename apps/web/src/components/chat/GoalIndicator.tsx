@@ -1,5 +1,6 @@
 import { type ReactElement, useCallback } from "react";
 import { type OrchestrationGoal, type ThreadId } from "@t3tools/contracts";
+import { formatSecondsCompact } from "~/lib/format";
 import { readNativeApi } from "~/nativeApi";
 import { newCommandId } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -17,12 +18,6 @@ function formatTokens(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
   if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
   return String(tokens);
-}
-
-function formatDuration(seconds: number): string {
-  if (seconds >= 3600) return `${(seconds / 3600).toFixed(1)}h`;
-  if (seconds >= 60) return `${Math.floor(seconds / 60)}m`;
-  return `${seconds}s`;
 }
 
 /**
@@ -79,7 +74,9 @@ export function GoalIndicator({
               {formatTokens(goal.tokensUsed)}
               {budgetHint} tokens
             </span>
-            <span className="text-muted-foreground/70">{formatDuration(goal.timeUsedSeconds)}</span>
+            <span className="text-muted-foreground/70">
+              {formatSecondsCompact(goal.timeUsedSeconds)}
+            </span>
           </button>
         }
       />
@@ -95,7 +92,7 @@ export function GoalIndicator({
               {formatTokens(goal.tokensUsed)}
               {budgetHint} tokens
             </span>
-            <span>{formatDuration(goal.timeUsedSeconds)}</span>
+            <span>{formatSecondsCompact(goal.timeUsedSeconds)}</span>
           </div>
           <div className="flex gap-2 pt-1">
             {canPause ? (
