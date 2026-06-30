@@ -89,8 +89,7 @@ function normalizeSentinelCandidate(text: string): string {
 
 // Extract the blocker reason from the assistant text preceding the
 // <goal-blocked/> sentinel. The model is prompted to state the blocker on the
-// lines before the sentinel. We take the last non-empty non-sentinel line,
-// trimmed and capped to a reasonable length for the persisted blockedReason.
+// lines before the sentinel.
 function extractBlockedReason(text: string): string {
   const lines = text
     .split(/\r?\n/)
@@ -104,8 +103,7 @@ function extractBlockedReason(text: string): string {
 }
 
 // Heuristic blocker detection for turns where the model reports being stuck
-// without emitting the explicit <goal-blocked/> sentinel. Returns a short
-// normalized reason string, or null if no blocker marker is found.
+// without emitting the explicit <goal-blocked/> sentinel.
 // ponytail: regex-based heuristic, not a full NLP parse — sufficient for the
 // audit's purpose (detect recurrence of the same blocker text). Upgrade to a
 // structured model-emitted marker if providers adopt one.
@@ -180,7 +178,7 @@ const make = Effect.gen(function* () {
     }
 
     const goal = thread.goal;
-    if (!goal || goal.status !== "active") {
+    if (!goal || (goal.status !== "active" && goal.status !== "budget_limited")) {
       return;
     }
 
@@ -251,23 +249,7 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    // The agent must be free. If a turn is still running, a later trigger will retry —
-    // do not record the turn as handled yet.
-    if (thread.session?.activeTurnId != null) {
-      return;
-    }
-    const sessionStatus = thread.session?.status;
-    if (sessionStatus !== "ready" && sessionStatus !== "idle") {
-      return;
-    }
-
-    // Never override a human in the loop.
-    if (thread.hasPendingApprovals === true || thread.hasPendingUserInput === true) {
-      return;
-    }
-
-    // Plan mode is read-only planning; do not apply continuation pressure.
-    if (thread.interactionMode === "plan") {
+    if (!canDispatchGoalAutomation(thread)) {
       return;
     }
 
@@ -326,25 +308,29 @@ const make = Effect.gen(function* () {
     // Budget steering: when the goal flips to budget_limited (set by applyGoalTurnAccounting
     // in the projector when tokensUsed >= tokenBudget), dispatch one final hidden steering
     // turn telling the model to wrap up and summarize what it accomplished (codex
-    // budget_limit.md port). Fire at most once per activation.
-    if (goal.status === "budget_limited" && !budgetSteered.has(threadId)) {
-      budgetSteered.add(threadId);
-      yield* orchestrationEngine.dispatch({
-        type: "thread.turn.start",
-        commandId: serverCommandId("goal-budget-limited"),
-        threadId,
-        message: {
-          messageId: budgetLimitedMessageId(),
-          role: "user",
-          text: renderGoalBudgetLimitedPrompt(goal),
-          attachments: [],
-        },
-        inputSource: "goal-budget-limited",
-        runtimeMode: thread.runtimeMode,
-        interactionMode: "default",
-        dispatchMode: "queue",
-        createdAt: new Date().toISOString(),
-      });
+    // budget_limit.md port). Fire at most once per activation. Budget_limited goals never
+    // get continuation dispatches — only the single steering turn, then the goal waits for
+    // the user to resume or clear it.
+    if (goal.status === "budget_limited") {
+      if (!budgetSteered.has(threadId)) {
+        budgetSteered.add(threadId);
+        yield* orchestrationEngine.dispatch({
+          type: "thread.turn.start",
+          commandId: serverCommandId("goal-budget-limited"),
+          threadId,
+          message: {
+            messageId: budgetLimitedMessageId(),
+            role: "user",
+            text: renderGoalBudgetLimitedPrompt(goal),
+            attachments: [],
+          },
+          inputSource: "goal-budget-limited",
+          runtimeMode: thread.runtimeMode,
+          interactionMode: "default",
+          dispatchMode: "queue",
+          createdAt: new Date().toISOString(),
+        });
+      }
       lastHandledTurnId.set(threadId, latestTurn.turnId);
       return;
     }
