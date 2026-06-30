@@ -177,6 +177,12 @@ const make = Effect.gen(function* () {
     // after the first error (no new turn dispatches → no trigger event →
     // counter never increments).
     if (latestTurn.state === "error") {
+      // Dedup per errored turn: thread.turn-diff-completed and thread.session-set
+      // can both re-enter this branch for the same latestTurn. Without this guard,
+      // one failed turn counts multiple times and the loop pauses early.
+      if (lastHandledTurnId.get(threadId) === latestTurn.turnId) {
+        return;
+      }
       const count = (consecutiveErrors.get(threadId) ?? 0) + 1;
       if (count > LOOP_ERROR_RETRY_LIMIT) {
         consecutiveErrors.delete(threadId);
@@ -199,6 +205,7 @@ const make = Effect.gen(function* () {
         return;
       }
       consecutiveErrors.set(threadId, count);
+      lastHandledTurnId.set(threadId, latestTurn.turnId);
       // Schedule a retry: after backoff, dispatch a new iteration. The new
       // turn either completes (counter resets on the next trigger) or errors
       // again (counter increments on the next trigger). This avoids silent
@@ -280,12 +287,38 @@ const make = Effect.gen(function* () {
     }
 
     // Pre-dispatch usage check: if context usage is above the loop compaction
-    // threshold, skip this iteration. The CompactionReactor will compact, and
-    // the loop re-evaluates on the compaction's thread.activity-appended event.
+    // threshold, skip this iteration so CompactionReactor can compact; the loop
+    // re-evaluates on the compaction's thread.activity-appended event. But if the
+    // active provider can't compact (no capability and auto-compaction disabled),
+    // waiting would stall the loop forever — no compaction event will ever arrive.
+    // In that case clear the loop so the user knows it stopped instead of silently
+    // hanging on a threshold it can never cross back.
     const settings = yield* settingsService.getSettings;
     const usedPercent = latestUsedPercent(thread);
     if (usedPercent !== null && usedPercent >= settings.loopCompactionThreshold) {
-      // Don't mark as handled — re-evaluate when compaction drops usage.
+      const activeProvider = threadActiveProvider(thread);
+      if (compactionCanReduceUsage(activeProvider, settings.autoCompactionEnabled)) {
+        // Don't mark as handled — re-evaluate when compaction drops usage.
+        return;
+      }
+      lastHandledTurnId.delete(threadId);
+      consecutiveErrors.delete(threadId);
+      const existing = wakeUpFibers.get(threadId);
+      if (existing) {
+        wakeUpFibers.delete(threadId);
+        yield* Fiber.interrupt(existing);
+      }
+      yield* orchestrationEngine.dispatch({
+        type: "thread.loop.clear",
+        commandId: serverCommandId("loop-clear-usage-no-compaction"),
+        threadId,
+        createdAt: new Date().toISOString(),
+      });
+      yield* Effect.logWarning("loop cleared at usage threshold with no compaction available", {
+        threadId,
+        usedPercent,
+        provider: activeProvider,
+      });
       return;
     }
 
@@ -365,9 +398,21 @@ const make = Effect.gen(function* () {
     );
   });
 
+  // Interrupt detached wake-up/retry fibers on drain so a shutdown cannot
+  // leave them alive long enough to enqueue or dispatch new loop turns after
+  // the reactor was supposed to stop. worker.drain handles the queue; this
+  // handles the timers spawned via Effect.forkDetach above.
+  const drain: LoopReactorShape["drain"] = Effect.gen(function* () {
+    for (const fiber of wakeUpFibers.values()) {
+      yield* Fiber.interrupt(fiber);
+    }
+    wakeUpFibers.clear();
+    yield* worker.drain;
+  });
+
   return {
     start,
-    drain: worker.drain,
+    drain,
     reconcile: (threadIds) =>
       Effect.forEach(
         threadIds,

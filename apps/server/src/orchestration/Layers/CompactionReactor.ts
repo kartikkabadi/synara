@@ -67,7 +67,12 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const provider = thread.modelSelection.provider as ProviderKind;
+    // Use the live session provider when one is attached — a resumed/switched
+    // session may differ from modelSelection.provider, and gating against the
+    // wrong one would skip compaction for a provider that actually needs it
+    // (or attempt it on one that can't).
+    const provider = (thread.session?.providerName ??
+      thread.modelSelection.provider) as ProviderKind;
     const capability = PROVIDER_COMPACTION_CAPABILITY[provider];
     if (!capability) {
       return;
@@ -149,13 +154,14 @@ const make = Effect.gen(function* () {
     }
     compactingThreads.add(threadId);
 
+    // Only record the cooldown timestamp on success. Effect.ensuring runs on
+    // failure too, so a transient compactThread error would set lastCompactedAt
+    // and the next high-usage event would skip another attempt even though no
+    // compaction happened. Keep the lock cleanup in ensuring (always release),
+    // but move the timestamp onto the success path only.
     yield* providerService.compactThread({ threadId }).pipe(
-      Effect.ensuring(
-        Effect.sync(() => {
-          compactingThreads.delete(threadId);
-          lastCompactedAt.set(threadId, Date.now());
-        }),
-      ),
+      Effect.tap(() => Effect.sync(() => lastCompactedAt.set(threadId, Date.now()))),
+      Effect.ensuring(Effect.sync(() => compactingThreads.delete(threadId))),
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.failCause(cause);
@@ -190,6 +196,17 @@ const make = Effect.gen(function* () {
     // permanently kill the reactor. Same pattern as GoalContinuationReactor.
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+        // Evict per-thread cooldown state when the thread or its goal/loop is
+        // removed. Without this, lastCompactedAt grows unboundedly across the
+        // server's lifetime (one permanent entry per compacted thread).
+        if (
+          event.type === "thread.deleted" ||
+          event.type === "thread.goal-cleared" ||
+          event.type === "thread.loop-cleared"
+        ) {
+          lastCompactedAt.delete(event.payload.threadId);
+          return Effect.void;
+        }
         // Filter on activity kind FIRST (cheapest) — avoids snapshot reads on
         // tool calls, messages, compactions, etc. that all fire activity-appended.
         if (event.type !== "thread.activity-appended") {
