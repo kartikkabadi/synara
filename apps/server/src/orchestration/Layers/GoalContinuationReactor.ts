@@ -362,6 +362,28 @@ const make = Effect.gen(function* () {
       blockedAudit.delete(threadId);
     }
 
+    // No-activity suppression (pi-goal guardrail): if the last turn was a
+    // continuation turn that produced no tool activity, the agent is stuck in
+    // a reasoning loop without acting. Stop continuing and wait for fresh user
+    // input — the next user message produces a non-continuation turn whose
+    // starter message has a different source, naturally resetting this check.
+    const starterMessage = thread.messages.find(
+      (m) => m.role === "user" && m.turnId === latestTurn.turnId && m.source === "goal-continuation",
+    );
+    if (starterMessage !== undefined) {
+      const hadToolActivity = thread.activities.some(
+        (a) => a.turnId === latestTurn.turnId && a.tone === "tool",
+      );
+      if (!hadToolActivity) {
+        lastHandledTurnId.set(threadId, latestTurn.turnId);
+        yield* Effect.logInfo("goal continuation suppressed: no tool activity", {
+          threadId,
+          turnId: latestTurn.turnId,
+        });
+        return;
+      }
+    }
+
     yield* orchestrationEngine.dispatch({
       type: "thread.turn.start",
       commandId: serverCommandId("goal-continuation"),
