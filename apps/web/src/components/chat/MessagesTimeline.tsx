@@ -1494,6 +1494,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               )}
               <div className="group min-w-0 py-0.5">
                 {renderWorkDisplay(leadingWorkDisplay, "leading")}
+                {row.loopIterationNumber ? (
+                  <div className="mb-1 text-[length:var(--app-font-size-ui-sm,11px)] font-medium text-muted-foreground/70">
+                    Iteration {row.loopIterationNumber}
+                  </div>
+                ) : null}
                 {messageText !== null ? (
                   <div data-assistant-message-id={row.message.id}>
                     <ChatMarkdown
