@@ -1804,10 +1804,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      if (!thread.goal || (thread.goal.status !== "active" && thread.goal.status !== "paused")) {
+      if (
+        !thread.goal ||
+        (thread.goal.status !== "active" &&
+          thread.goal.status !== "paused" &&
+          thread.goal.status !== "blocked")
+      ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: "No active or paused goal to complete.",
+          detail: "No active, paused, or blocked goal to complete.",
         });
       }
       return {

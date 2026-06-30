@@ -211,6 +211,13 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    // Dedup: multiple triggers (turn-diff-completed + session-set) can fire for the
+    // same turn. Check before any counting or dispatching to avoid double-counting
+    // errors or dispatching duplicate continuations.
+    if (lastHandledTurnId.get(threadId) === latestTurn.turnId) {
+      return;
+    }
+
     // Goal error handling: track consecutive terminal turn errors. Without this the stall
     // is silent — the reactor returns early on non-completed turns, so the user sees no
     // indication the goal is stuck. Worse, manual messages between errors reset the visible
@@ -244,10 +251,6 @@ const make = Effect.gen(function* () {
     }
     // A successful completion resets the error counter.
     consecutiveErrors.delete(threadId);
-
-    if (lastHandledTurnId.get(threadId) === latestTurn.turnId) {
-      return;
-    }
 
     if (!canDispatchGoalAutomation(thread)) {
       return;
