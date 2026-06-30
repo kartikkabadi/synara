@@ -298,6 +298,7 @@ const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
   ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
   ORCHESTRATION_PROJECTOR_NAMES.threadGoal,
+  ORCHESTRATION_PROJECTOR_NAMES.threadLoop,
   ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
   ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
   ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
@@ -312,6 +313,28 @@ function maxIso(left: string | null, right: string): string {
 
 function maxOptionalIso(left: string | null, right: string | null | undefined): string | null {
   return right ? maxIso(left, right) : left;
+}
+
+// Build a threadId → goal/loop Map from projection rows. Shared by getSnapshot
+// and getCommandReadModel so both read paths assemble the maps identically.
+function buildThreadGoalMap(
+  rows: ReadonlyArray<{ threadId: string; goal: OrchestrationGoal }>,
+): Map<string, OrchestrationGoal> {
+  const map = new Map<string, OrchestrationGoal>();
+  for (const row of rows) {
+    map.set(row.threadId, row.goal);
+  }
+  return map;
+}
+
+function buildThreadLoopMap(
+  rows: ReadonlyArray<{ threadId: string; loop: OrchestrationLoop }>,
+): Map<string, OrchestrationLoop> {
+  const map = new Map<string, OrchestrationLoop>();
+  for (const row of rows) {
+    map.set(row.threadId, row.loop);
+  }
+  return map;
 }
 
 function pushGrouped<T>(map: Map<string, T[]>, threadId: string, value: T): void {
@@ -1688,10 +1711,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           );
-          const goalsByThread = new Map<string, OrchestrationGoal>();
-          for (const row of goalRows) {
-            goalsByThread.set(row.threadId, row.goal);
-          }
+          const goalsByThread = buildThreadGoalMap(goalRows);
 
           const loopRows = yield* listThreadLoopRows(undefined).pipe(
             Effect.mapError(
@@ -1701,10 +1721,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           );
-          const loopsByThread = new Map<string, OrchestrationLoop>();
-          for (const row of loopRows) {
-            loopsByThread.set(row.threadId, row.loop);
-          }
+          const loopsByThread = buildThreadLoopMap(loopRows);
 
           const threads: ReadonlyArray<OrchestrationThread> = threadRows.map((row) =>
             toProjectedThread({
@@ -1836,10 +1853,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           );
-          const goalsByThread = new Map<string, OrchestrationGoal>();
-          for (const row of goalRows) {
-            goalsByThread.set(row.threadId, row.goal);
-          }
+          const goalsByThread = buildThreadGoalMap(goalRows);
 
           const loopRows = yield* listThreadLoopRows(undefined).pipe(
             Effect.mapError(
@@ -1849,10 +1863,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           );
-          const loopsByThread = new Map<string, OrchestrationLoop>();
-          for (const row of loopRows) {
-            loopsByThread.set(row.threadId, row.loop);
-          }
+          const loopsByThread = buildThreadLoopMap(loopRows);
 
           const threads: ReadonlyArray<OrchestrationThread> = threadRows.map((row) =>
             toProjectedThread({

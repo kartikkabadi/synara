@@ -747,17 +747,26 @@ export function projectEvent(
           : [...thread.messages, message];
         const cappedMessages = messages.slice(-MAX_THREAD_MESSAGES);
 
-        // Count hidden goal-continuation turns against the active goal.
+        // Count hidden goal-continuation turns against the active goal. Only
+        // count on first insert — a streaming update of an existing hidden
+        // message would double-count the continuation otherwise.
         const goal = thread.goal;
         const goalContinuationPatch =
-          goal && goal.status === "active" && payload.source === "goal-continuation"
+          goal &&
+          goal.status === "active" &&
+          payload.source === "goal-continuation" &&
+          existingMessage === undefined
             ? { goal: incrementGoalContinuation(goal, event.occurredAt) }
             : {};
 
-        // Count hidden loop-iteration turns against the active loop.
+        // Count hidden loop-iteration turns against the active loop. Same
+        // first-insert-only guard as goal-continuation above.
         const loop = thread.loop;
         const loopIterationPatch =
-          loop && loop.status === "active" && payload.source === "loop-iteration"
+          loop &&
+          loop.status === "active" &&
+          payload.source === "loop-iteration" &&
+          existingMessage === undefined
             ? {
                 loop: {
                   ...loop,
