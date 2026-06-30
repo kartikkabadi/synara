@@ -3,6 +3,7 @@ import {
   deriveInlineCommandCall,
   deriveReadableCommandDisplay,
   deriveReadableToolTitle,
+  isInspectCommand,
   normalizeCompactToolLabel,
 } from "./toolCallLabel";
 
@@ -240,5 +241,43 @@ describe("deriveInlineCommandCall", () => {
     expect(deriveInlineCommandCall(`/bin/zsh -lc 'rg -n "tool call" apps/web/src'`)).toBe(
       `rg -n "tool call" apps/web/src`,
     );
+  });
+});
+
+describe("isInspectCommand", () => {
+  it("returns true for read commands (cat, head, tail, less)", () => {
+    expect(isInspectCommand("cat foo.ts")).toBe(true);
+    expect(isInspectCommand("head -n 10 bar.ts")).toBe(true);
+    expect(isInspectCommand("tail -f log.txt")).toBe(true);
+    expect(isInspectCommand("less README.md")).toBe(true);
+  });
+
+  it("returns true for search commands (rg, grep, ag, ack)", () => {
+    expect(isInspectCommand("rg -n pattern .")).toBe(true);
+    expect(isInspectCommand("grep -r foo .")).toBe(true);
+    expect(isInspectCommand("ag --py pattern")).toBe(true);
+    expect(isInspectCommand("ack pattern")).toBe(true);
+  });
+
+  it("returns true for find commands (find, fd)", () => {
+    expect(isInspectCommand("find . -name '*.ts'")).toBe(true);
+    expect(isInspectCommand("fd '.ts$'")).toBe(true);
+  });
+
+  it("returns true for list commands (ls)", () => {
+    expect(isInspectCommand("ls -la")).toBe(true);
+    expect(isInspectCommand("ls")).toBe(true);
+  });
+
+  it("returns false for mutating commands (rm, mkdir, npm, git commit)", () => {
+    expect(isInspectCommand("rm -rf node_modules")).toBe(false);
+    expect(isInspectCommand("mkdir build")).toBe(false);
+    expect(isInspectCommand("npm test")).toBe(false);
+    expect(isInspectCommand("git commit -m 'fix'")).toBe(false);
+  });
+
+  it("unwraps shell wrappers before checking", () => {
+    expect(isInspectCommand(`/bin/zsh -lc 'ls -la'`)).toBe(true);
+    expect(isInspectCommand(`/bin/bash -c "rg pattern ."`)).toBe(true);
   });
 });
