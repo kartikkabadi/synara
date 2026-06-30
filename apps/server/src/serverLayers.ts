@@ -98,7 +98,10 @@ export function makeServerRuntimeServicesLayer() {
   const goalContinuationReactorLayer = GoalContinuationReactorLive.pipe(
     Layer.provideMerge(OrchestrationLayerLive),
   );
-  const loopReactorLayer = LoopReactorLive.pipe(Layer.provideMerge(OrchestrationLayerLive));
+  const loopReactorLayer = LoopReactorLive.pipe(
+    Layer.provideMerge(OrchestrationLayerLive),
+    Layer.provideMerge(ServerSettingsLive),
+  );
   const sessionCredentialLayer = SessionCredentialServiceLive.pipe(
     Layer.provide(ServerSecretStoreLive),
   );

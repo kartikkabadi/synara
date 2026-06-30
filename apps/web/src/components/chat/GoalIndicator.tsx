@@ -1,6 +1,7 @@
 import { type ReactElement, useCallback } from "react";
-import type { OrchestrationGoal } from "@t3tools/contracts";
+import { type OrchestrationGoal, type ThreadId } from "@t3tools/contracts";
 import { readNativeApi } from "~/nativeApi";
+import { newCommandId } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 
@@ -36,7 +37,7 @@ export function GoalIndicator({
   threadId,
 }: {
   goal: OrchestrationGoal | null | undefined;
-  threadId: string | null | undefined;
+  threadId: ThreadId | null | undefined;
 }): ReactElement | null {
   const dispatch = useCallback(
     (type: "thread.goal.pause" | "thread.goal.resume" | "thread.goal.clear") => {
@@ -44,7 +45,7 @@ export function GoalIndicator({
       if (!api || !threadId) return;
       void api.orchestration.dispatchCommand({
         type,
-        commandId: `goal-indicator-${crypto.randomUUID()}`,
+        commandId: newCommandId(),
         threadId,
         createdAt: new Date().toISOString(),
       });
