@@ -142,7 +142,7 @@ describe("elicitationFormToUserInputQuestions", () => {
     ]);
   });
 
-  it("uses the OK fallback for a free-form string property", () => {
+  it("uses empty options for a free-form string property", () => {
     const questions = elicitationFormToUserInputQuestions({
       ...baseForm,
       requestedSchema: {
@@ -154,10 +154,10 @@ describe("elicitationFormToUserInputQuestions", () => {
     });
 
     assert.strictEqual(questions.length, 1);
-    assert.deepStrictEqual(questions[0]!.options, [{ label: "OK", description: "Continue" }]);
+    assert.deepStrictEqual(questions[0]!.options, []);
   });
 
-  it("uses the OK fallback for a number property", () => {
+  it("uses empty options for a number property", () => {
     const questions = elicitationFormToUserInputQuestions({
       ...baseForm,
       message: "Enter count",
@@ -171,7 +171,7 @@ describe("elicitationFormToUserInputQuestions", () => {
 
     assert.strictEqual(questions.length, 1);
     assert.strictEqual(questions[0]!.question, "How many");
-    assert.deepStrictEqual(questions[0]!.options, [{ label: "OK", description: "Continue" }]);
+    assert.deepStrictEqual(questions[0]!.options, []);
   });
 
   it("returns a synthetic question when properties is empty", () => {
@@ -205,7 +205,7 @@ describe("elicitationFormToUserInputQuestions", () => {
     assert.strictEqual(questions[0]!.question, "Proceed?");
   });
 
-  it("uses OK fallback for string with empty enum array", () => {
+  it("uses empty options for string with empty enum array", () => {
     const questions = elicitationFormToUserInputQuestions({
       ...baseForm,
       requestedSchema: {
@@ -217,10 +217,10 @@ describe("elicitationFormToUserInputQuestions", () => {
     });
 
     assert.strictEqual(questions.length, 1);
-    assert.deepStrictEqual(questions[0]!.options, [{ label: "OK", description: "Continue" }]);
+    assert.deepStrictEqual(questions[0]!.options, []);
   });
 
-  it("uses OK fallback for string with empty oneOf array", () => {
+  it("uses empty options for string with empty oneOf array", () => {
     const questions = elicitationFormToUserInputQuestions({
       ...baseForm,
       requestedSchema: {
@@ -232,10 +232,10 @@ describe("elicitationFormToUserInputQuestions", () => {
     });
 
     assert.strictEqual(questions.length, 1);
-    assert.deepStrictEqual(questions[0]!.options, [{ label: "OK", description: "Continue" }]);
+    assert.deepStrictEqual(questions[0]!.options, []);
   });
 
-  it("uses OK fallback for array with items having no enum or anyOf", () => {
+  it("uses empty options for array with items having no enum or anyOf", () => {
     const questions = elicitationFormToUserInputQuestions({
       ...baseForm,
       requestedSchema: {
@@ -243,7 +243,7 @@ describe("elicitationFormToUserInputQuestions", () => {
         properties: {
           tags: {
             type: "array",
-            items: { type: "string" },
+            items: { type: "string", enum: [] },
           },
         },
       },
@@ -251,22 +251,22 @@ describe("elicitationFormToUserInputQuestions", () => {
 
     assert.strictEqual(questions.length, 1);
     assert.strictEqual(questions[0]!.multiSelect, true);
-    assert.deepStrictEqual(questions[0]!.options, [{ label: "OK", description: "Continue" }]);
+    assert.deepStrictEqual(questions[0]!.options, []);
   });
 
-  it("uses OK fallback for unknown property type", () => {
+  it("uses empty options for unknown property type", () => {
     const questions = elicitationFormToUserInputQuestions({
       ...baseForm,
       requestedSchema: {
         type: "object",
         properties: {
-          meta: { type: "object" },
+          meta: { type: "object" } as unknown as { type: "string" },
         },
       },
     });
 
     assert.strictEqual(questions.length, 1);
-    assert.deepStrictEqual(questions[0]!.options, [{ label: "OK", description: "Continue" }]);
+    assert.deepStrictEqual(questions[0]!.options, []);
   });
 });
 

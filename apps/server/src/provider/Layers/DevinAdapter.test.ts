@@ -39,8 +39,8 @@ function makeMockRuntime(input?: {
   ) => void;
   readonly onHandleRequestPermission?: (
     handler: (
-      params: EffectAcpSchema.SessionRequestPermissionRequest,
-    ) => Effect.Effect<EffectAcpSchema.SessionRequestPermissionResponse, EffectAcpErrors.AcpError>,
+      params: EffectAcpSchema.RequestPermissionRequest,
+    ) => Effect.Effect<EffectAcpSchema.RequestPermissionResponse, EffectAcpErrors.AcpError>,
   ) => void;
   readonly availableCommands?: ReadonlyArray<{ name: string; description?: string }>;
   readonly onStart?: () => void;
@@ -48,11 +48,8 @@ function makeMockRuntime(input?: {
   return {
     handleRequestPermission: (
       handler: (
-        params: EffectAcpSchema.SessionRequestPermissionRequest,
-      ) => Effect.Effect<
-        EffectAcpSchema.SessionRequestPermissionResponse,
-        EffectAcpErrors.AcpError
-      >,
+        params: EffectAcpSchema.RequestPermissionRequest,
+      ) => Effect.Effect<EffectAcpSchema.RequestPermissionResponse, EffectAcpErrors.AcpError>,
     ) => {
       input?.onHandleRequestPermission?.(handler);
       return Effect.void;
@@ -982,7 +979,9 @@ describe("DevinAdapterLive", () => {
 
         const resolved = Option.getOrThrow(yield* Fiber.join(resolvedFiber));
         assert.strictEqual(String(resolved.requestId), String(requested.requestId));
-        assert.deepStrictEqual(resolved.payload.answers, { choice: "a" });
+        // Answers are redacted in user-input.resolved for privacy; only the
+        // requestId and redacted flag are published.
+        assert.deepStrictEqual(resolved.payload.answers, {});
 
         yield* adapter.stopSession(threadId);
       }).pipe(
@@ -1346,11 +1345,8 @@ describe("DevinAdapterLive", () => {
     "auto-approves permission requests in full-access mode when a full-access option exists",
     () => {
       type PermissionHandler = (
-        params: EffectAcpSchema.SessionRequestPermissionRequest,
-      ) => Effect.Effect<
-        EffectAcpSchema.SessionRequestPermissionResponse,
-        EffectAcpErrors.AcpError
-      >;
+        params: EffectAcpSchema.RequestPermissionRequest,
+      ) => Effect.Effect<EffectAcpSchema.RequestPermissionResponse, EffectAcpErrors.AcpError>;
       let permissionHandler: PermissionHandler | undefined;
       return Effect.gen(function* () {
         const adapter = yield* DevinAdapter;
@@ -1371,7 +1367,7 @@ describe("DevinAdapterLive", () => {
           ],
           kind: "command",
           command: "rm -rf /tmp/scratch",
-        } as unknown as EffectAcpSchema.SessionRequestPermissionRequest;
+        } as unknown as EffectAcpSchema.RequestPermissionRequest;
 
         const result = yield* permissionHandler!(params);
         assert.strictEqual(result.outcome.outcome, "selected");
@@ -1400,8 +1396,8 @@ describe("DevinAdapterLive", () => {
 
   it.effect("stopSession settles pending approval requests with cancel", () => {
     type PermissionHandler = (
-      params: EffectAcpSchema.SessionRequestPermissionRequest,
-    ) => Effect.Effect<EffectAcpSchema.SessionRequestPermissionResponse, EffectAcpErrors.AcpError>;
+      params: EffectAcpSchema.RequestPermissionRequest,
+    ) => Effect.Effect<EffectAcpSchema.RequestPermissionResponse, EffectAcpErrors.AcpError>;
     let permissionHandler: PermissionHandler | undefined;
     return Effect.gen(function* () {
       const adapter = yield* DevinAdapter;
@@ -1432,7 +1428,7 @@ describe("DevinAdapterLive", () => {
           status: "pending",
           rawInput: { command: "echo hi" },
         },
-      } as unknown as EffectAcpSchema.SessionRequestPermissionRequest).pipe(Effect.forkChild);
+      } as unknown as EffectAcpSchema.RequestPermissionRequest).pipe(Effect.forkChild);
 
       // Wait for the request to be registered before stopping.
       Option.getOrThrow(yield* Fiber.join(requestedFiber));
@@ -1458,7 +1454,7 @@ describe("DevinAdapterLive", () => {
     );
   });
 
-  it.effect("returns no commands when threadId and cwd are omitted", () =>
+  it.effect("returns no commands when threadId is omitted and cwd does not match any session", () =>
     Effect.gen(function* () {
       const adapter = yield* DevinAdapter;
       yield* adapter.startSession({
@@ -1470,6 +1466,7 @@ describe("DevinAdapterLive", () => {
 
       const result = yield* adapter.listCommands!({
         provider: "devin",
+        cwd: "/tmp/nonexistent",
       });
 
       assert.deepStrictEqual(result.commands, []);

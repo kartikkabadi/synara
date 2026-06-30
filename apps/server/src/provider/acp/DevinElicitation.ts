@@ -12,6 +12,7 @@ type ElicitationProperty = EffectAcpSchema.ElicitationPropertySchema;
 type ElicitationContentValue = EffectAcpSchema.ElicitationContentValue;
 
 const FALLBACK_OPTIONS = [{ label: "OK", description: "Continue" }] as const;
+const FREEFORM_OPTIONS: ReadonlyArray<{ label: string; description: string }> = [];
 
 export function elicitationFormToUserInputQuestions(
   request: ElicitationForm,
@@ -53,13 +54,17 @@ function propertyOptions(
           description: opt.title || opt.const,
         }));
       }
-      return [...FALLBACK_OPTIONS];
+      return FREEFORM_OPTIONS;
 
     case "boolean":
       return [
         { label: "Yes", description: "Yes" },
         { label: "No", description: "No" },
       ];
+
+    case "number":
+    case "integer":
+      return FREEFORM_OPTIONS;
 
     case "array": {
       const items = prop.items;
@@ -72,11 +77,11 @@ function propertyOptions(
           description: opt.title || opt.const,
         }));
       }
-      return [...FALLBACK_OPTIONS];
+      return FREEFORM_OPTIONS;
     }
 
     default:
-      return [...FALLBACK_OPTIONS];
+      return FREEFORM_OPTIONS;
   }
 }
 
