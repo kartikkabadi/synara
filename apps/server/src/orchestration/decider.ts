@@ -1861,8 +1861,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       // Block loop creation on providers that can't compact and don't
       // auto-compact. Without compaction, the loop hits the context limit
-      // within a few iterations and stalls.
-      const provider = thread.modelSelection.provider as ProviderKind;
+      // within a few iterations and stalls. Use the live session provider
+      // when one is attached — a resumed/switched session may differ from
+      // modelSelection.provider, and gating against the wrong one would
+      // accept a loop that then stalls on the unsupported active provider.
+      const provider = (thread.session?.providerName ??
+        thread.modelSelection.provider) as ProviderKind;
       if (!PROVIDER_CAN_LOOP[provider]) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
