@@ -206,4 +206,72 @@ describe("orchestration decider — goals", () => {
     const exit = await Effect.runPromiseExit(decide(command, readModel));
     expect(Exit.isFailure(exit)).toBe(true);
   });
+
+  it("rejects creating a goal while a loop is paused", async () => {
+    const readModel = await seedReadModel([
+      threadCreatedEvent,
+      makeEvent({
+        sequence: 2,
+        type: "thread.loop-created",
+        payload: {
+          threadId: "thread-1",
+          loop: {
+            prompt: "Find and fix bugs",
+            intervalSeconds: 300,
+            status: "paused",
+            iterationsRun: 0,
+            createdAt: NOW,
+            updatedAt: NOW,
+          },
+        },
+      }),
+    ]);
+    const command = {
+      type: "thread.goal.create",
+      commandId: CommandId.makeUnsafe("cmd-goal-create"),
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      goalId: "goal-2",
+      objective: "Fix tests",
+      createdAt: NOW,
+    } satisfies Extract<OrchestrationCommand, { type: "thread.goal.create" }>;
+
+    const exit = await Effect.runPromiseExit(decide(command, readModel));
+    expect(Exit.isFailure(exit)).toBe(true);
+  });
+
+  it("rejects resuming a goal while a loop is paused", async () => {
+    const readModel = await seedReadModel([
+      threadCreatedEvent,
+      goalCreatedEvent("active"),
+      makeEvent({
+        sequence: 3,
+        type: "thread.goal-paused",
+        payload: { threadId: "thread-1", updatedAt: NOW },
+      }),
+      makeEvent({
+        sequence: 4,
+        type: "thread.loop-created",
+        payload: {
+          threadId: "thread-1",
+          loop: {
+            prompt: "Find and fix bugs",
+            intervalSeconds: 300,
+            status: "paused",
+            iterationsRun: 0,
+            createdAt: NOW,
+            updatedAt: NOW,
+          },
+        },
+      }),
+    ]);
+    const command = {
+      type: "thread.goal.resume",
+      commandId: CommandId.makeUnsafe("cmd-goal-resume"),
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      createdAt: NOW,
+    } satisfies Extract<OrchestrationCommand, { type: "thread.goal.resume" }>;
+
+    const exit = await Effect.runPromiseExit(decide(command, readModel));
+    expect(Exit.isFailure(exit)).toBe(true);
+  });
 });

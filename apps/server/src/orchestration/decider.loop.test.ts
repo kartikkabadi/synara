@@ -350,4 +350,82 @@ describe("orchestration decider — loops", () => {
     const exit = await Effect.runPromiseExit(decide(command, readModel));
     expect(Exit.isFailure(exit)).toBe(true);
   });
+
+  it("rejects creating a loop while a goal is paused", async () => {
+    const readModel = await seedReadModel([
+      threadCreatedEvent,
+      makeEvent({
+        sequence: 2,
+        type: "thread.goal-created",
+        payload: {
+          threadId: "thread-1",
+          goal: {
+            id: "goal-1",
+            objective: "Fix tests",
+            status: "paused",
+            tokenBudget: null,
+            tokensUsed: 0,
+            usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+            turnCount: 0,
+            continuationCount: 0,
+            timeUsedSeconds: 0,
+            createdAt: NOW,
+            updatedAt: NOW,
+          },
+        },
+      }),
+    ]);
+    const command = {
+      type: "thread.loop.create",
+      commandId: CommandId.makeUnsafe("cmd-loop-create"),
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      prompt: "Find and fix bugs",
+      intervalSeconds: 300,
+      createdAt: NOW,
+    } satisfies Extract<OrchestrationCommand, { type: "thread.loop.create" }>;
+
+    const exit = await Effect.runPromiseExit(decide(command, readModel));
+    expect(Exit.isFailure(exit)).toBe(true);
+  });
+
+  it("rejects resuming a loop while a goal is paused", async () => {
+    const readModel = await seedReadModel([
+      threadCreatedEvent,
+      loopCreatedEvent("active"),
+      makeEvent({
+        sequence: 3,
+        type: "thread.loop-paused",
+        payload: { threadId: "thread-1", updatedAt: NOW },
+      }),
+      makeEvent({
+        sequence: 4,
+        type: "thread.goal-created",
+        payload: {
+          threadId: "thread-1",
+          goal: {
+            id: "goal-1",
+            objective: "Fix tests",
+            status: "paused",
+            tokenBudget: null,
+            tokensUsed: 0,
+            usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+            turnCount: 0,
+            continuationCount: 0,
+            timeUsedSeconds: 0,
+            createdAt: NOW,
+            updatedAt: NOW,
+          },
+        },
+      }),
+    ]);
+    const command = {
+      type: "thread.loop.resume",
+      commandId: CommandId.makeUnsafe("cmd-loop-resume"),
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      createdAt: NOW,
+    } satisfies Extract<OrchestrationCommand, { type: "thread.loop.resume" }>;
+
+    const exit = await Effect.runPromiseExit(decide(command, readModel));
+    expect(Exit.isFailure(exit)).toBe(true);
+  });
 });
