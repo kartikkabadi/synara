@@ -65,6 +65,7 @@ function goalCreatedEvent(status: "active" | "paused" = "active"): Orchestration
         turnCount: 0,
         continuationCount: 0,
         timeUsedSeconds: 0,
+        blockedReason: null,
         createdAt: NOW,
         updatedAt: NOW,
       },
@@ -273,5 +274,69 @@ describe("orchestration decider — goals", () => {
 
     const exit = await Effect.runPromiseExit(decide(command, readModel));
     expect(Exit.isFailure(exit)).toBe(true);
+  });
+
+  it("blocks an active goal with a blockedReason", async () => {
+    const readModel = await seedReadModel([threadCreatedEvent, goalCreatedEvent("active")]);
+    const command = {
+      type: "thread.goal.blocked",
+      commandId: CommandId.makeUnsafe("cmd-goal-blocked"),
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      blockedReason: "Missing API key for external service",
+      createdAt: NOW,
+    } satisfies Extract<OrchestrationCommand, { type: "thread.goal.blocked" }>;
+
+    const event = await Effect.runPromise(decide(command, readModel));
+    expect(event.type).toBe("thread.goal-blocked");
+    if (event.type === "thread.goal-blocked") {
+      expect(event.payload.blockedReason).toBe("Missing API key for external service");
+    }
+  });
+
+  it("rejects blocking a non-active goal", async () => {
+    const readModel = await seedReadModel([
+      threadCreatedEvent,
+      goalCreatedEvent("active"),
+      makeEvent({
+        sequence: 3,
+        type: "thread.goal-paused",
+        payload: { threadId: "thread-1", updatedAt: NOW },
+      }),
+    ]);
+    const command = {
+      type: "thread.goal.blocked",
+      commandId: CommandId.makeUnsafe("cmd-goal-blocked"),
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      blockedReason: "Missing API key",
+      createdAt: NOW,
+    } satisfies Extract<OrchestrationCommand, { type: "thread.goal.blocked" }>;
+
+    const exit = await Effect.runPromiseExit(decide(command, readModel));
+    expect(Exit.isFailure(exit)).toBe(true);
+  });
+
+  it("resumes a blocked goal", async () => {
+    const readModel = await seedReadModel([
+      threadCreatedEvent,
+      goalCreatedEvent("active"),
+      makeEvent({
+        sequence: 3,
+        type: "thread.goal-blocked",
+        payload: {
+          threadId: "thread-1",
+          blockedReason: "Missing API key",
+          updatedAt: NOW,
+        },
+      }),
+    ]);
+    const command = {
+      type: "thread.goal.resume",
+      commandId: CommandId.makeUnsafe("cmd-goal-resume"),
+      threadId: ThreadId.makeUnsafe("thread-1"),
+      createdAt: NOW,
+    } satisfies Extract<OrchestrationCommand, { type: "thread.goal.resume" }>;
+
+    const event = await Effect.runPromise(decide(command, readModel));
+    expect(event.type).toBe("thread.goal-resumed");
   });
 });

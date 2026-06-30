@@ -9,6 +9,7 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 const GOAL_STATUS_LABEL: Record<OrchestrationGoal["status"], string> = {
   active: "active",
   paused: "paused",
+  blocked: "blocked",
   budget_limited: "budget limited",
   complete: "complete",
   cleared: "cleared",
@@ -54,7 +55,7 @@ export function GoalIndicator({
 
   const budgetHint = goal.tokenBudget !== null ? ` / ${formatTokens(goal.tokenBudget)}` : "";
   const canPause = goal.status === "active";
-  const canResume = goal.status === "paused";
+  const canResume = goal.status === "paused" || goal.status === "blocked";
 
   return (
     <Popover>
@@ -86,6 +87,14 @@ export function GoalIndicator({
             Goal — {GOAL_STATUS_LABEL[goal.status]}
           </div>
           <div className="text-xs text-foreground">{goal.objective}</div>
+          {goal.status === "blocked" && goal.blockedReason ? (
+            <div className="rounded-md border border-[var(--color-border-warning,transparent)] bg-[var(--color-background-warning-subtle,transparent)] px-2 py-1.5 text-xs text-foreground">
+              <div className="mb-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                Blocker
+              </div>
+              {goal.blockedReason}
+            </div>
+          ) : null}
           <div className="flex gap-3 text-xs text-muted-foreground">
             <span>{goal.turnCount} turns</span>
             <span>

@@ -25,6 +25,7 @@ import {
   ThreadActivityAppendedPayload as ContractsThreadActivityAppendedPayloadSchema,
   ThreadGoalCreatedPayload as ContractsThreadGoalCreatedPayloadSchema,
   ThreadGoalLifecyclePayload as ContractsThreadGoalLifecyclePayloadSchema,
+  ThreadGoalBlockedPayload as ContractsThreadGoalBlockedPayloadSchema,
   ThreadLoopCreatedPayload as ContractsThreadLoopCreatedPayloadSchema,
   ThreadLoopLifecyclePayload as ContractsThreadLoopLifecyclePayloadSchema,
   ThreadTurnStartRequestedPayload as ContractsThreadTurnStartRequestedPayloadSchema,
@@ -66,6 +67,7 @@ export const ThreadRevertedPayload = ContractsThreadRevertedPayloadSchema;
 export const ThreadActivityAppendedPayload = ContractsThreadActivityAppendedPayloadSchema;
 export const ThreadGoalCreatedPayload = ContractsThreadGoalCreatedPayloadSchema;
 export const ThreadGoalLifecyclePayload = ContractsThreadGoalLifecyclePayloadSchema;
+export const ThreadGoalBlockedPayload = ContractsThreadGoalBlockedPayloadSchema;
 export const ThreadLoopCreatedPayload = ContractsThreadLoopCreatedPayloadSchema;
 export const ThreadLoopLifecyclePayload = ContractsThreadLoopLifecyclePayloadSchema;
 

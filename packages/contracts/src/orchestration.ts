@@ -271,6 +271,9 @@ export const OrchestrationMessageSource = Schema.Literals([
   // goal-continuation: the web hides these so the transcript isn't spammed with
   // the repeated loop prompt.
   "loop-iteration",
+  // A hidden final steering turn injected when a goal hits its token budget
+  // (codex `budget_limit.md` port). Tells the model to wrap up and summarize.
+  "goal-budget-limited",
 ]);
 export type OrchestrationMessageSource = typeof OrchestrationMessageSource.Type;
 
@@ -457,6 +460,9 @@ const SourceProposedPlanReference = Schema.Struct({
 export const OrchestrationGoalStatus = Schema.Literals([
   "active",
   "paused",
+  // Model reported the same blocker for ≥3 consecutive goal turns (codex
+  // `blocked` port). Terminal — user can resume (fresh audit) or clear.
+  "blocked",
   "budget_limited",
   "complete",
   "cleared",
@@ -465,6 +471,7 @@ export type OrchestrationGoalStatus = typeof OrchestrationGoalStatus.Type;
 
 // Terminal statuses: a new goal can be created once the existing goal is in one of these.
 export const ORCHESTRATION_GOAL_TERMINAL_STATUSES: ReadonlyArray<OrchestrationGoalStatus> = [
+  "blocked",
   "budget_limited",
   "complete",
   "cleared",
@@ -492,6 +499,12 @@ export const OrchestrationGoal = Schema.Struct({
   continuationCount: NonNegativeInt,
   // Wall-clock seconds the goal has been running (createdAt → latest turn completion).
   timeUsedSeconds: NonNegativeInt,
+  // When status === "blocked", the recurring blocker text the model reported
+  // (null otherwise). Surfaces in the UI so the user knows why the goal stopped.
+  // Decoding default null backfills rows persisted before the blocked port.
+  blockedReason: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -501,6 +514,11 @@ export type OrchestrationGoal = typeof OrchestrationGoal.Type;
 // this in assistant output and marks the goal complete (faithful Design A self-report,
 // adapted to a text channel because Synara cannot inject tools across all providers).
 export const ORCHESTRATION_GOAL_COMPLETION_SENTINEL = "<goal-complete/>";
+
+// Sentinel the model emits after the same blocker has recurred for ≥3
+// consecutive goal turns (codex `blocked` port, adapted to text channel).
+// The reactor detects this and marks the goal blocked (terminal).
+export const ORCHESTRATION_GOAL_BLOCKED_SENTINEL = "<goal-blocked/>";
 
 // Loop state (session-scoped, ephemeral run + persisted state for UI snapshot).
 // Mirrors OrchestrationGoal's shape: the state is projected via domain events so
@@ -1346,6 +1364,14 @@ const ThreadGoalCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadGoalBlockedCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.blocked"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  blockedReason: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
 const ThreadLoopCreateCommand = Schema.Struct({
   type: Schema.Literal("thread.loop.create"),
   commandId: CommandId,
@@ -1409,6 +1435,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadGoalResumeCommand,
   ThreadGoalClearCommand,
   ThreadGoalCompleteCommand,
+  ThreadGoalBlockedCommand,
   ThreadLoopCreateCommand,
   ThreadLoopPauseCommand,
   ThreadLoopResumeCommand,
@@ -1451,6 +1478,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadGoalResumeCommand,
   ThreadGoalClearCommand,
   ThreadGoalCompleteCommand,
+  ThreadGoalBlockedCommand,
   ThreadLoopCreateCommand,
   ThreadLoopPauseCommand,
   ThreadLoopResumeCommand,
@@ -1598,6 +1626,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.goal-resumed",
   "thread.goal-cleared",
   "thread.goal-completed",
+  "thread.goal-blocked",
   "thread.loop-created",
   "thread.loop-paused",
   "thread.loop-resumed",
@@ -1941,6 +1970,14 @@ export const ThreadGoalLifecyclePayload = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 
+// Blocked event carries the recurring blocker text so the projection can
+// persist it on the goal row for UI display.
+export const ThreadGoalBlockedPayload = Schema.Struct({
+  threadId: ThreadId,
+  blockedReason: TrimmedNonEmptyString,
+  updatedAt: IsoDateTime,
+});
+
 // Loop events mirror goal events: created carries the full loop snapshot, lifecycle
 // transitions carry just the thread id + timestamp.
 export const ThreadLoopCreatedPayload = Schema.Struct({
@@ -2169,6 +2206,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.goal-completed"),
     payload: ThreadGoalLifecyclePayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.goal-blocked"),
+    payload: ThreadGoalBlockedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

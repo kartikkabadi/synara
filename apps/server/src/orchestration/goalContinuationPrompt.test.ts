@@ -15,6 +15,7 @@ function makeGoal(overrides?: Partial<OrchestrationGoal>): OrchestrationGoal {
     usage: { inputTokens: 150, outputTokens: 100, totalTokens: 250 },
     turnCount: 2,
     continuationCount: 1,
+        blockedReason: null,
     timeUsedSeconds: 42,
     createdAt: NOW,
     updatedAt: NOW,
