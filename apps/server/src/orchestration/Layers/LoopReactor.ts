@@ -49,6 +49,43 @@ const LOOP_ERROR_RETRY_LIMIT = 3;
 // Exponential backoff delays for retry-on-error: 30s, 60s, 120s.
 const LOOP_ERROR_BACKOFF_MS = [30_000, 60_000, 120_000];
 
+const PROVIDER_CAN_LOOP: Record<ProviderKind, boolean> = {
+  codex: true,
+  claudeAgent: false,
+  cursor: true,
+  gemini: true,
+  grok: false,
+  kilo: false,
+  opencode: true,
+  pi: true,
+};
+
+const PROVIDER_COMPACTION_CAPABILITY: Record<
+  ProviderKind,
+  { supportsCompaction: boolean; autoCompacts: boolean }
+> = {
+  codex: { supportsCompaction: true, autoCompacts: true },
+  claudeAgent: { supportsCompaction: false, autoCompacts: false },
+  cursor: { supportsCompaction: false, autoCompacts: true },
+  gemini: { supportsCompaction: false, autoCompacts: true },
+  grok: { supportsCompaction: false, autoCompacts: false },
+  kilo: { supportsCompaction: false, autoCompacts: false },
+  opencode: { supportsCompaction: true, autoCompacts: false },
+  pi: { supportsCompaction: true, autoCompacts: false },
+};
+
+function threadActiveProvider(thread: OrchestrationThread): ProviderKind {
+  return (thread.session?.providerName ?? thread.modelSelection.provider) as ProviderKind;
+}
+
+function compactionCanReduceUsage(provider: ProviderKind, autoCompactionEnabled: boolean): boolean {
+  if (!autoCompactionEnabled) {
+    return false;
+  }
+  const capability = PROVIDER_COMPACTION_CAPABILITY[provider];
+  return capability !== undefined && (capability.autoCompacts || capability.supportsCompaction);
+}
+
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;

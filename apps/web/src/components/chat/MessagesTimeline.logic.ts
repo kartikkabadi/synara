@@ -266,6 +266,9 @@ export function deriveMessagesTimelineRows(input: {
     if (entry.kind !== "message") continue;
     if (isHiddenLoopIterationMessage(entry.message)) {
       loopIterationCount += 1;
+    } else if (entry.message.role === "user" && !isHiddenGoalContinuationMessage(entry.message)) {
+      // A visible user turn ends the loop-iteration grouping context.
+      loopIterationCount = 0;
     } else if (entry.message.role === "assistant" && loopIterationCount > 0) {
       loopIterationNumberByAssistantMessageId.set(entry.message.id, loopIterationCount);
     }

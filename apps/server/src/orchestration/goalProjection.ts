@@ -73,7 +73,7 @@ export function applyGoalTurnAccounting(
     tokensUsed,
     usage,
     turnCount: goal.turnCount + 1,
-    timeUsedSeconds: goalElapsedSeconds(goal.createdAt, occurredAt),
+    timeUsedSeconds: Math.max(goal.timeUsedSeconds, goalElapsedSeconds(goal.createdAt, occurredAt)),
     updatedAt: occurredAt,
   };
 }

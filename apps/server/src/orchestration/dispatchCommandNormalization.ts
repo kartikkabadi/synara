@@ -268,6 +268,7 @@ export function makeDispatchCommandNormalizer<E>(options: DispatchCommandNormali
         ...turnStartCommand.message,
         attachments: normalizedAttachments,
       },
+      inputSource: undefined,
     } satisfies OrchestrationCommand;
   });
 }

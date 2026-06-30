@@ -1329,6 +1329,12 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           if (event.payload.activity.kind !== "turn.completed") {
             return;
           }
+          const existingActivities = yield* projectionThreadActivityRepository.listByThreadId({
+            threadId: event.payload.threadId,
+          });
+          if (existingActivities.some((entry) => entry.activityId === event.payload.activity.id)) {
+            return;
+          }
           const existing = yield* projectionThreadGoalRepository.getByThreadId({
             threadId: event.payload.threadId,
           });
