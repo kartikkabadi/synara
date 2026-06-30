@@ -467,12 +467,15 @@ export function BranchToolbarBranchSelector({
     onSetThreadWorkspace,
   ]);
 
-  const runBranchAction = (action: () => Promise<void>) => {
-    startBranchActionTransition(async () => {
-      await action().catch(() => undefined);
-      await invalidateGitQueries(queryClient).catch(() => undefined);
-    });
-  };
+  const runBranchAction = useCallback(
+    (action: () => Promise<void>) => {
+      startBranchActionTransition(async () => {
+        await action().catch(() => undefined);
+        await invalidateGitQueries(queryClient).catch(() => undefined);
+      });
+    },
+    [queryClient, startBranchActionTransition],
+  );
 
   const openCreateBranchDialog = useCallback(() => {
     setCreateBranchName(canPrefillCreateBranch && !hasExactBranchMatch ? trimmedBranchQuery : "");

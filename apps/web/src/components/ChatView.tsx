@@ -3955,7 +3955,6 @@ export default function ChatView({
       removeThreadFromSplitViews,
       storeClearTerminalState,
       storeCloseTerminal,
-      syncServerShellSnapshot,
       settings.confirmTerminalTabClose,
       terminalState.entryPoint,
       terminalState.runningTerminalIds,
