@@ -90,6 +90,28 @@ const make = Effect.gen(function* () {
   // the user knows it is stuck instead of silently burning budget on erroring continuations
   // (Codex c62d792). In-memory only — lost on restart, which also clears the failing session.
   const consecutiveErrors = new Map<ThreadId, number>();
+  // Threads enqueued via reconcile() may need a one-shot bootstrap when latestTurn
+  // is missing (e.g. goal persisted but the first objective turn never started
+  // before restart). Normal trigger paths must not bootstrap — that races with
+  // the client's auto-start turn and duplicates the objective.
+  const reconcileBootstrapThreadIds = new Set<ThreadId>();
+
+  const canDispatchGoalAutomation = (thread: OrchestrationThread) => {
+    if (thread.session?.activeTurnId != null) {
+      return false;
+    }
+    const sessionStatus = thread.session?.status;
+    if (sessionStatus !== "ready" && sessionStatus !== "idle") {
+      return false;
+    }
+    if (thread.hasPendingApprovals === true || thread.hasPendingUserInput === true) {
+      return false;
+    }
+    if (thread.interactionMode === "plan") {
+      return false;
+    }
+    return true;
+  };
 
   const handleThread = Effect.fn(function* (threadId: ThreadId) {
     const thread = Option.getOrUndefined(
@@ -106,6 +128,30 @@ const make = Effect.gen(function* () {
 
     const latestTurn = thread.latestTurn;
     if (!latestTurn) {
+      if (!reconcileBootstrapThreadIds.delete(threadId)) {
+        return;
+      }
+      if (!canDispatchGoalAutomation(thread)) {
+        return;
+      }
+      const isFreshGoal =
+        goal.turnCount === 0 && goal.continuationCount === 0 && thread.messages.length === 0;
+      yield* orchestrationEngine.dispatch({
+        type: "thread.turn.start",
+        commandId: serverCommandId("goal-reconcile-bootstrap"),
+        threadId,
+        message: {
+          messageId: continuationMessageId(),
+          role: "user",
+          text: isFreshGoal ? goal.objective : renderGoalContinuationPrompt(goal),
+          attachments: [],
+        },
+        inputSource: isFreshGoal ? undefined : "goal-continuation",
+        runtimeMode: thread.runtimeMode,
+        interactionMode: "default",
+        dispatchMode: "queue",
+        createdAt: new Date().toISOString(),
+      });
       return;
     }
 
@@ -256,7 +302,10 @@ const make = Effect.gen(function* () {
       Effect.forEach(
         threadIds,
         (threadId) =>
-          Effect.sleep(Duration.millis(500)).pipe(
+          Effect.sync(() => {
+            reconcileBootstrapThreadIds.add(threadId as ThreadId);
+          }).pipe(
+            Effect.andThen(Effect.sleep(Duration.millis(500))),
             Effect.andThen(() => worker.enqueue(threadId as ThreadId)),
           ),
         { discard: true },

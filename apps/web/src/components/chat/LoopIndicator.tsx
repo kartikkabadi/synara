@@ -1,5 +1,6 @@
 import { type ReactElement, useCallback, useEffect, useRef, useState } from "react";
 import { type OrchestrationLoop, type ThreadId } from "@t3tools/contracts";
+import { formatSecondsCompact } from "~/lib/format";
 import { readNativeApi } from "~/nativeApi";
 import { newCommandId } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -11,12 +12,6 @@ const LOOP_STATUS_LABEL: Record<OrchestrationLoop["status"], string> = {
   paused: "paused",
   cleared: "cleared",
 };
-
-function formatInterval(seconds: number): string {
-  if (seconds >= 3600) return `${(seconds / 3600).toFixed(1)}h`;
-  if (seconds >= 60) return `${Math.floor(seconds / 60)}m`;
-  return `${seconds}s`;
-}
 
 /**
  * Compact composer chip for the thread's persisted loop. Mirrors GoalIndicator:
@@ -109,7 +104,7 @@ export function LoopIndicator({
             <span aria-hidden>🔄</span>
             <span className="sr-only sm:not-sr-only">Loop: {LOOP_STATUS_LABEL[loop.status]}</span>
             <span className="text-muted-foreground/70">
-              every {formatInterval(loop.intervalSeconds)}
+              every {formatSecondsCompact(loop.intervalSeconds)}
             </span>
             <span className="text-muted-foreground/70">{loop.iterationsRun} runs</span>
             {showCountdown ? (
@@ -126,7 +121,7 @@ export function LoopIndicator({
           </div>
           <div className="text-xs text-foreground">{loop.prompt}</div>
           <div className="flex gap-3 text-xs text-muted-foreground">
-            <span>every {formatInterval(loop.intervalSeconds)}</span>
+            <span>every {formatSecondsCompact(loop.intervalSeconds)}</span>
             <span>{loop.iterationsRun} runs</span>
             {showCountdown ? <span>next in {secondsRemaining}s</span> : null}
             {isRunning ? <span>running…</span> : null}
