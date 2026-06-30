@@ -9824,8 +9824,17 @@ export default function ChatView({
                             </Button>
                           ) : null}
 
-                          <GoalIndicator goal={activeThread?.goal} />
-                          <LoopIndicator loop={activeThread?.loop} />
+                          <GoalIndicator goal={activeThread?.goal} threadId={activeThreadId} />
+                          <LoopIndicator
+                            loop={activeThread?.loop}
+                            threadId={activeThreadId}
+                            isWorking={isWorking}
+                            lastIterationCompletedAt={
+                              activeThread?.messages.findLast(
+                                (message) => message.role === "assistant" && message.completedAt,
+                              )?.completedAt
+                            }
+                          />
 
                           {activeTaskList || sidebarProposedPlan || planSidebarOpen ? (
                             <Button

@@ -23,16 +23,16 @@ function makeGoal(overrides?: Partial<OrchestrationGoal>): OrchestrationGoal {
 
 describe("GoalIndicator", () => {
   it("renders nothing without a goal", () => {
-    expect(renderToStaticMarkup(<GoalIndicator goal={null} />)).toBe("");
-    expect(renderToStaticMarkup(<GoalIndicator goal={undefined} />)).toBe("");
+    expect(renderToStaticMarkup(<GoalIndicator goal={null} threadId="t1" />)).toBe("");
+    expect(renderToStaticMarkup(<GoalIndicator goal={undefined} threadId="t1" />)).toBe("");
   });
 
   it("renders nothing for a cleared goal", () => {
-    expect(renderToStaticMarkup(<GoalIndicator goal={makeGoal({ status: "cleared" })} />)).toBe("");
+    expect(renderToStaticMarkup(<GoalIndicator goal={makeGoal({ status: "cleared" })} threadId="t1" />)).toBe("");
   });
 
   it("shows status, objective, and turn count for an active goal", () => {
-    const html = renderToStaticMarkup(<GoalIndicator goal={makeGoal()} />);
+    const html = renderToStaticMarkup(<GoalIndicator goal={makeGoal()} threadId="t1" />);
     expect(html).toContain("Goal: active");
     expect(html).toContain("3 turns");
     expect(html).toContain('title="Make all tests pass"');
@@ -41,19 +41,19 @@ describe("GoalIndicator", () => {
 
   it("labels budget-limited goals", () => {
     const html = renderToStaticMarkup(
-      <GoalIndicator goal={makeGoal({ status: "budget_limited" })} />,
+      <GoalIndicator goal={makeGoal({ status: "budget_limited" })} threadId="t1" />,
     );
     expect(html).toContain("budget limited");
     expect(html).toContain('data-goal-status="budget_limited"');
   });
 
   it("renders paused and completed statuses", () => {
-    const paused = renderToStaticMarkup(<GoalIndicator goal={makeGoal({ status: "paused" })} />);
+    const paused = renderToStaticMarkup(<GoalIndicator goal={makeGoal({ status: "paused" })} threadId="t1" />);
     expect(paused).toContain("Goal: paused");
     expect(paused).toContain('data-goal-status="paused"');
 
     const completed = renderToStaticMarkup(
-      <GoalIndicator goal={makeGoal({ status: "complete" })} />,
+      <GoalIndicator goal={makeGoal({ status: "complete" })} threadId="t1" />,
     );
     expect(completed).toContain("Goal: complete");
     expect(completed).toContain('data-goal-status="complete"');

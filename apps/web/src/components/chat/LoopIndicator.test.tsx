@@ -18,16 +18,16 @@ function makeLoop(overrides?: Partial<OrchestrationLoop>): OrchestrationLoop {
 
 describe("LoopIndicator", () => {
   it("renders nothing without a loop", () => {
-    expect(renderToStaticMarkup(<LoopIndicator loop={null} />)).toBe("");
-    expect(renderToStaticMarkup(<LoopIndicator loop={undefined} />)).toBe("");
+    expect(renderToStaticMarkup(<LoopIndicator loop={null} threadId="t1" isWorking={false} />)).toBe("");
+    expect(renderToStaticMarkup(<LoopIndicator loop={undefined} threadId="t1" isWorking={false} />)).toBe("");
   });
 
   it("renders nothing for a cleared loop", () => {
-    expect(renderToStaticMarkup(<LoopIndicator loop={makeLoop({ status: "cleared" })} />)).toBe("");
+    expect(renderToStaticMarkup(<LoopIndicator loop={makeLoop({ status: "cleared" })} threadId="t1" isWorking={false} />)).toBe("");
   });
 
   it("shows status, interval, and iteration count for an active loop", () => {
-    const html = renderToStaticMarkup(<LoopIndicator loop={makeLoop()} />);
+    const html = renderToStaticMarkup(<LoopIndicator loop={makeLoop()} threadId="t1" isWorking={false} />);
     expect(html).toContain("Loop: active");
     expect(html).toContain("every 5m");
     expect(html).toContain("3 runs");
@@ -36,12 +36,12 @@ describe("LoopIndicator", () => {
   });
 
   it("formats hour-scale intervals", () => {
-    const html = renderToStaticMarkup(<LoopIndicator loop={makeLoop({ intervalSeconds: 3600 })} />);
+    const html = renderToStaticMarkup(<LoopIndicator loop={makeLoop({ intervalSeconds: 3600 })} threadId="t1" isWorking={false} />);
     expect(html).toContain("every 1.0h");
   });
 
   it("renders paused status", () => {
-    const html = renderToStaticMarkup(<LoopIndicator loop={makeLoop({ status: "paused" })} />);
+    const html = renderToStaticMarkup(<LoopIndicator loop={makeLoop({ status: "paused" })} threadId="t1" isWorking={false} />);
     expect(html).toContain("Loop: paused");
     expect(html).toContain('data-loop-status="paused"');
   });
