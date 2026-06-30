@@ -3,6 +3,7 @@ import {
   MessageId,
   type OrchestrationEvent,
   type OrchestrationThread,
+  type ProviderKind,
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
