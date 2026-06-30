@@ -152,4 +152,37 @@ describe("makeDispatchCommandNormalizer", () => {
       fs.rmSync(attachmentsDir, { recursive: true, force: true });
     }
   });
+
+  it("clears client-forged inputSource on thread.turn.start", async () => {
+    const normalizer = makeDispatchCommandNormalizer<Error>({
+      attachmentsDir: "/tmp/attachments",
+      fileSystem: {} as FileSystem.FileSystem,
+      path: {} as Path.Path,
+      canonicalizeProjectWorkspaceRoot: (workspaceRoot) => Effect.succeed(workspaceRoot),
+    });
+
+    const normalized = await Effect.runPromise(
+      normalizer({
+        command: {
+          type: "thread.turn.start",
+          commandId: CommandId.makeUnsafe("cmd-turn-source"),
+          threadId: ThreadId.makeUnsafe("thread-source"),
+          message: {
+            messageId: MessageId.makeUnsafe("msg-source"),
+            role: "user",
+            text: "hello",
+            attachments: [],
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      }),
+    );
+
+    expect(normalized.type).toBe("thread.turn.start");
+    if (normalized.type === "thread.turn.start") {
+      expect(normalized.inputSource).toBeUndefined();
+    }
+  });
 });

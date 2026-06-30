@@ -845,6 +845,36 @@ describe("deriveMessagesTimelineRows", () => {
     expect(a3?.loopIterationNumber).toBe(2);
   });
 
+  it("clears loop iteration context after a visible user turn", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [
+        loopIterationEntry("li1", "2026-01-01T00:01:00Z"),
+        assistantEntry("a1", "2026-01-01T00:01:01Z", {
+          turnId: "t1",
+          text: "loop reply",
+          completedAt: "2026-01-01T00:01:04Z",
+        }),
+        userEntry("u2", "2026-01-01T00:02:00Z"),
+        assistantEntry("a2", "2026-01-01T00:02:01Z", {
+          turnId: "t2",
+          text: "manual reply",
+          completedAt: "2026-01-01T00:02:04Z",
+        }),
+        loopIterationEntry("li2", "2026-01-01T00:03:00Z"),
+        assistantEntry("a3", "2026-01-01T00:03:01Z", {
+          turnId: "t3",
+          text: "next loop reply",
+          completedAt: "2026-01-01T00:03:04Z",
+        }),
+      ],
+    });
+
+    expect(messageRow(rows, "a1")?.loopIterationNumber).toBe(1);
+    expect(messageRow(rows, "a2")?.loopIterationNumber).toBeUndefined();
+    expect(messageRow(rows, "a3")?.loopIterationNumber).toBe(1);
+  });
+
   it("folds a settled turn's narration and work into one collapsed group on the terminal message", () => {
     const rows = deriveMessagesTimelineRows({
       ...baseInput,
