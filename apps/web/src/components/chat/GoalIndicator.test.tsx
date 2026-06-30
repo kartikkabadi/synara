@@ -17,6 +17,7 @@ function makeGoal(overrides?: Partial<OrchestrationGoal>): OrchestrationGoal {
     turnCount: 3,
     continuationCount: 2,
     timeUsedSeconds: 0,
+    blockedReason: null,
     createdAt: "2026-06-02T10:00:00.000Z",
     updatedAt: "2026-06-02T10:00:00.000Z",
     ...overrides,

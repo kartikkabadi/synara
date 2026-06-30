@@ -11,7 +11,10 @@ import {
 import { Cause, Duration, Effect, Layer, Option, Schedule, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
-import { renderGoalContinuationPrompt, renderGoalBudgetLimitedPrompt } from "../goalContinuationPrompt.ts";
+import {
+  renderGoalContinuationPrompt,
+  renderGoalBudgetLimitedPrompt,
+} from "../goalContinuationPrompt.ts";
 import {
   GoalContinuationReactor,
   type GoalContinuationReactorShape,
@@ -92,7 +95,10 @@ function extractBlockedReason(text: string): string {
   const lines = text
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line.length > 0 && normalizeSentinelCandidate(line) !== ORCHESTRATION_GOAL_BLOCKED_SENTINEL);
+    .filter(
+      (line) =>
+        line.length > 0 && normalizeSentinelCandidate(line) !== ORCHESTRATION_GOAL_BLOCKED_SENTINEL,
+    );
   const reason = lines.at(-1) ?? "Recurring blocker detected by goal audit";
   return reason.length > 280 ? `${reason.slice(0, 277)}...` : reason;
 }
