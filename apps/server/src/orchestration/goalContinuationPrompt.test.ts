@@ -30,6 +30,10 @@ describe("renderGoalContinuationPrompt", () => {
     expect(prompt).toContain("completion audit");
     // The objective is framed as untrusted data, not higher-priority instructions.
     expect(prompt).toContain("user-provided data");
+    // The "How goals work" section explains the continuation loop to the agent.
+    expect(prompt).toContain("How goals work:");
+    expect(prompt).toContain("not being asked a new question");
+    expect(prompt).toContain("completion sentinel");
   });
 
   it("renders the budget line when a token budget is set", () => {
