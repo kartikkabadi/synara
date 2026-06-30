@@ -176,7 +176,11 @@ describe("makeDispatchCommandNormalizer", () => {
           runtimeMode: "full-access",
           interactionMode: "default",
           createdAt: "2026-01-01T00:00:00.000Z",
-        },
+          // Forge a privileged internal source the client must not be able to
+          // set. Without normalization this would let a client inject hidden
+          // goal-continuation turns that bypass the UI and inflate counts.
+          inputSource: "goal-continuation",
+        } as unknown as Parameters<typeof normalizer>[0]["command"],
       }),
     );
 

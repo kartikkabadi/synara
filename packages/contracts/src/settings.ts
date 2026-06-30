@@ -107,9 +107,23 @@ export const ServerSettings = Schema.Struct({
   }).pipe(Schema.withDecodingDefault(() => ({}))),
   skills: SkillsServerSettings.pipe(Schema.withDecodingDefault(() => ({}))),
   autoCompactionEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
-  autoCompactionThreshold: Schema.Number.pipe(Schema.withDecodingDefault(() => 80)),
-  loopCompactionThreshold: Schema.Number.pipe(Schema.withDecodingDefault(() => 50)),
-  autoCompactionCooldownSeconds: Schema.Number.pipe(Schema.withDecodingDefault(() => 30)),
+  // Thresholds are percentages 0..100; cooldown is a non-negative second count.
+  // Constraints apply to both the full settings and the patch (below) so a
+  // malformed client patch can't bypass validation the full schema enforces.
+  autoCompactionThreshold: Schema.Number.pipe(
+    Schema.check(Schema.isGreaterThanOrEqualTo(0)),
+    Schema.check(Schema.isLessThanOrEqualTo(100)),
+    Schema.withDecodingDefault(() => 80),
+  ),
+  loopCompactionThreshold: Schema.Number.pipe(
+    Schema.check(Schema.isGreaterThanOrEqualTo(0)),
+    Schema.check(Schema.isLessThanOrEqualTo(100)),
+    Schema.withDecodingDefault(() => 50),
+  ),
+  autoCompactionCooldownSeconds: Schema.Number.pipe(
+    Schema.check(Schema.isGreaterThanOrEqualTo(0)),
+    Schema.withDecodingDefault(() => 30),
+  ),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -185,9 +199,21 @@ export const ServerSettingsPatch = Schema.Struct({
     }),
   ),
   autoCompactionEnabled: Schema.optionalKey(Schema.Boolean),
-  autoCompactionThreshold: Schema.optionalKey(Schema.Number),
-  loopCompactionThreshold: Schema.optionalKey(Schema.Number),
-  autoCompactionCooldownSeconds: Schema.optionalKey(Schema.Number),
+  autoCompactionThreshold: Schema.optionalKey(
+    Schema.Number.pipe(
+      Schema.check(Schema.isGreaterThanOrEqualTo(0)),
+      Schema.check(Schema.isLessThanOrEqualTo(100)),
+    ),
+  ),
+  loopCompactionThreshold: Schema.optionalKey(
+    Schema.Number.pipe(
+      Schema.check(Schema.isGreaterThanOrEqualTo(0)),
+      Schema.check(Schema.isLessThanOrEqualTo(100)),
+    ),
+  ),
+  autoCompactionCooldownSeconds: Schema.optionalKey(
+    Schema.Number.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
+  ),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
