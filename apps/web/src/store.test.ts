@@ -3467,6 +3467,7 @@ describe("store — goals", () => {
       usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
       turnCount: 2,
       continuationCount: 1,
+      blockedReason: null,
       timeUsedSeconds: 0,
       createdAt: "2026-02-27T00:00:00.000Z",
       updatedAt: "2026-02-27T00:00:00.000Z",

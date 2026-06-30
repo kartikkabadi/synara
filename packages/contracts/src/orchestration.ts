@@ -497,9 +497,7 @@ export const OrchestrationGoal = Schema.Struct({
   // When status === "blocked", the recurring blocker text the model reported
   // (null otherwise). Surfaces in the UI so the user knows why the goal stopped.
   // Decoding default null backfills rows persisted before the blocked port.
-  blockedReason: Schema.NullOr(TrimmedNonEmptyString).pipe(
-    Schema.withDecodingDefault(() => null),
-  ),
+  blockedReason: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => null)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
