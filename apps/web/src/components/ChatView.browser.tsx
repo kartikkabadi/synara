@@ -437,8 +437,6 @@ function buildFixture(snapshot: OrchestrationReadModel): TestFixture {
   };
 }
 
-
-
 function findThreadDetailFromFixtureSnapshot(
   threadId: ThreadId,
 ): OrchestrationReadModel["threads"][number] | null {

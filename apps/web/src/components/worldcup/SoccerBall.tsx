@@ -73,7 +73,13 @@ export function SoccerBall({ className }: SoccerBallProps) {
 
       <g stroke="#0f1115" strokeWidth={1.4} strokeLinejoin="round" strokeLinecap="round">
         {SEAMS.map((seam, index) => (
-          <line key={`seam-${seam.x1}-${seam.y1}`} x1={seam.x1} y1={seam.y1} x2={seam.x2} y2={seam.y2} />
+          <line
+            key={`seam-${seam.x1}-${seam.y1}`}
+            x1={seam.x1}
+            y1={seam.y1}
+            x2={seam.x2}
+            y2={seam.y2}
+          />
         ))}
       </g>
 
