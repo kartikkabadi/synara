@@ -37,25 +37,10 @@ import {
   requireThreadArchived,
   requireThreadNotArchived,
 } from "./commandInvariants.ts";
+import { providerCanLoop } from "./providerCapabilities.ts";
 
 const nowIso = () => new Date().toISOString();
 
-// Static provider compaction capability map (mirrors CompactionReactor's
-// PROVIDER_COMPACTION_CAPABILITY). The decider can't read the runtime
-// `compactsAutomatically` flag from the read model, so it uses this
-// compile-time constant to block loop creation on providers that can't
-// compact AND don't auto-compact (Claude, Grok, Kilo). Without this guard,
-// the loop would hit the context limit and stall within a few iterations.
-const PROVIDER_CAN_LOOP: Record<ProviderKind, boolean> = {
-  codex: true,
-  claudeAgent: false,
-  cursor: true,
-  gemini: true,
-  grok: false,
-  kilo: false,
-  opencode: true,
-  pi: true,
-};
 const DEFAULT_ASSISTANT_DELIVERY_MODE = "buffered" as const;
 
 const defaultMetadata: Omit<OrchestrationEvent, "sequence" | "type" | "payload"> = {
@@ -1897,7 +1882,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       // accept a loop that then stalls on the unsupported active provider.
       const provider = (thread.session?.providerName ??
         thread.modelSelection.provider) as ProviderKind;
-      if (!PROVIDER_CAN_LOOP[provider]) {
+      if (!providerCanLoop(provider)) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail:

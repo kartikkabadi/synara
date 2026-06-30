@@ -201,32 +201,27 @@ export function deriveTerminalAssistantMessageIds(
   return terminalAssistantMessageIds;
 }
 
-// A hidden goal-continuation turn (Synara's analog of pi-goal's `display:false`): the
-// user-role message the goal loop injects to keep the agent working. It drives the next
-// turn but is never shown in the transcript — only the agent's response to it is.
-export function isHiddenGoalContinuationMessage(
-  message: Pick<ChatMessage, "role" | "source">,
-): boolean {
-  return message.role === "user" && message.source === "goal-continuation";
+// Hidden automation turns (goal-continuation, loop-iteration, goal-budget-limited):
+// user-role messages the reactor injects to drive the agent. They never render in
+// the transcript — only the agent's response to them does.
+const HIDDEN_AUTOMATION_SOURCES: ReadonlySet<string> = new Set([
+  "goal-continuation",
+  "loop-iteration",
+  "goal-budget-limited",
+]);
+
+export function isHiddenAutomationMessage(message: Pick<ChatMessage, "role" | "source">): boolean {
+  return (
+    message.role === "user" &&
+    message.source != null &&
+    HIDDEN_AUTOMATION_SOURCES.has(message.source)
+  );
 }
 
-// A hidden loop-iteration turn: same treatment as goal-continuation. The loop
-// reactor injects the same prompt every N minutes; hiding the repeated user
-// message keeps the transcript clean — only the agent's responses show.
 export function isHiddenLoopIterationMessage(
   message: Pick<ChatMessage, "role" | "source">,
 ): boolean {
   return message.role === "user" && message.source === "loop-iteration";
-}
-
-// A hidden goal-budget-limited steering turn: the goal reactor injects one
-// final wrap-up prompt when the token budget is exhausted. Same treatment as
-// goal-continuation — the user message is hidden, only the agent's summary
-// response is shown.
-export function isHiddenGoalBudgetLimitedMessage(
-  message: Pick<ChatMessage, "role" | "source">,
-): boolean {
-  return message.role === "user" && message.source === "goal-budget-limited";
 }
 
 // Derives transcript rows from timeline entries while keeping live narration and
@@ -250,14 +245,9 @@ export function deriveMessagesTimelineRows(input: {
     entry.kind === "message" ? [entry.message] : [],
   );
   const durationStartByMessageId = computeMessageDurationStart(allTimelineMessages);
-  // Hidden goal-continuation, loop-iteration, and goal-budget-limited turns
-  // never render (their assistant responses still do).
+  // Hidden automation turns never render (their assistant responses still do).
   const timelineEntries = input.timelineEntries.filter(
-    (entry) =>
-      entry.kind !== "message" ||
-      (!isHiddenGoalContinuationMessage(entry.message) &&
-        !isHiddenLoopIterationMessage(entry.message) &&
-        !isHiddenGoalBudgetLimitedMessage(entry.message)),
+    (entry) => entry.kind !== "message" || !isHiddenAutomationMessage(entry.message),
   );
   const timelineMessages = timelineEntries.flatMap((entry) =>
     entry.kind === "message" ? [entry.message] : [],
@@ -277,7 +267,7 @@ export function deriveMessagesTimelineRows(input: {
     if (entry.kind !== "message") continue;
     if (isHiddenLoopIterationMessage(entry.message)) {
       loopIterationCount += 1;
-    } else if (entry.message.role === "user" && !isHiddenGoalContinuationMessage(entry.message)) {
+    } else if (entry.message.role === "user" && !isHiddenAutomationMessage(entry.message)) {
       // A visible user turn ends the loop-iteration grouping context.
       loopIterationCount = 0;
     } else if (entry.message.role === "assistant" && loopIterationCount > 0) {

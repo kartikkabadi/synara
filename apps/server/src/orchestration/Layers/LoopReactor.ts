@@ -14,6 +14,7 @@ import { LoopReactor, type LoopReactorShape } from "../Services/LoopReactor.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { PROVIDER_COMPACTION_CAPABILITY } from "../providerCapabilities.ts";
 
 // Same trigger set as GoalContinuationReactor: events that mean "a turn may have
 // just settled" or "the loop/interaction state changed in a way that should
@@ -49,31 +50,6 @@ const loopIterationMessageId = (): MessageId =>
 const LOOP_ERROR_RETRY_LIMIT = 3;
 // Exponential backoff delays for retry-on-error: 30s, 60s, 120s.
 const LOOP_ERROR_BACKOFF_MS = [30_000, 60_000, 120_000];
-
-const PROVIDER_CAN_LOOP: Record<ProviderKind, boolean> = {
-  codex: true,
-  claudeAgent: false,
-  cursor: true,
-  gemini: true,
-  grok: false,
-  kilo: false,
-  opencode: true,
-  pi: true,
-};
-
-const PROVIDER_COMPACTION_CAPABILITY: Record<
-  ProviderKind,
-  { supportsCompaction: boolean; autoCompacts: boolean }
-> = {
-  codex: { supportsCompaction: true, autoCompacts: true },
-  claudeAgent: { supportsCompaction: false, autoCompacts: false },
-  cursor: { supportsCompaction: false, autoCompacts: true },
-  gemini: { supportsCompaction: false, autoCompacts: true },
-  grok: { supportsCompaction: false, autoCompacts: false },
-  kilo: { supportsCompaction: false, autoCompacts: false },
-  opencode: { supportsCompaction: true, autoCompacts: false },
-  pi: { supportsCompaction: true, autoCompacts: false },
-};
 
 function threadActiveProvider(thread: OrchestrationThread): ProviderKind {
   return (thread.session?.providerName ?? thread.modelSelection.provider) as ProviderKind;

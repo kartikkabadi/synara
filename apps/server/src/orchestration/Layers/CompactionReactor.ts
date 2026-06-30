@@ -7,26 +7,7 @@ import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-
-// Static provider compaction capability map (verified from providerDiscovery.ts +
-// adapter source). Provider capabilities don't change at runtime, so a compile-time
-// constant avoids a cross-service dependency on ProviderDiscoveryService.
-//
-// supportsCompaction: provider exposes a compact action (Synara can drive it)
-// autoCompacts: provider handles compaction internally (Synara should stay out)
-const PROVIDER_COMPACTION_CAPABILITY: Record<
-  ProviderKind,
-  { supportsCompaction: boolean; autoCompacts: boolean }
-> = {
-  codex: { supportsCompaction: true, autoCompacts: true },
-  claudeAgent: { supportsCompaction: false, autoCompacts: false },
-  cursor: { supportsCompaction: false, autoCompacts: true },
-  gemini: { supportsCompaction: false, autoCompacts: true },
-  grok: { supportsCompaction: false, autoCompacts: false },
-  kilo: { supportsCompaction: false, autoCompacts: false },
-  opencode: { supportsCompaction: true, autoCompacts: false },
-  pi: { supportsCompaction: true, autoCompacts: false },
-};
+import { PROVIDER_COMPACTION_CAPABILITY } from "../providerCapabilities.ts";
 
 const EMERGENCY_THRESHOLD = 90;
 

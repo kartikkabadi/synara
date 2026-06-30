@@ -6,7 +6,7 @@ import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
   deriveTerminalAssistantMessageIds,
-  isHiddenGoalContinuationMessage,
+  isHiddenAutomationMessage,
   isHiddenLoopIterationMessage,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
@@ -603,16 +603,16 @@ describe("resolveAssistantMessageCopyState", () => {
   });
 });
 
-describe("isHiddenGoalContinuationMessage", () => {
-  it("matches only user-role goal-continuation messages", () => {
-    expect(isHiddenGoalContinuationMessage({ role: "user", source: "goal-continuation" })).toBe(
-      true,
+describe("isHiddenAutomationMessage", () => {
+  it("matches user-role goal-continuation, loop-iteration, and goal-budget-limited messages", () => {
+    expect(isHiddenAutomationMessage({ role: "user", source: "goal-continuation" })).toBe(true);
+    expect(isHiddenAutomationMessage({ role: "user", source: "loop-iteration" })).toBe(true);
+    expect(isHiddenAutomationMessage({ role: "user", source: "goal-budget-limited" })).toBe(true);
+    expect(isHiddenAutomationMessage({ role: "assistant", source: "goal-continuation" })).toBe(
+      false,
     );
-    expect(
-      isHiddenGoalContinuationMessage({ role: "assistant", source: "goal-continuation" }),
-    ).toBe(false);
-    expect(isHiddenGoalContinuationMessage({ role: "user", source: "native" })).toBe(false);
-    expect(isHiddenGoalContinuationMessage({ role: "user" })).toBe(false);
+    expect(isHiddenAutomationMessage({ role: "user", source: "native" })).toBe(false);
+    expect(isHiddenAutomationMessage({ role: "user" })).toBe(false);
   });
 });
 

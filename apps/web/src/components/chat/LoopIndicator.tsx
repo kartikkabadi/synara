@@ -66,10 +66,7 @@ export function LoopIndicator({
     return () => clearInterval(timer);
   }, [loop, isWorking, lastIterationCompletedAt]);
 
-  // Warn the user once when a loop crosses 50 iterations so unintended loops
-  // do not silently burn budget. The ref prevents duplicate toasts on re-render.
-  // Re-arm when the loop is absent/cleared or reset below 50 so a new loop on
-  // the same thread warns again.
+  // Warn once when a loop crosses 50 iterations. Re-arm when cleared or reset below 50.
   const warnedAt50 = useRef(false);
   useEffect(() => {
     if (!loop || loop.status === "cleared" || loop.iterationsRun < 50) {

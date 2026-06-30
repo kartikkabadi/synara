@@ -287,10 +287,9 @@ describe("orchestration decider — goals", () => {
     } satisfies Extract<OrchestrationCommand, { type: "thread.goal.blocked" }>;
 
     const event = await Effect.runPromise(decide(command, readModel));
-    expect(event.type).toBe("thread.goal-blocked");
-    if (event.type === "thread.goal-blocked") {
-      expect(event.payload.blockedReason).toBe("Missing API key for external service");
-    }
+    const single = event as Extract<OrchestrationEvent, { type: "thread.goal-blocked" }>;
+    expect(single.type).toBe("thread.goal-blocked");
+    expect(single.payload.blockedReason).toBe("Missing API key for external service");
   });
 
   it("rejects blocking a non-active goal", async () => {
@@ -337,6 +336,7 @@ describe("orchestration decider — goals", () => {
     } satisfies Extract<OrchestrationCommand, { type: "thread.goal.resume" }>;
 
     const event = await Effect.runPromise(decide(command, readModel));
-    expect(event.type).toBe("thread.goal-resumed");
+    const single = event as Extract<OrchestrationEvent, { type: "thread.goal-resumed" }>;
+    expect(single.type).toBe("thread.goal-resumed");
   });
 });
