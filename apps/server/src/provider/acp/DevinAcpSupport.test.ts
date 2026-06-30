@@ -97,39 +97,39 @@ describe("buildDevinAcpSpawnInput — env allowlist filtering", () => {
   it("includes PATH from the allowlist", () => {
     withEnv({ PATH: "/usr/bin:/bin", UNRELATED_VAR: "drop" }, () => {
       const result = buildDevinAcpSpawnInput(undefined, "/tmp");
-      assert.strictEqual(result.env.PATH, "/usr/bin:/bin");
-      assert.strictEqual(result.env.UNRELATED_VAR, undefined);
+      assert.strictEqual(result.env!.PATH, "/usr/bin:/bin");
+      assert.strictEqual(result.env!.UNRELATED_VAR, undefined);
     });
   });
 
   it("includes Windows Path casing from the allowlist", () => {
     withEnv({ Path: "C:\\Windows\\System32", PATH: undefined }, () => {
       const result = buildDevinAcpSpawnInput(undefined, "/tmp");
-      assert.strictEqual(result.env.Path, "C:\\Windows\\System32");
-      assert.strictEqual(result.env.PATH, undefined);
+      assert.strictEqual(result.env!.Path, "C:\\Windows\\System32");
+      assert.strictEqual(result.env!.PATH, undefined);
     });
   });
 
   it("includes HOME from the allowlist", () => {
     withEnv({ HOME: "/home/user" }, () => {
       const result = buildDevinAcpSpawnInput(undefined, "/tmp");
-      assert.strictEqual(result.env.HOME, "/home/user");
+      assert.strictEqual(result.env!.HOME, "/home/user");
     });
   });
 
   it("includes vars with DEVIN_ prefix", () => {
     withEnv({ DEVIN_API_KEY: "secret", DEVIN_BASE_URL: "https://devin.ai" }, () => {
       const result = buildDevinAcpSpawnInput(undefined, "/tmp");
-      assert.strictEqual(result.env.DEVIN_API_KEY, "secret");
-      assert.strictEqual(result.env.DEVIN_BASE_URL, "https://devin.ai");
+      assert.strictEqual(result.env!.DEVIN_API_KEY, "secret");
+      assert.strictEqual(result.env!.DEVIN_BASE_URL, "https://devin.ai");
     });
   });
 
   it("includes vars with WINDSURF_ prefix", () => {
     withEnv({ WINDSURF_API_KEY: "wk-123", WINDSURF_ORG: "org-1" }, () => {
       const result = buildDevinAcpSpawnInput(undefined, "/tmp");
-      assert.strictEqual(result.env.WINDSURF_API_KEY, "wk-123");
-      assert.strictEqual(result.env.WINDSURF_ORG, "org-1");
+      assert.strictEqual(result.env!.WINDSURF_API_KEY, "wk-123");
+      assert.strictEqual(result.env!.WINDSURF_ORG, "org-1");
     });
   });
 
@@ -142,9 +142,9 @@ describe("buildDevinAcpSpawnInput — env allowlist filtering", () => {
       },
       () => {
         const result = buildDevinAcpSpawnInput(undefined, "/tmp");
-        assert.strictEqual(result.env.SECRET_TOKEN, undefined);
-        assert.strictEqual(result.env.AWS_CREDENTIALS, undefined);
-        assert.strictEqual(result.env.RANDOM_VAR, undefined);
+        assert.strictEqual(result.env!.SECRET_TOKEN, undefined);
+        assert.strictEqual(result.env!.AWS_CREDENTIALS, undefined);
+        assert.strictEqual(result.env!.RANDOM_VAR, undefined);
       },
     );
   });
@@ -163,14 +163,14 @@ describe("buildDevinAcpSpawnInput — env allowlist filtering", () => {
       },
       () => {
         const result = buildDevinAcpSpawnInput(undefined, "/tmp");
-        assert.strictEqual(result.env.USERPROFILE, "C:\\Users\\dev");
-        assert.strictEqual(result.env.APPDATA, "C:\\Users\\dev\\AppData\\Roaming");
-        assert.strictEqual(result.env.LOCALAPPDATA, "C:\\Users\\dev\\AppData\\Local");
-        assert.strictEqual(result.env.TEMP, "C:\\Users\\dev\\AppData\\Local\\Temp");
-        assert.strictEqual(result.env.TMP, "C:\\Users\\dev\\AppData\\Local\\Temp");
-        assert.strictEqual(result.env.SystemRoot, "C:\\Windows");
-        assert.strictEqual(result.env.PATHEXT, ".EXE;.BAT;.CMD");
-        assert.strictEqual(result.env.COMSPEC, "C:\\Windows\\System32\\cmd.exe");
+        assert.strictEqual(result.env!.USERPROFILE, "C:\\Users\\dev");
+        assert.strictEqual(result.env!.APPDATA, "C:\\Users\\dev\\AppData\\Roaming");
+        assert.strictEqual(result.env!.LOCALAPPDATA, "C:\\Users\\dev\\AppData\\Local");
+        assert.strictEqual(result.env!.TEMP, "C:\\Users\\dev\\AppData\\Local\\Temp");
+        assert.strictEqual(result.env!.TMP, "C:\\Users\\dev\\AppData\\Local\\Temp");
+        assert.strictEqual(result.env!.SystemRoot, "C:\\Windows");
+        assert.strictEqual(result.env!.PATHEXT, ".EXE;.BAT;.CMD");
+        assert.strictEqual(result.env!.COMSPEC, "C:\\Windows\\System32\\cmd.exe");
       },
     );
   });
@@ -186,11 +186,11 @@ describe("buildDevinAcpSpawnInput — env allowlist filtering", () => {
       },
       () => {
         const result = buildDevinAcpSpawnInput(undefined, "/tmp");
-        assert.strictEqual(result.env.HTTPS_PROXY, "https://proxy.corp:3128");
-        assert.strictEqual(result.env.HTTP_PROXY, "http://proxy.corp:3128");
-        assert.strictEqual(result.env.NO_PROXY, "localhost,127.0.0.1");
-        assert.strictEqual(result.env.NODE_EXTRA_CA_CERTS, "/etc/ssl/corp-ca.pem");
-        assert.strictEqual(result.env.SSL_CERT_FILE, "/etc/ssl/corp-ca.pem");
+        assert.strictEqual(result.env!.HTTPS_PROXY, "https://proxy.corp:3128");
+        assert.strictEqual(result.env!.HTTP_PROXY, "http://proxy.corp:3128");
+        assert.strictEqual(result.env!.NO_PROXY, "localhost,127.0.0.1");
+        assert.strictEqual(result.env!.NODE_EXTRA_CA_CERTS, "/etc/ssl/corp-ca.pem");
+        assert.strictEqual(result.env!.SSL_CERT_FILE, "/etc/ssl/corp-ca.pem");
       },
     );
   });
@@ -209,14 +209,14 @@ describe("buildDevinAcpSpawnInput — env allowlist filtering", () => {
       },
       () => {
         const result = buildDevinAcpSpawnInput(undefined, "/tmp");
-        assert.strictEqual(result.env.XDG_RUNTIME_DIR, "/run/user/1000");
-        assert.strictEqual(result.env.XDG_CONFIG_HOME, "/home/user/.config");
-        assert.strictEqual(result.env.XDG_DATA_HOME, "/home/user/.local/share");
-        assert.strictEqual(result.env.LANG, "en_US.UTF-8");
-        assert.strictEqual(result.env.TERM, "xterm-256color");
-        assert.strictEqual(result.env.SHELL, "/bin/zsh");
-        assert.strictEqual(result.env.USER, "dev");
-        assert.strictEqual(result.env.TMPDIR, "/tmp");
+        assert.strictEqual(result.env!.XDG_RUNTIME_DIR, "/run/user/1000");
+        assert.strictEqual(result.env!.XDG_CONFIG_HOME, "/home/user/.config");
+        assert.strictEqual(result.env!.XDG_DATA_HOME, "/home/user/.local/share");
+        assert.strictEqual(result.env!.LANG, "en_US.UTF-8");
+        assert.strictEqual(result.env!.TERM, "xterm-256color");
+        assert.strictEqual(result.env!.SHELL, "/bin/zsh");
+        assert.strictEqual(result.env!.USER, "dev");
+        assert.strictEqual(result.env!.TMPDIR, "/tmp");
       },
     );
   });
@@ -336,7 +336,7 @@ describe("resolveDevinAcpAuthMethodId", () => {
       }).pipe(Effect.flip);
 
       assert.strictEqual(error._tag, "AcpRequestError");
-      assert.strictEqual(error.code, -32602);
+      assert.strictEqual((error as EffectAcpErrors.AcpRequestError).code, -32602);
     }));
 
   it("includes the advertised auth method IDs in the error data", () =>
@@ -349,7 +349,10 @@ describe("resolveDevinAcpAuthMethodId", () => {
         ],
       }).pipe(Effect.flip);
 
-      const data = error.data as { authMethods: string[]; detail: string };
+      const data = (error as EffectAcpErrors.AcpRequestError).data as {
+        authMethods: string[];
+        detail: string;
+      };
       assert.deepStrictEqual(data.authMethods, ["browser_login", "oauth"]);
     }));
 
@@ -363,7 +366,7 @@ describe("resolveDevinAcpAuthMethodId", () => {
           authMethods: [{ id: "browser_login", name: "Browser login" }],
         }).pipe(Effect.flip);
 
-        const data = error.data as { detail: string };
+        const data = (error as EffectAcpErrors.AcpRequestError).data as { detail: string };
         assert.match(data.detail, /devin auth login/);
         assert.match(data.detail, /WINDSURF_API_KEY/);
       } finally {
@@ -381,7 +384,7 @@ describe("resolveDevinAcpAuthMethodId", () => {
           authMethods: [{ id: "browser_login", name: "Browser login" }],
         }).pipe(Effect.flip);
 
-        const data = error.data as { detail: string };
+        const data = (error as EffectAcpErrors.AcpRequestError).data as { detail: string };
         assert.match(data.detail, /did not advertise Windsurf API key/);
       } finally {
         if (saved === undefined) delete process.env.WINDSURF_API_KEY;
