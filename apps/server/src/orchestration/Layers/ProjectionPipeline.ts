@@ -70,6 +70,7 @@ import { ProjectionThreadLoopRepositoryLive } from "../../persistence/Layers/Pro
 import {
   applyGoalTurnAccounting,
   incrementGoalContinuation,
+  markGoalBlocked,
   transitionGoalStatus,
 } from "../goalProjection.ts";
 import { ServerConfig } from "../../config.ts";
@@ -1330,6 +1331,25 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           yield* projectionThreadGoalRepository.upsert({
             threadId: event.payload.threadId,
             goal: transitionGoalStatus(existing.value.goal, status, event.payload.updatedAt),
+          });
+          yield* touchThreadUpdatedAt(event.payload.threadId, event.occurredAt);
+          return;
+        }
+
+        case "thread.goal-blocked": {
+          const existing = yield* projectionThreadGoalRepository.getByThreadId({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existing)) {
+            return;
+          }
+          yield* projectionThreadGoalRepository.upsert({
+            threadId: event.payload.threadId,
+            goal: markGoalBlocked(
+              existing.value.goal,
+              event.payload.blockedReason,
+              event.payload.updatedAt,
+            ),
           });
           yield* touchThreadUpdatedAt(event.payload.threadId, event.occurredAt);
           return;

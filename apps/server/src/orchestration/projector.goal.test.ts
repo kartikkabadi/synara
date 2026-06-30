@@ -66,6 +66,7 @@ function goalCreatedEvent(overrides?: { tokenBudget?: number | null }): Orchestr
         usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
         turnCount: 0,
         continuationCount: 0,
+        blockedReason: null,
         timeUsedSeconds: 0,
         createdAt: NOW,
         updatedAt: NOW,

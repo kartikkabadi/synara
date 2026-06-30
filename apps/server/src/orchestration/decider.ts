@@ -1674,7 +1674,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         existingGoal &&
         existingGoal.status !== "complete" &&
         existingGoal.status !== "cleared" &&
-        existingGoal.status !== "budget_limited"
+        existingGoal.status !== "budget_limited" &&
+        existingGoal.status !== "blocked"
       ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -1703,6 +1704,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         turnCount: 0,
         continuationCount: 0,
         timeUsedSeconds: 0,
+        blockedReason: null,
         createdAt: command.createdAt,
         updatedAt: command.createdAt,
       };
@@ -1754,10 +1756,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      if (!thread.goal || thread.goal.status !== "paused") {
+      if (!thread.goal || (thread.goal.status !== "paused" && thread.goal.status !== "blocked")) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: "No paused goal to resume.",
+          detail: "No paused or blocked goal to resume.",
         });
       }
       // Goal + Loop mutual exclusion on resume: a paused loop still owns the
@@ -1833,6 +1835,34 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "thread.goal-completed",
         payload: {
           threadId: command.threadId,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.goal.blocked": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (!thread.goal || thread.goal.status !== "active") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "No active goal to block.",
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.goal-blocked",
+        payload: {
+          threadId: command.threadId,
+          blockedReason: command.blockedReason,
           updatedAt: command.createdAt,
         },
       };

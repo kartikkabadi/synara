@@ -219,6 +219,16 @@ export function isHiddenLoopIterationMessage(
   return message.role === "user" && message.source === "loop-iteration";
 }
 
+// A hidden goal-budget-limited steering turn: the goal reactor injects one
+// final wrap-up prompt when the token budget is exhausted. Same treatment as
+// goal-continuation — the user message is hidden, only the agent's summary
+// response is shown.
+export function isHiddenGoalBudgetLimitedMessage(
+  message: Pick<ChatMessage, "role" | "source">,
+): boolean {
+  return message.role === "user" && message.source === "goal-budget-limited";
+}
+
 // Derives transcript rows from timeline entries while keeping live narration and
 // tool rows in visual chronology. Work already waiting when assistant text
 // arrives renders above that text; trailing work renders below it.
@@ -232,21 +242,22 @@ export function deriveMessagesTimelineRows(input: {
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
 }): MessagesTimelineRow[] {
   const nextRows: MessagesTimelineRow[] = [];
-  // Duration boundaries must include hidden goal-continuation and loop-iteration
-  // user messages — otherwise the assistant response after a hidden message
-  // calculates its duration from the previous *visible* assistant message,
-  // inflating "worked for" times (e.g. 1m5s instead of 4s).
+  // Duration boundaries must include hidden goal-continuation, loop-iteration,
+  // and goal-budget-limited user messages — otherwise the assistant response
+  // after a hidden message calculates its duration from the previous *visible*
+  // assistant message, inflating "worked for" times (e.g. 1m5s instead of 4s).
   const allTimelineMessages = input.timelineEntries.flatMap((entry) =>
     entry.kind === "message" ? [entry.message] : [],
   );
   const durationStartByMessageId = computeMessageDurationStart(allTimelineMessages);
-  // Hidden goal-continuation and loop-iteration turns never render (their assistant
-  // responses still do).
+  // Hidden goal-continuation, loop-iteration, and goal-budget-limited turns
+  // never render (their assistant responses still do).
   const timelineEntries = input.timelineEntries.filter(
     (entry) =>
       entry.kind !== "message" ||
       (!isHiddenGoalContinuationMessage(entry.message) &&
-        !isHiddenLoopIterationMessage(entry.message)),
+        !isHiddenLoopIterationMessage(entry.message) &&
+        !isHiddenGoalBudgetLimitedMessage(entry.message)),
   );
   const timelineMessages = timelineEntries.flatMap((entry) =>
     entry.kind === "message" ? [entry.message] : [],

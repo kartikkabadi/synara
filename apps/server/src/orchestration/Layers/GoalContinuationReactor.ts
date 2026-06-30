@@ -2,6 +2,7 @@ import {
   CommandId,
   MessageId,
   ORCHESTRATION_GOAL_COMPLETION_SENTINEL,
+  ORCHESTRATION_GOAL_BLOCKED_SENTINEL,
   type OrchestrationEvent,
   type OrchestrationThread,
   type ThreadId,
@@ -10,7 +11,7 @@ import {
 import { Cause, Duration, Effect, Layer, Option, Schedule, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
-import { renderGoalContinuationPrompt } from "../goalContinuationPrompt.ts";
+import { renderGoalContinuationPrompt, renderGoalBudgetLimitedPrompt } from "../goalContinuationPrompt.ts";
 import {
   GoalContinuationReactor,
   type GoalContinuationReactorShape,
@@ -53,6 +54,13 @@ const serverCommandId = (tag: string): CommandId =>
 const continuationMessageId = (): MessageId =>
   MessageId.makeUnsafe(`goal-continuation:${crypto.randomUUID()}`);
 
+const budgetLimitedMessageId = (): MessageId =>
+  MessageId.makeUnsafe(`goal-budget-limited:${crypto.randomUUID()}`);
+
+// Number of consecutive goal turns that report the same blocker before the
+// reactor marks the goal blocked (terminal). Codex uses 3; we match.
+const GOAL_BLOCKED_AUDIT_THRESHOLD = 3;
+
 // The assistant message produced by the just-completed turn. We require it to be present
 // before deciding, so sentinel detection reads the real final text rather than racing the
 // message's persistence into the projection.
@@ -76,6 +84,42 @@ function normalizeSentinelCandidate(text: string): string {
     .trim();
 }
 
+// Extract the blocker reason from the assistant text preceding the
+// <goal-blocked/> sentinel. The model is prompted to state the blocker on the
+// lines before the sentinel. We take the last non-empty non-sentinel line,
+// trimmed and capped to a reasonable length for the persisted blockedReason.
+function extractBlockedReason(text: string): string {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && normalizeSentinelCandidate(line) !== ORCHESTRATION_GOAL_BLOCKED_SENTINEL);
+  const reason = lines.at(-1) ?? "Recurring blocker detected by goal audit";
+  return reason.length > 280 ? `${reason.slice(0, 277)}...` : reason;
+}
+
+// Heuristic blocker detection for turns where the model reports being stuck
+// without emitting the explicit <goal-blocked/> sentinel. Returns a short
+// normalized reason string, or null if no blocker marker is found.
+// ponytail: regex-based heuristic, not a full NLP parse — sufficient for the
+// audit's purpose (detect recurrence of the same blocker text). Upgrade to a
+// structured model-emitted marker if providers adopt one.
+const BLOCKER_PATTERNS: ReadonlyArray<{ pattern: RegExp; label: string }> = [
+  { pattern: /\bI(?:'m| am) blocked\b/i, label: "I'm blocked" },
+  { pattern: /\bcannot proceed\b/i, label: "cannot proceed" },
+  { pattern: /\bblocked by\b/i, label: "blocked by dependency" },
+  { pattern: /\bunblock(?:ed)?\s+(?:this|the)\s+(?:goal|task)\b/i, label: "needs unblock" },
+  { pattern: /\bstuck\b[^.]*\b(?:cannot|can't|unable)\b/i, label: "stuck and unable to proceed" },
+];
+
+function detectBlockerHeuristic(text: string): string | null {
+  for (const { pattern, label } of BLOCKER_PATTERNS) {
+    if (pattern.test(text)) {
+      return label;
+    }
+  }
+  return null;
+}
+
 const GOAL_ERROR_PAUSE_THRESHOLD = 3;
 
 const make = Effect.gen(function* () {
@@ -90,6 +134,14 @@ const make = Effect.gen(function* () {
   // the user knows it is stuck instead of silently burning budget on erroring continuations
   // (Codex c62d792). In-memory only — lost on restart, which also clears the failing session.
   const consecutiveErrors = new Map<ThreadId, number>();
+  // Blocked-audit: tracks the last blocker text the model reported and how many
+  // consecutive goal turns it has recurred. When the same blocker recurs
+  // GOAL_BLOCKED_AUDIT_THRESHOLD times, the reactor dispatches thread.goal.blocked
+  // (terminal). Reset on any non-blocker turn. In-memory only.
+  const blockedAudit = new Map<ThreadId, { reason: string; count: number }>();
+  // Budget steering: ensures the final budget_limited steering turn fires at most
+  // once per goal activation. Reset when the goal leaves budget_limited (resume).
+  const budgetSteered = new Set<ThreadId>();
   // Threads enqueued via reconcile() may need a one-shot bootstrap when latestTurn
   // is missing (e.g. goal persisted but the first objective turn never started
   // before restart). Normal trigger paths must not bootstrap — that races with
@@ -239,7 +291,83 @@ const make = Effect.gen(function* () {
       // Goal is terminal now; drop the per-thread bookkeeping so the map cannot grow
       // unboundedly across the server's lifetime.
       lastHandledTurnId.delete(threadId);
+      blockedAudit.delete(threadId);
+      budgetSteered.delete(threadId);
       return;
+    }
+
+    // Blocked sentinel: the model emitted <goal-blocked/> after its blocked-audit
+    // (codex port). Terminal — dispatch the blocked event with the blocker reason
+    // extracted from the lines preceding the sentinel.
+    if (
+      lastLine !== undefined &&
+      normalizeSentinelCandidate(lastLine) === ORCHESTRATION_GOAL_BLOCKED_SENTINEL
+    ) {
+      const blockedReason = extractBlockedReason(assistantMessage.text);
+      yield* orchestrationEngine.dispatch({
+        type: "thread.goal.blocked",
+        commandId: serverCommandId("goal-blocked"),
+        threadId,
+        blockedReason,
+        createdAt: new Date().toISOString(),
+      });
+      lastHandledTurnId.delete(threadId);
+      blockedAudit.delete(threadId);
+      budgetSteered.delete(threadId);
+      return;
+    }
+
+    // Budget steering: when the goal flips to budget_limited (set by applyGoalTurnAccounting
+    // in the projector when tokensUsed >= tokenBudget), dispatch one final hidden steering
+    // turn telling the model to wrap up and summarize what it accomplished (codex
+    // budget_limit.md port). Fire at most once per activation.
+    if (goal.status === "budget_limited" && !budgetSteered.has(threadId)) {
+      budgetSteered.add(threadId);
+      yield* orchestrationEngine.dispatch({
+        type: "thread.turn.start",
+        commandId: serverCommandId("goal-budget-limited"),
+        threadId,
+        message: {
+          messageId: budgetLimitedMessageId(),
+          role: "user",
+          text: renderGoalBudgetLimitedPrompt(goal),
+          attachments: [],
+        },
+        inputSource: "goal-budget-limited",
+        runtimeMode: thread.runtimeMode,
+        interactionMode: "default",
+        dispatchMode: "queue",
+        createdAt: new Date().toISOString(),
+      });
+      lastHandledTurnId.set(threadId, latestTurn.turnId);
+      return;
+    }
+
+    // Blocked-audit: if the assistant text contains a blocker marker (heuristic —
+    // "I'm blocked", "cannot proceed", "blocked by"), track recurrence. Same blocker
+    // GOAL_BLOCKED_AUDIT_THRESHOLD turns in a row → dispatch thread.goal.blocked.
+    // This catches blockers the model reports without emitting the explicit sentinel.
+    const blockerReason = detectBlockerHeuristic(assistantMessage.text);
+    if (blockerReason !== null) {
+      const prev = blockedAudit.get(threadId);
+      const nextCount = prev && prev.reason === blockerReason ? prev.count + 1 : 1;
+      blockedAudit.set(threadId, { reason: blockerReason, count: nextCount });
+      if (nextCount >= GOAL_BLOCKED_AUDIT_THRESHOLD) {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.goal.blocked",
+          commandId: serverCommandId("goal-blocked-audit"),
+          threadId,
+          blockedReason: blockerReason,
+          createdAt: new Date().toISOString(),
+        });
+        lastHandledTurnId.delete(threadId);
+        blockedAudit.delete(threadId);
+        budgetSteered.delete(threadId);
+        return;
+      }
+    } else {
+      // Non-blocker turn resets the audit.
+      blockedAudit.delete(threadId);
     }
 
     yield* orchestrationEngine.dispatch({

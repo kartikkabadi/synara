@@ -90,5 +90,21 @@ export function transitionGoalStatus(
   status: OrchestrationGoalStatus,
   updatedAt: string,
 ): OrchestrationGoal {
+  // Clear blockedReason on any non-blocked transition so a resumed goal
+  // doesn't carry a stale reason into the next blocked audit.
+  if (status !== "blocked" && goal.blockedReason !== null) {
+    return { ...goal, status, blockedReason: null, updatedAt };
+  }
   return { ...goal, status, updatedAt };
+}
+
+// Mark a goal blocked: set status + capture the recurring blocker text.
+// Clears blockedReason on any non-blocked transition so a resumed goal
+// doesn't carry a stale reason into the next blocked audit.
+export function markGoalBlocked(
+  goal: OrchestrationGoal,
+  blockedReason: string,
+  updatedAt: string,
+): OrchestrationGoal {
+  return { ...goal, status: "blocked", blockedReason, updatedAt };
 }

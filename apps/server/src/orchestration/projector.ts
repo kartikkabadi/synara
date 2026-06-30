@@ -29,6 +29,7 @@ import {
   ThreadActivityAppendedPayload,
   ThreadGoalCreatedPayload,
   ThreadGoalLifecyclePayload,
+  ThreadGoalBlockedPayload,
   ThreadLoopCreatedPayload,
   ThreadLoopLifecyclePayload,
   ThreadCreatedPayload,
@@ -57,6 +58,7 @@ import {
   applyGoalTurnAccounting,
   incrementGoalContinuation,
   transitionGoalStatus,
+  markGoalBlocked,
 } from "./goalProjection.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -1146,6 +1148,24 @@ export function projectEvent(
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
               goal: transitionGoalStatus(thread.goal, nextStatus, payload.updatedAt),
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+    }
+
+    case "thread.goal-blocked": {
+      return decodeForEvent(ThreadGoalBlockedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread || !thread.goal) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              goal: markGoalBlocked(thread.goal, payload.blockedReason, payload.updatedAt),
               updatedAt: event.occurredAt,
             }),
           };
