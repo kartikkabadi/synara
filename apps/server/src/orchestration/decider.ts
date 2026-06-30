@@ -1176,7 +1176,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             : {}),
           turnId: null,
           streaming: false,
-          source: command.inputSource ?? "native",
+          source:
+            "inputSource" in command && command.inputSource ? command.inputSource : "native",
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },

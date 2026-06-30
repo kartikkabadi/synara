@@ -217,6 +217,7 @@ export function makeDispatchCommandNormalizer<E>(options: DispatchCommandNormali
     return {
       command: {
         ...turnStartCommand,
+        inputSource: undefined,
         message: {
           ...turnStartCommand.message,
           attachments: normalizedAttachments,
