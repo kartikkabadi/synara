@@ -552,16 +552,24 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
   ): Effect.Effect<void, AcpError.AcpError> => {
     // Restore original non-numeric string IDs that were replaced before decoding.
     // Request messages use `id`, response/chunk messages use `requestId`.
-    const idField = message._tag === "Request" ? "id" : "requestId";
-    const syntheticKey = String(message[idField]);
-    if (syntheticIdMap.has(syntheticKey)) {
-      const originalId = syntheticIdMap.get(syntheticKey)!;
-      syntheticIdMap.delete(syntheticKey);
-      return routeDecodedMessage({ ...message, [idField]: originalId });
+    if (message._tag === "Request") {
+      const syntheticKey = String(message.id);
+      if (syntheticIdMap.has(syntheticKey)) {
+        const originalId = syntheticIdMap.get(syntheticKey)!;
+        syntheticIdMap.delete(syntheticKey);
+        return routeDecodedMessage({ ...message, id: originalId });
+      }
+      return handleRequestEncoded(message);
+    }
+    if ("requestId" in message) {
+      const syntheticKey = String(message.requestId);
+      if (syntheticIdMap.has(syntheticKey)) {
+        const originalId = syntheticIdMap.get(syntheticKey)!;
+        syntheticIdMap.delete(syntheticKey);
+        return routeDecodedMessage({ ...message, requestId: originalId });
+      }
     }
     switch (message._tag) {
-      case "Request":
-        return handleRequestEncoded(message);
       case "Exit":
         return handleExitEncoded(message);
       case "Chunk":
