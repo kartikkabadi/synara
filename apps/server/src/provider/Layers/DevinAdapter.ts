@@ -278,7 +278,7 @@ function extractDevinModelsFromConfigOptions(
   for (const base of matrix.values()) {
     const supportedReasoningEfforts =
       base.supportedEfforts.length > 0
-        ? base.supportedEfforts.map((effort) => ({ value: effort }))
+        ? base.supportedEfforts.map((effort) => ({ value: effort, label: labelForEffort(effort) }))
         : undefined;
     const defaultVariant = base.defaultVariant;
     const contextWindowOptions =
@@ -311,7 +311,30 @@ function extractDevinModelsFromConfigOptions(
     });
   }
 
-  return { models, matrix };
+  return { models: models.toSorted((a, b) => a.name.localeCompare(b.name)), matrix };
+}
+
+function labelForEffort(effort: string): string {
+  switch (effort) {
+    case "low":
+      return "Low";
+    case "medium":
+      return "Medium";
+    case "high":
+      return "High";
+    case "xhigh":
+      return "Extra High";
+    case "max":
+      return "Max";
+    case "none":
+      return "None";
+    case "minimal":
+      return "Minimal";
+    case "slow":
+      return "Slow";
+    default:
+      return effort;
+  }
 }
 
 function makeDefaultRuntimeFactory(input: DevinAcpRuntimeFactoryInput) {

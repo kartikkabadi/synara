@@ -497,7 +497,7 @@ describe("DevinAdapterLive", () => {
           slug: "claude-opus-4-8",
           // Single-variant base keeps full display name (no stripping).
           name: "Claude Opus 4.8 Medium",
-          supportedReasoningEfforts: [{ value: "medium" }],
+          supportedReasoningEfforts: [{ value: "medium", label: "Medium" }],
           defaultReasoningEffort: "medium",
         },
       );
