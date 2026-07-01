@@ -12,10 +12,41 @@
 import { MODEL_OPTIONS_BY_PROVIDER, MODEL_SLUG_ALIASES_BY_PROVIDER } from "@t3tools/contracts";
 import { parseDevinModelSlug, type ParsedDevinSlug } from "./DevinModelSlugParser";
 
-export const DEVIN_FALLBACK_MODELS = MODEL_OPTIONS_BY_PROVIDER.devin.map((option) => ({
-  slug: option.slug,
-  name: option.name,
-}));
+export const DEVIN_FALLBACK_MODELS = MODEL_OPTIONS_BY_PROVIDER.devin.map((option) => {
+  const { reasoningEffortLevels, supportsFastMode, supportsThinkingToggle, contextWindowOptions } =
+    option.capabilities;
+
+  const supportedReasoningEfforts =
+    reasoningEffortLevels.length > 0
+      ? reasoningEffortLevels.map((effort) => ({
+          value: effort.value,
+          label: effort.label,
+          description: effort.description,
+        }))
+      : undefined;
+  const defaultReasoningEffort = reasoningEffortLevels.find((effort) => effort.isDefault)?.value;
+
+  const mappedContextWindowOptions =
+    contextWindowOptions.length > 0
+      ? contextWindowOptions.map((window) => ({
+          value: window.value,
+          label: window.label,
+          isDefault: window.isDefault,
+        }))
+      : undefined;
+  const defaultContextWindow = contextWindowOptions.find((window) => window.isDefault)?.value;
+
+  return {
+    slug: option.slug,
+    name: option.name,
+    ...(supportedReasoningEfforts ? { supportedReasoningEfforts } : {}),
+    ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
+    ...(supportsFastMode ? { supportsFastMode: true } : {}),
+    ...(supportsThinkingToggle ? { supportsThinkingToggle: true } : {}),
+    ...(mappedContextWindowOptions ? { contextWindowOptions: mappedContextWindowOptions } : {}),
+    ...(defaultContextWindow ? { defaultContextWindow } : {}),
+  };
+});
 
 export function normalizeDevinModelSlug(model: string): string {
   const trimmed = model.trim();

@@ -281,7 +281,7 @@ describe("DevinAdapterLive", () => {
       });
       const model = yield* Effect.promise(() => observedModelPromise);
 
-      assert.strictEqual(model, "claude-opus-4-8-medium");
+      assert.strictEqual(model, "claude-opus-4-8");
     }).pipe(
       Effect.provide(
         makeDevinAdapterLive({

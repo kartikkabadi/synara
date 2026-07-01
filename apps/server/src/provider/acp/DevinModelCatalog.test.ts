@@ -8,8 +8,8 @@ import {
 } from "./DevinModelCatalog.ts";
 
 describe("normalizeDevinModelSlug", () => {
-  it('maps "opus" to "claude-opus-4-8-medium"', () => {
-    assert.strictEqual(normalizeDevinModelSlug("opus"), "claude-opus-4-8-medium");
+  it('maps "opus" to the "claude-opus-4-8" base family', () => {
+    assert.strictEqual(normalizeDevinModelSlug("opus"), "claude-opus-4-8");
   });
 
   it('trims whitespace and lowercases input (e.g. " SWE " → "swe-1-6")', () => {
@@ -40,6 +40,18 @@ describe("DEVIN_FALLBACK_MODELS", () => {
     const contractSlugs = MODEL_OPTIONS_BY_PROVIDER.devin.map((o) => o.slug);
     const catalogSlugs = DEVIN_FALLBACK_MODELS.map((m) => m.slug);
     assert.deepStrictEqual(catalogSlugs, contractSlugs);
+  });
+
+  it("copies capabilities from the contract model definitions", () => {
+    const opus = DEVIN_FALLBACK_MODELS.find((m) => m.slug === "claude-opus-4-8");
+    assert.ok(opus, "expected claude-opus-4-8 fallback entry");
+    assert.ok(opus!.supportedReasoningEfforts && opus!.supportedReasoningEfforts.length > 0);
+    assert.strictEqual(opus!.supportsFastMode, true);
+
+    const deepseek = DEVIN_FALLBACK_MODELS.find((m) => m.slug === "deepseek-v4");
+    assert.ok(deepseek, "expected deepseek-v4 fallback entry");
+    assert.strictEqual(deepseek!.supportedReasoningEfforts, undefined);
+    assert.strictEqual(deepseek!.supportsFastMode, undefined);
   });
 });
 
