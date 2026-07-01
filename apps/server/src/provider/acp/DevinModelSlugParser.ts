@@ -42,6 +42,7 @@ const DISPLAY_VARIANT_WORDS = new Set([
   "x-high",
   "max",
   "none",
+  "no",
   "minimal",
   "slow",
   "thinking",

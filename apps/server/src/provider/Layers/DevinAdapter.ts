@@ -280,11 +280,22 @@ function extractDevinModelsFromConfigOptions(
       base.supportedEfforts.length > 0
         ? base.supportedEfforts.map((effort) => ({ value: effort }))
         : undefined;
+    const defaultVariant = base.defaultVariant;
     const contextWindowOptions =
       base.contextWindowOptions.length > 0
-        ? base.contextWindowOptions.map((cw) => ({ value: cw, label: cw === "1m" ? "1M" : cw }))
+        ? [
+            {
+              value: "standard",
+              label: "Standard",
+              ...(defaultVariant.contextWindow === null ? { isDefault: true as const } : {}),
+            },
+            ...base.contextWindowOptions.map((cw) => ({
+              value: cw,
+              label: cw === "1m" ? "1M" : cw,
+              ...(defaultVariant.contextWindow === cw ? { isDefault: true as const } : {}),
+            })),
+          ]
         : undefined;
-    const defaultVariant = base.defaultVariant;
 
     models.push({
       slug: base.baseSlug,
@@ -296,7 +307,7 @@ function extractDevinModelsFromConfigOptions(
       ...(contextWindowOptions ? { contextWindowOptions } : {}),
       ...(defaultVariant.contextWindow
         ? { defaultContextWindow: defaultVariant.contextWindow }
-        : {}),
+        : { ...(contextWindowOptions ? { defaultContextWindow: "standard" } : {}) }),
     });
   }
 

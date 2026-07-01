@@ -495,7 +495,8 @@ describe("DevinAdapterLive", () => {
         result.models.find((m) => m.slug === "claude-opus-4-8"),
         {
           slug: "claude-opus-4-8",
-          name: "Claude Opus 4.8",
+          // Single-variant base keeps full display name (no stripping).
+          name: "Claude Opus 4.8 Medium",
           supportedReasoningEfforts: [{ value: "medium" }],
           defaultReasoningEffort: "medium",
         },

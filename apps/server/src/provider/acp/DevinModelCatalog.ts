@@ -97,9 +97,13 @@ export function buildDevinVariantMatrix(
     const medium = variants.find((v) => v.effort === "medium");
     const defaultVariant: DevinModelVariant = bare ?? medium ?? variants[0]!;
 
+    // Single-variant bases keep their full display name (avoids duplicates like
+    // "Claude Sonnet 4.5" appearing twice for MODEL_PRIVATE_2 vs MODEL_PRIVATE_3).
+    const baseName = variants.length === 1 ? entries[0]!.name : entries[0]!.parsed.baseName;
+
     matrix.set(baseSlug, {
       baseSlug,
-      baseName: entries[0]!.parsed.baseName,
+      baseName,
       variants,
       supportedEfforts,
       supportsFastMode,
@@ -132,7 +136,9 @@ export function resolveDevinModelSlug(
   const targetEffort = options.reasoningEffort ?? base.defaultVariant.effort;
   const targetFast = options.fastMode ?? base.defaultVariant.fast;
   const targetThinking = options.thinking ?? base.defaultVariant.thinking;
-  const targetContext = options.contextWindow ?? base.defaultVariant.contextWindow;
+  // "standard" is the UI label for the default (non-1m) context window.
+  const rawContext = options.contextWindow ?? base.defaultVariant.contextWindow;
+  const targetContext = rawContext === "standard" ? null : rawContext;
 
   const exact = base.variants.find(
     (v) =>
