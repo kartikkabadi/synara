@@ -486,11 +486,21 @@ describe("DevinAdapterLive", () => {
       assert.strictEqual(result.models.length, 2);
       assert.deepStrictEqual(
         result.models.find((m) => m.slug === "swe-1-6"),
-        { slug: "swe-1-6", name: "SWE 1.6" },
+        {
+          slug: "swe-1-6",
+          name: "SWE 1.6",
+          upstreamProviderId: "swe-1-6",
+          upstreamProviderName: "SWE 1.6",
+        },
       );
       assert.deepStrictEqual(
         result.models.find((m) => m.slug === "claude-opus-4-8-medium"),
-        { slug: "claude-opus-4-8-medium", name: "Claude Opus 4.8 Medium" },
+        {
+          slug: "claude-opus-4-8-medium",
+          name: "Claude Opus 4.8 Medium",
+          upstreamProviderId: "claude-opus-4-8",
+          upstreamProviderName: "Claude Opus 4.8",
+        },
       );
     }).pipe(
       Effect.provide(

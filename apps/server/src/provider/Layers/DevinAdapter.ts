@@ -82,6 +82,7 @@ import {
   validateUserInputAnswersForElicitation,
 } from "../acp/DevinElicitation.ts";
 import { applyDevinModeSelection } from "../acp/DevinModeMapper.ts";
+import { parseDevinModelSlug } from "../acp/DevinModelSlugParser.ts";
 import { DEVIN_FALLBACK_MODELS, normalizeDevinModelSlug } from "../acp/DevinModelCatalog.ts";
 import { DevinAdapter, type DevinAdapterShape } from "../Services/DevinAdapter.ts";
 import type { ProviderThreadTurnSnapshot } from "../Services/ProviderAdapter.ts";
@@ -138,6 +139,13 @@ interface PendingUserInput {
   readonly answers: Deferred.Deferred<ProviderUserInputAnswers>;
 }
 
+type DevinModelEntry = {
+  readonly slug: string;
+  readonly name: string;
+  readonly upstreamProviderId?: string | undefined;
+  readonly upstreamProviderName?: string | undefined;
+};
+
 interface DevinSessionContext {
   readonly threadId: ThreadId;
   session: ProviderSession;
@@ -152,7 +160,7 @@ interface DevinSessionContext {
   activeTurnFailedToolDetail: string | undefined;
   lastTurnActivityAt: number | undefined;
   /** Cached model list extracted from config options, updated on session start. */
-  cachedModels: ReadonlyArray<{ slug: string; name: string }> | undefined;
+  cachedModels: ReadonlyArray<DevinModelEntry> | undefined;
   /** Binary path that produced cachedModels, for cache invalidation. */
   cachedModelsBinaryPath: string | undefined;
   stopped: boolean;
@@ -201,7 +209,7 @@ function clearActiveTurn(ctx: DevinSessionContext, turnId: TurnId): boolean {
 function readColdDiscoveredModels(
   cache: Map<
     string,
-    { readonly models: ReadonlyArray<{ slug: string; name: string }>; readonly cachedAt: number }
+    { readonly models: ReadonlyArray<DevinModelEntry>; readonly cachedAt: number }
   >,
   binaryPath: string,
 ) {
@@ -219,10 +227,10 @@ function readColdDiscoveredModels(
 function storeColdDiscoveredModels(
   cache: Map<
     string,
-    { readonly models: ReadonlyArray<{ slug: string; name: string }>; readonly cachedAt: number }
+    { readonly models: ReadonlyArray<DevinModelEntry>; readonly cachedAt: number }
   >,
   binaryPath: string,
-  models: ReadonlyArray<{ slug: string; name: string }>,
+  models: ReadonlyArray<DevinModelEntry>,
 ): void {
   cache.set(binaryPath, {
     models,
@@ -232,17 +240,30 @@ function storeColdDiscoveredModels(
 
 function extractDevinModelsFromConfigOptions(
   configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>,
-) {
+): readonly DevinModelEntry[] {
   const modelOption = configOptions.find((opt) => opt.category === "model");
   if (!modelOption || modelOption.type !== "select") {
     return [];
   }
 
-  return modelOption.options.flatMap((entry) =>
+  const rawEntries = modelOption.options.flatMap((entry) =>
     "value" in entry
       ? [{ slug: entry.value, name: entry.name ?? entry.value }]
       : entry.options.map((option) => ({ slug: option.value, name: option.name ?? option.value })),
   );
+
+  return rawEntries.flatMap((entry) => {
+    const parsed = parseDevinModelSlug(entry.slug, entry.name);
+    if (!parsed) return [];
+    return [
+      {
+        slug: entry.slug,
+        name: entry.name,
+        upstreamProviderId: parsed.baseSlug,
+        upstreamProviderName: parsed.baseName,
+      },
+    ];
+  });
 }
 
 function makeDefaultRuntimeFactory(input: DevinAcpRuntimeFactoryInput) {
@@ -286,7 +307,7 @@ function makeProviderAdapter(
     const sessions = new Map<ThreadId, DevinSessionContext>();
     const coldDiscoveredModelsByBinaryPath = new Map<
       string,
-      { readonly models: ReadonlyArray<{ slug: string; name: string }>; readonly cachedAt: number }
+      { readonly models: ReadonlyArray<DevinModelEntry>; readonly cachedAt: number }
     >();
     const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
     const { withThreadLock } = makeAcpThreadLock(threadLocksRef);
