@@ -113,6 +113,7 @@ function providerIconClassName(
 const SEARCHABLE_MODEL_PICKER_THRESHOLD = 15;
 const FAVORITE_MODEL_STORAGE_KEYS = {
   cursor: "synara:cursor-favourite-models:v1",
+  devin: "synara:devin-favourite-models:v1",
   kilo: "synara:kilo-favourite-models:v1",
   opencode: "synara:opencode-favourite-models:v1",
   pi: "synara:pi-favourite-models:v1",
@@ -122,7 +123,11 @@ type FavoriteModelProvider = keyof typeof FAVORITE_MODEL_STORAGE_KEYS;
 
 function supportsModelFavorites(provider: ProviderKind): provider is FavoriteModelProvider {
   return (
-    provider === "cursor" || provider === "kilo" || provider === "opencode" || provider === "pi"
+    provider === "cursor" ||
+    provider === "devin" ||
+    provider === "kilo" ||
+    provider === "opencode" ||
+    provider === "pi"
   );
 }
 
@@ -331,7 +336,8 @@ export const ProviderModelMenuItems = memo(function ProviderModelMenuItems(
       (provider === "kilo" ||
         provider === "opencode" ||
         provider === "cursor" ||
-        provider === "pi") &&
+        provider === "pi" ||
+        provider === "devin") &&
       providerOptions.length >= SEARCHABLE_MODEL_PICKER_THRESHOLD;
     const normalizedModelSearchQuery = deferredModelSearchQuery.trim().toLowerCase();
     const filteredOptions =
