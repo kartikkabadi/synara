@@ -10,6 +10,7 @@ import {
   formatProviderModelOptionName,
   groupProviderModelOptions,
   groupProviderModelOptionsWithFavorites,
+  mergeDynamicModelOptions,
   resolveModelGroupDefaultOpen,
   shouldUseCollapsibleModelGroups,
   type ProviderModelOption,
@@ -41,6 +42,24 @@ describe("formatProviderModelOptionName", () => {
         slug: "custom/internal-model",
       }),
     ).toBe("custom/internal-model");
+  });
+});
+
+describe("mergeDynamicModelOptions", () => {
+  it("does not re-insert static Devin variant slugs when dynamic discovery already returned the base family", () => {
+    const staticOptions = [
+      { slug: "claude-opus-4-8", name: "Claude Opus 4.8" },
+      { slug: "claude-opus-4-8-medium", name: "Claude Opus 4.8 Medium" },
+    ] satisfies ProviderModelOption[];
+    const dynamicModels = [{ slug: "claude-opus-4-8", name: "Claude Opus 4.8" }];
+
+    const merged = mergeDynamicModelOptions({
+      provider: "devin",
+      staticOptions,
+      dynamicModels,
+    });
+
+    expect(merged.map((m) => m.slug)).toEqual(["claude-opus-4-8"]);
   });
 });
 
