@@ -489,8 +489,6 @@ describe("DevinAdapterLive", () => {
         {
           slug: "swe-1-6",
           name: "SWE 1.6",
-          upstreamProviderId: "swe-1-6",
-          upstreamProviderName: "SWE 1.6",
         },
       );
       assert.deepStrictEqual(
@@ -498,8 +496,6 @@ describe("DevinAdapterLive", () => {
         {
           slug: "claude-opus-4-8",
           name: "Claude Opus 4.8",
-          upstreamProviderId: "claude-opus-4-8",
-          upstreamProviderName: "Claude Opus 4.8",
           supportedReasoningEfforts: [{ value: "medium" }],
           defaultReasoningEffort: "medium",
         },

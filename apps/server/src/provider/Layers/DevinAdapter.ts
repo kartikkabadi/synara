@@ -289,8 +289,6 @@ function extractDevinModelsFromConfigOptions(
     models.push({
       slug: base.baseSlug,
       name: base.baseName,
-      upstreamProviderId: base.baseSlug,
-      upstreamProviderName: base.baseName,
       ...(supportedReasoningEfforts ? { supportedReasoningEfforts } : {}),
       ...(defaultVariant.effort ? { defaultReasoningEffort: defaultVariant.effort } : {}),
       ...(base.supportsFastMode ? { supportsFastMode: true } : {}),
