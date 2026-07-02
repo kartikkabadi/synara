@@ -11,12 +11,7 @@ import type {
 import { Effect, Option, Result } from "effect";
 
 import { parseGenericCliVersion } from "../providerMaintenance";
-
-export interface CommandResult {
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly code: number;
-}
+import type { CommandResult } from "../providerCliOutput";
 
 const PROVIDER_COMMAND_TIMEOUT_DETAIL = "Timed out while running command.";
 
