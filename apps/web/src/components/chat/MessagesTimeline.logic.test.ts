@@ -6,6 +6,8 @@ import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
   deriveTerminalAssistantMessageIds,
+  isHiddenAutomationMessage,
+  isHiddenLoopIterationMessage,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
   type MessagesTimelineRow,
@@ -601,6 +603,30 @@ describe("resolveAssistantMessageCopyState", () => {
   });
 });
 
+describe("isHiddenAutomationMessage", () => {
+  it("matches user-role goal-continuation, loop-iteration, and goal-budget-limited messages", () => {
+    expect(isHiddenAutomationMessage({ role: "user", source: "goal-continuation" })).toBe(true);
+    expect(isHiddenAutomationMessage({ role: "user", source: "loop-iteration" })).toBe(true);
+    expect(isHiddenAutomationMessage({ role: "user", source: "goal-budget-limited" })).toBe(true);
+    expect(isHiddenAutomationMessage({ role: "assistant", source: "goal-continuation" })).toBe(
+      false,
+    );
+    expect(isHiddenAutomationMessage({ role: "user", source: "native" })).toBe(false);
+    expect(isHiddenAutomationMessage({ role: "user" })).toBe(false);
+  });
+});
+
+describe("isHiddenLoopIterationMessage", () => {
+  it("matches only user-role loop-iteration messages", () => {
+    expect(isHiddenLoopIterationMessage({ role: "user", source: "loop-iteration" })).toBe(true);
+    expect(isHiddenLoopIterationMessage({ role: "assistant", source: "loop-iteration" })).toBe(
+      false,
+    );
+    expect(isHiddenLoopIterationMessage({ role: "user", source: "native" })).toBe(false);
+    expect(isHiddenLoopIterationMessage({ role: "user" })).toBe(false);
+  });
+});
+
 describe("deriveMessagesTimelineRows", () => {
   type MessageTimelineRow = Extract<MessagesTimelineRow, { kind: "message" }>;
 
@@ -678,6 +704,176 @@ describe("deriveMessagesTimelineRows", () => {
 
   const collapsedSignature = (row: MessageTimelineRow): string[] =>
     (row.collapsedTurnItems ?? []).map((item) => `${item.kind}:${String(item.id)}`);
+
+  const goalContinuationEntry = (id: string, createdAt: string): TimelineEntry => ({
+    id: `entry-${id}`,
+    kind: "message",
+    createdAt,
+    message: {
+      id: MessageId.makeUnsafe(id),
+      role: "user",
+      text: "internal goal continuation",
+      createdAt,
+      streaming: false,
+      source: "goal-continuation",
+    },
+  });
+
+  const loopIterationEntry = (id: string, createdAt: string): TimelineEntry => ({
+    id: `entry-${id}`,
+    kind: "message",
+    createdAt,
+    message: {
+      id: MessageId.makeUnsafe(id),
+      role: "user",
+      text: "internal loop iteration",
+      createdAt,
+      streaming: false,
+      source: "loop-iteration",
+    },
+  });
+
+  it("hides hidden goal-continuation turns but keeps their assistant response", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [
+        userEntry("u1", "2026-01-01T00:00:00Z"),
+        assistantEntry("a1", "2026-01-01T00:00:01Z", {
+          turnId: "t1",
+          text: "first",
+          completedAt: "2026-01-01T00:00:01Z",
+        }),
+        goalContinuationEntry("uc1", "2026-01-01T00:00:10Z"),
+        assistantEntry("a2", "2026-01-01T00:00:11Z", {
+          turnId: "t2",
+          text: "second",
+          completedAt: "2026-01-01T00:00:12Z",
+        }),
+      ],
+    });
+
+    // The injected continuation message itself never renders...
+    expect(messageRow(rows, "uc1")).toBeUndefined();
+    // ...but the real user turn and the agent's response to the continuation both remain.
+    expect(messageRow(rows, "u1")).toBeDefined();
+    expect(messageRow(rows, "a2")).toBeDefined();
+  });
+
+  it("hides hidden loop-iteration turns but keeps their assistant response", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [
+        userEntry("u1", "2026-01-01T00:00:00Z"),
+        assistantEntry("a1", "2026-01-01T00:00:01Z", {
+          turnId: "t1",
+          text: "first",
+          completedAt: "2026-01-01T00:00:01Z",
+        }),
+        loopIterationEntry("li1", "2026-01-01T00:00:10Z"),
+        assistantEntry("a2", "2026-01-01T00:00:11Z", {
+          turnId: "t2",
+          text: "second",
+          completedAt: "2026-01-01T00:00:12Z",
+        }),
+      ],
+    });
+
+    expect(messageRow(rows, "li1")).toBeUndefined();
+    expect(messageRow(rows, "u1")).toBeDefined();
+    expect(messageRow(rows, "a2")).toBeDefined();
+  });
+
+  it("calculates duration from hidden loop-iteration user message, not previous assistant", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [
+        userEntry("u1", "2026-01-01T00:00:00Z"),
+        assistantEntry("a1", "2026-01-01T00:00:01Z", {
+          turnId: "t1",
+          text: "first",
+          completedAt: "2026-01-01T00:00:05Z",
+        }),
+        // Hidden loop-iteration at 00:00:60 — should be the duration boundary for a2.
+        loopIterationEntry("li1", "2026-01-01T00:01:00Z"),
+        assistantEntry("a2", "2026-01-01T00:01:01Z", {
+          turnId: "t2",
+          text: "second",
+          completedAt: "2026-01-01T00:01:04Z",
+        }),
+      ],
+    });
+
+    const a2 = messageRow(rows, "a2");
+    expect(a2).toBeDefined();
+    // Duration start should be the hidden loop-iteration's createdAt, not a1's completedAt.
+    expect(a2!.durationStart).toBe("2026-01-01T00:01:00Z");
+  });
+
+  it("tags loop-iteration assistant responses with iteration number", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [
+        userEntry("u1", "2026-01-01T00:00:00Z"),
+        assistantEntry("a1", "2026-01-01T00:00:01Z", {
+          turnId: "t1",
+          text: "first",
+          completedAt: "2026-01-01T00:00:05Z",
+        }),
+        loopIterationEntry("li1", "2026-01-01T00:01:00Z"),
+        assistantEntry("a2", "2026-01-01T00:01:01Z", {
+          turnId: "t2",
+          text: "Hi.",
+          completedAt: "2026-01-01T00:01:04Z",
+        }),
+        loopIterationEntry("li2", "2026-01-01T00:02:00Z"),
+        assistantEntry("a3", "2026-01-01T00:02:01Z", {
+          turnId: "t3",
+          text: "Hi.",
+          completedAt: "2026-01-01T00:02:04Z",
+        }),
+      ],
+    });
+
+    // First assistant (before any loop) has no iteration number.
+    const a1 = messageRow(rows, "a1");
+    expect(a1?.loopIterationNumber).toBeUndefined();
+    // Second assistant (after 1st loop-iteration) is iteration 1.
+    const a2 = messageRow(rows, "a2");
+    expect(a2?.loopIterationNumber).toBe(1);
+    // Third assistant (after 2nd loop-iteration) is iteration 2.
+    const a3 = messageRow(rows, "a3");
+    expect(a3?.loopIterationNumber).toBe(2);
+  });
+
+  it("clears loop iteration context after a visible user turn", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [
+        loopIterationEntry("li1", "2026-01-01T00:01:00Z"),
+        assistantEntry("a1", "2026-01-01T00:01:01Z", {
+          turnId: "t1",
+          text: "loop reply",
+          completedAt: "2026-01-01T00:01:04Z",
+        }),
+        userEntry("u2", "2026-01-01T00:02:00Z"),
+        assistantEntry("a2", "2026-01-01T00:02:01Z", {
+          turnId: "t2",
+          text: "manual reply",
+          completedAt: "2026-01-01T00:02:04Z",
+        }),
+        loopIterationEntry("li2", "2026-01-01T00:03:00Z"),
+        assistantEntry("a3", "2026-01-01T00:03:01Z", {
+          turnId: "t3",
+          text: "next loop reply",
+          completedAt: "2026-01-01T00:03:04Z",
+        }),
+      ],
+    });
+
+    expect(messageRow(rows, "a1")?.loopIterationNumber).toBe(1);
+    expect(messageRow(rows, "a2")?.loopIterationNumber).toBeUndefined();
+    expect(messageRow(rows, "a3")?.loopIterationNumber).toBe(1);
+  });
 
   it("folds a settled turn's narration and work into one collapsed group on the terminal message", () => {
     const rows = deriveMessagesTimelineRows({

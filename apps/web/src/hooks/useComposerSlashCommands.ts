@@ -24,6 +24,8 @@ import {
   parseComposerSlashInvocationForCommands,
   parseFastSlashCommandAction,
   parseForkSlashCommandArgs,
+  parseGoalSlashCommand,
+  parseLoopSlashCommand,
   type ForkSlashCommandTarget,
 } from "../composerSlashCommands";
 import { buildThreadHandoffImportedMessages } from "../lib/threadHandoff";
@@ -565,6 +567,193 @@ export function useComposerSlashCommands(input: {
     return false;
   }, [editorActions, providerCommandDiscoveryCwd, threadId]);
 
+  const handleGoalSlashCommand = useCallback(
+    async (args: string) => {
+      const api = readNativeApi();
+      if (!api || !activeThread || !isServerThread) {
+        toastManager.add({
+          type: "warning",
+          title: "Goals need a server-backed thread",
+          description: "Open a server-backed thread before setting a goal.",
+        });
+        return;
+      }
+
+      const parsed = parseGoalSlashCommand(args);
+      const threadId = activeThread.id;
+      const createdAt = new Date().toISOString();
+
+      if (parsed.kind === "create") {
+        if (!parsed.objective) {
+          toastManager.add({
+            type: "warning",
+            title: "Goal needs an objective",
+            description: "Use /goal followed by what the agent should achieve.",
+          });
+          return;
+        }
+        editorActions.clearComposerSlashDraft();
+        await api.orchestration.dispatchCommand({
+          type: "thread.goal.create",
+          commandId: newCommandId(),
+          threadId,
+          goalId: `goal-${crypto.randomUUID()}`,
+          objective: parsed.objective,
+          ...(parsed.tokenBudget !== null ? { tokenBudget: parsed.tokenBudget } : {}),
+          createdAt,
+        });
+        // Auto-start the first turn with the objective (pi-goal submits it immediately).
+        await api.orchestration.dispatchCommand({
+          type: "thread.turn.start",
+          commandId: newCommandId(),
+          threadId,
+          message: {
+            messageId: newMessageId(),
+            role: "user",
+            text: parsed.objective,
+            attachments: [],
+          },
+          modelSelection: selectedModelSelection,
+          runtimeMode,
+          interactionMode,
+          createdAt,
+        });
+        return;
+      }
+
+      editorActions.clearComposerSlashDraft();
+
+      if (parsed.kind === "status") {
+        toastManager.add({
+          type: "info",
+          title: "Goal",
+          description: "The active goal is shown in the thread's goal indicator.",
+        });
+        return;
+      }
+
+      const commandType =
+        parsed.kind === "pause"
+          ? ("thread.goal.pause" as const)
+          : parsed.kind === "resume"
+            ? ("thread.goal.resume" as const)
+            : parsed.kind === "clear"
+              ? ("thread.goal.clear" as const)
+              : ("thread.goal.complete" as const);
+      await api.orchestration.dispatchCommand({
+        type: commandType,
+        commandId: newCommandId(),
+        threadId,
+        createdAt,
+      });
+    },
+    [
+      activeThread,
+      editorActions,
+      interactionMode,
+      isServerThread,
+      runtimeMode,
+      selectedModelSelection,
+      toastManager,
+    ],
+  );
+
+  const handleLoopSlashCommand = useCallback(
+    async (args: string) => {
+      const api = readNativeApi();
+      if (!api || !activeThread || !isServerThread) {
+        toastManager.add({
+          type: "warning",
+          title: "Loops need a server-backed thread",
+          description: "Open a server-backed thread before starting a loop.",
+        });
+        return;
+      }
+
+      const parsed = parseLoopSlashCommand(args);
+      const threadId = activeThread.id;
+      const createdAt = new Date().toISOString();
+
+      if (parsed.kind === "create") {
+        if (parsed.intervalSeconds < 60 || parsed.intervalSeconds > 3600) {
+          toastManager.add({
+            type: "warning",
+            title: "Invalid loop interval",
+            description: "Use a value between 1m and 60m. Example: /loop 5m find and fix bugs",
+          });
+          return;
+        }
+        if (!parsed.prompt) {
+          toastManager.add({
+            type: "warning",
+            title: "Loop needs a prompt",
+            description: "Use /loop <interval> <prompt>. Example: /loop 5m find and fix bugs",
+          });
+          return;
+        }
+        editorActions.clearComposerSlashDraft();
+        await api.orchestration.dispatchCommand({
+          type: "thread.loop.create",
+          commandId: newCommandId(),
+          threadId,
+          prompt: parsed.prompt,
+          intervalSeconds: parsed.intervalSeconds,
+          createdAt,
+        });
+        // Auto-start the first iteration immediately (same as /goal).
+        await api.orchestration.dispatchCommand({
+          type: "thread.turn.start",
+          commandId: newCommandId(),
+          threadId,
+          message: {
+            messageId: newMessageId(),
+            role: "user",
+            text: parsed.prompt,
+            attachments: [],
+          },
+          modelSelection: selectedModelSelection,
+          runtimeMode,
+          interactionMode,
+          createdAt,
+        });
+        return;
+      }
+
+      editorActions.clearComposerSlashDraft();
+
+      if (parsed.kind === "status") {
+        toastManager.add({
+          type: "info",
+          title: "Loop",
+          description: "The active loop is shown in the thread's loop indicator.",
+        });
+        return;
+      }
+
+      const commandType =
+        parsed.kind === "pause"
+          ? ("thread.loop.pause" as const)
+          : parsed.kind === "resume"
+            ? ("thread.loop.resume" as const)
+            : ("thread.loop.clear" as const);
+      await api.orchestration.dispatchCommand({
+        type: commandType,
+        commandId: newCommandId(),
+        threadId,
+        createdAt,
+      });
+    },
+    [
+      activeThread,
+      editorActions,
+      interactionMode,
+      isServerThread,
+      runtimeMode,
+      selectedModelSelection,
+      toastManager,
+    ],
+  );
+
   const handleStandaloneSlashCommand = useCallback(
     async (trimmed: string): Promise<boolean> => {
       const fastSlashAction = parseFastSlashCommandAction(trimmed);
@@ -690,10 +879,20 @@ export function useComposerSlashCommands(input: {
         }
         return true;
       }
+      if (slashInvocation.command === "goal") {
+        await handleGoalSlashCommand(slashInvocation.args);
+        return true;
+      }
+      if (slashInvocation.command === "loop") {
+        await handleLoopSlashCommand(slashInvocation.args);
+        return true;
+      }
       return false;
     },
     [
       availableBuiltInSlashCommands,
+      handleGoalSlashCommand,
+      handleLoopSlashCommand,
       checkClaudeFastSlashCommandAvailability,
       compactProviderThread,
       createForkThreadFromSlashCommand,
@@ -752,6 +951,44 @@ export function useComposerSlashCommands(input: {
         if (wasPromptReplacementApplied(applied)) {
           editorActions.setComposerHighlightedItemId(null);
           editorActions.scheduleComposerFocus();
+        }
+        return;
+      }
+
+      if (item.command === "goal") {
+        const replacement = "/goal ";
+        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+          snapshot.value,
+          trigger.rangeEnd,
+          replacement,
+        );
+        const applied = editorActions.applyPromptReplacement(
+          trigger.rangeStart,
+          replacementRangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+        );
+        if (wasPromptReplacementApplied(applied)) {
+          editorActions.setComposerHighlightedItemId(null);
+        }
+        return;
+      }
+
+      if (item.command === "loop") {
+        const replacement = "/loop ";
+        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+          snapshot.value,
+          trigger.rangeEnd,
+          replacement,
+        );
+        const applied = editorActions.applyPromptReplacement(
+          trigger.rangeStart,
+          replacementRangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+        );
+        if (wasPromptReplacementApplied(applied)) {
+          editorActions.setComposerHighlightedItemId(null);
         }
         return;
       }

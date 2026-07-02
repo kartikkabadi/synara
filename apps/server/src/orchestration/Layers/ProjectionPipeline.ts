@@ -4,6 +4,7 @@ import {
   EventId,
   type OrchestrationEvent,
   type OrchestrationThreadActivity,
+  type ThreadId,
 } from "@t3tools/contracts";
 import {
   addPinnedMessage,
@@ -44,6 +45,8 @@ import {
   type ProjectionThreadProposedPlanRepositoryShape,
   ProjectionThreadProposedPlanRepository,
 } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
+import { ProjectionThreadGoalRepository } from "../../persistence/Services/ProjectionThreadGoal.ts";
+import { ProjectionThreadLoopRepository } from "../../persistence/Services/ProjectionThreadLoop.ts";
 import { ProjectionThreadSessionRepository } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import {
   type ProjectionTurn,
@@ -62,6 +65,14 @@ import { ProjectionThreadProposedPlanRepositoryLive } from "../../persistence/La
 import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/ProjectionThreadSessions.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
+import { ProjectionThreadGoalRepositoryLive } from "../../persistence/Layers/ProjectionThreadGoal.ts";
+import { ProjectionThreadLoopRepositoryLive } from "../../persistence/Layers/ProjectionThreadLoop.ts";
+import {
+  applyGoalTurnAccounting,
+  incrementGoalContinuation,
+  markGoalBlocked,
+  transitionGoalStatus,
+} from "../goalProjection.ts";
 import { ServerConfig } from "../../config.ts";
 import {
   OrchestrationProjectionPipeline,
@@ -87,6 +98,8 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   threadShellSummaries: "projection.thread-shell-summaries",
   threadMessages: "projection.thread-messages",
   threadProposedPlans: "projection.thread-proposed-plans",
+  threadGoal: "projection.thread-goal",
+  threadLoop: "projection.thread-loop",
   threadActivities: "projection.thread-activities",
   threadSessions: "projection.thread-sessions",
   threadTurns: "projection.thread-turns",
@@ -584,6 +597,8 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
   const projectionThreadRepository = yield* ProjectionThreadRepository;
   const projectionThreadMessageRepository = yield* ProjectionThreadMessageRepository;
   const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
+  const projectionThreadGoalRepository = yield* ProjectionThreadGoalRepository;
+  const projectionThreadLoopRepository = yield* ProjectionThreadLoopRepository;
   const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
   const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
@@ -592,6 +607,27 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig;
+
+  // Bump projection_threads.updated_at without rewriting the full row. Goal/loop
+  // lifecycle events don't change thread metadata, but the web's thread row
+  // timestamp (toProjectedThread) sources from updated_at, so without this bump
+  // a snapshot reload after `/goal pause` would show a stale thread.updatedAt
+  // and the UI wouldn't re-render the goal indicator.
+  const touchThreadUpdatedAt = (threadId: ThreadId, occurredAt: string) =>
+    Effect.gen(function* () {
+      const existing = yield* projectionThreadRepository.getById({ threadId });
+      if (Option.isNone(existing)) {
+        return;
+      }
+      // Don't rewind the timestamp — only bump forward.
+      if (occurredAt <= existing.value.updatedAt) {
+        return;
+      }
+      yield* projectionThreadRepository.upsert({
+        ...existing.value,
+        updatedAt: occurredAt,
+      });
+    });
 
   const applyProjectsProjection: ProjectorDefinition["apply"] = (event, _attachmentSideEffects) =>
     event.type === "project.created" ||
@@ -1260,6 +1296,178 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
       }
     });
 
+  const applyThreadGoalProjection: ProjectorDefinition["apply"] = (event, _attachmentSideEffects) =>
+    Effect.gen(function* () {
+      switch (event.type) {
+        case "thread.goal-created":
+          yield* projectionThreadGoalRepository.upsert({
+            threadId: event.payload.threadId,
+            goal: event.payload.goal,
+          });
+          // Bump the thread row so snapshot reloads see the goal lifecycle
+          // change in thread.updatedAt (toProjectedThread sources the thread
+          // timestamp from projection_threads.updated_at).
+          yield* touchThreadUpdatedAt(event.payload.threadId, event.occurredAt);
+          return;
+
+        case "thread.goal-paused":
+        case "thread.goal-resumed":
+        case "thread.goal-cleared":
+        case "thread.goal-completed": {
+          const existing = yield* projectionThreadGoalRepository.getByThreadId({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existing)) {
+            return;
+          }
+          const status =
+            event.type === "thread.goal-paused"
+              ? "paused"
+              : event.type === "thread.goal-resumed"
+                ? "active"
+                : event.type === "thread.goal-cleared"
+                  ? "cleared"
+                  : "complete";
+          yield* projectionThreadGoalRepository.upsert({
+            threadId: event.payload.threadId,
+            goal: transitionGoalStatus(existing.value.goal, status, event.payload.updatedAt),
+          });
+          yield* touchThreadUpdatedAt(event.payload.threadId, event.occurredAt);
+          return;
+        }
+
+        case "thread.goal-blocked": {
+          const existing = yield* projectionThreadGoalRepository.getByThreadId({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existing)) {
+            return;
+          }
+          yield* projectionThreadGoalRepository.upsert({
+            threadId: event.payload.threadId,
+            goal: markGoalBlocked(
+              existing.value.goal,
+              event.payload.blockedReason,
+              event.payload.updatedAt,
+            ),
+          });
+          yield* touchThreadUpdatedAt(event.payload.threadId, event.occurredAt);
+          return;
+        }
+
+        case "thread.message-sent": {
+          if (event.payload.source !== "goal-continuation") {
+            return;
+          }
+          const existing = yield* projectionThreadGoalRepository.getByThreadId({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existing) || existing.value.goal.status !== "active") {
+            return;
+          }
+          yield* projectionThreadGoalRepository.upsert({
+            threadId: event.payload.threadId,
+            goal: incrementGoalContinuation(existing.value.goal, event.occurredAt),
+          });
+          return;
+        }
+
+        case "thread.activity-appended": {
+          if (event.payload.activity.kind !== "turn.completed") {
+            return;
+          }
+          const existingActivities = yield* projectionThreadActivityRepository.listByThreadId({
+            threadId: event.payload.threadId,
+          });
+          if (existingActivities.some((entry) => entry.activityId === event.payload.activity.id)) {
+            return;
+          }
+          const existing = yield* projectionThreadGoalRepository.getByThreadId({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existing) || existing.value.goal.status !== "active") {
+            return;
+          }
+          yield* projectionThreadGoalRepository.upsert({
+            threadId: event.payload.threadId,
+            goal: applyGoalTurnAccounting(
+              existing.value.goal,
+              event.payload.activity.payload,
+              event.occurredAt,
+            ),
+          });
+          return;
+        }
+
+        default:
+          return;
+      }
+    });
+
+  const applyThreadLoopProjection: ProjectorDefinition["apply"] = (event, _attachmentSideEffects) =>
+    Effect.gen(function* () {
+      switch (event.type) {
+        case "thread.loop-created":
+          yield* projectionThreadLoopRepository.upsert({
+            threadId: event.payload.threadId,
+            loop: event.payload.loop,
+          });
+          yield* touchThreadUpdatedAt(event.payload.threadId, event.occurredAt);
+          return;
+
+        case "thread.loop-paused":
+        case "thread.loop-resumed":
+        case "thread.loop-cleared": {
+          const existing = yield* projectionThreadLoopRepository.getByThreadId({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existing)) {
+            return;
+          }
+          const status =
+            event.type === "thread.loop-paused"
+              ? "paused"
+              : event.type === "thread.loop-resumed"
+                ? "active"
+                : "cleared";
+          yield* projectionThreadLoopRepository.upsert({
+            threadId: event.payload.threadId,
+            loop: {
+              ...existing.value.loop,
+              status,
+              updatedAt: event.payload.updatedAt,
+            },
+          });
+          yield* touchThreadUpdatedAt(event.payload.threadId, event.occurredAt);
+          return;
+        }
+
+        case "thread.message-sent": {
+          if (event.payload.source !== "loop-iteration") {
+            return;
+          }
+          const existing = yield* projectionThreadLoopRepository.getByThreadId({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existing) || existing.value.loop.status !== "active") {
+            return;
+          }
+          yield* projectionThreadLoopRepository.upsert({
+            threadId: event.payload.threadId,
+            loop: {
+              ...existing.value.loop,
+              iterationsRun: existing.value.loop.iterationsRun + 1,
+              updatedAt: event.occurredAt,
+            },
+          });
+          return;
+        }
+
+        default:
+          return;
+      }
+    });
+
   const applyThreadActivitiesProjection: ProjectorDefinition["apply"] = (
     event,
     _attachmentSideEffects,
@@ -1802,6 +2010,16 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
       apply: applyThreadProposedPlansProjection,
     },
     {
+      name: ORCHESTRATION_PROJECTOR_NAMES.threadGoal,
+      phase: "hot",
+      apply: applyThreadGoalProjection,
+    },
+    {
+      name: ORCHESTRATION_PROJECTOR_NAMES.threadLoop,
+      phase: "hot",
+      apply: applyThreadLoopProjection,
+    },
+    {
       name: ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
       phase: "hot",
       apply: applyThreadActivitiesProjection,
@@ -2076,6 +2294,8 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionThreadRepositoryLive),
   Layer.provideMerge(ProjectionThreadMessageRepositoryLive),
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),
+  Layer.provideMerge(ProjectionThreadGoalRepositoryLive),
+  Layer.provideMerge(ProjectionThreadLoopRepositoryLive),
   Layer.provideMerge(ProjectionThreadActivityRepositoryLive),
   Layer.provideMerge(ProjectionThreadSessionRepositoryLive),
   Layer.provideMerge(ProjectionTurnRepositoryLive),

@@ -27,6 +27,11 @@ import {
   ProjectMetaUpdatedPayload,
   ThreadArchivedPayload,
   ThreadActivityAppendedPayload,
+  ThreadGoalCreatedPayload,
+  ThreadGoalLifecyclePayload,
+  ThreadGoalBlockedPayload,
+  ThreadLoopCreatedPayload,
+  ThreadLoopLifecyclePayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
   ThreadInteractionModeSetPayload,
@@ -49,6 +54,12 @@ import {
   ThreadTurnStartRequestedPayload,
 } from "./Schemas.ts";
 import { resolveStableMessageTurnId } from "./messageTurnId.ts";
+import {
+  applyGoalTurnAccounting,
+  incrementGoalContinuation,
+  transitionGoalStatus,
+  markGoalBlocked,
+} from "./goalProjection.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
@@ -738,10 +749,41 @@ export function projectEvent(
           : [...thread.messages, message];
         const cappedMessages = messages.slice(-MAX_THREAD_MESSAGES);
 
+        // Count hidden goal-continuation turns against the active goal. Only
+        // count on first insert — a streaming update of an existing hidden
+        // message would double-count the continuation otherwise.
+        const goal = thread.goal;
+        const goalContinuationPatch =
+          goal &&
+          goal.status === "active" &&
+          payload.source === "goal-continuation" &&
+          existingMessage === undefined
+            ? { goal: incrementGoalContinuation(goal, event.occurredAt) }
+            : {};
+
+        // Count hidden loop-iteration turns against the active loop. Same
+        // first-insert-only guard as goal-continuation above.
+        const loop = thread.loop;
+        const loopIterationPatch =
+          loop &&
+          loop.status === "active" &&
+          payload.source === "loop-iteration" &&
+          existingMessage === undefined
+            ? {
+                loop: {
+                  ...loop,
+                  iterationsRun: loop.iterationsRun + 1,
+                  updatedAt: event.occurredAt,
+                },
+              }
+            : {};
+
         return {
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             messages: cappedMessages,
+            ...goalContinuationPatch,
+            ...loopIterationPatch,
             updatedAt: event.occurredAt,
           }),
         };
@@ -1044,15 +1086,135 @@ export function projectEvent(
             .toSorted(compareThreadActivities)
             .slice(-MAX_THREAD_ACTIVITIES);
 
+          // Accumulate goal turn/usage accounting when a turn completes. Only for a
+          // genuinely new activity — a replayed/re-upserted turn.completed (same activity
+          // id already present) must not double-count turns or usage.
+          const goal = thread.goal;
+          const isNewTurnCompletion =
+            payload.activity.kind === "turn.completed" &&
+            !thread.activities.some((entry) => entry.id === payload.activity.id);
+          const goalAccountingPatch =
+            goal && goal.status === "active" && isNewTurnCompletion
+              ? { goal: applyGoalTurnAccounting(goal, payload.activity.payload, event.occurredAt) }
+              : {};
+
           return {
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
               activities,
+              ...goalAccountingPatch,
               updatedAt: event.occurredAt,
             }),
           };
         }),
       );
+
+    case "thread.goal-created":
+      return decodeForEvent(ThreadGoalCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              goal: payload.goal,
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.goal-paused":
+    case "thread.goal-resumed":
+    case "thread.goal-cleared":
+    case "thread.goal-completed": {
+      const nextStatus =
+        event.type === "thread.goal-paused"
+          ? "paused"
+          : event.type === "thread.goal-resumed"
+            ? "active"
+            : event.type === "thread.goal-cleared"
+              ? "cleared"
+              : "complete";
+      return decodeForEvent(ThreadGoalLifecyclePayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread || !thread.goal) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              goal: transitionGoalStatus(thread.goal, nextStatus, payload.updatedAt),
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+    }
+
+    case "thread.goal-blocked": {
+      return decodeForEvent(ThreadGoalBlockedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread || !thread.goal) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              goal: markGoalBlocked(thread.goal, payload.blockedReason, payload.updatedAt),
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+    }
+
+    case "thread.loop-created":
+      return decodeForEvent(ThreadLoopCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              loop: payload.loop,
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.loop-paused":
+    case "thread.loop-resumed":
+    case "thread.loop-cleared": {
+      const nextLoopStatus =
+        event.type === "thread.loop-paused"
+          ? "paused"
+          : event.type === "thread.loop-resumed"
+            ? "active"
+            : "cleared";
+      return decodeForEvent(ThreadLoopLifecyclePayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          if (!thread || !thread.loop) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              loop: { ...thread.loop, status: nextLoopStatus, updatedAt: payload.updatedAt },
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+    }
 
     default:
       return Effect.succeed(nextBase);

@@ -315,6 +315,10 @@ describe("wsNativeApi", () => {
           pi: { enabled: true, binaryPath: "pi", agentDir: "", customModels: [] },
         },
         skills: { disabled: [] },
+        autoCompactionEnabled: true,
+        autoCompactionThreshold: 80,
+        loopCompactionThreshold: 50,
+        autoCompactionCooldownSeconds: 30,
       },
     } as const;
     emitPush(WS_CHANNELS.serverSettingsUpdated, payload);

@@ -68,6 +68,10 @@ function serverSettings(overrides: Partial<ServerSettings["providers"]> = {}): S
       ...overrides,
     },
     skills: { disabled: [] },
+    autoCompactionEnabled: true,
+    autoCompactionThreshold: 80,
+    loopCompactionThreshold: 50,
+    autoCompactionCooldownSeconds: 30,
   };
 }
 

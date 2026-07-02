@@ -245,6 +245,16 @@ export const OrchestrationMessageSource = Schema.Literals([
   "native",
   "handoff-import",
   "fork-import",
+  // A hidden continuation turn injected by the goal loop. The web hides/dims these,
+  // mirroring pi-goal's `display: false` continuation messages.
+  "goal-continuation",
+  // A hidden iteration turn injected by the loop reactor. Same treatment as
+  // goal-continuation: the web hides these so the transcript isn't spammed with
+  // the repeated loop prompt.
+  "loop-iteration",
+  // A hidden final steering turn injected when a goal hits its token budget
+  // (codex `budget_limit.md` port). Tells the model to wrap up and summarize.
+  "goal-budget-limited",
 ]);
 export type OrchestrationMessageSource = typeof OrchestrationMessageSource.Type;
 
@@ -439,6 +449,90 @@ const SourceProposedPlanReference = Schema.Struct({
   threadId: ThreadId,
   planId: OrchestrationProposedPlanId,
 });
+
+// --- Goal (agent-agnostic persisted objective; ported from Codex thread_goals /
+// pi-goal GoalState). One active goal per thread. ---
+export const OrchestrationGoalStatus = Schema.Literals([
+  "active",
+  "paused",
+  // Model reported the same blocker for ≥3 consecutive goal turns (codex
+  // `blocked` port). Terminal — user can resume (fresh audit) or clear.
+  "blocked",
+  "budget_limited",
+  "complete",
+  "cleared",
+]);
+export type OrchestrationGoalStatus = typeof OrchestrationGoalStatus.Type;
+
+// Terminal statuses: a new goal can be created once the existing goal is in one of these.
+export const ORCHESTRATION_GOAL_TERMINAL_STATUSES: ReadonlyArray<OrchestrationGoalStatus> = [
+  "blocked",
+  "budget_limited",
+  "complete",
+  "cleared",
+];
+
+export const OrchestrationGoalId = TrimmedNonEmptyString;
+export type OrchestrationGoalId = typeof OrchestrationGoalId.Type;
+
+export const OrchestrationGoalUsage = Schema.Struct({
+  inputTokens: NonNegativeInt,
+  outputTokens: NonNegativeInt,
+  totalTokens: NonNegativeInt,
+});
+export type OrchestrationGoalUsage = typeof OrchestrationGoalUsage.Type;
+
+export const OrchestrationGoal = Schema.Struct({
+  id: OrchestrationGoalId,
+  objective: TrimmedNonEmptyString,
+  status: OrchestrationGoalStatus,
+  tokenBudget: Schema.NullOr(PositiveInt),
+  tokensUsed: NonNegativeInt,
+  usage: OrchestrationGoalUsage,
+  turnCount: NonNegativeInt,
+  // Number of hidden continuation turns the goal loop has injected.
+  continuationCount: NonNegativeInt,
+  // Wall-clock seconds the goal has been running (createdAt → latest turn completion).
+  timeUsedSeconds: NonNegativeInt,
+  // When status === "blocked", the recurring blocker text the model reported
+  // (null otherwise). Surfaces in the UI so the user knows why the goal stopped.
+  // Decoding default null backfills rows persisted before the blocked port.
+  blockedReason: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => null)),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationGoal = typeof OrchestrationGoal.Type;
+
+// Sentinel the model emits once its completion audit passes; the goal reactor detects
+// this in assistant output and marks the goal complete (faithful Design A self-report,
+// adapted to a text channel because Synara cannot inject tools across all providers).
+export const ORCHESTRATION_GOAL_COMPLETION_SENTINEL = "<goal-complete/>";
+
+// Sentinel the model emits after the same blocker has recurred for ≥3
+// consecutive goal turns (codex `blocked` port, adapted to text channel).
+// The reactor detects this and marks the goal blocked (terminal).
+export const ORCHESTRATION_GOAL_BLOCKED_SENTINEL = "<goal-blocked/>";
+
+// Loop state (session-scoped, ephemeral run + persisted state for UI snapshot).
+// Mirrors OrchestrationGoal's shape: the state is projected via domain events so
+// the UI can show loop status; the run (in-memory interval timer) is ephemeral and
+// lost on server restart. Startup loop reconciliation re-enqueues active loops so
+// the reactor recreates the wake-up fiber and resumes the interval.
+export const OrchestrationLoopStatus = Schema.Literals(["active", "paused", "cleared"]);
+export type OrchestrationLoopStatus = typeof OrchestrationLoopStatus.Type;
+
+export const OrchestrationLoop = Schema.Struct({
+  prompt: TrimmedNonEmptyString,
+  intervalSeconds: PositiveInt,
+  status: OrchestrationLoopStatus,
+  // Number of hidden iteration turns the loop reactor has injected. Derived from
+  // thread.message-sent events with source === "loop-iteration" (same pattern as
+  // goal continuationCount).
+  iterationsRun: NonNegativeInt,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationLoop = typeof OrchestrationLoop.Type;
 
 export const OrchestrationSessionStatus = Schema.Literals([
   "idle",
@@ -650,6 +744,12 @@ export const OrchestrationThread = Schema.Struct({
   notes: Schema.optional(ThreadNotes),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(Schema.withDecodingDefault(() => [])),
+  goal: Schema.optional(Schema.NullOr(OrchestrationGoal)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  loop: Schema.optional(Schema.NullOr(OrchestrationLoop)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
@@ -1051,6 +1151,9 @@ export const ThreadTurnStartCommand = Schema.Struct({
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  // Origin of the user message this turn carries. Defaults to "native"; the goal loop
+  // sets "goal-continuation" so the message is hidden/dimmed in the UI.
+  inputSource: Schema.optional(OrchestrationMessageSource),
   createdAt: IsoDateTime,
 });
 
@@ -1171,6 +1274,82 @@ const ThreadActivityAppendCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadGoalCreateCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.create"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  goalId: OrchestrationGoalId,
+  objective: TrimmedNonEmptyString,
+  tokenBudget: Schema.optional(Schema.NullOr(PositiveInt)),
+  createdAt: IsoDateTime,
+});
+
+const ThreadGoalPauseCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.pause"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
+const ThreadGoalResumeCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.resume"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
+const ThreadGoalClearCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.clear"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
+const ThreadGoalCompleteCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.complete"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
+const ThreadGoalBlockedCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.blocked"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  blockedReason: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const ThreadLoopCreateCommand = Schema.Struct({
+  type: Schema.Literal("thread.loop.create"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  prompt: TrimmedNonEmptyString,
+  intervalSeconds: PositiveInt,
+  createdAt: IsoDateTime,
+});
+
+const ThreadLoopPauseCommand = Schema.Struct({
+  type: Schema.Literal("thread.loop.pause"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
+const ThreadLoopResumeCommand = Schema.Struct({
+  type: Schema.Literal("thread.loop.resume"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
+const ThreadLoopClearCommand = Schema.Struct({
+  type: Schema.Literal("thread.loop.clear"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
@@ -1199,6 +1378,16 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadCheckpointRevertCommand,
   ThreadMessageEditAndResendCommand,
   ThreadActivityAppendCommand,
+  ThreadGoalCreateCommand,
+  ThreadGoalPauseCommand,
+  ThreadGoalResumeCommand,
+  ThreadGoalClearCommand,
+  ThreadGoalCompleteCommand,
+  ThreadGoalBlockedCommand,
+  ThreadLoopCreateCommand,
+  ThreadLoopPauseCommand,
+  ThreadLoopResumeCommand,
+  ThreadLoopClearCommand,
   ThreadSessionStopCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
@@ -1232,6 +1421,16 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadCheckpointRevertCommand,
   ThreadMessageEditAndResendCommand,
   ThreadActivityAppendCommand,
+  ThreadGoalCreateCommand,
+  ThreadGoalPauseCommand,
+  ThreadGoalResumeCommand,
+  ThreadGoalClearCommand,
+  ThreadGoalCompleteCommand,
+  ThreadGoalBlockedCommand,
+  ThreadLoopCreateCommand,
+  ThreadLoopPauseCommand,
+  ThreadLoopResumeCommand,
+  ThreadLoopClearCommand,
   ThreadSessionStopCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
@@ -1369,6 +1568,16 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.goal-created",
+  "thread.goal-paused",
+  "thread.goal-resumed",
+  "thread.goal-cleared",
+  "thread.goal-completed",
+  "thread.goal-blocked",
+  "thread.loop-created",
+  "thread.loop-paused",
+  "thread.loop-resumed",
+  "thread.loop-cleared",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -1688,6 +1897,39 @@ export const ThreadActivityAppendedPayload = Schema.Struct({
   activity: OrchestrationThreadActivity,
 });
 
+// Created carries the full goal snapshot (mirrors thread.proposed-plan-upserted). The
+// lifecycle transitions only flip status on the existing goal, preserving accumulated
+// counters/usage, so they carry just the thread id + timestamp.
+export const ThreadGoalCreatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  goal: OrchestrationGoal,
+});
+
+export const ThreadGoalLifecyclePayload = Schema.Struct({
+  threadId: ThreadId,
+  updatedAt: IsoDateTime,
+});
+
+// Blocked event carries the recurring blocker text so the projection can
+// persist it on the goal row for UI display.
+export const ThreadGoalBlockedPayload = Schema.Struct({
+  threadId: ThreadId,
+  blockedReason: TrimmedNonEmptyString,
+  updatedAt: IsoDateTime,
+});
+
+// Loop events mirror goal events: created carries the full loop snapshot, lifecycle
+// transitions carry just the thread id + timestamp.
+export const ThreadLoopCreatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  loop: OrchestrationLoop,
+});
+
+export const ThreadLoopLifecyclePayload = Schema.Struct({
+  threadId: ThreadId,
+  updatedAt: IsoDateTime,
+});
+
 export const OrchestrationEventMetadata = Schema.Struct({
   providerTurnId: Schema.optional(TrimmedNonEmptyString),
   providerItemId: Schema.optional(ProviderItemId),
@@ -1879,6 +2121,56 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.goal-created"),
+    payload: ThreadGoalCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.goal-paused"),
+    payload: ThreadGoalLifecyclePayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.goal-resumed"),
+    payload: ThreadGoalLifecyclePayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.goal-cleared"),
+    payload: ThreadGoalLifecyclePayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.goal-completed"),
+    payload: ThreadGoalLifecyclePayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.goal-blocked"),
+    payload: ThreadGoalBlockedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.loop-created"),
+    payload: ThreadLoopCreatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.loop-paused"),
+    payload: ThreadLoopLifecyclePayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.loop-resumed"),
+    payload: ThreadLoopLifecyclePayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.loop-cleared"),
+    payload: ThreadLoopLifecyclePayload,
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;

@@ -10,10 +10,13 @@ import {
   getAvailableComposerSlashCommands,
   hasProviderNativeSlashCommand,
   isBuiltInComposerSlashCommand,
+  nativeReviewDispatchable,
   parseComposerSlashInvocation,
   parseComposerSlashInvocationForCommands,
   parseFastSlashCommandAction,
   parseForkSlashCommandArgs,
+  parseGoalSlashCommand,
+  parseLoopSlashCommand,
   shouldHideProviderNativeCommandFromComposerMenu,
 } from "./composerSlashCommands";
 
@@ -39,6 +42,102 @@ describe("composerSlashCommands", () => {
         (entry) => entry.command,
       ),
     ).toEqual(["model", "fast", "default"]);
+  });
+
+  it("parses /goal subcommands and objectives", () => {
+    expect(parseGoalSlashCommand("")).toEqual({ kind: "status" });
+    expect(parseGoalSlashCommand("status")).toEqual({ kind: "status" });
+    expect(parseGoalSlashCommand("pause")).toEqual({ kind: "pause" });
+    expect(parseGoalSlashCommand("resume")).toEqual({ kind: "resume" });
+    expect(parseGoalSlashCommand("clear")).toEqual({ kind: "clear" });
+    expect(parseGoalSlashCommand("complete")).toEqual({ kind: "complete" });
+    expect(parseGoalSlashCommand("Migrate the auth module")).toEqual({
+      kind: "create",
+      objective: "Migrate the auth module",
+      tokenBudget: null,
+    });
+    expect(parseGoalSlashCommand("Migrate the auth module --budget 5000")).toEqual({
+      kind: "create",
+      objective: "Migrate the auth module",
+      tokenBudget: 5000,
+    });
+    expect(parseGoalSlashCommand("Ship it --budget=100")).toEqual({
+      kind: "create",
+      objective: "Ship it",
+      tokenBudget: 100,
+    });
+  });
+
+  it("parses /loop subcommands and create form", () => {
+    expect(parseLoopSlashCommand("")).toEqual({ kind: "status" });
+    expect(parseLoopSlashCommand("status")).toEqual({ kind: "status" });
+    expect(parseLoopSlashCommand("pause")).toEqual({ kind: "pause" });
+    expect(parseLoopSlashCommand("resume")).toEqual({ kind: "resume" });
+    expect(parseLoopSlashCommand("clear")).toEqual({ kind: "clear" });
+    expect(parseLoopSlashCommand("5m find and fix bugs")).toEqual({
+      kind: "create",
+      prompt: "find and fix bugs",
+      intervalSeconds: 300,
+    });
+    expect(parseLoopSlashCommand("1h rebuild the index")).toEqual({
+      kind: "create",
+      prompt: "rebuild the index",
+      intervalSeconds: 3600,
+    });
+    // Case-insensitive lifecycle keywords.
+    expect(parseLoopSlashCommand("PAUSE")).toEqual({ kind: "pause" });
+  });
+
+  it("returns an invalid create action when the interval is missing or malformed", () => {
+    expect(parseLoopSlashCommand("find and fix bugs")).toEqual({
+      kind: "create",
+      prompt: "",
+      intervalSeconds: 0,
+    });
+    expect(parseLoopSlashCommand("5m")).toEqual({
+      kind: "create",
+      prompt: "",
+      intervalSeconds: 0,
+    });
+    expect(parseLoopSlashCommand("5 find and fix bugs")).toEqual({
+      kind: "create",
+      prompt: "",
+      intervalSeconds: 0,
+    });
+  });
+
+  it("offers /loop to non-Claude providers", () => {
+    const codexCommands = getAvailableComposerSlashCommands({
+      provider: "codex",
+      supportsFastSlashCommand: true,
+      canOfferCompactCommand: true,
+      canOfferReviewCommand: true,
+      canOfferForkCommand: true,
+      canOfferSideCommand: true,
+    });
+    expect(codexCommands).toContain("loop");
+  });
+
+  it("offers /goal to non-Claude providers but not Claude (which has a native /goal)", () => {
+    const codexCommands = getAvailableComposerSlashCommands({
+      provider: "codex",
+      supportsFastSlashCommand: true,
+      canOfferCompactCommand: true,
+      canOfferReviewCommand: true,
+      canOfferForkCommand: true,
+      canOfferSideCommand: true,
+    });
+    expect(codexCommands).toContain("goal");
+
+    const claudeCommands = getAvailableComposerSlashCommands({
+      provider: "claudeAgent",
+      supportsFastSlashCommand: true,
+      canOfferCompactCommand: true,
+      canOfferReviewCommand: true,
+      canOfferForkCommand: true,
+      canOfferSideCommand: true,
+    });
+    expect(claudeCommands).not.toContain("goal");
   });
 
   it("parses slash invocations with optional arguments", () => {
@@ -225,6 +324,24 @@ describe("composerSlashCommands", () => {
     expect(shouldHideProviderNativeCommandFromComposerMenu("codex", "status")).toBe(false);
   });
 
+  it("routes opencode /review to the text fallback (ACP silent-drop, #218)", () => {
+    // opencode exposes `review` in its native command list, but its ACP agent silently
+    // drops `/`-prefixed prompts for unrecognized slash commands (opencode #27528). The
+    // native command cannot be dispatched via ACP, so nativeReviewDispatchable must return
+    // false for opencode — this makes /review fall through to the text fallback prompt
+    // (not `/`-prefixed, processed as a normal coding request).
+    expect(nativeReviewDispatchable("opencode")).toBe(false);
+    // All other providers that expose `review` can dispatch it (Codex via startReview
+    // JSON-RPC; others via ACP when their parser handles it).
+    expect(nativeReviewDispatchable("codex")).toBe(true);
+    expect(nativeReviewDispatchable("claudeAgent")).toBe(true);
+    expect(nativeReviewDispatchable("cursor")).toBe(true);
+    expect(nativeReviewDispatchable("gemini")).toBe(true);
+    expect(nativeReviewDispatchable("grok")).toBe(true);
+    expect(nativeReviewDispatchable("kilo")).toBe(true);
+    expect(nativeReviewDispatchable("pi")).toBe(true);
+  });
+
   it("keeps app-level /automation available even if a provider exposes a native collision", () => {
     const availableCommands = getAvailableComposerSlashCommands({
       provider: "gemini",
@@ -298,6 +415,8 @@ describe("composerSlashCommands", () => {
       "status",
       "subagents",
       "automation",
+      "goal",
+      "loop",
     ]);
   });
 

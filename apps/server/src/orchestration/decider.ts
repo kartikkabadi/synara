@@ -2,6 +2,7 @@ import type {
   OrchestrationCommand,
   OrchestrationEvent,
   OrchestrationReadModel,
+  ProviderKind,
   ThreadMarker,
 } from "@t3tools/contracts";
 import {
@@ -36,8 +37,10 @@ import {
   requireThreadArchived,
   requireThreadNotArchived,
 } from "./commandInvariants.ts";
+import { providerCanLoop } from "./providerCapabilities.ts";
 
 const nowIso = () => new Date().toISOString();
+
 const DEFAULT_ASSISTANT_DELIVERY_MODE = "buffered" as const;
 
 const defaultMetadata: Omit<OrchestrationEvent, "sequence" | "type" | "payload"> = {
@@ -1106,7 +1109,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           dispatchMode,
           turnId: null,
           streaming: false,
-          source: "native",
+          source: "inputSource" in command && command.inputSource ? command.inputSource : "native",
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -1641,6 +1644,363 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           activity: command.activity,
+        },
+      };
+    }
+
+    case "thread.goal.create": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const existingGoal = thread.goal;
+      if (
+        existingGoal &&
+        existingGoal.status !== "complete" &&
+        existingGoal.status !== "cleared" &&
+        existingGoal.status !== "budget_limited" &&
+        existingGoal.status !== "blocked"
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "A goal already exists on this thread; complete or clear it before creating another.",
+        });
+      }
+      // Goal + Loop mutual exclusion: one continuation per thread. Both
+      // reactors would interleave dispatches with different prompts, causing
+      // neither to run consistently. A paused loop still owns the slot —
+      // resuming it later would interleave with an active goal — so block
+      // creation while the loop is active OR paused.
+      if (thread.loop && (thread.loop.status === "active" || thread.loop.status === "paused")) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A loop is active or paused on this thread. `/loop clear` first.",
+        });
+      }
+      const goal = {
+        id: command.goalId,
+        objective: command.objective,
+        status: "active" as const,
+        tokenBudget: command.tokenBudget ?? null,
+        tokensUsed: 0,
+        usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        turnCount: 0,
+        continuationCount: 0,
+        timeUsedSeconds: 0,
+        blockedReason: null,
+        createdAt: command.createdAt,
+        updatedAt: command.createdAt,
+      };
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.goal-created",
+        payload: {
+          threadId: command.threadId,
+          goal,
+        },
+      };
+    }
+
+    case "thread.goal.pause": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (!thread.goal || thread.goal.status !== "active") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "No active goal to pause.",
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.goal-paused",
+        payload: {
+          threadId: command.threadId,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.goal.resume": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (!thread.goal || (thread.goal.status !== "paused" && thread.goal.status !== "blocked")) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "No paused or blocked goal to resume.",
+        });
+      }
+      // Goal + Loop mutual exclusion on resume: a paused loop still owns the
+      // slot. Resuming the goal while a loop is paused would interleave both
+      // once the loop is resumed.
+      if (thread.loop && (thread.loop.status === "active" || thread.loop.status === "paused")) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A loop is active or paused on this thread. `/loop clear` first.",
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.goal-resumed",
+        payload: {
+          threadId: command.threadId,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.goal.clear": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (!thread.goal || thread.goal.status === "cleared") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "No goal to clear.",
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.goal-cleared",
+        payload: {
+          threadId: command.threadId,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.goal.complete": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (
+        !thread.goal ||
+        (thread.goal.status !== "active" &&
+          thread.goal.status !== "paused" &&
+          thread.goal.status !== "blocked")
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "No active, paused, or blocked goal to complete.",
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.goal-completed",
+        payload: {
+          threadId: command.threadId,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.goal.blocked": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (!thread.goal || thread.goal.status !== "active") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "No active goal to block.",
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.goal-blocked",
+        payload: {
+          threadId: command.threadId,
+          blockedReason: command.blockedReason,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.loop.create": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (thread.loop && thread.loop.status !== "cleared") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A loop already exists on this thread; clear it before creating another.",
+        });
+      }
+      // Goal + Loop mutual exclusion (symmetric guard — see thread.goal.create).
+      // A paused goal still owns the slot — resuming it later would interleave
+      // with an active loop — so block creation while the goal is active OR paused.
+      if (thread.goal && (thread.goal.status === "active" || thread.goal.status === "paused")) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A goal is active or paused on this thread. `/goal clear` first.",
+        });
+      }
+      // Block loop creation on providers that can't compact and don't
+      // auto-compact. Without compaction, the loop hits the context limit
+      // within a few iterations and stalls. Use the live session provider
+      // when one is attached — a resumed/switched session may differ from
+      // modelSelection.provider, and gating against the wrong one would
+      // accept a loop that then stalls on the unsupported active provider.
+      const provider = (thread.session?.providerName ??
+        thread.modelSelection.provider) as ProviderKind;
+      if (!providerCanLoop(provider)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "This provider doesn't support compaction — the loop will hit the context limit. Use Codex, OpenCode, Pi, Cursor, or Gemini instead.",
+        });
+      }
+      const loop = {
+        prompt: command.prompt,
+        intervalSeconds: command.intervalSeconds,
+        status: "active" as const,
+        iterationsRun: 0,
+        createdAt: command.createdAt,
+        updatedAt: command.createdAt,
+      };
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.loop-created",
+        payload: {
+          threadId: command.threadId,
+          loop,
+        },
+      };
+    }
+
+    case "thread.loop.pause": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (!thread.loop || thread.loop.status !== "active") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "No active loop to pause.",
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.loop-paused",
+        payload: {
+          threadId: command.threadId,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.loop.resume": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (!thread.loop || thread.loop.status !== "paused") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "No paused loop to resume.",
+        });
+      }
+      // Goal + Loop mutual exclusion on resume (symmetric — see thread.goal.resume).
+      if (thread.goal && (thread.goal.status === "active" || thread.goal.status === "paused")) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A goal is active or paused on this thread. `/goal clear` first.",
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.loop-resumed",
+        payload: {
+          threadId: command.threadId,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.loop.clear": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (!thread.loop || thread.loop.status === "cleared") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "No loop to clear.",
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.loop-cleared",
+        payload: {
+          threadId: command.threadId,
+          updatedAt: command.createdAt,
         },
       };
     }
