@@ -129,10 +129,25 @@ export const GrokModelOptions = Schema.Struct({
 });
 export type GrokModelOptions = typeof GrokModelOptions.Type;
 
+/**
+ * Devin model options — variant selections resolved to full slugs by the adapter.
+ * Devin encodes variants in model slugs (e.g. claude-opus-4-8-high_fast), not
+ * via runtime config options. The adapter uses a variant matrix to resolve
+ * base + options to the correct full slug before calling session/set_model.
+ */
+export const DevinModelOptions = Schema.Struct({
+  reasoningEffort: Schema.optional(TrimmedNonEmptyString),
+  fastMode: Schema.optional(Schema.Boolean),
+  thinking: Schema.optional(Schema.Boolean),
+  contextWindow: Schema.optional(Schema.String),
+});
+export type DevinModelOptions = typeof DevinModelOptions.Type;
+
 export const ProviderModelOptions = Schema.Struct({
   codex: Schema.optional(CodexModelOptions),
   claudeAgent: Schema.optional(ClaudeModelOptions),
   cursor: Schema.optional(CursorModelOptions),
+  devin: Schema.optional(DevinModelOptions),
   gemini: Schema.optional(GeminiModelOptions),
   grok: Schema.optional(GrokModelOptions),
   kilo: Schema.optional(OpenCodeModelOptions),
@@ -587,6 +602,80 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
       },
     },
   ],
+  devin: [
+    {
+      slug: "adaptive",
+      name: "Adaptive",
+      capabilities: {
+        reasoningEffortLevels: [],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+        contextWindowOptions: [],
+      },
+    },
+    {
+      slug: "claude-5-fable",
+      name: "Claude 5 Fable",
+      capabilities: CLAUDE_FABLE_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-8",
+      name: "Claude Opus 4.8",
+      capabilities: CLAUDE_FLAGSHIP_CAPABILITIES,
+    },
+    {
+      slug: "claude-sonnet-5",
+      name: "Claude Sonnet 5",
+      capabilities: CLAUDE_SONNET_5_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-5",
+      name: "GPT-5.5",
+      capabilities: CODEX_GPT_5_5_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-3-codex",
+      name: "GPT-5.3 Codex",
+      capabilities: CODEX_GPT_5_CAPABILITIES,
+    },
+    {
+      slug: "gemini-3-5-flash",
+      name: "Gemini 3.5 Flash",
+      capabilities: {
+        reasoningEffortLevels: [
+          { value: "HIGH", label: "High", isDefault: true },
+          { value: "LOW", label: "Low" },
+        ],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+        contextWindowOptions: [],
+      },
+    },
+    {
+      slug: "swe-1-6",
+      name: "SWE 1.6",
+      capabilities: {
+        reasoningEffortLevels: [],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+        contextWindowOptions: [],
+      },
+    },
+    {
+      slug: "deepseek-v4",
+      name: "DeepSeek V4",
+      capabilities: {
+        reasoningEffortLevels: [],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+        contextWindowOptions: [],
+      },
+    },
+  ],
 } as const satisfies Record<ProviderKind, readonly ModelDefinition[]>;
 export type ModelOptionsByProvider = typeof MODEL_OPTIONS_BY_PROVIDER;
 
@@ -603,6 +692,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderWithDefaultModel, ModelSl
   grok: "grok-build",
   kilo: "kilo/kilo-auto/free",
   opencode: "openai/gpt-5",
+  devin: "adaptive",
 };
 
 // Backward compatibility for existing Codex-only call sites.
@@ -657,6 +747,17 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     "gpt-5.3": "gpt-5.3-codex",
     "codex-5.3": "gpt-5.3-codex",
     "gemini-3": "gemini-3-pro",
+  },
+  devin: {
+    swe: "swe-1-6",
+    opus: "claude-opus-4-8",
+    sonnet: "claude-sonnet-5",
+    fable: "claude-5-fable",
+    "fable-5": "claude-5-fable",
+    gpt: "gpt-5-5",
+    codex: "gpt-5-3-codex",
+    gemini: "gemini-3-5-flash",
+    deepseek: "deepseek-v4",
   },
   gemini: {
     auto: "auto-gemini-3",
@@ -717,6 +818,7 @@ export const PROVIDER_DISPLAY_NAMES: Record<ProviderKind, string> = {
   codex: "Codex",
   claudeAgent: "Claude",
   cursor: "Cursor",
+  devin: "Devin",
   gemini: "Gemini",
   grok: "Grok",
   kilo: "Kilo",

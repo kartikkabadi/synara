@@ -68,7 +68,7 @@ describe("composer menu selection", () => {
         picker: null,
         triggerKind: "slash-command",
         triggerQuery: "check",
-        items: [...items].reverse(),
+        items: [...items].toReversed(),
       }),
     ).not.toBe(baseKey);
   });

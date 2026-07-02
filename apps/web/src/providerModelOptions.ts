@@ -11,6 +11,8 @@ import type {
   CodexModelSelection,
   CursorModelOptions,
   CursorModelSelection,
+  DevinModelOptions,
+  DevinModelSelection,
   GeminiModelOptions,
   GeminiModelSelection,
   GrokModelOptions,
@@ -160,7 +162,10 @@ export function mergeDynamicModelOptions(input: {
     (model) => !("isCustom" in model) || model.isCustom !== true,
   );
   const missingStaticBuiltIns =
-    (input.provider === "kilo" || input.provider === "opencode" || input.provider === "cursor") &&
+    (input.provider === "kilo" ||
+      input.provider === "opencode" ||
+      input.provider === "cursor" ||
+      input.provider === "devin") &&
     normalizedDynamicOptions.length > 0
       ? []
       : staticBuiltInModels.filter((model) => !dynamicNormalizedSlugs.has(model.slug));
@@ -272,6 +277,12 @@ export function buildNextProviderOptions(
   if (provider === "cursor") {
     return { ...(modelOptions as CursorModelOptions | undefined), ...patch } as CursorModelOptions;
   }
+  if (provider === "devin") {
+    return {
+      ...(modelOptions as DevinModelOptions | undefined),
+      ...patch,
+    } as DevinModelOptions;
+  }
   if (provider === "gemini") {
     return {
       ...(modelOptions as GeminiModelOptions | undefined),
@@ -328,6 +339,11 @@ export function buildModelSelection(
   model: string,
   options?: CursorModelOptions | null | undefined,
 ): CursorModelSelection;
+export function buildModelSelection(
+  provider: "devin",
+  model: string,
+  options?: DevinModelOptions | null | undefined,
+): DevinModelSelection;
 export function buildModelSelection(
   provider: "gemini",
   model: string,
@@ -386,6 +402,14 @@ export function buildModelSelection(
             provider,
             model,
             options: options as CursorModelOptions,
+          }
+        : { provider, model };
+    case "devin":
+      return options
+        ? {
+            provider,
+            model,
+            options: options as DevinModelOptions,
           }
         : { provider, model };
     case "gemini":
