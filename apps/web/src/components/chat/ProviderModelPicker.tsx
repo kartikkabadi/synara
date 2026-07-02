@@ -10,6 +10,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useSta
 import { type ProviderPickerKind, PROVIDER_OPTIONS } from "../../session-logic";
 import { formatProviderModelOptionName } from "../../providerModelOptions";
 import { compareProvidersByOrder } from "../../providerOrdering";
+import { normalizeDevinModelVariantBaseId } from "../../devinModelVariants";
 import {
   Menu,
   MenuItem,
@@ -159,6 +160,17 @@ function resolveSelectedModelLabel(input: {
     );
     if (baseMatch) {
       return baseMatch.name;
+    }
+  }
+  if (input.provider === "devin") {
+    const baseId = normalizeDevinModelVariantBaseId(input.model);
+    if (baseId) {
+      const baseMatch = input.options.find(
+        (option) => normalizeDevinModelVariantBaseId(option.slug) === baseId,
+      );
+      if (baseMatch) {
+        return baseMatch.name;
+      }
     }
   }
   return formatProviderModelOptionName({

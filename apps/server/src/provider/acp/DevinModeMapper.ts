@@ -71,14 +71,29 @@ export function resolveDevinModeId(input: {
   return undefined;
 }
 
-function isDevinPlanModeId(
+function isDevinModeId(
   modes: ReadonlyArray<AcpSessionMode>,
   modeId: string | undefined,
+  aliases: ReadonlyArray<string>,
 ): boolean {
   if (!modeId) return false;
   const currentMode = modes.find((mode) => mode.id === modeId);
   if (!currentMode) return false;
-  return findDevinModeByAliases([currentMode], DEVIN_PLAN_MODE_ALIASES) !== undefined;
+  return findDevinModeByAliases([currentMode], aliases) !== undefined;
+}
+
+function isDevinPlanModeId(
+  modes: ReadonlyArray<AcpSessionMode>,
+  modeId: string | undefined,
+): boolean {
+  return isDevinModeId(modes, modeId, DEVIN_PLAN_MODE_ALIASES);
+}
+
+function isDevinDefaultModeId(
+  modes: ReadonlyArray<AcpSessionMode>,
+  modeId: string | undefined,
+): boolean {
+  return isDevinModeId(modes, modeId, DEVIN_DEFAULT_MODE_ALIASES);
 }
 
 export function applyDevinModeSelection(input: {
@@ -95,10 +110,15 @@ export function applyDevinModeSelection(input: {
       runtimeMode: input.runtimeMode,
       ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
     });
+    // approval-required returns undefined from resolveDevinModeId to avoid
+    // forcing accept-edits. But if the session is currently in a non-default
+    // mode (bypass, plan, accept-edits), we must explicitly switch back to
+    // Devin's default/ask mode — otherwise the session stays stuck in the
+    // previous mode.
     if (
       input.interactionMode !== "plan" &&
-      isDevinPlanModeId(modeState.availableModes, modeState.currentModeId) &&
-      modeId === undefined
+      modeId === undefined &&
+      !isDevinDefaultModeId(modeState.availableModes, modeState.currentModeId)
     ) {
       modeId = findDevinModeByAliases(modeState.availableModes, DEVIN_DEFAULT_MODE_ALIASES)?.id;
     }

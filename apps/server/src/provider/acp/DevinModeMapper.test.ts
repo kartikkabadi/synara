@@ -377,4 +377,49 @@ describe("applyDevinModeSelection", () => {
       assert.deepStrictEqual(setModes, ["ask"]);
     }),
   );
+
+  it.effect("restores ask/default mode after switching from full-access to approval-required", () =>
+    Effect.gen(function* () {
+      const setModes: string[] = [];
+      const modes = [
+        makeMode("accept-edits", "Code"),
+        makeMode("ask", "Ask"),
+        makeMode("plan", "Plan"),
+        makeMode("bypass", "Bypass Permissions"),
+      ];
+      const modeState = makeModeState("bypass", modes);
+      const runtime = makeMockRuntime({
+        modeState,
+        onSetMode: (id) => {
+          setModes.push(id);
+        },
+      });
+      yield* applyDevinModeSelection({
+        runtime,
+        threadId,
+        runtimeMode: "approval-required",
+      });
+      assert.deepStrictEqual(setModes, ["ask"]);
+    }),
+  );
+
+  it.effect("does not call setMode when already in ask and switching to approval-required", () =>
+    Effect.gen(function* () {
+      let setModeCalled = false;
+      const modes = [makeMode("ask", "Ask"), makeMode("bypass", "Bypass Permissions")];
+      const modeState = makeModeState("ask", modes);
+      const runtime = makeMockRuntime({
+        modeState,
+        onSetMode: () => {
+          setModeCalled = true;
+        },
+      });
+      yield* applyDevinModeSelection({
+        runtime,
+        threadId,
+        runtimeMode: "approval-required",
+      });
+      assert.strictEqual(setModeCalled, false);
+    }),
+  );
 });
