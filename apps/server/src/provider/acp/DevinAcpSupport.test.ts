@@ -117,6 +117,16 @@ describe("buildDevinAcpSpawnInput — env allowlist filtering", () => {
     });
   });
 
+  it("includes SSH_AUTH_SOCK from the allowlist", () => {
+    withEnv({ SSH_AUTH_SOCK: "/private/tmp/com.apple.launchd.ssh/agent.sock" }, () => {
+      const result = buildDevinAcpSpawnInput(undefined, "/tmp");
+      assert.strictEqual(
+        result.env!.SSH_AUTH_SOCK,
+        "/private/tmp/com.apple.launchd.ssh/agent.sock",
+      );
+    });
+  });
+
   it("includes vars with DEVIN_ prefix", () => {
     withEnv({ DEVIN_API_KEY: "secret", DEVIN_BASE_URL: "https://devin.ai" }, () => {
       const result = buildDevinAcpSpawnInput(undefined, "/tmp");

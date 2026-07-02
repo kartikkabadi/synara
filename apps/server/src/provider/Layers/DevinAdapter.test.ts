@@ -911,6 +911,50 @@ describe("DevinAdapterLive", () => {
     );
   });
 
+  it.effect("rejects compactThread while a Devin ACP prompt is active", () =>
+    (() => {
+      let resolvePrompt!: (result: EffectAcpSchema.PromptResponse) => void;
+      const promptPromise = new Promise<EffectAcpSchema.PromptResponse>((resolve) => {
+        resolvePrompt = resolve;
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* DevinAdapter;
+        yield* adapter.startSession({
+          threadId,
+          provider: "devin",
+          cwd: "/tmp/project",
+          runtimeMode: "full-access",
+        });
+
+        yield* adapter.sendTurn({
+          threadId,
+          input: "keep working",
+        });
+        const error = yield* adapter.compactThread!(threadId).pipe(Effect.flip);
+
+        assert.strictEqual(error._tag, "ProviderAdapterValidationError");
+        assert.match(error.message, /already has an active turn/);
+        yield* adapter.interruptTurn(threadId);
+      }).pipe(
+        Effect.provide(
+          makeDevinAdapterLive({
+            makeRuntime: () =>
+              Effect.succeed(
+                makeMockRuntime({
+                  prompt: () => Effect.promise(() => promptPromise),
+                  cancel: Effect.sync(() => {
+                    resolvePrompt({
+                      stopReason: "cancelled",
+                    } as EffectAcpSchema.PromptResponse);
+                  }),
+                }),
+              ),
+          }),
+        ),
+      );
+    })(),
+  );
+
   it.effect("composer capabilities advertise thread compaction", () =>
     Effect.gen(function* () {
       const adapter = yield* DevinAdapter;

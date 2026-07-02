@@ -7,6 +7,7 @@ import {
   type ClaudeCodeEffort,
   type CodexReasoningEffort,
   type CursorModelOptions,
+  type DevinModelOptions,
   type GeminiThinkingBudget,
   type GeminiThinkingLevel,
   GROK_REASONING_EFFORT_OPTIONS,
@@ -1375,8 +1376,36 @@ function normalizeProviderModelOptions(
       ? piCandidate.thinkingLevel
       : undefined;
   const pi = piThinkingLevel !== undefined ? { thinkingLevel: piThinkingLevel } : undefined;
-  // Devin has no client-side model options; pass through an empty object if present.
-  const devin = devinCandidate && Object.keys(devinCandidate).length === 0 ? {} : undefined;
+  const devinReasoningEffort = trimStringOrUndefined(devinCandidate?.reasoningEffort);
+  const devinFastMode =
+    devinCandidate?.fastMode === true
+      ? true
+      : devinCandidate?.fastMode === false
+        ? false
+        : undefined;
+  const devinThinking =
+    devinCandidate?.thinking === true
+      ? true
+      : devinCandidate?.thinking === false
+        ? false
+        : undefined;
+  const devinContextWindow = trimStringOrUndefined(devinCandidate?.contextWindow);
+  const devin: DevinModelOptions | undefined =
+    devinReasoningEffort !== undefined ||
+    devinFastMode !== undefined ||
+    devinThinking !== undefined ||
+    devinContextWindow !== undefined
+      ? {
+          ...(devinReasoningEffort !== undefined
+            ? { reasoningEffort: devinReasoningEffort }
+            : {}),
+          ...(devinFastMode !== undefined ? { fastMode: devinFastMode } : {}),
+          ...(devinThinking !== undefined ? { thinking: devinThinking } : {}),
+          ...(devinContextWindow !== undefined ? { contextWindow: devinContextWindow } : {}),
+        }
+      : devinCandidate && Object.keys(devinCandidate).length === 0
+        ? {}
+        : undefined;
   if (!codex && !claude && !cursor && !gemini && !grok && !kilo && !opencode && !pi && !devin) {
     return null;
   }

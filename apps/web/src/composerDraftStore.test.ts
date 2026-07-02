@@ -1257,6 +1257,46 @@ describe("composerDraftStore modelSelection", () => {
     expect(state.stickyActiveProvider).toBe("grok");
   });
 
+  it("stores Devin trait options instead of dropping them during normalization", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setModelSelection(
+      threadId,
+      modelSelection("devin", "claude-opus-4-8", {
+        reasoningEffort: "medium",
+        fastMode: true,
+        thinking: true,
+        contextWindow: "200k",
+      }),
+    );
+    store.setStickyModelSelection(
+      modelSelection("devin", "claude-opus-4-8", {
+        reasoningEffort: "medium",
+        fastMode: true,
+        thinking: true,
+        contextWindow: "200k",
+      }),
+    );
+
+    const state = useComposerDraftStore.getState();
+    expect(state.draftsByThreadId[threadId]?.modelSelectionByProvider.devin).toEqual(
+      modelSelection("devin", "claude-opus-4-8", {
+        reasoningEffort: "medium",
+        fastMode: true,
+        thinking: true,
+        contextWindow: "200k",
+      }),
+    );
+    expect(state.stickyModelSelectionByProvider.devin).toEqual(
+      modelSelection("devin", "claude-opus-4-8", {
+        reasoningEffort: "medium",
+        fastMode: true,
+        thinking: true,
+        contextWindow: "200k",
+      }),
+    );
+  });
+
   it("replaces only the targeted provider options on the current model selection", () => {
     const store = useComposerDraftStore.getState();
 

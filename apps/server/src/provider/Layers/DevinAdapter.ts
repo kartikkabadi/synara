@@ -1232,16 +1232,26 @@ function makeProviderAdapter(
           });
         }),
       compactThread: (threadId) =>
-        Effect.gen(function* () {
-          const ctx = yield* requireSession(threadId);
-          yield* ctx.acp
-            .prompt({ prompt: [{ type: "text", text: "/compact" }] })
-            .pipe(
-              Effect.mapError((error) =>
-                mapAcpToAdapterError(PROVIDER, threadId, "session/prompt", error),
-              ),
-            );
-        }),
+        withThreadLock(
+          threadId,
+          Effect.gen(function* () {
+            const ctx = yield* requireSession(threadId);
+            if (ctx.activeTurnId !== undefined || ctx.activePromptFiber !== undefined) {
+              return yield* new ProviderAdapterValidationError({
+                provider: PROVIDER,
+                operation: "compactThread",
+                issue: "Devin already has an active turn. Wait for it to finish or cancel it first.",
+              });
+            }
+            yield* ctx.acp
+              .prompt({ prompt: [{ type: "text", text: "/compact" }] })
+              .pipe(
+                Effect.mapError((error) =>
+                  mapAcpToAdapterError(PROVIDER, threadId, "session/prompt", error),
+                ),
+              );
+          }),
+        ),
       stopAll: () =>
         Effect.gen(function* () {
           const contexts = [...sessions.values()];
