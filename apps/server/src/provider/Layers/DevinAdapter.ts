@@ -1240,7 +1240,8 @@ function makeProviderAdapter(
               return yield* new ProviderAdapterValidationError({
                 provider: PROVIDER,
                 operation: "compactThread",
-                issue: "Devin already has an active turn. Wait for it to finish or cancel it first.",
+                issue:
+                  "Devin already has an active turn. Wait for it to finish or cancel it first.",
               });
             }
             yield* ctx.acp
