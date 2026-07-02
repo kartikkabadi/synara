@@ -9,12 +9,16 @@
  *
  * @module DevinModelCatalog
  */
-import { MODEL_OPTIONS_BY_PROVIDER, MODEL_SLUG_ALIASES_BY_PROVIDER } from "@t3tools/contracts";
+import {
+  MODEL_OPTIONS_BY_PROVIDER,
+  MODEL_SLUG_ALIASES_BY_PROVIDER,
+  type ModelCapabilities,
+} from "@t3tools/contracts";
 import { parseDevinModelSlug, type ParsedDevinSlug } from "./DevinModelSlugParser";
 
 export const DEVIN_FALLBACK_MODELS = MODEL_OPTIONS_BY_PROVIDER.devin.map((option) => {
   const { reasoningEffortLevels, supportsFastMode, supportsThinkingToggle, contextWindowOptions } =
-    option.capabilities;
+    option.capabilities as ModelCapabilities;
 
   const supportedReasoningEfforts =
     reasoningEffortLevels.length > 0

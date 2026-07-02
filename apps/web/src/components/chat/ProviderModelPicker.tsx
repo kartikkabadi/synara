@@ -208,6 +208,11 @@ export const ProviderModelMenuItems = memo(function ProviderModelMenuItems(
     [],
     FavoriteModelSlugs,
   );
+  const [devinFavoriteModelSlugs, setDevinFavoriteModelSlugs] = useLocalStorage(
+    FAVORITE_MODEL_STORAGE_KEYS.devin,
+    [],
+    FavoriteModelSlugs,
+  );
   const [openCodeFavoriteModelSlugs, setOpenCodeFavoriteModelSlugs] = useLocalStorage(
     FAVORITE_MODEL_STORAGE_KEYS.opencode,
     [],
@@ -267,6 +272,10 @@ export const ProviderModelMenuItems = memo(function ProviderModelMenuItems(
     () => new Set(cursorFavoriteModelSlugs),
     [cursorFavoriteModelSlugs],
   );
+  const devinFavoriteModelSlugSet = useMemo(
+    () => new Set(devinFavoriteModelSlugs),
+    [devinFavoriteModelSlugs],
+  );
   const piFavoriteModelSlugSet = useMemo(
     () => new Set(piFavoriteModelSlugs),
     [piFavoriteModelSlugs],
@@ -274,12 +283,14 @@ export const ProviderModelMenuItems = memo(function ProviderModelMenuItems(
   const favoriteModelSlugSets = useMemo(
     () => ({
       cursor: cursorFavoriteModelSlugSet,
+      devin: devinFavoriteModelSlugSet,
       kilo: kiloFavoriteModelSlugSet,
       opencode: openCodeFavoriteModelSlugSet,
       pi: piFavoriteModelSlugSet,
     }),
     [
       cursorFavoriteModelSlugSet,
+      devinFavoriteModelSlugSet,
       kiloFavoriteModelSlugSet,
       openCodeFavoriteModelSlugSet,
       piFavoriteModelSlugSet,
@@ -302,15 +313,18 @@ export const ProviderModelMenuItems = memo(function ProviderModelMenuItems(
       const setFavoriteModelSlugs =
         provider === "cursor"
           ? setCursorFavoriteModelSlugs
-          : provider === "kilo"
-            ? setKiloFavoriteModelSlugs
-            : provider === "pi"
-              ? setPiFavoriteModelSlugs
-              : setOpenCodeFavoriteModelSlugs;
+          : provider === "devin"
+            ? setDevinFavoriteModelSlugs
+            : provider === "kilo"
+              ? setKiloFavoriteModelSlugs
+              : provider === "pi"
+                ? setPiFavoriteModelSlugs
+                : setOpenCodeFavoriteModelSlugs;
       setFavoriteModelSlugs((current) => toggleFavoriteModelSlug(current, slug));
     },
     [
       setCursorFavoriteModelSlugs,
+      setDevinFavoriteModelSlugs,
       setKiloFavoriteModelSlugs,
       setOpenCodeFavoriteModelSlugs,
       setPiFavoriteModelSlugs,
