@@ -7,7 +7,9 @@ import type {
   GitActionProgressEvent,
   GitStackedAction,
   GitStatusResult,
+  ModelSelection,
   ThreadId,
+  DEFAULT_GIT_TEXT_GENERATION_MODEL,
 } from "@t3tools/contracts";
 import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
@@ -315,6 +317,13 @@ export default function GitActionsControl({
   const isPanel = variant === "panel";
   const { settings } = useAppSettings();
   const providerOptions = useMemo(() => getProviderStartOptions(settings), [settings]);
+  const gitTextGenerationModelSelection = useMemo(
+    (): ModelSelection => ({
+      provider: settings.textGenerationProvider ?? "codex",
+      model: settings.textGenerationModel ?? DEFAULT_GIT_TEXT_GENERATION_MODEL,
+    }),
+    [settings.textGenerationModel, settings.textGenerationProvider],
+  );
   const activeThread = useStore(
     useMemo(() => createThreadSelector(activeThreadId), [activeThreadId]),
   );
@@ -385,6 +394,7 @@ export default function GitActionsControl({
       queryClient,
       codexHomePath: settings.codexHomePath || null,
       model: settings.textGenerationModel ?? null,
+      modelSelection: gitTextGenerationModelSelection,
       ...(providerOptions ? { providerOptions } : {}),
     }),
   );
