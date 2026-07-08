@@ -310,10 +310,13 @@ function mergeDevinToolCallMeta(
   previous: DevinToolCallMeta | undefined,
   next: DevinToolCallMeta,
 ): DevinToolCallMeta {
+  const title = next.title ?? previous?.title;
+  const kind = next.kind ?? previous?.kind;
+  const rawInput = next.rawInput !== undefined ? next.rawInput : previous?.rawInput;
   return {
-    title: next.title ?? previous?.title,
-    kind: next.kind ?? previous?.kind,
-    rawInput: next.rawInput !== undefined ? next.rawInput : previous?.rawInput,
+    ...(title !== undefined ? { title } : {}),
+    ...(kind !== undefined ? { kind } : {}),
+    ...(rawInput !== undefined ? { rawInput } : {}),
   };
 }
 
@@ -332,13 +335,21 @@ function enrichDevinPermissionParams(
   }
   const incoming = readToolCallMeta(params.toolCall);
   const merged = mergeDevinToolCallMeta(tracked, incoming);
+  const baseToolCall = params.toolCall;
   return {
     ...params,
     toolCall: {
-      ...params.toolCall,
+      toolCallId: baseToolCall.toolCallId,
+      ...(baseToolCall.status !== undefined && baseToolCall.status !== null
+        ? { status: baseToolCall.status }
+        : {}),
+      ...(baseToolCall.content !== undefined ? { content: baseToolCall.content } : {}),
+      ...(baseToolCall.locations !== undefined ? { locations: baseToolCall.locations } : {}),
+      ...(baseToolCall.rawOutput !== undefined ? { rawOutput: baseToolCall.rawOutput } : {}),
+      ...(baseToolCall._meta !== undefined ? { _meta: baseToolCall._meta } : {}),
       ...(merged.title !== undefined ? { title: merged.title } : {}),
       ...(merged.kind !== undefined
-        ? { kind: merged.kind as EffectAcpSchema.RequestPermissionRequest["toolCall"]["kind"] }
+        ? { kind: merged.kind as NonNullable<typeof baseToolCall.kind> }
         : {}),
       ...(merged.rawInput !== undefined ? { rawInput: merged.rawInput } : {}),
     },
@@ -1096,9 +1107,7 @@ function makeProviderAdapter(
                       ctx.activePlanAssistantText += event.text;
                       // Surface the plan card as soon as the tagged block is complete,
                       // even if Exit plan mode permission is still in flight / sparse.
-                      const planMarkdown = extractProposedPlanMarkdown(
-                        ctx.activePlanAssistantText,
-                      );
+                      const planMarkdown = extractProposedPlanMarkdown(ctx.activePlanAssistantText);
                       if (planMarkdown && ctx.completedPlanFingerprint !== planMarkdown) {
                         ctx.completedPlanFingerprint = planMarkdown;
                         yield* publish({

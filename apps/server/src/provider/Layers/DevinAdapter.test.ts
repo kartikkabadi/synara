@@ -1748,97 +1748,95 @@ describe("DevinAdapterLive", () => {
     );
   });
 
-  it.effect(
-    "does not auto-approve permissions during plan mode even under full-access",
-    () => {
-      type PermissionHandler = (
-        params: EffectAcpSchema.RequestPermissionRequest,
-      ) => Effect.Effect<EffectAcpSchema.RequestPermissionResponse, EffectAcpErrors.AcpError>;
-      let permissionHandler: PermissionHandler | undefined;
-      let resolvePrompt!: (result: EffectAcpSchema.PromptResponse) => void;
-      const promptPromise = new Promise<EffectAcpSchema.PromptResponse>((resolve) => {
-        resolvePrompt = resolve;
+  it.effect("does not auto-approve permissions during plan mode even under full-access", () => {
+    type PermissionHandler = (
+      params: EffectAcpSchema.RequestPermissionRequest,
+    ) => Effect.Effect<EffectAcpSchema.RequestPermissionResponse, EffectAcpErrors.AcpError>;
+    let permissionHandler: PermissionHandler | undefined;
+    let resolvePrompt!: (result: EffectAcpSchema.PromptResponse) => void;
+    const promptPromise = new Promise<EffectAcpSchema.PromptResponse>((resolve) => {
+      resolvePrompt = resolve;
+    });
+    return Effect.gen(function* () {
+      const adapter = yield* DevinAdapter;
+      yield* adapter.startSession({
+        threadId,
+        provider: "devin",
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
       });
-      return Effect.gen(function* () {
-        const adapter = yield* DevinAdapter;
-        yield* adapter.startSession({
-          threadId,
-          provider: "devin",
-          cwd: "/tmp/project",
-          runtimeMode: "full-access",
-        });
-        assert.isDefined(permissionHandler);
+      assert.isDefined(permissionHandler);
 
-        yield* adapter.sendTurn({
-          threadId,
-          input: "make a plan only",
-          interactionMode: "plan",
-        });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "make a plan only",
+        interactionMode: "plan",
+      });
 
-        const openedFiber = yield* Stream.runHead(
-          Stream.filter(
-            adapter.streamEvents,
-            (event): event is Extract<typeof event, { type: "request.opened" }> =>
-              event.type === "request.opened",
-          ),
-        ).pipe(Effect.forkChild);
-
-        const permissionFiber = yield* permissionHandler!({
-          options: [
-            { kind: "allow_once", optionId: "allow-once" },
-            { kind: "allow_always", optionId: "always-allow" },
-            { kind: "reject_once", optionId: "deny-now" },
-          ],
-          toolCall: {
-            toolCallId: "tc-plan-1",
-            title: "Edit AGENTS.md",
-            kind: "edit",
-            status: "pending",
-            rawInput: { path: "AGENTS.md" },
-          },
-        } as unknown as EffectAcpSchema.RequestPermissionRequest).pipe(Effect.forkChild);
-
-        const opened = Option.getOrThrow(yield* Fiber.join(openedFiber));
-        assert.strictEqual(opened.type, "request.opened");
-
-        yield* adapter.respondToRequest(
-          threadId,
-          ApprovalRequestId.makeUnsafe(opened.requestId),
-          "decline",
-        );
-        const result = yield* Fiber.join(permissionFiber);
-        assert.strictEqual(result.outcome.outcome, "selected");
-        if (result.outcome.outcome === "selected") {
-          assert.strictEqual(result.outcome.optionId, "deny-now");
-        }
-
-        resolvePrompt({ stopReason: "end_turn" } as EffectAcpSchema.PromptResponse);
-        yield* adapter.stopSession(threadId);
-      }).pipe(
-        Effect.provide(
-          makeDevinAdapterLive({
-            makeRuntime: () =>
-              Effect.succeed(
-                makeMockRuntime({
-                  modeState: {
-                    currentModeId: "bypass",
-                    availableModes: [
-                      { id: "ask", name: "Ask" },
-                      { id: "plan", name: "Plan" },
-                      { id: "bypass", name: "Bypass Permissions" },
-                    ],
-                  },
-                  onHandleRequestPermission: (handler) => {
-                    permissionHandler = handler;
-                  },
-                  prompt: () => Effect.promise(() => promptPromise),
-                }),
-              ),
-          }),
+      const openedFiber = yield* Stream.runHead(
+        Stream.filter(
+          adapter.streamEvents,
+          (event): event is Extract<typeof event, { type: "request.opened" }> =>
+            event.type === "request.opened",
         ),
+      ).pipe(Effect.forkChild);
+
+      const permissionFiber = yield* permissionHandler!({
+        options: [
+          { kind: "allow_once", optionId: "allow-once" },
+          { kind: "allow_always", optionId: "always-allow" },
+          { kind: "reject_once", optionId: "deny-now" },
+        ],
+        toolCall: {
+          toolCallId: "tc-plan-1",
+          title: "Edit AGENTS.md",
+          kind: "edit",
+          status: "pending",
+          rawInput: { path: "AGENTS.md" },
+        },
+      } as unknown as EffectAcpSchema.RequestPermissionRequest).pipe(Effect.forkChild);
+
+      const opened = Option.getOrThrow(yield* Fiber.join(openedFiber));
+      assert.strictEqual(opened.type, "request.opened");
+      assert.ok(opened.requestId);
+
+      yield* adapter.respondToRequest(
+        threadId,
+        ApprovalRequestId.makeUnsafe(opened.requestId),
+        "decline",
       );
-    },
-  );
+      const result = yield* Fiber.join(permissionFiber);
+      assert.strictEqual(result.outcome.outcome, "selected");
+      if (result.outcome.outcome === "selected") {
+        assert.strictEqual(result.outcome.optionId, "deny-now");
+      }
+
+      resolvePrompt({ stopReason: "end_turn" } as EffectAcpSchema.PromptResponse);
+      yield* adapter.stopSession(threadId);
+    }).pipe(
+      Effect.provide(
+        makeDevinAdapterLive({
+          makeRuntime: () =>
+            Effect.succeed(
+              makeMockRuntime({
+                modeState: {
+                  currentModeId: "bypass",
+                  availableModes: [
+                    { id: "ask", name: "Ask" },
+                    { id: "plan", name: "Plan" },
+                    { id: "bypass", name: "Bypass Permissions" },
+                  ],
+                },
+                onHandleRequestPermission: (handler) => {
+                  permissionHandler = handler;
+                },
+                prompt: () => Effect.promise(() => promptPromise),
+              }),
+            ),
+        }),
+      ),
+    );
+  });
 
   it.effect(
     "captures Exit plan mode as a proposed plan and settles the turn without UI approval",
@@ -1986,249 +1984,243 @@ describe("DevinAdapterLive", () => {
     },
   );
 
-  it.effect(
-    "handles sparse Exit plan permission after tool_call update (real Devin shape)",
-    () => {
-      type PermissionHandler = (
-        params: EffectAcpSchema.RequestPermissionRequest,
-      ) => Effect.Effect<EffectAcpSchema.RequestPermissionResponse, EffectAcpErrors.AcpError>;
-      let permissionHandler: PermissionHandler | undefined;
-      let resolvePrompt!: (result: EffectAcpSchema.PromptResponse) => void;
-      const promptPromise = new Promise<EffectAcpSchema.PromptResponse>((resolve) => {
-        resolvePrompt = resolve;
-      });
-      let resolveEventsReady!: () => void;
-      const eventsReady = new Promise<void>((resolve) => {
-        resolveEventsReady = resolve;
-      });
-      const planBody = "# Sparse exit plan\n\n- Add a period in KEYBINDINGS.md";
-      const planDelta = {
-        _tag: "ContentDelta" as const,
-        text: `<proposed_plan>\n${planBody}\n</proposed_plan>`,
-        streamKind: "assistant_text" as const,
-        itemId: "assistant-plan-2",
-        rawPayload: {},
-      } satisfies AcpParsedSessionEvent;
-      const toolUpdate = {
-        _tag: "ToolCallUpdated" as const,
-        toolCall: {
+  it.effect("handles sparse Exit plan permission after tool_call update (real Devin shape)", () => {
+    type PermissionHandler = (
+      params: EffectAcpSchema.RequestPermissionRequest,
+    ) => Effect.Effect<EffectAcpSchema.RequestPermissionResponse, EffectAcpErrors.AcpError>;
+    let permissionHandler: PermissionHandler | undefined;
+    let resolvePrompt!: (result: EffectAcpSchema.PromptResponse) => void;
+    const promptPromise = new Promise<EffectAcpSchema.PromptResponse>((resolve) => {
+      resolvePrompt = resolve;
+    });
+    let resolveEventsReady!: () => void;
+    const eventsReady = new Promise<void>((resolve) => {
+      resolveEventsReady = resolve;
+    });
+    const planBody = "# Sparse exit plan\n\n- Add a period in KEYBINDINGS.md";
+    const planDelta = {
+      _tag: "ContentDelta" as const,
+      text: `<proposed_plan>\n${planBody}\n</proposed_plan>`,
+      streamKind: "assistant_text" as const,
+      itemId: "assistant-plan-2",
+      rawPayload: {},
+    } satisfies AcpParsedSessionEvent;
+    const toolUpdate = {
+      _tag: "ToolCallUpdated" as const,
+      toolCall: {
+        toolCallId: "18d3792f7",
+        title: "Exit plan mode",
+        kind: "switch_mode",
+        status: "inProgress" as const,
+        data: {
           toolCallId: "18d3792f7",
-          title: "Exit plan mode",
           kind: "switch_mode",
-          status: "inProgress" as const,
-          data: {
-            toolCallId: "18d3792f7",
-            kind: "switch_mode",
-            rawInput: {
-              plan: "Add a missing period at the end of line 35 in KEYBINDINGS.md",
-            },
+          rawInput: {
+            plan: "Add a missing period at the end of line 35 in KEYBINDINGS.md",
           },
         },
-        rawPayload: {},
-      } satisfies AcpParsedSessionEvent;
+      },
+      rawPayload: {},
+    } satisfies AcpParsedSessionEvent;
 
-      return Effect.gen(function* () {
-        const adapter = yield* DevinAdapter;
-        yield* adapter.startSession({
-          threadId,
-          provider: "devin",
-          cwd: "/tmp/project",
-          runtimeMode: "full-access",
-        });
-        assert.isDefined(permissionHandler);
-
-        const proposedFiber = yield* Stream.runHead(
-          Stream.filter(
-            adapter.streamEvents,
-            (event): event is Extract<typeof event, { type: "turn.proposed.completed" }> =>
-              event.type === "turn.proposed.completed",
-          ),
-        ).pipe(Effect.forkChild);
-        const completedFiber = yield* Stream.runHead(
-          Stream.filter(
-            adapter.streamEvents,
-            (event): event is Extract<typeof event, { type: "turn.completed" }> =>
-              event.type === "turn.completed",
-          ),
-        ).pipe(Effect.forkChild);
-
-        yield* adapter.sendTurn({
-          threadId,
-          input: "make a plan",
-          interactionMode: "plan",
-        });
-
-        resolveEventsReady();
-        const proposed = Option.getOrThrow(yield* Fiber.join(proposedFiber));
-        assert.include(
-          proposed.type === "turn.proposed.completed" ? proposed.payload.planMarkdown : "",
-          "Sparse exit plan",
-        );
-        // Let ToolCallUpdated land in toolCallMetaById before the sparse permission.
-        yield* Effect.promise(
-          () =>
-            new Promise<void>((resolve) => {
-              setImmediate(resolve);
-            }),
-        );
-
-        // Real Devin often sends request_permission with ONLY toolCallId.
-        // Title/kind/rawInput were already seen on tool_call updates.
-        const result = yield* permissionHandler!({
-          sessionId: "swamp-spur",
-          options: [
-            { kind: "allow_once", optionId: "allow-once" },
-            { kind: "allow_always", optionId: "always-allow" },
-            { kind: "reject_once", optionId: "deny-now" },
-          ],
-          toolCall: {
-            toolCallId: "18d3792f7",
-          },
-        } as unknown as EffectAcpSchema.RequestPermissionRequest);
-
-        assert.deepStrictEqual(result.outcome, { outcome: "cancelled" });
-
-        const completed = Option.getOrThrow(yield* Fiber.join(completedFiber));
-        assert.strictEqual(completed.type, "turn.completed");
-        if (completed.type === "turn.completed") {
-          assert.strictEqual(completed.payload.state, "completed");
-        }
-
-        resolvePrompt({ stopReason: "end_turn" } as EffectAcpSchema.PromptResponse);
-        yield* adapter.stopSession(threadId);
-      }).pipe(
-        Effect.provide(
-          makeDevinAdapterLive({
-            makeRuntime: () =>
-              Effect.succeed(
-                makeMockRuntime({
-                  modeState: {
-                    currentModeId: "plan",
-                    availableModes: [
-                      { id: "ask", name: "Ask" },
-                      { id: "plan", name: "Plan" },
-                      { id: "bypass", name: "Bypass Permissions" },
-                    ],
-                  },
-                  onHandleRequestPermission: (handler) => {
-                    permissionHandler = handler;
-                  },
-                  events: Stream.unwrap(
-                    Effect.promise(() => eventsReady).pipe(
-                      Effect.map(() => Stream.make(planDelta, toolUpdate)),
-                    ),
-                  ),
-                  prompt: () => Effect.promise(() => promptPromise),
-                }),
-              ),
-          }),
-        ),
-      );
-    },
-  );
-
-  it.effect(
-    "treats sparse permission as Exit plan when tagged plan is already complete",
-    () => {
-      type PermissionHandler = (
-        params: EffectAcpSchema.RequestPermissionRequest,
-      ) => Effect.Effect<EffectAcpSchema.RequestPermissionResponse, EffectAcpErrors.AcpError>;
-      let permissionHandler: PermissionHandler | undefined;
-      let resolvePrompt!: (result: EffectAcpSchema.PromptResponse) => void;
-      const promptPromise = new Promise<EffectAcpSchema.PromptResponse>((resolve) => {
-        resolvePrompt = resolve;
+    return Effect.gen(function* () {
+      const adapter = yield* DevinAdapter;
+      yield* adapter.startSession({
+        threadId,
+        provider: "devin",
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
       });
-      let resolveDeltaReady!: () => void;
-      const deltaReady = new Promise<void>((resolve) => {
-        resolveDeltaReady = resolve;
-      });
-      const planDelta = {
-        _tag: "ContentDelta" as const,
-        text: "<proposed_plan>\n# Race plan\n\n- one step\n</proposed_plan>",
-        streamKind: "assistant_text" as const,
-        itemId: "assistant-plan-3",
-        rawPayload: {},
-      } satisfies AcpParsedSessionEvent;
+      assert.isDefined(permissionHandler);
 
-      return Effect.gen(function* () {
-        const adapter = yield* DevinAdapter;
-        yield* adapter.startSession({
-          threadId,
-          provider: "devin",
-          cwd: "/tmp/project",
-          runtimeMode: "full-access",
-        });
-        assert.isDefined(permissionHandler);
-
-        const completedFiber = yield* Stream.runHead(
-          Stream.filter(
-            adapter.streamEvents,
-            (event): event is Extract<typeof event, { type: "turn.completed" }> =>
-              event.type === "turn.completed",
-          ),
-        ).pipe(Effect.forkChild);
-        const proposedFiber = yield* Stream.runHead(
-          Stream.filter(
-            adapter.streamEvents,
-            (event): event is Extract<typeof event, { type: "turn.proposed.completed" }> =>
-              event.type === "turn.proposed.completed",
-          ),
-        ).pipe(Effect.forkChild);
-
-        yield* adapter.sendTurn({
-          threadId,
-          input: "make a plan",
-          interactionMode: "plan",
-        });
-        resolveDeltaReady();
-        Option.getOrThrow(yield* Fiber.join(proposedFiber));
-
-        // Permission arrives with only toolCallId BEFORE/without tool meta enrichment.
-        // hasCompletedPlan fallback must still settle the turn.
-        const result = yield* permissionHandler!({
-          sessionId: "swamp-spur",
-          options: [
-            { kind: "allow_once", optionId: "allow-once" },
-            { kind: "allow_always", optionId: "always-allow" },
-            { kind: "reject_once", optionId: "deny-now" },
-          ],
-          toolCall: { toolCallId: "only-id" },
-        } as unknown as EffectAcpSchema.RequestPermissionRequest);
-
-        assert.deepStrictEqual(result.outcome, { outcome: "cancelled" });
-        const completed = Option.getOrThrow(yield* Fiber.join(completedFiber));
-        assert.strictEqual(completed.type, "turn.completed");
-
-        resolvePrompt({ stopReason: "end_turn" } as EffectAcpSchema.PromptResponse);
-        yield* adapter.stopSession(threadId);
-      }).pipe(
-        Effect.provide(
-          makeDevinAdapterLive({
-            makeRuntime: () =>
-              Effect.succeed(
-                makeMockRuntime({
-                  modeState: {
-                    currentModeId: "plan",
-                    availableModes: [
-                      { id: "ask", name: "Ask" },
-                      { id: "plan", name: "Plan" },
-                      { id: "bypass", name: "Bypass Permissions" },
-                    ],
-                  },
-                  onHandleRequestPermission: (handler) => {
-                    permissionHandler = handler;
-                  },
-                  events: Stream.fromEffect(
-                    Effect.promise(() => deltaReady).pipe(Effect.as(planDelta)),
-                  ),
-                  prompt: () => Effect.promise(() => promptPromise),
-                }),
-              ),
-          }),
+      const proposedFiber = yield* Stream.runHead(
+        Stream.filter(
+          adapter.streamEvents,
+          (event): event is Extract<typeof event, { type: "turn.proposed.completed" }> =>
+            event.type === "turn.proposed.completed",
         ),
+      ).pipe(Effect.forkChild);
+      const completedFiber = yield* Stream.runHead(
+        Stream.filter(
+          adapter.streamEvents,
+          (event): event is Extract<typeof event, { type: "turn.completed" }> =>
+            event.type === "turn.completed",
+        ),
+      ).pipe(Effect.forkChild);
+
+      yield* adapter.sendTurn({
+        threadId,
+        input: "make a plan",
+        interactionMode: "plan",
+      });
+
+      resolveEventsReady();
+      const proposed = Option.getOrThrow(yield* Fiber.join(proposedFiber));
+      assert.include(
+        proposed.type === "turn.proposed.completed" ? proposed.payload.planMarkdown : "",
+        "Sparse exit plan",
       );
-    },
-  );
+      // Let ToolCallUpdated land in toolCallMetaById before the sparse permission.
+      yield* Effect.promise(
+        () =>
+          new Promise<void>((resolve) => {
+            setImmediate(resolve);
+          }),
+      );
+
+      // Real Devin often sends request_permission with ONLY toolCallId.
+      // Title/kind/rawInput were already seen on tool_call updates.
+      const result = yield* permissionHandler!({
+        sessionId: "swamp-spur",
+        options: [
+          { kind: "allow_once", optionId: "allow-once" },
+          { kind: "allow_always", optionId: "always-allow" },
+          { kind: "reject_once", optionId: "deny-now" },
+        ],
+        toolCall: {
+          toolCallId: "18d3792f7",
+        },
+      } as unknown as EffectAcpSchema.RequestPermissionRequest);
+
+      assert.deepStrictEqual(result.outcome, { outcome: "cancelled" });
+
+      const completed = Option.getOrThrow(yield* Fiber.join(completedFiber));
+      assert.strictEqual(completed.type, "turn.completed");
+      if (completed.type === "turn.completed") {
+        assert.strictEqual(completed.payload.state, "completed");
+      }
+
+      resolvePrompt({ stopReason: "end_turn" } as EffectAcpSchema.PromptResponse);
+      yield* adapter.stopSession(threadId);
+    }).pipe(
+      Effect.provide(
+        makeDevinAdapterLive({
+          makeRuntime: () =>
+            Effect.succeed(
+              makeMockRuntime({
+                modeState: {
+                  currentModeId: "plan",
+                  availableModes: [
+                    { id: "ask", name: "Ask" },
+                    { id: "plan", name: "Plan" },
+                    { id: "bypass", name: "Bypass Permissions" },
+                  ],
+                },
+                onHandleRequestPermission: (handler) => {
+                  permissionHandler = handler;
+                },
+                events: Stream.unwrap(
+                  Effect.promise(() => eventsReady).pipe(
+                    Effect.map(() => Stream.make(planDelta, toolUpdate)),
+                  ),
+                ),
+                prompt: () => Effect.promise(() => promptPromise),
+              }),
+            ),
+        }),
+      ),
+    );
+  });
+
+  it.effect("treats sparse permission as Exit plan when tagged plan is already complete", () => {
+    type PermissionHandler = (
+      params: EffectAcpSchema.RequestPermissionRequest,
+    ) => Effect.Effect<EffectAcpSchema.RequestPermissionResponse, EffectAcpErrors.AcpError>;
+    let permissionHandler: PermissionHandler | undefined;
+    let resolvePrompt!: (result: EffectAcpSchema.PromptResponse) => void;
+    const promptPromise = new Promise<EffectAcpSchema.PromptResponse>((resolve) => {
+      resolvePrompt = resolve;
+    });
+    let resolveDeltaReady!: () => void;
+    const deltaReady = new Promise<void>((resolve) => {
+      resolveDeltaReady = resolve;
+    });
+    const planDelta = {
+      _tag: "ContentDelta" as const,
+      text: "<proposed_plan>\n# Race plan\n\n- one step\n</proposed_plan>",
+      streamKind: "assistant_text" as const,
+      itemId: "assistant-plan-3",
+      rawPayload: {},
+    } satisfies AcpParsedSessionEvent;
+
+    return Effect.gen(function* () {
+      const adapter = yield* DevinAdapter;
+      yield* adapter.startSession({
+        threadId,
+        provider: "devin",
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+      assert.isDefined(permissionHandler);
+
+      const completedFiber = yield* Stream.runHead(
+        Stream.filter(
+          adapter.streamEvents,
+          (event): event is Extract<typeof event, { type: "turn.completed" }> =>
+            event.type === "turn.completed",
+        ),
+      ).pipe(Effect.forkChild);
+      const proposedFiber = yield* Stream.runHead(
+        Stream.filter(
+          adapter.streamEvents,
+          (event): event is Extract<typeof event, { type: "turn.proposed.completed" }> =>
+            event.type === "turn.proposed.completed",
+        ),
+      ).pipe(Effect.forkChild);
+
+      yield* adapter.sendTurn({
+        threadId,
+        input: "make a plan",
+        interactionMode: "plan",
+      });
+      resolveDeltaReady();
+      Option.getOrThrow(yield* Fiber.join(proposedFiber));
+
+      // Permission arrives with only toolCallId BEFORE/without tool meta enrichment.
+      // hasCompletedPlan fallback must still settle the turn.
+      const result = yield* permissionHandler!({
+        sessionId: "swamp-spur",
+        options: [
+          { kind: "allow_once", optionId: "allow-once" },
+          { kind: "allow_always", optionId: "always-allow" },
+          { kind: "reject_once", optionId: "deny-now" },
+        ],
+        toolCall: { toolCallId: "only-id" },
+      } as unknown as EffectAcpSchema.RequestPermissionRequest);
+
+      assert.deepStrictEqual(result.outcome, { outcome: "cancelled" });
+      const completed = Option.getOrThrow(yield* Fiber.join(completedFiber));
+      assert.strictEqual(completed.type, "turn.completed");
+
+      resolvePrompt({ stopReason: "end_turn" } as EffectAcpSchema.PromptResponse);
+      yield* adapter.stopSession(threadId);
+    }).pipe(
+      Effect.provide(
+        makeDevinAdapterLive({
+          makeRuntime: () =>
+            Effect.succeed(
+              makeMockRuntime({
+                modeState: {
+                  currentModeId: "plan",
+                  availableModes: [
+                    { id: "ask", name: "Ask" },
+                    { id: "plan", name: "Plan" },
+                    { id: "bypass", name: "Bypass Permissions" },
+                  ],
+                },
+                onHandleRequestPermission: (handler) => {
+                  permissionHandler = handler;
+                },
+                events: Stream.fromEffect(
+                  Effect.promise(() => deltaReady).pipe(Effect.as(planDelta)),
+                ),
+                prompt: () => Effect.promise(() => promptPromise),
+              }),
+            ),
+        }),
+      ),
+    );
+  });
 
   it.effect("emits turn.proposed.completed from tagged plan assistant text", () => {
     let resolvePrompt!: (result: EffectAcpSchema.PromptResponse) => void;

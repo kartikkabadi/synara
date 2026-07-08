@@ -65,13 +65,16 @@ describe("isAcpAuthRequiredError", () => {
     expect(isAcpAuthRequiredError(error)).toBe(true);
   });
 
-  vitestIt("returns false when errorMessage contains 'authoring' (not 'auth' as a word boundary)", () => {
-    const error = new EffectAcpErrors.AcpRequestError({
-      code: -1,
-      errorMessage: "authoring mode is not supported",
-    });
-    expect(isAcpAuthRequiredError(error)).toBe(false);
-  });
+  vitestIt(
+    "returns false when errorMessage contains 'authoring' (not 'auth' as a word boundary)",
+    () => {
+      const error = new EffectAcpErrors.AcpRequestError({
+        code: -1,
+        errorMessage: "authoring mode is not supported",
+      });
+      expect(isAcpAuthRequiredError(error)).toBe(false);
+    },
+  );
 
   vitestIt("returns true for code -32000 regardless of errorMessage content", () => {
     const error = new EffectAcpErrors.AcpRequestError({
@@ -97,10 +100,13 @@ describe("causeIndicatesAuthRequired", () => {
     expect(causeIndicatesAuthRequired(cause)).toBe(true);
   });
 
-  vitestIt("returns false when Cause.pretty would contain 'auth' in a path but there is no auth failure", () => {
-    const cause = Cause.die(new Error("Module not found: /src/auth/utils.ts"));
-    expect(causeIndicatesAuthRequired(cause)).toBe(false);
-  });
+  vitestIt(
+    "returns false when Cause.pretty would contain 'auth' in a path but there is no auth failure",
+    () => {
+      const cause = Cause.die(new Error("Module not found: /src/auth/utils.ts"));
+      expect(causeIndicatesAuthRequired(cause)).toBe(false);
+    },
+  );
 
   vitestIt("returns false for a Die cause with 'the author field is missing'", () => {
     const cause = Cause.die(new Error("the author field is missing"));
@@ -154,14 +160,17 @@ describe("causeIndicatesAuthRequired", () => {
 describe("assistantItemId", () => {
   // Format contract only — distinct runtimeInstanceId wiring is covered by
   // AcpJsonRpcConnection.test.ts ("assigns distinct fallback assistant item ids...").
-  vitestIt("produces distinct ids across runtime instances with the same session id and segment index", () => {
-    const sessionId = "session-1";
-    const a = assistantItemId(sessionId, "aaaa1111", 0);
-    const b = assistantItemId(sessionId, "bbbb2222", 0);
-    expect(a).not.toBe(b);
-    expect(a).toBe("assistant:session-1:aaaa1111:segment:0");
-    expect(b).toBe("assistant:session-1:bbbb2222:segment:0");
-  });
+  vitestIt(
+    "produces distinct ids across runtime instances with the same session id and segment index",
+    () => {
+      const sessionId = "session-1";
+      const a = assistantItemId(sessionId, "aaaa1111", 0);
+      const b = assistantItemId(sessionId, "bbbb2222", 0);
+      expect(a).not.toBe(b);
+      expect(a).toBe("assistant:session-1:aaaa1111:segment:0");
+      expect(b).toBe("assistant:session-1:bbbb2222:segment:0");
+    },
+  );
 });
 
 describe("decodeSetSessionConfigOptionResponse", () => {

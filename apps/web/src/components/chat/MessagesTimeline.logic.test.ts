@@ -1116,7 +1116,7 @@ describe("deriveMessagesTimelineRows", () => {
     ]);
   });
 
-  it("collapses turn work across an intervening proposed plan card", () => {
+  it("keeps exploration work above a plan card instead of folding it under post-plan final text", () => {
     const rows = deriveMessagesTimelineRows({
       ...baseInput,
       timelineEntries: [
@@ -1137,7 +1137,11 @@ describe("deriveMessagesTimelineRows", () => {
     });
 
     expect(rows.some((row) => row.kind === "proposed-plan")).toBe(true);
-    expect(collapsedSignature(messageRow(rows, "a2")!)).toEqual(["narration:a1", "work:w1"]);
+    // Plan is a mid-turn boundary: pre-plan narration/work stay visible above it
+    // and are not collapsed into the post-plan final assistant row.
+    expect(messageRow(rows, "a1")).toBeDefined();
+    expect(rows.some((row) => row.kind === "work")).toBe(true);
+    expect(collapsedSignature(messageRow(rows, "a2")!)).toEqual([]);
   });
 
   const worktreeSetupSnapshot = (): WorktreeSetupSnapshot => ({

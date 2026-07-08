@@ -130,8 +130,6 @@ export function stripProposedPlanBlocksFromText(text: string): string {
   return next.trim();
 }
 
-
-
 export function downloadPlanAsTextFile(filename: string, contents: string): void {
   const blob = new Blob([contents], { type: "text/markdown;charset=utf-8" });
   const url = URL.createObjectURL(blob);
