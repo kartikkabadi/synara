@@ -14,6 +14,7 @@ type ModelProviderKind =
   | "droid"
   | "kilo"
   | "opencode"
+  | "devin"
   | "pi";
 
 const NON_DROID_MODEL_SLUGS = new Set(
@@ -54,6 +55,9 @@ function inferProviderFromLabel(label: string): ModelProviderKind | undefined {
   if (lowerLabel.includes("opencode")) {
     return "opencode";
   }
+  if (lowerLabel.includes("devin")) {
+    return "devin";
+  }
   if (lowerLabel.includes("kilo")) {
     return "kilo";
   }
@@ -86,7 +90,8 @@ function inferLegacyModelProvider(provider: unknown, model: string): ModelProvid
     provider === "codex" ||
     provider === "claudeAgent" ||
     provider === "cursor" ||
-    provider === "antigravity" ||
+    provider === "devin" ||
+    provider === "gemini" ||
     provider === "grok" ||
     provider === "droid" ||
     provider === "kilo" ||

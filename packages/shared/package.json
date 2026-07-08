@@ -188,13 +188,13 @@
       "types": "./src/formatBytes.ts",
       "import": "./src/formatBytes.ts"
     },
-    "./cli": {
-      "types": "./src/cli.ts",
-      "import": "./src/cli.ts"
+    "./devinModelDisplay": {
+      "types": "./src/devinModelDisplay.ts",
+      "import": "./src/devinModelDisplay.ts"
     },
-    "./migrationRecovery": {
-      "types": "./src/migrationRecovery.ts",
-      "import": "./src/migrationRecovery.ts"
+    "./devinModelVariants": {
+      "types": "./src/devinModelVariants.ts",
+      "import": "./src/devinModelVariants.ts"
     }
   },
   "scripts": {

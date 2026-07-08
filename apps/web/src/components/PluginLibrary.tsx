@@ -86,6 +86,17 @@ const PROVIDER_ICON: Record<ProviderKind, React.FC<React.SVGProps<SVGSVGElement>
   ...PROVIDER_ICON_COMPONENT_BY_PROVIDER,
   codex: HammerIcon,
 };
+const PROVIDER_DISCOVERY_ORDER: ReadonlyArray<ProviderKind> = [
+  "codex",
+  "claudeAgent",
+  "cursor",
+  "devin",
+  "gemini",
+  "grok",
+  "kilo",
+  "opencode",
+  "pi",
+];
 const KNOWN_PLUGIN_BRANDS: Record<string, PluginBrandArtwork> = {
   canva: { icon: SiCanva, color: "#00C4CC" },
   figma: { icon: SiFigma, color: "#F24E1E" },
@@ -387,9 +398,8 @@ export function PluginLibrary() {
   const codexCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("codex"));
   const claudeCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("claudeAgent"));
   const cursorCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("cursor"));
-  const antigravityCapabilitiesQuery = useQuery(
-    providerComposerCapabilitiesQueryOptions("antigravity"),
-  );
+  const devinCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("devin"));
+  const geminiCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("gemini"));
   const grokCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("grok"));
   const droidCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("droid"));
   const kiloCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("kilo"));
@@ -410,9 +420,13 @@ export function PluginLibrary() {
         plugins: supportsPluginDiscovery(cursorCapabilitiesQuery.data),
         skills: supportsSkillDiscovery(cursorCapabilitiesQuery.data),
       },
-      antigravity: {
-        plugins: supportsPluginDiscovery(antigravityCapabilitiesQuery.data),
-        skills: supportsSkillDiscovery(antigravityCapabilitiesQuery.data),
+      devin: {
+        plugins: supportsPluginDiscovery(devinCapabilitiesQuery.data),
+        skills: supportsSkillDiscovery(devinCapabilitiesQuery.data),
+      },
+      gemini: {
+        plugins: supportsPluginDiscovery(geminiCapabilitiesQuery.data),
+        skills: supportsSkillDiscovery(geminiCapabilitiesQuery.data),
       },
       grok: {
         plugins: supportsPluginDiscovery(grokCapabilitiesQuery.data),
@@ -439,7 +453,8 @@ export function PluginLibrary() {
       claudeCapabilitiesQuery.data,
       codexCapabilitiesQuery.data,
       cursorCapabilitiesQuery.data,
-      antigravityCapabilitiesQuery.data,
+      devinCapabilitiesQuery.data,
+      geminiCapabilitiesQuery.data,
       grokCapabilitiesQuery.data,
       droidCapabilitiesQuery.data,
       kiloCapabilitiesQuery.data,

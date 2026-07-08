@@ -54,6 +54,11 @@ import {
   ProviderAdapterValidationError,
 } from "../Errors.ts";
 import {
+  settlePendingApprovalsAsCancelled,
+  settlePendingUserInputsAsEmptyAnswers,
+  makeAcpThreadLock,
+} from "../acp/AcpAdapterSessionSupport.ts";
+import {
   classifyAcpPromptTurnCompletion,
   mapAcpToAdapterError,
   readAcpFailedToolDetail,
@@ -87,6 +92,7 @@ import {
 import { makeAcpDebugLoggers, makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
 import {
   forkAcpTurnIdleWatchdog,
+  isAcpTurnProgressEventTag,
   resolveAcpTurnIdleTimeoutMs,
 } from "../acp/AcpTurnIdleWatchdog.ts";
 import {
@@ -689,21 +695,16 @@ export function makeGrokAdapter(
       options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
 
     const sessions = new Map<ThreadId, GrokSessionContext>();
-    const withThreadLock = yield* makeAcpThreadLock();
+    const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
+    const { withThreadLock } = makeAcpThreadLock(threadLocksRef);
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
     const nextEventId = Effect.map(Random.nextUUIDv4, (id) => EventId.makeUnsafe(id));
     const makeEventStamp = () => Effect.all({ eventId: nextEventId, createdAt: nowIso });
 
-    const offerRuntimeEvent = (
-      lifecycleGeneration: string | undefined,
-      event: ProviderRuntimeEvent,
-    ) =>
-      PubSub.publish(
-        runtimeEventPubSub,
-        stampAcpRuntimeEventLifecycleGeneration(event, lifecycleGeneration),
-      ).pipe(Effect.asVoid);
+    const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
+      PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid);
 
     const logNative = (threadId: ThreadId, method: string, payload: unknown) =>
       Effect.gen(function* () {
@@ -1227,9 +1228,11 @@ export function makeGrokAdapter(
           const notificationFiber = yield* Stream.runDrain(
             Stream.mapEffect(acp.getEvents(), (event) =>
               Effect.gen(function* () {
-                // Any inbound ACP event proves the child is alive and making
-                // progress; reset the idle-progress watchdog clock.
-                ctx.lastTurnActivityAt = Date.now();
+                // Only real turn work resets the idle watchdog — mode/usage
+                // heartbeats must not keep a hung session/prompt "Working".
+                if (isAcpTurnProgressEventTag(event._tag)) {
+                  ctx.lastTurnActivityAt = Date.now();
+                }
                 switch (event._tag) {
                   case "ModeChanged":
                     return;

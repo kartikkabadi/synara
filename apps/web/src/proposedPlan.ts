@@ -110,10 +110,27 @@ export function normalizePlanMarkdownForExport(planMarkdown: string): string {
 }
 
 const PROPOSED_PLAN_BLOCK_GLOBAL_REGEX = /<proposed_plan>\s*[\s\S]*?\s*<\/proposed_plan>/gi;
+// Incomplete open tag still streaming (no matching close yet) — hide from chat.
+const PROPOSED_PLAN_INCOMPLETE_OPEN_REGEX = /<proposed_plan\b[^>]*>[\s\S]*$/i;
+const PROPOSED_PLAN_ORPHAN_CLOSE_REGEX = /<\/proposed_plan>/gi;
+const PROPOSED_PLAN_ORPHAN_OPEN_TAG_REGEX = /<proposed_plan\b[^>]*>/gi;
 
+/**
+ * Remove Synara plan-tag markup from assistant chat text so the plan card is the
+ * only plan surface. Handles:
+ * - complete `<proposed_plan>…</proposed_plan>` blocks
+ * - in-progress open tags while the model is still streaming the plan
+ * - stray open/close tag fragments
+ */
 export function stripProposedPlanBlocksFromText(text: string): string {
-  return text.replace(PROPOSED_PLAN_BLOCK_GLOBAL_REGEX, "").trim();
+  let next = text.replace(PROPOSED_PLAN_BLOCK_GLOBAL_REGEX, "");
+  next = next.replace(PROPOSED_PLAN_INCOMPLETE_OPEN_REGEX, "");
+  next = next.replace(PROPOSED_PLAN_ORPHAN_CLOSE_REGEX, "");
+  next = next.replace(PROPOSED_PLAN_ORPHAN_OPEN_TAG_REGEX, "");
+  return next.trim();
 }
+
+
 
 export function downloadPlanAsTextFile(filename: string, contents: string): void {
   const blob = new Blob([contents], { type: "text/markdown;charset=utf-8" });

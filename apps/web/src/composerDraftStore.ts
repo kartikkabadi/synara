@@ -7,6 +7,9 @@ import {
   type ClaudeCodeEffort,
   type CodexReasoningEffort,
   type CursorModelOptions,
+  type DevinModelOptions,
+  type GeminiThinkingBudget,
+  type GeminiThinkingLevel,
   GROK_REASONING_EFFORT_OPTIONS,
   type DroidReasoningEffort,
   type GrokReasoningEffort,
@@ -91,7 +94,8 @@ const COMPOSER_PROVIDER_KINDS = [
   "codex",
   "claudeAgent",
   "cursor",
-  "antigravity",
+  "devin",
+  "gemini",
   "grok",
   "droid",
   "kilo",
@@ -1369,6 +1373,14 @@ function makeModelSelection(
           ? { options: options as Extract<ModelSelection, { provider: "opencode" }>["options"] }
           : {}),
       };
+    case "devin":
+      return {
+        provider,
+        model,
+        ...(options
+          ? { options: options as Extract<ModelSelection, { provider: "devin" }>["options"] }
+          : {}),
+      };
     case "pi":
       return {
         provider,
@@ -1421,6 +1433,10 @@ function normalizeProviderModelOptions(
   const piCandidate =
     candidate?.pi && typeof candidate.pi === "object"
       ? (candidate.pi as Record<string, unknown>)
+      : null;
+  const devinCandidate =
+    candidate?.devin && typeof candidate.devin === "object"
+      ? (candidate.devin as Record<string, unknown>)
       : null;
 
   const codexReasoningEffort: CodexReasoningEffort | undefined =
@@ -1557,17 +1573,35 @@ function normalizeProviderModelOptions(
       ? piCandidate.thinkingLevel
       : undefined;
   const pi = piThinkingLevel !== undefined ? { thinkingLevel: piThinkingLevel } : undefined;
-  if (
-    !codex &&
-    !claude &&
-    !cursor &&
-    !antigravity &&
-    !grok &&
-    !droid &&
-    !kilo &&
-    !opencode &&
-    !pi
-  ) {
+  const devinReasoningEffort = trimStringOrUndefined(devinCandidate?.reasoningEffort);
+  const devinFastMode =
+    devinCandidate?.fastMode === true
+      ? true
+      : devinCandidate?.fastMode === false
+        ? false
+        : undefined;
+  const devinThinking =
+    devinCandidate?.thinking === true
+      ? true
+      : devinCandidate?.thinking === false
+        ? false
+        : undefined;
+  const devinContextWindow = trimStringOrUndefined(devinCandidate?.contextWindow);
+  const devin: DevinModelOptions | undefined =
+    devinReasoningEffort !== undefined ||
+    devinFastMode !== undefined ||
+    devinThinking !== undefined ||
+    devinContextWindow !== undefined
+      ? {
+          ...(devinReasoningEffort !== undefined ? { reasoningEffort: devinReasoningEffort } : {}),
+          ...(devinFastMode !== undefined ? { fastMode: devinFastMode } : {}),
+          ...(devinThinking !== undefined ? { thinking: devinThinking } : {}),
+          ...(devinContextWindow !== undefined ? { contextWindow: devinContextWindow } : {}),
+        }
+      : devinCandidate && Object.keys(devinCandidate).length === 0
+        ? {}
+        : undefined;
+  if (!codex && !claude && !cursor && !gemini && !grok && !kilo && !opencode && !pi && !devin) {
     return null;
   }
   return {
@@ -1580,6 +1614,7 @@ function normalizeProviderModelOptions(
     ...(kilo ? { kilo } : {}),
     ...(opencode ? { opencode } : {}),
     ...(pi ? { pi } : {}),
+    ...(devin ? { devin } : {}),
   };
 }
 
@@ -1643,104 +1678,18 @@ function normalizeModelSelection(
           ? modelOptions?.antigravity
           : provider === "grok"
             ? modelOptions?.grok
-            : provider === "droid"
-              ? modelOptions?.droid
-              : provider === "kilo"
-                ? modelOptions?.kilo
-                : provider === "cursor"
-                  ? modelOptions?.cursor
-                  : provider === "opencode"
-                    ? modelOptions?.opencode
+            : provider === "kilo"
+              ? modelOptions?.kilo
+              : provider === "cursor"
+                ? modelOptions?.cursor
+                : provider === "opencode"
+                  ? modelOptions?.opencode
+                  : provider === "devin"
+                    ? modelOptions?.devin
                     : provider === "pi"
                       ? modelOptions?.pi
                       : undefined;
-  const normalizedOptions =
-    provider === "antigravity" && hasLegacyAntigravityEffort
-      ? {
-          reasoningEffort: modelOptions?.antigravity?.reasoningEffort ?? antigravityLegacyEffort,
-        }
-      : options;
-  return makeModelSelection(provider, model, normalizedOptions);
-}
-
-function reconcileProviderScopedModelSelection(
-  requested: ModelSelection,
-  current: ModelSelection | null | undefined,
-): ModelSelection {
-  if (requested.options !== undefined || current?.provider !== requested.provider) {
-    return requested;
-  }
-  if (current.model === requested.model) {
-    return makeModelSelection(requested.provider, requested.model, current.options);
-  }
-  if (
-    current.provider !== "codex" &&
-    current.provider !== "cursor" &&
-    current.provider !== "claudeAgent"
-  ) {
-    return requested;
-  }
-  let preservedOptions = current.options;
-  const effort =
-    current.provider === "claudeAgent"
-      ? current.options?.effort
-      : current.provider === "codex" || current.provider === "cursor"
-        ? current.options?.reasoningEffort
-        : undefined;
-  if (
-    effort !== undefined &&
-    classifyProviderReasoningEffortSupport({
-      provider: requested.provider,
-      model: requested.model,
-      effort,
-    }) !== "supported"
-  ) {
-    if (current.provider === "claudeAgent") {
-      const { effort: _effort, ...remainingOptions } = current.options ?? {};
-      preservedOptions = Object.keys(remainingOptions).length > 0 ? remainingOptions : undefined;
-    } else if (current.provider === "codex" || current.provider === "cursor") {
-      const { reasoningEffort: _reasoningEffort, ...remainingOptions } = current.options ?? {};
-      preservedOptions = Object.keys(remainingOptions).length > 0 ? remainingOptions : undefined;
-    }
-  }
-  return makeModelSelection(requested.provider, requested.model, preservedOptions);
-}
-
-// ── Sticky selection sanitization ─────────────────────────────────────
-
-// The Claude context window must stay a per-thread choice: a 1M thread can grow far
-// beyond the normal 200k compaction point and consume usage limits much faster, so a
-// one-off pick must never silently become every future thread's sticky default.
-function stripNonStickyModelOptions(selection: ModelSelection): ModelSelection {
-  if (
-    selection.provider !== "claudeAgent" ||
-    (!selection.options?.contextWindow && !selection.options?.autoCompactWindow)
-  ) {
-    return selection;
-  }
-  const {
-    contextWindow: _contextWindow,
-    autoCompactWindow: _autoCompactWindow,
-    ...rest
-  } = selection.options;
-  return makeModelSelection(
-    selection.provider,
-    selection.model,
-    Object.keys(rest).length > 0 ? rest : undefined,
-  );
-}
-
-function sanitizeStickyModelSelectionMap(
-  map: Partial<Record<ProviderKind, ModelSelection>>,
-): Partial<Record<ProviderKind, ModelSelection>> {
-  const claude = map.claudeAgent;
-  if (
-    claude?.provider !== "claudeAgent" ||
-    (!claude.options?.contextWindow && !claude.options?.autoCompactWindow)
-  ) {
-    return map;
-  }
-  return { ...map, claudeAgent: stripNonStickyModelOptions(claude) };
+  return makeModelSelection(provider, model, options);
 }
 
 // ── Legacy sync helpers (used only during migration from v2 storage) ──
@@ -1922,10 +1871,15 @@ export function resolvePreferredComposerModelSelection(input: {
       : null) ??
     (input.projectModelSelection?.provider === preferredProvider
       ? input.projectModelSelection
-      : null) ?? {
-      provider: preferredProvider === "pi" ? "codex" : preferredProvider,
-      model: getDefaultModel(preferredProvider === "pi" ? "codex" : preferredProvider),
-    }
+      : null) ??
+    (() => {
+      const fallbackProvider = preferredProvider === "pi" ? "codex" : preferredProvider;
+      const fallbackModel = getDefaultModel(fallbackProvider);
+      return {
+        provider: fallbackModel === null ? "codex" : fallbackProvider,
+        model: fallbackModel ?? getDefaultModel("codex"),
+      };
+    })()
   );
 }
 

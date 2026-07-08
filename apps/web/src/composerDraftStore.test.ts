@@ -2261,22 +2261,46 @@ describe("composerDraftStore modelSelection", () => {
     expect(state.stickyActiveProvider).toBe("grok");
   });
 
-  it("stores Antigravity base models and effort options separately", () => {
+  it("stores Devin trait options instead of dropping them during normalization", () => {
     const store = useComposerDraftStore.getState();
-    const selection = modelSelection("antigravity", "Gemini 3.5 Flash", {
-      reasoningEffort: "high",
-    });
 
-    store.setModelSelection(threadId, selection);
-    store.setStickyModelSelection(selection);
+    store.setModelSelection(
+      threadId,
+      modelSelection("devin", "claude-opus-4-8", {
+        reasoningEffort: "medium",
+        fastMode: true,
+        thinking: true,
+        contextWindow: "200k",
+      }),
+    );
+    store.setStickyModelSelection(
+      modelSelection("devin", "claude-opus-4-8", {
+        reasoningEffort: "medium",
+        fastMode: true,
+        thinking: true,
+        contextWindow: "200k",
+      }),
+    );
 
     const state = useComposerDraftStore.getState();
-    expect(state.draftsByThreadId[threadId]?.modelSelectionByProvider.antigravity).toEqual(
-      selection,
+    expect(state.draftsByThreadId[threadId]?.modelSelectionByProvider.devin).toEqual(
+      modelSelection("devin", "claude-opus-4-8", {
+        reasoningEffort: "medium",
+        fastMode: true,
+        thinking: true,
+        contextWindow: "200k",
+      }),
     );
-    expect(state.draftsByThreadId[threadId]?.activeProvider).toBe("antigravity");
-    expect(state.stickyModelSelectionByProvider.antigravity).toEqual(selection);
-    expect(state.stickyActiveProvider).toBe("antigravity");
+    expect(state.draftsByThreadId[threadId]?.activeProvider).toBe("devin");
+    expect(state.stickyModelSelectionByProvider.devin).toEqual(
+      modelSelection("devin", "claude-opus-4-8", {
+        reasoningEffort: "medium",
+        fastMode: true,
+        thinking: true,
+        contextWindow: "200k",
+      }),
+    );
+    expect(state.stickyActiveProvider).toBe("devin");
   });
 
   it("replaces only the targeted provider options on the current model selection", () => {
@@ -2475,6 +2499,7 @@ describe("composerDraftStore modelSelection", () => {
         droid: [],
         kilo: [],
         opencode: [],
+        devin: [],
         pi: [],
       },
       availableModelOptionsByProvider: {
@@ -2503,6 +2528,7 @@ describe("composerDraftStore modelSelection", () => {
         droid: [],
         kilo: [],
         opencode: [],
+        devin: [],
         pi: [],
       },
       availableModelOptionsByProvider: {
@@ -2536,6 +2562,7 @@ describe("composerDraftStore modelSelection", () => {
         droid: [],
         kilo: [],
         opencode: [],
+        devin: [],
         pi: [],
       },
       availableModelOptionsByProvider: {
@@ -2569,6 +2596,7 @@ describe("composerDraftStore modelSelection", () => {
         droid: [],
         kilo: [],
         opencode: [],
+        devin: [],
         pi: [],
       },
       availableModelOptionsByProvider: {

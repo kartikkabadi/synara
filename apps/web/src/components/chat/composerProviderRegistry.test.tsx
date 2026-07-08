@@ -5,7 +5,7 @@ import {
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./composerProviderRegistry";
-import { getComposerTraitSelection } from "./composerTraits";
+import { getComposerTraitSelection, hasVisibleComposerTraitControls } from "./composerTraits";
 
 const OPENCODE_RUNTIME_MODEL_WITH_REASONING: ProviderModelDescriptor = {
   slug: "openai/gpt-5.4",
@@ -730,6 +730,32 @@ describe("getComposerProviderState", () => {
         reasoningEffort: "xhigh",
       },
     });
+  });
+
+  it("does not expose Devin context controls when runtime discovery omits contextWindowOptions", () => {
+    const runtimeModel: ProviderModelDescriptor = {
+      slug: "claude-opus-4-8",
+      name: "Claude Opus 4.8",
+      supportedReasoningEfforts: [{ value: "low" }, { value: "medium" }, { value: "high" }],
+      defaultReasoningEffort: "medium",
+      supportsFastMode: true,
+    };
+    const selection = getComposerTraitSelection(
+      "devin",
+      "claude-opus-4-8",
+      "",
+      undefined,
+      runtimeModel,
+    );
+
+    expect(selection.contextWindowOptions).toEqual([]);
+    expect(hasVisibleComposerTraitControls(selection)).toBe(true);
+  });
+
+  it("does not expose Devin context controls from static fallbacks for Claude families", () => {
+    const selection = getComposerTraitSelection("devin", "claude-sonnet-5", "", undefined);
+
+    expect(selection.contextWindowOptions).toEqual([]);
   });
 
   it("keeps Pi runtime thinking selections on the thinkingLevel field", () => {

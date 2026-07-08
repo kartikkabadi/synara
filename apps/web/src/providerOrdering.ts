@@ -6,9 +6,17 @@
 import type { ProviderKind } from "@synara/contracts";
 import { PROVIDER_DESCRIPTORS } from "@synara/shared/providerMetadata";
 
-export const DEFAULT_PROVIDER_ORDER: readonly ProviderKind[] = PROVIDER_DESCRIPTORS.map(
-  (descriptor) => descriptor.kind,
-);
+export const DEFAULT_PROVIDER_ORDER: readonly ProviderKind[] = [
+  "codex",
+  "claudeAgent",
+  "cursor",
+  "devin",
+  "gemini",
+  "grok",
+  "kilo",
+  "opencode",
+  "pi",
+];
 
 const PROVIDER_KIND_SET: ReadonlySet<ProviderKind> = new Set(DEFAULT_PROVIDER_ORDER);
 

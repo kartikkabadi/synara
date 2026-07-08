@@ -9,6 +9,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationProjectShell,
   type OrchestrationThread,
+  type ProviderKind,
   type ProviderRuntimeEvent,
 } from "@synara/contracts";
 import { Cause, Effect, Layer, Option, Stream } from "effect";
@@ -229,7 +230,13 @@ const make = Effect.gen(function* () {
 
   const resolveSessionRuntimeForThread = Effect.fnUntraced(function* (
     threadId: ThreadId,
-  ): Effect.fn.Return<Option.Option<{ readonly threadId: ThreadId; readonly cwd: string }>> {
+  ): Effect.fn.Return<
+    Option.Option<{
+      readonly threadId: ThreadId;
+      readonly cwd: string;
+      readonly provider: ProviderKind;
+    }>
+  > {
     const thread = yield* projectionSnapshotQuery
       .getThreadShellById(threadId)
       .pipe(Effect.catch(() => Effect.succeed(Option.none())));
@@ -241,11 +248,19 @@ const make = Effect.gen(function* () {
 
     const findSessionWithCwd = (
       session: (typeof sessions)[number] | undefined,
-    ): Option.Option<{ readonly threadId: ThreadId; readonly cwd: string }> => {
+    ): Option.Option<{
+      readonly threadId: ThreadId;
+      readonly cwd: string;
+      readonly provider: ProviderKind;
+    }> => {
       if (!session?.cwd) {
         return Option.none();
       }
-      return Option.some({ threadId: session.threadId, cwd: session.cwd });
+      return Option.some({
+        threadId: session.threadId,
+        cwd: session.cwd,
+        provider: session.provider,
+      });
     };
 
     const projectedSession = sessions.find((session) => session.threadId === thread.value.id);
@@ -1069,16 +1084,49 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const earliestManagedBaselineRef = thread.checkpoints
-      .toSorted((left, right) => left.checkpointTurnCount - right.checkpointTurnCount)
-      .map((checkpoint) =>
-        checkpointRefForThreadTurnInManagedFamily(
-          checkpoint.checkpointRef,
-          event.payload.threadId,
-          0,
+    const currentTurnCount = thread.checkpoints.reduce(
+      (maxTurnCount, checkpoint) => Math.max(maxTurnCount, checkpoint.checkpointTurnCount),
+      0,
+    );
+
+    // Fail closed: if capabilities cannot be resolved, treat it as a hard revert
+    // failure rather than proceeding into a partial restore path that can diverge
+    // filesystem and provider session state.
+    const capabilities = yield* providerService
+      .getCapabilities(sessionRuntime.value.provider)
+      .pipe(
+        Effect.mapError(
+          (error) =>
+            new Error(
+              `Failed to resolve provider capabilities for ${sessionRuntime.value.provider}: ${error.message}`,
+            ),
         ),
-      )
-      .find((checkpointRef) => checkpointRef !== null);
+      );
+
+    // Only block rollback-disabled providers when an actual rewind is requested.
+    // No-op/current-turn restores (turnCount >= currentTurnCount) don't rewind
+    // the session, so they're safe even for providers without rollback support.
+    if (capabilities.supportsRollback === false && event.payload.turnCount < currentTurnCount) {
+      yield* appendRevertFailureActivity({
+        threadId: event.payload.threadId,
+        turnCount: event.payload.turnCount,
+        detail:
+          "Checkpoint revert cannot be performed for this provider. The Agent Client Protocol does not support session rollback, so the session cannot be rewound to match the filesystem restore. Restoring files without also rolling back the session would cause the files and session context to be out of sync. To revert changes, start a new session from the desired git checkpoint.",
+        createdAt: now,
+      }).pipe(Effect.catch(() => Effect.void));
+      return;
+    }
+
+    if (event.payload.turnCount > currentTurnCount) {
+      yield* appendRevertFailureActivity({
+        threadId: event.payload.threadId,
+        turnCount: event.payload.turnCount,
+        detail: `Checkpoint turn count ${event.payload.turnCount} exceeds current turn count ${currentTurnCount}.`,
+        createdAt: now,
+      }).pipe(Effect.catch(() => Effect.void));
+      return;
+    }
+
     const targetCheckpointRef =
       event.payload.turnCount === 0
         ? (earliestManagedBaselineRef ?? checkpointRefForThreadTurn(event.payload.threadId, 0))

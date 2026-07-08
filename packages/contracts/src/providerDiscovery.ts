@@ -16,6 +16,7 @@ const ProviderDiscoveryKind = Schema.Literals([
   "droid",
   "kilo",
   "opencode",
+  "devin",
   "pi",
 ]);
 
@@ -58,6 +59,7 @@ export const ProviderComposerCapabilities = Schema.Struct({
   supportsRuntimeModelList: Schema.Boolean,
   supportsThreadCompaction: Schema.optional(Schema.Boolean),
   supportsThreadImport: Schema.optional(Schema.Boolean),
+  supportsRollback: Schema.optional(Schema.Boolean),
 });
 export type ProviderComposerCapabilities = typeof ProviderComposerCapabilities.Type;
 
@@ -246,6 +248,7 @@ export const ProviderListModelsInput = Schema.Struct({
   binaryPath: Schema.optional(TrimmedNonEmptyString),
   apiEndpoint: Schema.optional(TrimmedNonEmptyString),
   agentDir: Schema.optional(TrimmedNonEmptyString),
+  /** Working directory for the provider runtime (e.g. cold-start ACP discovery). */
   cwd: Schema.optional(TrimmedNonEmptyString),
 });
 export type ProviderListModelsInput = typeof ProviderListModelsInput.Type;

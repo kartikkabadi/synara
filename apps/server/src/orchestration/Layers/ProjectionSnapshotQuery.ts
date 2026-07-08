@@ -574,7 +574,7 @@ function toProjectedProjectShell(row: ProjectionProjectDbRow): OrchestrationProj
   };
 }
 
-function toProjectedThreadShell(input: {
+function toProjectedThreadShellFromStoredSummary(input: {
   readonly threadRow: ProjectionThreadShellDbRow;
   readonly latestTurn: OrchestrationLatestTurn | null;
   readonly session: OrchestrationSession | null;

@@ -119,105 +119,113 @@ const noCursorAgentCommandOptions = {
 
 describe("buildCursorAcpSpawnInput", () => {
   it("builds the default Cursor ACP command", () => {
-    expect(buildCursorAcpSpawnInput(undefined, "/tmp/project")).toMatchObject({
-      command: "cursor-agent",
-      args: ["acp"],
-      cwd: "/tmp/project",
-      env: {
-        NO_BROWSER: "true",
-        BROWSER: "www-browser",
-      },
-    });
+    const result = buildCursorAcpSpawnInput(undefined, "/tmp/project");
+    expect(result.command).toBe("cursor-agent");
+    expect(result.args).toEqual(["acp"]);
+    expect(result.cwd).toBe("/tmp/project");
+    expect(result.env?.NO_BROWSER).toBe("true");
+    expect(result.env?.BROWSER).toBe("www-browser");
   });
 
   it("maps the old ambiguous agent default to cursor-agent", () => {
-    expect(buildCursorAcpSpawnInput({ binaryPath: "agent" }, "/tmp/project")).toMatchObject({
-      command: "cursor-agent",
-      args: ["acp"],
-      cwd: "/tmp/project",
-      env: {
-        NO_BROWSER: "true",
-        BROWSER: "www-browser",
-      },
-    });
+    const result = buildCursorAcpSpawnInput({ binaryPath: "agent" }, "/tmp/project");
+    expect(result.command).toBe("cursor-agent");
+    expect(result.args).toEqual(["acp"]);
+    expect(result.cwd).toBe("/tmp/project");
+    expect(result.env?.NO_BROWSER).toBe("true");
+    expect(result.env?.BROWSER).toBe("www-browser");
   });
 
   it("uses configured Cursor editor launchers when no agent command is resolved", () => {
-    expect(
-      buildCursorAcpSpawnInput(
-        { binaryPath: "/not-real/bin/cursor" },
-        "/tmp/project",
-        noCursorAgentCommandOptions,
-      ),
-    ).toMatchObject({
-      command: "/not-real/bin/cursor",
-      args: ["agent", "acp"],
-      cwd: "/tmp/project",
-      env: {
-        NO_BROWSER: "true",
-        BROWSER: "www-browser",
-      },
-    });
+    const result = buildCursorAcpSpawnInput(
+      { binaryPath: "/not-real/bin/cursor" },
+      "/tmp/project",
+      noCursorAgentCommandOptions,
+    );
+    expect(result.command).toBe("/not-real/bin/cursor");
+    expect(result.args).toEqual(["agent", "acp"]);
+    expect(result.cwd).toBe("/tmp/project");
+    expect(result.env?.NO_BROWSER).toBe("true");
+    expect(result.env?.BROWSER).toBe("www-browser");
   });
 
   it("uses bundled sibling agent commands for Cursor editor ACP startup", () => {
     const cursorPath = "/Applications/Cursor.app/Contents/Resources/app/bin/cursor";
     const agentPath = "/Applications/Cursor.app/Contents/Resources/app/bin/agent";
-    expect(
-      buildCursorAcpSpawnInput({ binaryPath: cursorPath }, "/tmp/project", {
-        env: { PATH: "" },
-        pathExists: (path) => path === agentPath,
-      }),
-    ).toMatchObject({
-      command: agentPath,
-      args: ["acp"],
-      cwd: "/tmp/project",
-      env: {
-        NO_BROWSER: "true",
-        BROWSER: "www-browser",
-      },
+    const result = buildCursorAcpSpawnInput({ binaryPath: cursorPath }, "/tmp/project", {
+      env: { PATH: "" },
+      pathExists: (path) => path === agentPath,
     });
+    expect(result.command).toBe(agentPath);
+    expect(result.args).toEqual(["acp"]);
+    expect(result.cwd).toBe("/tmp/project");
+    expect(result.env?.NO_BROWSER).toBe("true");
+    expect(result.env?.BROWSER).toBe("www-browser");
   });
 
   it("includes the configured api endpoint when present", () => {
-    expect(
-      buildCursorAcpSpawnInput(
-        {
-          binaryPath: "/usr/local/bin/agent",
-          apiEndpoint: "http://localhost:3000",
-        },
-        "/tmp/project",
-      ),
-    ).toMatchObject({
-      command: "/usr/local/bin/agent",
-      args: ["-e", "http://localhost:3000", "acp"],
-      cwd: "/tmp/project",
-      env: {
-        NO_BROWSER: "true",
-        BROWSER: "www-browser",
+    const result = buildCursorAcpSpawnInput(
+      {
+        binaryPath: "/usr/local/bin/agent",
+        apiEndpoint: "http://localhost:3000",
       },
-    });
+      "/tmp/project",
+    );
+    expect(result.command).toBe("/usr/local/bin/agent");
+    expect(result.args).toEqual(["-e", "http://localhost:3000", "acp"]);
+    expect(result.cwd).toBe("/tmp/project");
+    expect(result.env?.NO_BROWSER).toBe("true");
+    expect(result.env?.BROWSER).toBe("www-browser");
   });
 
   it("passes api endpoint overrides through the Cursor launcher fallback", () => {
-    expect(
-      buildCursorAcpSpawnInput(
-        {
-          binaryPath: "/not-real/bin/cursor",
-          apiEndpoint: "http://localhost:3000",
-        },
-        "/tmp/project",
-        noCursorAgentCommandOptions,
-      ),
-    ).toMatchObject({
-      command: "/not-real/bin/cursor",
-      args: ["agent", "-e", "http://localhost:3000", "acp"],
-      cwd: "/tmp/project",
-      env: {
-        NO_BROWSER: "true",
-        BROWSER: "www-browser",
+    const result = buildCursorAcpSpawnInput(
+      {
+        binaryPath: "/not-real/bin/cursor",
+        apiEndpoint: "http://localhost:3000",
       },
-    });
+      "/tmp/project",
+      noCursorAgentCommandOptions,
+    );
+    expect(result.command).toBe("/not-real/bin/cursor");
+    expect(result.args).toEqual(["agent", "-e", "http://localhost:3000", "acp"]);
+    expect(result.cwd).toBe("/tmp/project");
+    expect(result.env?.NO_BROWSER).toBe("true");
+    expect(result.env?.BROWSER).toBe("www-browser");
+  });
+
+  it("allowlists PATH/HOME and CURSOR_ vars while dropping unrelated secrets", () => {
+    const saved: Record<string, string | undefined> = {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      CURSOR_API_KEY: process.env.CURSOR_API_KEY,
+      AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
+      UNRELATED_TOKEN: process.env.UNRELATED_TOKEN,
+    };
+    try {
+      process.env.PATH = "/usr/local/bin:/usr/bin";
+      process.env.HOME = "/Users/cursor-dev";
+      process.env.CURSOR_API_KEY = "cursor-key";
+      process.env.AWS_SECRET_ACCESS_KEY = "aws-secret";
+      process.env.UNRELATED_TOKEN = "leak-me";
+
+      const result = buildCursorAcpSpawnInput(undefined, "/tmp/project");
+      expect(result.env?.PATH).toBe("/usr/local/bin:/usr/bin");
+      expect(result.env?.HOME).toBe("/Users/cursor-dev");
+      expect(result.env?.CURSOR_API_KEY).toBe("cursor-key");
+      expect(result.env?.NO_BROWSER).toBe("true");
+      expect(result.env?.BROWSER).toBe("www-browser");
+      expect(result.env?.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+      expect(result.env?.UNRELATED_TOKEN).toBeUndefined();
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      }
+    }
   });
 });
 

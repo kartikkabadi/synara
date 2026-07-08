@@ -1,3 +1,4 @@
+import { resolveDevinModelDisplayName } from "@t3tools/shared/devinModelDisplay";
 import {
   formatModelDisplayName,
   humanizeModelSlug,
@@ -12,8 +13,10 @@ import type {
   CodexModelSelection,
   CursorModelOptions,
   CursorModelSelection,
-  DroidModelOptions,
-  DroidModelSelection,
+  DevinModelOptions,
+  DevinModelSelection,
+  GeminiModelOptions,
+  GeminiModelSelection,
   GrokModelOptions,
   GrokModelSelection,
   KiloModelSelection,
@@ -62,6 +65,10 @@ export function formatProviderModelOptionName(input: {
       ? trimmedSlug.slice(trimmedSlug.lastIndexOf("/") + 1)
       : trimmedSlug;
     return formatModelDisplayName(modelIdentifier) ?? humanizeModelSlug(modelIdentifier);
+  }
+
+  if (input.provider === "devin") {
+    return resolveDevinModelDisplayName(trimmedSlug, trimmedSlug);
   }
 
   return formatModelDisplayName(trimmedSlug) ?? trimmedSlug;
@@ -176,11 +183,10 @@ export function mergeDynamicModelOptions(input: {
     (model) => !("isCustom" in model) || model.isCustom !== true,
   );
   const missingStaticBuiltIns =
-    (input.provider === "antigravity" ||
-      input.provider === "kilo" ||
+    (input.provider === "kilo" ||
       input.provider === "opencode" ||
       input.provider === "cursor" ||
-      input.provider === "droid") &&
+      input.provider === "devin") &&
     normalizedDynamicOptions.length > 0
       ? []
       : staticBuiltInModels.filter((model) => !dynamicNormalizedSlugs.has(model.slug));
@@ -298,7 +304,13 @@ export function buildNextProviderOptions(
   if (provider === "cursor") {
     return { ...(modelOptions as CursorModelOptions | undefined), ...patch } as CursorModelOptions;
   }
-  if (provider === "antigravity") {
+  if (provider === "devin") {
+    return {
+      ...(modelOptions as DevinModelOptions | undefined),
+      ...patch,
+    } as DevinModelOptions;
+  }
+  if (provider === "gemini") {
     return {
       ...(modelOptions as AntigravityModelOptions | undefined),
       ...patch,
@@ -352,7 +364,12 @@ export function buildModelSelection(
   options?: CursorModelOptions | null | undefined,
 ): CursorModelSelection;
 export function buildModelSelection(
-  provider: "antigravity",
+  provider: "devin",
+  model: string,
+  options?: DevinModelOptions | null | undefined,
+): DevinModelSelection;
+export function buildModelSelection(
+  provider: "gemini",
   model: string,
   options?: AntigravityModelOptions | null | undefined,
 ): AntigravityModelSelection;
@@ -422,6 +439,22 @@ export function buildModelSelection(
             provider,
             model,
             options: options as CursorModelOptions,
+          }
+        : { provider, model };
+    case "devin":
+      return options
+        ? {
+            provider,
+            model,
+            options: options as DevinModelOptions,
+          }
+        : { provider, model };
+    case "gemini":
+      return options
+        ? {
+            provider,
+            model,
+            options: options as GeminiModelOptions,
           }
         : { provider, model };
     case "grok":

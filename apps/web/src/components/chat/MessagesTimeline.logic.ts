@@ -588,11 +588,9 @@ function collapseSettledTurns(
         foldIndices.push(scan);
         continue;
       }
-      if (prev.kind === "proposed-plan") {
-        // The plan card stays visible, but it should not strand earlier
-        // narration/work outside the final "Worked for..." disclosure.
-        continue;
-      }
+      // Stop at the plan card so exploration work stays ABOVE the plan and any
+      // post-plan "Worked for..." disclosure only covers follow-up after the plan.
+      // (Previously we continued past the plan and piled every tool under it.)
       break;
     }
     foldIndices.reverse();
@@ -637,7 +635,7 @@ function collapseSettledTurns(
       delete row.inlineWorkEntries;
       delete row.inlineWorkGroupId;
 
-      for (const index of [...foldIndices].sort((a, b) => b - a)) {
+      for (const index of foldIndices.toSorted((a, b) => b - a)) {
         rows.splice(index, 1);
       }
       pass -= foldIndices.length;
@@ -827,15 +825,6 @@ function collapsedTurnItemsEqual(
     }
     return false;
   });
-}
-
-function shallowEqualEntryArray<T>(
-  left: ReadonlyArray<T> | undefined,
-  right: ReadonlyArray<T> | undefined,
-) {
-  if (left === right) return true;
-  if (!left || !right) return false;
-  return left.length === right.length && left.every((entry, index) => entry === right[index]);
 }
 
 function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean {

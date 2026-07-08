@@ -14,6 +14,8 @@ export const PROVIDER_PLAN_MODE_PROMPT_PREFIX = [
   "plan content",
   "</proposed_plan>",
   "Use at most one proposed_plan block. Keep the tags in English exactly as shown.",
+  "Put any short preamble outside the tags. Put the full plan only inside the tags. Do not stream partial plans without closing the tags when finished.",
+  "After the closing tag, stop. Do not keep searching for alternative plans unless the user asks.",
 ].join("\n");
 
 const PROPOSED_PLAN_BLOCK_REGEX = /<proposed_plan>\s*([\s\S]*?)\s*<\/proposed_plan>/i;

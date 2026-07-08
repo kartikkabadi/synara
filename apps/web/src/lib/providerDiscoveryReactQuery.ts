@@ -342,3 +342,11 @@ export function supportsThreadImport(
 ): boolean {
   return capabilities?.supportsThreadImport === true;
 }
+
+export function supportsRollback(capabilities: ProviderComposerCapabilities | undefined): boolean {
+  // Undefined capabilities (still loading) → false to avoid enabling rollback
+  // before the provider's capabilities resolve. Once loaded, default to true
+  // unless explicitly disabled (supportsRollback === false), matching the
+  // server-side CheckpointReactor's `=== false` check and the schema default.
+  return capabilities !== undefined && capabilities.supportsRollback !== false;
+}

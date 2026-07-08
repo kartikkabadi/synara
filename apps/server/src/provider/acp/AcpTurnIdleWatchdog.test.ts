@@ -4,8 +4,25 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateAcpTurnIdleTick,
   forkAcpTurnIdleWatchdog,
+  isAcpTurnProgressEventTag,
   resolveAcpTurnIdleTimeoutMs,
 } from "./AcpTurnIdleWatchdog.ts";
+
+describe("isAcpTurnProgressEventTag", () => {
+  it("treats content, tools, plans, and assistant items as progress", () => {
+    expect(isAcpTurnProgressEventTag("ContentDelta")).toBe(true);
+    expect(isAcpTurnProgressEventTag("ToolCallUpdated")).toBe(true);
+    expect(isAcpTurnProgressEventTag("PlanUpdated")).toBe(true);
+    expect(isAcpTurnProgressEventTag("AssistantItemStarted")).toBe(true);
+    expect(isAcpTurnProgressEventTag("AssistantItemCompleted")).toBe(true);
+  });
+
+  it("does not treat mode/command/usage heartbeats as progress", () => {
+    expect(isAcpTurnProgressEventTag("ModeChanged")).toBe(false);
+    expect(isAcpTurnProgressEventTag("AvailableCommandsUpdated")).toBe(false);
+    expect(isAcpTurnProgressEventTag("UsageUpdated")).toBe(false);
+  });
+});
 
 describe("evaluateAcpTurnIdleTick", () => {
   it("stops once the turn is no longer active, regardless of idle state", () => {

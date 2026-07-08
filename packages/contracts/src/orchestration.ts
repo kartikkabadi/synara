@@ -4,7 +4,8 @@ import {
   ClaudeModelOptions,
   CodexModelOptions,
   CursorModelOptions,
-  DroidModelOptions,
+  DevinModelOptions,
+  GeminiModelOptions,
   GrokModelOptions,
   OpenCodeModelOptions,
   PiModelOptions,
@@ -55,7 +56,8 @@ export const ProviderKind = Schema.Literals([
   "codex",
   "claudeAgent",
   "cursor",
-  "antigravity",
+  "devin",
+  "gemini",
   "grok",
   "droid",
   "kilo",
@@ -99,8 +101,15 @@ export const CursorModelSelection = Schema.Struct({
 });
 export type CursorModelSelection = typeof CursorModelSelection.Type;
 
-export const AntigravityModelSelection = Schema.Struct({
-  provider: Schema.Literal("antigravity"),
+export const DevinModelSelection = Schema.Struct({
+  provider: Schema.Literal("devin"),
+  model: TrimmedNonEmptyString,
+  options: Schema.optional(DevinModelOptions),
+});
+export type DevinModelSelection = typeof DevinModelSelection.Type;
+
+export const GeminiModelSelection = Schema.Struct({
+  provider: Schema.Literal("gemini"),
   model: TrimmedNonEmptyString,
   options: Schema.optional(AntigravityModelOptions),
 });
@@ -145,7 +154,8 @@ export const ModelSelection = Schema.Union([
   CodexModelSelection,
   ClaudeModelSelection,
   CursorModelSelection,
-  AntigravityModelSelection,
+  DevinModelSelection,
+  GeminiModelSelection,
   GrokModelSelection,
   DroidModelSelection,
   KiloModelSelection,
@@ -172,6 +182,10 @@ export const AntigravityProviderStartOptions = Schema.Struct({
 export const CursorProviderStartOptions = Schema.Struct({
   binaryPath: Schema.optional(TrimmedNonEmptyString),
   apiEndpoint: Schema.optional(TrimmedNonEmptyString),
+});
+
+export const DevinProviderStartOptions = Schema.Struct({
+  binaryPath: Schema.optional(TrimmedNonEmptyString),
 });
 
 export const GrokProviderStartOptions = Schema.Struct({
@@ -202,7 +216,8 @@ export const ProviderStartOptions = Schema.Struct({
   codex: Schema.optional(CodexProviderStartOptions),
   claudeAgent: Schema.optional(ClaudeProviderStartOptions),
   cursor: Schema.optional(CursorProviderStartOptions),
-  antigravity: Schema.optional(AntigravityProviderStartOptions),
+  devin: Schema.optional(DevinProviderStartOptions),
+  gemini: Schema.optional(GeminiProviderStartOptions),
   grok: Schema.optional(GrokProviderStartOptions),
   droid: Schema.optional(DroidProviderStartOptions),
   kilo: Schema.optional(KiloProviderStartOptions),

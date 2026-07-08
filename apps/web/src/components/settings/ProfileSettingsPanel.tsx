@@ -7,7 +7,12 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { type ProfileStats, type ProfileTokenStats, type ProviderKind } from "@synara/contracts";
+import {
+  PROVIDER_DISPLAY_NAMES,
+  type ProfileStats,
+  type ProfileTokenStats,
+  type ProviderKind,
+} from "@t3tools/contracts";
 import {
   serverProfileStatsQueryOptions,
   serverProfileTokenStatsQueryOptions,
@@ -169,7 +174,7 @@ function ProfileContent({
               label="Most used provider"
               value={
                 topProvider.provider
-                  ? `${formatProviderLabel(topProvider.provider)}${
+                  ? `${PROVIDER_DISPLAY_NAMES[topProvider.provider]}${
                       topProvider.percent !== null ? ` · ${topProvider.percent}%` : ""
                     }`
                   : "—"
@@ -328,29 +333,6 @@ function formatMostWorkedProjectLabel(project: ProfileStats["mostWorkedProject"]
   }
   const promptLabel = project.promptCount === 1 ? "prompt" : "prompts";
   return `${project.title} · ${formatNumber(project.promptCount)} ${promptLabel}`;
-}
-
-function formatProviderLabel(provider: ProviderKind): string {
-  switch (provider) {
-    case "codex":
-      return "Codex";
-    case "claudeAgent":
-      return "Claude";
-    case "cursor":
-      return "Cursor";
-    case "antigravity":
-      return "Antigravity";
-    case "grok":
-      return "Grok";
-    case "droid":
-      return "Droid";
-    case "kilo":
-      return "Kilo";
-    case "opencode":
-      return "OpenCode";
-    case "pi":
-      return "Pi";
-  }
 }
 
 function ModelUsageRow({

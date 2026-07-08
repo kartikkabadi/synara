@@ -29,6 +29,12 @@ __screenshots__/
 .tanstack
 /.pi/
 /.tmp/
+/.codegraph
+/apps/server/.codegraph
+/.cursor/
+/devin-acp-test-shots/
+/apps/server/scripts/devin-qa-rpc-smoke.mjs
+/apps/server/scripts/verify-devin-rpc.ts
 /~/
 /bootstrap.js
 /preload.js

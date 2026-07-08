@@ -1,82 +1,160 @@
-import { describe, expect, it } from "vitest";
-
-import { Deferred, Effect, Exit, Scope } from "effect";
-import type * as EffectAcpSchema from "effect-acp/schema";
+import { Cause } from "effect";
+import { describe, expect, it as vitestIt } from "vitest";
+import * as EffectAcpErrors from "effect-acp/errors";
 
 import {
   assistantItemId,
-  decodeSetSessionConfigOptionResponse,
-  makeAcpIncomingFrameGuard,
-  sessionConfigOptionsFromSetup,
-  teardownAcpChildProcess,
+  causeIndicatesAuthRequired,
+  isAcpAuthRequiredError,
 } from "./AcpSessionRuntime.ts";
 
-describe("makeAcpIncomingFrameGuard", () => {
-  const encode = (value: string) => new TextEncoder().encode(value);
-
-  it("enforces the frame budget across split chunks and resets it at newline boundaries", () => {
-    const guard = makeAcpIncomingFrameGuard(5);
-
-    expect(guard(encode("123"))).toBeUndefined();
-    expect(guard(encode("45\n12345\n"))).toBeUndefined();
-    expect(guard(encode("1\n"))).toBeUndefined();
+describe("isAcpAuthRequiredError", () => {
+  vitestIt("returns true for ACP auth-required code (-32000)", () => {
+    const error = new EffectAcpErrors.AcpRequestError({
+      code: -32000,
+      errorMessage: "Some error",
+    });
+    expect(isAcpAuthRequiredError(error)).toBe(true);
   });
 
-  it("rejects an oversized unterminated frame", () => {
-    const guard = makeAcpIncomingFrameGuard(5);
+  vitestIt("returns true when errorMessage contains 'authentication required'", () => {
+    const error = new EffectAcpErrors.AcpRequestError({
+      code: -1,
+      errorMessage: "Authentication required",
+    });
+    expect(isAcpAuthRequiredError(error)).toBe(true);
+  });
 
-    expect(guard(encode("123"))).toBeUndefined();
-    const error = guard(encode("456"));
-    expect(error?._tag).toBe("AcpTransportError");
-    expect(error?.detail).toContain("5-byte limit");
+  vitestIt("returns false for unrelated errors", () => {
+    const error = new EffectAcpErrors.AcpRequestError({
+      code: -1,
+      errorMessage: "the author field is missing",
+    });
+    expect(isAcpAuthRequiredError(error)).toBe(false);
+  });
+
+  vitestIt("returns false for non-AcpRequestError tags", () => {
+    const error = new EffectAcpErrors.AcpSpawnError({
+      command: "devin",
+      cause: new Error("spawn failed"),
+    });
+    expect(isAcpAuthRequiredError(error)).toBe(false);
+  });
+
+  vitestIt("returns true when errorMessage contains 'authorization required'", () => {
+    const error = new EffectAcpErrors.AcpRequestError({
+      code: -1,
+      errorMessage: "Authorization required",
+    });
+    expect(isAcpAuthRequiredError(error)).toBe(true);
+  });
+
+  vitestIt("returns true when errorMessage contains 'authentication expired'", () => {
+    const error = new EffectAcpErrors.AcpRequestError({
+      code: -1,
+      errorMessage: "Authentication expired",
+    });
+    expect(isAcpAuthRequiredError(error)).toBe(true);
+  });
+
+  vitestIt("returns true when errorMessage contains 'auth' as a standalone word", () => {
+    const error = new EffectAcpErrors.AcpRequestError({
+      code: -1,
+      errorMessage: "Auth required for this action",
+    });
+    expect(isAcpAuthRequiredError(error)).toBe(true);
+  });
+
+  vitestIt("returns false when errorMessage contains 'authoring' (not 'auth' as a word boundary)", () => {
+    const error = new EffectAcpErrors.AcpRequestError({
+      code: -1,
+      errorMessage: "authoring mode is not supported",
+    });
+    expect(isAcpAuthRequiredError(error)).toBe(false);
+  });
+
+  vitestIt("returns true for code -32000 regardless of errorMessage content", () => {
+    const error = new EffectAcpErrors.AcpRequestError({
+      code: -32000,
+      errorMessage: "something unrelated",
+    });
+    expect(isAcpAuthRequiredError(error)).toBe(true);
   });
 });
 
-describe("teardownAcpChildProcess", () => {
-  it("keeps ACP scope closure pending until the owned root exit settles", async () => {
-    const processExited = Deferred.makeUnsafe<number>();
-    const exitCode = Deferred.await(processExited);
-    let observeTeardown!: (input: {
-      readonly rootPid: number;
-      readonly rootExited: Promise<unknown>;
-    }) => void;
-    const teardownStarted = new Promise<{
-      readonly rootPid: number;
-      readonly rootExited: Promise<unknown>;
-    }>((resolve) => {
-      observeTeardown = resolve;
+describe("causeIndicatesAuthRequired", () => {
+  vitestIt("returns true for a Fail cause with auth-required code", () => {
+    const error = new EffectAcpErrors.AcpRequestError({
+      code: -32000,
+      errorMessage: "Unauthorized",
     });
-    const scope = await Effect.runPromise(Scope.make("sequential"));
+    const cause = Cause.fail(error);
+    expect(causeIndicatesAuthRequired(cause)).toBe(true);
+  });
 
-    await Effect.runPromise(
-      Effect.addFinalizer(() =>
-        teardownAcpChildProcess({ pid: 4_242, exitCode }, async (input) => {
-          observeTeardown(input);
-          await input.rootExited;
-          return { escalated: false, signalErrors: [] };
-        }),
-      ).pipe(Effect.provideService(Scope.Scope, scope)),
-    );
+  vitestIt("returns true for a Die cause with 'authentication failed' message", () => {
+    const cause = Cause.die(new Error("Devin authentication failed"));
+    expect(causeIndicatesAuthRequired(cause)).toBe(true);
+  });
 
-    let scopeClosed = false;
-    const closing = Effect.runPromise(Scope.close(scope, Exit.void)).then(() => {
-      scopeClosed = true;
+  vitestIt("returns false when Cause.pretty would contain 'auth' in a path but there is no auth failure", () => {
+    const cause = Cause.die(new Error("Module not found: /src/auth/utils.ts"));
+    expect(causeIndicatesAuthRequired(cause)).toBe(false);
+  });
+
+  vitestIt("returns false for a Die cause with 'the author field is missing'", () => {
+    const cause = Cause.die(new Error("the author field is missing"));
+    expect(causeIndicatesAuthRequired(cause)).toBe(false);
+  });
+
+  vitestIt("returns false for a plain non-auth Fail cause", () => {
+    const error = new EffectAcpErrors.AcpRequestError({
+      code: -32603,
+      errorMessage: "Internal error",
     });
-    const teardown = await teardownStarted;
-    expect(teardown.rootPid).toBe(4_242);
-    await Promise.resolve();
-    expect(scopeClosed).toBe(false);
+    const cause = Cause.fail(error);
+    expect(causeIndicatesAuthRequired(cause)).toBe(false);
+  });
 
-    Deferred.doneUnsafe(processExited, Effect.succeed(0));
-    await closing;
-    expect(scopeClosed).toBe(true);
+  vitestIt("returns true for a Die cause with 'authorization required' message", () => {
+    const cause = Cause.die(new Error("Authorization required"));
+    expect(causeIndicatesAuthRequired(cause)).toBe(true);
+  });
+
+  vitestIt("returns true for a Die cause with 'authentication expired' message", () => {
+    const cause = Cause.die(new Error("Authentication expired"));
+    expect(causeIndicatesAuthRequired(cause)).toBe(true);
+  });
+
+  vitestIt("returns true for a Die cause with 'auth required' message", () => {
+    const cause = Cause.die(new Error("Auth required"));
+    expect(causeIndicatesAuthRequired(cause)).toBe(true);
+  });
+
+  vitestIt("returns false for a Die cause with a non-auth error", () => {
+    const cause = Cause.die(new Error("Internal server error"));
+    expect(causeIndicatesAuthRequired(cause)).toBe(false);
+  });
+
+  vitestIt("returns false for a Die cause with a non-string defect (number)", () => {
+    const cause = Cause.die(42);
+    expect(causeIndicatesAuthRequired(cause)).toBe(false);
+  });
+
+  vitestIt("returns false for a Die cause with a non-string defect (object)", () => {
+    const cause = Cause.die({ foo: "bar" });
+    expect(causeIndicatesAuthRequired(cause)).toBe(false);
+  });
+
+  vitestIt("returns false for an Empty cause", () => {
+    expect(causeIndicatesAuthRequired(Cause.empty)).toBe(false);
   });
 });
 
 describe("assistantItemId", () => {
   // Format contract only — distinct runtimeInstanceId wiring is covered by
   // AcpJsonRpcConnection.test.ts ("assigns distinct fallback assistant item ids...").
-  it("produces distinct ids across runtime instances with the same session id and segment index", () => {
+  vitestIt("produces distinct ids across runtime instances with the same session id and segment index", () => {
     const sessionId = "session-1";
     const a = assistantItemId(sessionId, "aaaa1111", 0);
     const b = assistantItemId(sessionId, "bbbb2222", 0);

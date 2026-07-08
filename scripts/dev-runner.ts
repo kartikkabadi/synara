@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter as pathDelimiter, join as pathJoin } from "node:path";
+import { join, sep } from "node:path";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -415,6 +416,25 @@ export function resolveDevRunnerBooleanOverrides(
   };
 }
 
+/** Blocks QA home dirs while `.synara-devin-qa/_qa/ABORT` exists (parallel agent teardown). */
+function assertQaDevNotAborted(t3Home: string | undefined): Effect.Effect<void, DevRunnerError> {
+  const home = t3Home?.trim() ?? "";
+  if (!home.split(sep).includes(".synara-devin-qa")) {
+    return Effect.void;
+  }
+
+  const abortPath = join(home, "_qa", "ABORT");
+  if (existsSync(abortPath)) {
+    return Effect.fail(
+      new DevRunnerError({
+        message: `QA dev blocked (${abortPath} present). Delete ABORT before starting QA instances.`,
+      }),
+    );
+  }
+
+  return Effect.void;
+}
+
 export function runDevRunnerWithInput(input: DevRunnerCliInput) {
   return Effect.gen(function* () {
     const { portOffset, devInstance } = yield* OffsetConfig.asEffect().pipe(
@@ -445,6 +465,8 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       hasExplicitDevUrl: input.devUrl !== undefined,
     });
     const booleanOverrides = resolveDevRunnerBooleanOverrides(input, envOverrides);
+
+    yield* assertQaDevNotAborted(input.t3Home);
 
     const env = yield* createDevRunnerEnv({
       mode: input.mode,

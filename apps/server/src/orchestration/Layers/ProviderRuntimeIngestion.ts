@@ -845,6 +845,16 @@ function requestKindFromCanonicalRequestType(
     : undefined;
 }
 
+function redactedUserInputResolvedPayload(
+  event: Extract<ProviderRuntimeEvent, { type: "user-input.resolved" }>,
+) {
+  return {
+    ...(event.requestId ? { requestId: event.requestId } : {}),
+    answeredQuestionIds: Object.keys(event.payload.answers).toSorted(),
+    redacted: true,
+  };
+}
+
 function runtimeEventToActivities(
   event: ProviderRuntimeEvent,
 ): ReadonlyArray<OrchestrationThreadActivity> {
@@ -1050,18 +1060,9 @@ function runtimeEventToActivities(
           id: event.eventId,
           createdAt: event.createdAt,
           tone: "info",
-          kind: event.type,
-          summary:
-            event.type === "user-input.requested" ? "User input requested" : "User input submitted",
-          payload: toActivityPayload({
-            ...(event.requestId ? { requestId: event.requestId } : {}),
-            ...(event.lifecycleGeneration !== undefined
-              ? { lifecycleGeneration: event.lifecycleGeneration }
-              : {}),
-            ...(event.type === "user-input.requested"
-              ? { questions: event.payload.questions }
-              : { answers: event.payload.answers }),
-          }),
+          kind: "user-input.resolved",
+          summary: "User input submitted",
+          payload: toActivityPayload(redactedUserInputResolvedPayload(event)),
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
         },
