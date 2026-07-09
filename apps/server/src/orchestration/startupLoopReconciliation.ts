@@ -9,8 +9,8 @@
  * every thread with an active loop into the reactor's worker. The reactor's
  * per-thread handler re-checks all guards (session idle, no pending input, plan
  * mode, interval elapsed, etc.) before dispatching, so this is safe to call on
- * any thread — non-loop or paused threads early return. Stagger dispatches to
- * avoid a load spike if multiple loops survived restart.
+ * any thread — non-loop or paused threads early return. The worker serializes
+ * processing, so reconciliation does not block readiness per thread.
  *
  * @module startupLoopReconciliation
  */

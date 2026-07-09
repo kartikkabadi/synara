@@ -199,6 +199,10 @@
     "./orchestrationGoals": {
       "types": "./src/orchestrationGoals.ts",
       "import": "./src/orchestrationGoals.ts"
+    },
+    "./contextWindow": {
+      "types": "./src/contextWindow.ts",
+      "import": "./src/contextWindow.ts"
     }
   },
   "scripts": {

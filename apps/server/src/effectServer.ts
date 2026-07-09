@@ -212,7 +212,8 @@ export const createEffectServer = Effect.fn(function* () {
   // Re-enqueue active goals into the continuation reactor so they resume without
   // waiting for a manual message. Runs after stuck-turn healing (so terminal turns
   // are resolved first) and before markCommandReady (so goals are unblocked before
-  // clients connect). The reactor staggers dispatches to avoid a restart load spike.
+  // clients connect). The reactor queues reconciliation without delaying readiness for
+  // each active thread.
   yield* reconcileRestartActiveGoals;
   // Re-enqueue active loops into the loop reactor so they resume without waiting
   // for a manual message. Same pattern as goal reconciliation above.

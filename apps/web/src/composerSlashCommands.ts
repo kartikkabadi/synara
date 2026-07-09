@@ -85,6 +85,7 @@ function shouldKeepBuiltInSlashCommandDespiteNativeCollision(
     command === "automation" ||
     command === "export" ||
     command === "feedback" ||
+    command === "goal" ||
     (providerUsesAppOwnedReviewSlashCommand(provider) && command === "review")
   );
 }
@@ -431,7 +432,7 @@ export function getAvailableComposerSlashCommands(input: {
           ...(input.canOfferExportCommand ? (["export"] as const) : []),
           "feedback",
           "automation",
-          // Claude ships a native /goal; other providers get Synara's agent-agnostic one.
+          // Synara owns /goal so its persisted goal lifecycle is consistent across providers.
           "goal",
           "loop",
         ]
@@ -444,6 +445,7 @@ export function getAvailableComposerSlashCommands(input: {
           ...(input.canOfferExportCommand ? (["export"] as const) : []),
           "feedback",
           "automation",
+          "goal",
         ];
   return availableCommands.filter((command) => !collidingNativeCommandNames.has(command));
 }

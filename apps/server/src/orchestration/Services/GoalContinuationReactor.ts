@@ -7,7 +7,8 @@ export interface GoalContinuationReactorShape {
   // without waiting for a manual message or session event. The reactor's per-thread
   // handler re-checks all guards (session idle, no pending input, plan mode, etc.) before
   // dispatching, so this is safe to call on any thread — non-goal or paused threads early
-  // return. Stagger dispatches to avoid a load spike if multiple goals survived restart.
+  // return. The worker serializes processing, so startup reconciliation stays bounded
+  // without delaying readiness per thread.
   readonly reconcile: (threadIds: ReadonlyArray<string>) => Effect.Effect<void>;
 }
 

@@ -10,8 +10,8 @@
  * with an active goal into the reactor's worker. The reactor's per-thread handler
  * re-checks all guards (session idle, no pending input, plan mode, etc.) before
  * dispatching a continuation, so this is safe to call on any thread — non-goal or
- * paused threads early return. The reactor staggers dispatches (500ms apart) to
- * avoid a load spike if multiple goals survived restart.
+ * paused threads early return. The worker serializes processing, so reconciliation
+ * does not block readiness per thread.
  *
  * @module startupGoalReconciliation
  */

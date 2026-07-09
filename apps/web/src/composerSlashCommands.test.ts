@@ -118,26 +118,26 @@ describe("composerSlashCommands", () => {
     expect(codexCommands).toContain("loop");
   });
 
-  it("offers /goal to non-Claude providers but not Claude (which has a native /goal)", () => {
-    const codexCommands = getAvailableComposerSlashCommands({
-      provider: "codex",
-      supportsFastSlashCommand: true,
-      canOfferCompactCommand: true,
-      canOfferReviewCommand: true,
-      canOfferForkCommand: true,
-      canOfferSideCommand: true,
-    });
-    expect(codexCommands).toContain("goal");
-
-    const claudeCommands = getAvailableComposerSlashCommands({
-      provider: "claudeAgent",
-      supportsFastSlashCommand: true,
-      canOfferCompactCommand: true,
-      canOfferReviewCommand: true,
-      canOfferForkCommand: true,
-      canOfferSideCommand: true,
-    });
-    expect(claudeCommands).not.toContain("goal");
+  it.each([
+    "codex",
+    "claudeAgent",
+    "cursor",
+    "gemini",
+    "grok",
+    "kilo",
+    "opencode",
+    "pi",
+  ] as const)("offers Synara /goal for %s", (provider) => {
+    expect(
+      getAvailableComposerSlashCommands({
+        provider,
+        supportsFastSlashCommand: true,
+        canOfferCompactCommand: true,
+        canOfferReviewCommand: true,
+        canOfferForkCommand: true,
+        canOfferSideCommand: true,
+      }),
+    ).toContain("goal");
   });
 
   it("parses slash invocations with optional arguments", () => {
@@ -394,7 +394,7 @@ describe("composerSlashCommands", () => {
         canOfferSideCommand: true,
         canOfferExportCommand: true,
       }),
-    ).toEqual(["side", "export", "feedback", "automation"]);
+    ).toEqual(["side", "export", "feedback", "automation", "goal"]);
   });
 
   it("offers the app-level /export command on every provider", () => {

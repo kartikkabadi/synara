@@ -1,5 +1,6 @@
 import type { ProviderKind, ThreadId } from "@t3tools/contracts";
 import { Cause, Duration, Effect, Layer, Option, Schedule, Stream } from "effect";
+import { deriveLatestContextWindowUsage } from "@t3tools/shared/contextWindow";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { CompactionReactor, type CompactionReactorShape } from "../Services/CompactionReactor.ts";
@@ -10,18 +11,6 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { PROVIDER_COMPACTION_CAPABILITY } from "../providerCapabilities.ts";
 
 const EMERGENCY_THRESHOLD = 90;
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
-}
-
-function asFiniteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function asBoolean(value: unknown): boolean | null {
-  return typeof value === "boolean" ? value : null;
-}
 
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -68,39 +57,16 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    // Scan activities backwards for the latest context-window.updated activity.
-    // This reuses the same scanning pattern as the web UI's contextWindow.ts.
-    let usedPercent: number | null = null;
-    let compactsAutomatically = false;
-    for (let i = thread.activities.length - 1; i >= 0; i -= 1) {
-      const activity = thread.activities[i];
-      if (!activity || activity.kind !== "context-window.updated") {
-        continue;
-      }
-      const payload = asRecord(activity.payload);
-      const rawPercent = asFiniteNumber(payload?.usedPercent);
-      const usedTokens = asFiniteNumber(payload?.usedTokens);
-      const maxTokens = asFiniteNumber(payload?.maxTokens);
-      compactsAutomatically = asBoolean(payload?.compactsAutomatically) ?? false;
-      if (rawPercent !== null) {
-        usedPercent = Math.max(0, Math.min(100, rawPercent));
-        break;
-      }
-      if (usedTokens !== null && maxTokens !== null && maxTokens > 0) {
-        usedPercent = Math.min(100, (usedTokens / maxTokens) * 100);
-        break;
-      }
-      // No usable data in this activity — keep scanning backwards.
-    }
-
-    if (usedPercent === null) {
+    const latestUsage = deriveLatestContextWindowUsage(thread.activities);
+    if (latestUsage === null || latestUsage.usedPercentage === null) {
       return;
     }
+    const usedPercent = latestUsage.usedPercentage;
 
     // The activity payload's compactsAutomatically flag is the per-session truth
     // (set by the provider runtime). If it says the provider auto-compacts, skip
     // even if the static map says otherwise — the runtime knows best.
-    if (compactsAutomatically) {
+    if (latestUsage.usage.compactsAutomatically === true) {
       return;
     }
 

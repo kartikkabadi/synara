@@ -8,6 +8,7 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import { Cause, Duration, Effect, Fiber, Layer, Option, Schedule, Stream } from "effect";
+import { deriveLatestContextWindowUsage } from "@t3tools/shared/contextWindow";
 import { makeDrainableWorker, type DrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { LoopReactor, type LoopReactorShape } from "../Services/LoopReactor.ts";
@@ -55,12 +56,15 @@ function threadActiveProvider(thread: OrchestrationThread): ProviderKind {
   return (thread.session?.providerName ?? thread.modelSelection.provider) as ProviderKind;
 }
 
-function compactionCanReduceUsage(provider: ProviderKind, autoCompactionEnabled: boolean): boolean {
-  if (!autoCompactionEnabled) {
-    return false;
-  }
+export function compactionCanReduceUsage(
+  provider: ProviderKind,
+  autoCompactionEnabled: boolean,
+): boolean {
   const capability = PROVIDER_COMPACTION_CAPABILITY[provider];
-  return capability !== undefined && (capability.autoCompacts || capability.supportsCompaction);
+  return (
+    capability !== undefined &&
+    (capability.autoCompacts || (autoCompactionEnabled && capability.supportsCompaction))
+  );
 }
 
 const make = Effect.gen(function* () {
@@ -81,33 +85,10 @@ const make = Effect.gen(function* () {
   // are defined. handleThread references worker via this binding for wake-up re-enqueue.
   let worker: DrainableWorker<ThreadId> | undefined;
 
-  function asRecord(value: unknown): Record<string, unknown> | null {
-    return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
-  }
-
-  function asFiniteNumber(value: unknown): number | null {
-    return typeof value === "number" && Number.isFinite(value) ? value : null;
-  }
-
-  // Scan activities backwards for the latest context-window.updated usedPercent.
+  // Read the latest provider usage through the shared parser so loop safety and the web meter
+  // agree on malformed payloads and provider-specific usage shapes.
   function latestUsedPercent(thread: OrchestrationThread): number | null {
-    for (let i = thread.activities.length - 1; i >= 0; i -= 1) {
-      const activity = thread.activities[i];
-      if (!activity || activity.kind !== "context-window.updated") {
-        continue;
-      }
-      const payload = asRecord(activity.payload);
-      const rawPercent = asFiniteNumber(payload?.usedPercent);
-      if (rawPercent !== null) {
-        return Math.max(0, Math.min(100, rawPercent));
-      }
-      const usedTokens = asFiniteNumber(payload?.usedTokens);
-      const maxTokens = asFiniteNumber(payload?.maxTokens);
-      if (usedTokens !== null && maxTokens !== null && maxTokens > 0) {
-        return Math.min(100, (usedTokens / maxTokens) * 100);
-      }
-    }
-    return null;
+    return deriveLatestContextWindowUsage(thread.activities)?.usedPercentage ?? null;
   }
 
   const handleThread = Effect.fn(function* (threadId: ThreadId) {
@@ -303,7 +284,7 @@ const make = Effect.gen(function* () {
     // fire immediately (no stacking, no overlap).
     const completedAt = latestTurn.completedAt;
     if (completedAt !== null) {
-      const elapsedMs = Date.now() - Date.parse(completedAt);
+      const elapsedMs = Math.max(0, Date.now() - Date.parse(completedAt));
       const intervalMs = loop.intervalSeconds * 1000;
       if (elapsedMs < intervalMs) {
         // Cancel any existing wake-up fiber and fork a new one for the remaining time.
@@ -390,14 +371,9 @@ const make = Effect.gen(function* () {
     start,
     drain,
     reconcile: (threadIds) =>
-      Effect.forEach(
-        threadIds,
-        (threadId) =>
-          Effect.sleep(Duration.millis(500)).pipe(
-            Effect.andThen(() => worker!.enqueue(threadId as ThreadId)),
-          ),
-        { discard: true },
-      ),
+      Effect.forEach(threadIds, (threadId) => worker!.enqueue(threadId as ThreadId), {
+        discard: true,
+      }),
   } satisfies LoopReactorShape;
 });
 

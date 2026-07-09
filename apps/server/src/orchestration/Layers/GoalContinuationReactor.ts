@@ -184,7 +184,7 @@ const make = Effect.gen(function* () {
 
     const latestTurn = thread.latestTurn;
     if (!latestTurn) {
-      if (!reconcileBootstrapThreadIds.delete(threadId)) {
+      if (!reconcileBootstrapThreadIds.has(threadId)) {
         return;
       }
       if (!canDispatchGoalAutomation(thread)) {
@@ -208,9 +208,6 @@ const make = Effect.gen(function* () {
         dispatchMode: "queue",
         createdAt: new Date().toISOString(),
       });
-      // Keep the bootstrap marker when the thread is busy or dispatch fails. The
-      // next reconciliation/trigger must be able to retry instead of silently
-      // losing the only startup opportunity for a persisted goal.
       reconcileBootstrapThreadIds.delete(threadId);
       return;
     }
@@ -332,7 +329,6 @@ const make = Effect.gen(function* () {
     // the user to resume or clear it.
     if (goal.status === "budget_limited") {
       if (!budgetSteered.has(threadId)) {
-        budgetSteered.add(threadId);
         yield* orchestrationEngine.dispatch({
           type: "thread.turn.start",
           commandId: serverCommandId("goal-budget-limited"),
@@ -349,6 +345,9 @@ const make = Effect.gen(function* () {
           dispatchMode: "queue",
           createdAt: new Date().toISOString(),
         });
+        // Mark the activation only after dispatch succeeds. A transient failure must be
+        // retried by the next trigger instead of permanently losing the wrap-up turn.
+        budgetSteered.add(threadId);
       }
       lastHandledTurnId.set(threadId, latestTurn.turnId);
       return;
@@ -474,10 +473,7 @@ const make = Effect.gen(function* () {
         (threadId) =>
           Effect.sync(() => {
             reconcileBootstrapThreadIds.add(threadId as ThreadId);
-          }).pipe(
-            Effect.andThen(Effect.sleep(Duration.millis(500))),
-            Effect.andThen(() => worker.enqueue(threadId as ThreadId)),
-          ),
+          }).pipe(Effect.andThen(() => worker.enqueue(threadId as ThreadId))),
         { discard: true },
       ),
   } satisfies GoalContinuationReactorShape;
