@@ -5,6 +5,7 @@ import {
   normalizeComposerSlashCommandName,
   type BuiltInComposerSlashCommand,
 } from "@synara/shared/composerSlashCommands";
+import { providerCanLoop } from "@synara/shared/providerCapabilities";
 import { rankProviderDiscoveryItems } from "./lib/providerDiscovery";
 
 export { BUILT_IN_COMPOSER_SLASH_COMMANDS };
@@ -434,7 +435,7 @@ export function getAvailableComposerSlashCommands(input: {
           "automation",
           // Synara owns /goal so its persisted goal lifecycle is consistent across providers.
           "goal",
-          "loop",
+          ...(providerCanLoop(input.provider) ? (["loop"] as const) : []),
         ]
       : [
           // Claude owns most slash-command UX natively; sidechat remains app-level because it

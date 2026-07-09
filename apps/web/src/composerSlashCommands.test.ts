@@ -106,16 +106,49 @@ describe("composerSlashCommands", () => {
     });
   });
 
-  it("offers /loop to non-Claude providers", () => {
-    const codexCommands = getAvailableComposerSlashCommands({
-      provider: "codex",
-      supportsFastSlashCommand: true,
-      canOfferCompactCommand: true,
-      canOfferReviewCommand: true,
-      canOfferForkCommand: true,
-      canOfferSideCommand: true,
-    });
-    expect(codexCommands).toContain("loop");
+  it.each(["codex", "cursor", "gemini", "opencode", "pi"] as const)(
+    "offers /loop to providers with a compaction path: %s",
+    (provider) => {
+      expect(
+        getAvailableComposerSlashCommands({
+          provider,
+          supportsFastSlashCommand: true,
+          canOfferCompactCommand: true,
+          canOfferReviewCommand: true,
+          canOfferForkCommand: true,
+          canOfferSideCommand: true,
+        }),
+      ).toContain("loop");
+    },
+  );
+
+  it.each(["claudeAgent", "grok", "kilo"] as const)(
+    "hides /loop from providers without a compaction path: %s",
+    (provider) => {
+      expect(
+        getAvailableComposerSlashCommands({
+          provider,
+          supportsFastSlashCommand: true,
+          canOfferCompactCommand: true,
+          canOfferReviewCommand: true,
+          canOfferForkCommand: true,
+          canOfferSideCommand: true,
+        }),
+      ).not.toContain("loop");
+    },
+  );
+
+  it("keeps /goal available when /loop is unsupported", () => {
+    expect(
+      getAvailableComposerSlashCommands({
+        provider: "grok",
+        supportsFastSlashCommand: true,
+        canOfferCompactCommand: true,
+        canOfferReviewCommand: true,
+        canOfferForkCommand: true,
+        canOfferSideCommand: true,
+      }),
+    ).toContain("goal");
   });
 
   it.each([

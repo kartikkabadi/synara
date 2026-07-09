@@ -203,6 +203,10 @@
     "./contextWindow": {
       "types": "./src/contextWindow.ts",
       "import": "./src/contextWindow.ts"
+    },
+    "./providerCapabilities": {
+      "types": "./src/providerCapabilities.ts",
+      "import": "./src/providerCapabilities.ts"
     }
   },
   "scripts": {
