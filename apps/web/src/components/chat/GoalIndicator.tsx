@@ -1,6 +1,6 @@
 import { type ReactElement, useCallback } from "react";
 import { type OrchestrationGoal, type ThreadId } from "@t3tools/contracts";
-import { formatSecondsCompact } from "~/lib/format";
+import { formatGoalUsageSummary } from "~/lib/goalDisplay";
 import { readNativeApi } from "~/nativeApi";
 import { newCommandId } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -15,10 +15,11 @@ const GOAL_STATUS_LABEL: Record<OrchestrationGoal["status"], string> = {
   cleared: "cleared",
 };
 
-function formatTokens(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
-  return String(tokens);
+function goalMetaLabel(goal: OrchestrationGoal): string {
+  if (goal.status === "complete" || goal.status === "budget_limited") {
+    return formatGoalUsageSummary(goal);
+  }
+  return `${goal.turnCount} turns`;
 }
 
 /**
@@ -53,7 +54,6 @@ export function GoalIndicator({
     return null;
   }
 
-  const budgetHint = goal.tokenBudget !== null ? ` / ${formatTokens(goal.tokenBudget)}` : "";
   const canPause = goal.status === "active";
   const canResume = goal.status === "paused" || goal.status === "blocked";
 
@@ -70,14 +70,7 @@ export function GoalIndicator({
           >
             <span aria-hidden>🎯</span>
             <span className="sr-only sm:not-sr-only">Goal: {GOAL_STATUS_LABEL[goal.status]}</span>
-            <span className="text-muted-foreground/70">{goal.turnCount} turns</span>
-            <span className="text-muted-foreground/70">
-              {formatTokens(goal.tokensUsed)}
-              {budgetHint} tokens
-            </span>
-            <span className="text-muted-foreground/70">
-              {formatSecondsCompact(goal.timeUsedSeconds)}
-            </span>
+            <span className="text-muted-foreground/70">{goalMetaLabel(goal)}</span>
           </button>
         }
       />
@@ -97,11 +90,7 @@ export function GoalIndicator({
           ) : null}
           <div className="flex gap-3 text-xs text-muted-foreground">
             <span>{goal.turnCount} turns</span>
-            <span>
-              {formatTokens(goal.tokensUsed)}
-              {budgetHint} tokens
-            </span>
-            <span>{formatSecondsCompact(goal.timeUsedSeconds)}</span>
+            <span>{formatGoalUsageSummary(goal)}</span>
           </div>
           <div className="flex gap-2 pt-1">
             {canPause ? (
