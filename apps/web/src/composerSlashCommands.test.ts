@@ -93,19 +93,16 @@ describe("composerSlashCommands", () => {
 
   it("returns an invalid create action when the interval is missing or malformed", () => {
     expect(parseLoopSlashCommand("find and fix bugs")).toEqual({
-      kind: "create",
-      prompt: "",
-      intervalSeconds: 0,
+      kind: "invalid",
+      reason: "syntax",
     });
     expect(parseLoopSlashCommand("5m")).toEqual({
-      kind: "create",
-      prompt: "",
-      intervalSeconds: 0,
+      kind: "invalid",
+      reason: "syntax",
     });
     expect(parseLoopSlashCommand("5 find and fix bugs")).toEqual({
-      kind: "create",
-      prompt: "",
-      intervalSeconds: 0,
+      kind: "invalid",
+      reason: "syntax",
     });
   });
 

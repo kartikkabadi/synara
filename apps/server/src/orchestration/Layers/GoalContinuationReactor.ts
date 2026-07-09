@@ -208,6 +208,22 @@ const make = Effect.gen(function* () {
         dispatchMode: "queue",
         createdAt: new Date().toISOString(),
       });
+      // Keep the bootstrap marker when the thread is busy or dispatch fails. The
+      // next reconciliation/trigger must be able to retry instead of silently
+      // losing the only startup opportunity for a persisted goal.
+      reconcileBootstrapThreadIds.delete(threadId);
+      return;
+    }
+
+    // A goal can be created on a thread that already has a completed turn. That
+    // old turn must not become the goal's first continuation after restart; only
+    // a turn completed after the goal was created is eligible to drive the loop.
+    if (
+      goal.turnCount === 0 &&
+      goal.continuationCount === 0 &&
+      latestTurn.completedAt !== null &&
+      Date.parse(latestTurn.completedAt) < Date.parse(goal.createdAt)
+    ) {
       return;
     }
 
@@ -431,6 +447,15 @@ const make = Effect.gen(function* () {
     // ProviderSessionReaper.ts:79 (Schedule.spaced without Schedule.forever).
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+        if (
+          event.type === "thread.goal-created" ||
+          event.type === "thread.goal-cleared" ||
+          event.type === "thread.goal-resumed"
+        ) {
+          // This state is intentionally per activation, not per thread. A new
+          // goal on the same thread must be allowed to emit its own budget wrap-up.
+          budgetSteered.delete(event.payload.threadId);
+        }
         if (!TRIGGER_EVENT_TYPES.has(event.type)) {
           return Effect.void;
         }

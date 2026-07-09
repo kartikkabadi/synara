@@ -736,6 +736,15 @@ export function useComposerSlashCommands(input: {
       const threadId = activeThread.id;
       const createdAt = new Date().toISOString();
 
+      if (parsed.kind === "invalid") {
+        toastManager.add({
+          type: "warning",
+          title: "Invalid loop command",
+          description: "Use /loop <interval> <prompt>. Example: /loop 5m find and fix bugs",
+        });
+        return;
+      }
+
       if (parsed.kind === "create") {
         if (parsed.intervalSeconds < 60 || parsed.intervalSeconds > 3600) {
           toastManager.add({

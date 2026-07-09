@@ -515,6 +515,7 @@ export type LoopSlashCommandAction =
   | { kind: "pause" }
   | { kind: "resume" }
   | { kind: "clear" }
+  | { kind: "invalid"; reason: "syntax" }
   | { kind: "create"; prompt: string; intervalSeconds: number };
 
 // `/loop` (status), `/loop pause|resume|clear`, or `/loop <interval> <prompt>`.
@@ -534,7 +535,7 @@ export function parseLoopSlashCommand(args: string): LoopSlashCommandAction {
   // Parse interval: first token must match <n>m or <n>h.
   const intervalMatch = /^(\d+)(m|h)\s+(.+)$/is.exec(trimmed);
   if (!intervalMatch || !intervalMatch[1] || !intervalMatch[2] || !intervalMatch[3]) {
-    return { kind: "create", prompt: "", intervalSeconds: 0 };
+    return { kind: "invalid", reason: "syntax" };
   }
   const num = Number(intervalMatch[1]);
   const unit = intervalMatch[2].toLowerCase();

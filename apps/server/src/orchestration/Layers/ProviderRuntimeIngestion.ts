@@ -1277,6 +1277,7 @@ function runtimeEventToActivities(
             ...(typeof event.payload.cumulativeCostUsd === "number"
               ? { cumulativeCostUsd: event.payload.cumulativeCostUsd }
               : {}),
+            ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
             ...(errorMessage ? { errorMessage } : {}),
           }),
           turnId: toTurnId(event.turnId) ?? null,
