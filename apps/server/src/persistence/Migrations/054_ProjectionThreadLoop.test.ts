@@ -11,12 +11,12 @@ const tableColumns = (sql: SqlClient.SqlClient) =>
     SELECT name FROM pragma_table_info('projection_thread_loop')
   `.pipe(Effect.map((rows) => rows.map((row) => row.name)));
 
-describe("050_ProjectionThreadLoop", () => {
+describe("054_ProjectionThreadLoop", () => {
   it.effect("creates the projection_thread_loop table", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
 
-      yield* runMigrations({ toMigrationInclusive: 49 });
+      yield* runMigrations({ toMigrationInclusive: 53 });
 
       const beforeRows = yield* sql<{ readonly name: string }>`
         SELECT name FROM sqlite_master
@@ -24,7 +24,7 @@ describe("050_ProjectionThreadLoop", () => {
       `;
       assert.lengthOf(beforeRows, 0);
 
-      yield* runMigrations({ toMigrationInclusive: 50 });
+      yield* runMigrations({ toMigrationInclusive: 54 });
 
       const afterRows = yield* sql<{ readonly name: string }>`
         SELECT name FROM sqlite_master
@@ -41,8 +41,8 @@ describe("050_ProjectionThreadLoop", () => {
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
 
-      yield* runMigrations({ toMigrationInclusive: 50 });
-      yield* runMigrations({ toMigrationInclusive: 50 });
+      yield* runMigrations({ toMigrationInclusive: 54 });
+      yield* runMigrations({ toMigrationInclusive: 54 });
 
       const rows = yield* sql<{ readonly name: string }>`
         SELECT name FROM sqlite_master
