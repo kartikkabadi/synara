@@ -14,6 +14,8 @@ import {
   parseComposerSlashInvocationForCommands,
   parseFastSlashCommandAction,
   parseForkSlashCommandArgs,
+  parseGoalSlashCommand,
+  parseLoopSlashCommand,
   providerSupportsTextNativeReviewCommand,
   shouldHideProviderNativeCommandFromComposerMenu,
 } from "./composerSlashCommands";
@@ -44,6 +46,126 @@ describe("composerSlashCommands", () => {
       ),
     ).toEqual(["model", "fast", "default"]);
   });
+
+  it("parses /goal subcommands and objectives", () => {
+    expect(parseGoalSlashCommand("")).toEqual({ kind: "status" });
+    expect(parseGoalSlashCommand("status")).toEqual({ kind: "status" });
+    expect(parseGoalSlashCommand("pause")).toEqual({ kind: "pause" });
+    expect(parseGoalSlashCommand("resume")).toEqual({ kind: "resume" });
+    expect(parseGoalSlashCommand("clear")).toEqual({ kind: "clear" });
+    expect(parseGoalSlashCommand("complete")).toEqual({ kind: "complete" });
+    expect(parseGoalSlashCommand("Migrate the auth module")).toEqual({
+      kind: "create",
+      objective: "Migrate the auth module",
+      tokenBudget: null,
+    });
+    expect(parseGoalSlashCommand("Migrate the auth module --budget 5000")).toEqual({
+      kind: "create",
+      objective: "Migrate the auth module",
+      tokenBudget: 5000,
+    });
+    expect(parseGoalSlashCommand("Ship it --budget=100")).toEqual({
+      kind: "create",
+      objective: "Ship it",
+      tokenBudget: 100,
+    });
+  });
+
+  it("parses /loop subcommands and create form", () => {
+    expect(parseLoopSlashCommand("")).toEqual({ kind: "status" });
+    expect(parseLoopSlashCommand("status")).toEqual({ kind: "status" });
+    expect(parseLoopSlashCommand("pause")).toEqual({ kind: "pause" });
+    expect(parseLoopSlashCommand("resume")).toEqual({ kind: "resume" });
+    expect(parseLoopSlashCommand("clear")).toEqual({ kind: "clear" });
+    expect(parseLoopSlashCommand("5m find and fix bugs")).toEqual({
+      kind: "create",
+      prompt: "find and fix bugs",
+      intervalSeconds: 300,
+    });
+    expect(parseLoopSlashCommand("1h rebuild the index")).toEqual({
+      kind: "create",
+      prompt: "rebuild the index",
+      intervalSeconds: 3600,
+    });
+    // Case-insensitive lifecycle keywords.
+    expect(parseLoopSlashCommand("PAUSE")).toEqual({ kind: "pause" });
+  });
+
+  it("returns an invalid create action when the interval is missing or malformed", () => {
+    expect(parseLoopSlashCommand("find and fix bugs")).toEqual({
+      kind: "invalid",
+      reason: "syntax",
+    });
+    expect(parseLoopSlashCommand("5m")).toEqual({
+      kind: "invalid",
+      reason: "syntax",
+    });
+    expect(parseLoopSlashCommand("5 find and fix bugs")).toEqual({
+      kind: "invalid",
+      reason: "syntax",
+    });
+  });
+
+  it.each(["codex", "cursor", "gemini", "opencode", "pi"] as const)(
+    "offers /loop to providers with a compaction path: %s",
+    (provider) => {
+      expect(
+        getAvailableComposerSlashCommands({
+          provider,
+          supportsFastSlashCommand: true,
+          canOfferCompactCommand: true,
+          canOfferReviewCommand: true,
+          canOfferForkCommand: true,
+          canOfferSideCommand: true,
+        }),
+      ).toContain("loop");
+    },
+  );
+
+  it.each(["claudeAgent", "grok", "kilo"] as const)(
+    "hides /loop from providers without a compaction path: %s",
+    (provider) => {
+      expect(
+        getAvailableComposerSlashCommands({
+          provider,
+          supportsFastSlashCommand: true,
+          canOfferCompactCommand: true,
+          canOfferReviewCommand: true,
+          canOfferForkCommand: true,
+          canOfferSideCommand: true,
+        }),
+      ).not.toContain("loop");
+    },
+  );
+
+  it("keeps /goal available when /loop is unsupported", () => {
+    expect(
+      getAvailableComposerSlashCommands({
+        provider: "grok",
+        supportsFastSlashCommand: true,
+        canOfferCompactCommand: true,
+        canOfferReviewCommand: true,
+        canOfferForkCommand: true,
+        canOfferSideCommand: true,
+      }),
+    ).toContain("goal");
+  });
+
+  it.each(["codex", "claudeAgent", "cursor", "gemini", "grok", "kilo", "opencode", "pi"] as const)(
+    "offers Synara /goal for %s",
+    (provider) => {
+      expect(
+        getAvailableComposerSlashCommands({
+          provider,
+          supportsFastSlashCommand: true,
+          canOfferCompactCommand: true,
+          canOfferReviewCommand: true,
+          canOfferForkCommand: true,
+          canOfferSideCommand: true,
+        }),
+      ).toContain("goal");
+    },
+  );
 
   it("parses slash invocations with optional arguments", () => {
     expect(parseComposerSlashInvocation("/review current diff")).toEqual({
@@ -299,7 +421,7 @@ describe("composerSlashCommands", () => {
         canOfferSideCommand: true,
         canOfferExportCommand: true,
       }),
-    ).toEqual(["side", "export", "feedback", "automation"]);
+    ).toEqual(["side", "export", "feedback", "automation", "goal"]);
   });
 
   it("offers the app-level /export command on every provider", () => {
@@ -412,6 +534,8 @@ describe("composerSlashCommands", () => {
       "export",
       "feedback",
       "automation",
+      "goal",
+      "loop",
     ]);
   });
 

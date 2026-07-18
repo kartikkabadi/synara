@@ -5799,7 +5799,7 @@ describe("ProviderRuntimeIngestion", () => {
     ).toBe("# Plan title");
   });
 
-  it("still appends turn.completed activity when the provider omits cost metadata", async () => {
+  it("preserves turn usage metadata in the projected completion activity", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
 
@@ -5812,6 +5812,8 @@ describe("ProviderRuntimeIngestion", () => {
       turnId: asTurnId("turn-no-cost"),
       payload: {
         state: "completed",
+        usage: { inputTokens: 120, outputTokens: 30, totalTokens: 150 },
+        modelUsage: { "gpt-5": { inputTokens: 120, outputTokens: 30 } },
       },
     });
 
@@ -5832,6 +5834,14 @@ describe("ProviderRuntimeIngestion", () => {
     expect(completed?.kind).toBe("turn.completed");
     expect(completed?.turnId).toBe("turn-no-cost");
     expect(completedPayload?.state).toBe("completed");
+    expect(completedPayload?.usage).toEqual({
+      inputTokens: 120,
+      outputTokens: 30,
+      totalTokens: 150,
+    });
+    expect(completedPayload?.modelUsage).toEqual({
+      "gpt-5": { inputTokens: 120, outputTokens: 30 },
+    });
     expect(completedPayload?.totalCostUsd).toBeUndefined();
   });
 

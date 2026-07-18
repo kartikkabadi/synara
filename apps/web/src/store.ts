@@ -67,6 +67,7 @@ export interface AppState {
   activityByThreadId?: Record<ThreadId, Record<string, Thread["activities"][number]>>;
   proposedPlanIdsByThreadId?: Record<ThreadId, string[]>;
   proposedPlanByThreadId?: Record<ThreadId, Record<string, Thread["proposedPlans"][number]>>;
+  threadGoalById?: Record<ThreadId, Thread["goal"]>;
   turnDiffIdsByThreadId?: Record<ThreadId, TurnId[]>;
   turnDiffSummaryByThreadId?: Record<ThreadId, Record<TurnId, Thread["turnDiffSummaries"][number]>>;
   deletedProjectIdsById?: Record<Project["id"], true>;
@@ -116,6 +117,7 @@ const EMPTY_PROPOSED_PLAN_BY_THREAD: Record<
   ThreadId,
   Record<string, Thread["proposedPlans"][number]>
 > = {};
+const EMPTY_THREAD_GOAL_BY_ID: Record<ThreadId, Thread["goal"]> = {};
 const EMPTY_TURN_DIFF_IDS_BY_THREAD: Record<ThreadId, TurnId[]> = {};
 const EMPTY_TURN_DIFF_BY_THREAD: Record<
   ThreadId,
@@ -1627,6 +1629,8 @@ function normalizeThreadFromReadModel(
   const session = normalizeThreadSession(incoming.session, previous?.session);
   const messages = normalizeChatMessages(incoming.messages, previous?.messages);
   const proposedPlans = normalizeProposedPlans(incoming.proposedPlans, previous?.proposedPlans);
+  const goal = incoming.goal ?? null;
+  const loop = incoming.loop ?? null;
   const latestTurn = normalizeLatestTurn(incoming.latestTurn, previous?.latestTurn);
   const handoff =
     previous?.handoff && incoming.handoff && deepEqualJson(previous.handoff, incoming.handoff)
@@ -1745,7 +1749,9 @@ function normalizeThreadFromReadModel(
     previous.notes === notes &&
     previous.turnDiffSummaries === turnDiffSummaries &&
     previous.activities === activities &&
-    previous.pendingInteractions === pendingInteractions
+    previous.pendingInteractions === pendingInteractions &&
+    deepEqualJson(previous.goal ?? null, goal) &&
+    deepEqualJson(previous.loop ?? null, loop)
   ) {
     return previous;
   }
@@ -1761,6 +1767,8 @@ function normalizeThreadFromReadModel(
     session,
     messages,
     proposedPlans,
+    goal,
+    loop,
     error,
     createdAt: incoming.createdAt,
     archivedAt: incoming.archivedAt ?? null,
@@ -2485,6 +2493,16 @@ function writeThreadState(state: AppState, nextThread: Thread, previousThread?: 
     };
   }
 
+  if ((previousThread?.goal ?? null) !== (nextThread.goal ?? null)) {
+    nextState = {
+      ...nextState,
+      threadGoalById: {
+        ...(nextState.threadGoalById ?? EMPTY_THREAD_GOAL_BY_ID),
+        [nextThread.id]: nextThread.goal ?? null,
+      },
+    };
+  }
+
   if (previousThread?.turnDiffSummaries !== nextThread.turnDiffSummaries) {
     const nextTurnDiffSlice = buildTurnDiffSlice(nextThread);
     nextState = {
@@ -2510,6 +2528,12 @@ function removeThreadState(state: AppState, threadId: ThreadId): AppState {
     state.threadSessionById ?? EMPTY_THREAD_SESSION_BY_ID;
   const { [threadId]: _removedTurnState, ...threadTurnStateById } =
     state.threadTurnStateById ?? EMPTY_THREAD_TURN_STATE_BY_ID;
+  // Goal state lives in a separate map (loop flows through the shell, which is
+  // already destructured above). Without this, deleting a thread leaves a
+  // dangling threadGoalById entry that getThreadFromState would keep
+  // reconstructing into a stale Thread.goal on a recycled thread id.
+  const { [threadId]: _removedGoal, ...threadGoalById } =
+    state.threadGoalById ?? EMPTY_THREAD_GOAL_BY_ID;
   const { [threadId]: _removedMessageIds, ...messageIdsByThreadId } =
     state.messageIdsByThreadId ?? EMPTY_MESSAGE_IDS_BY_THREAD;
   const { [threadId]: _removedMessages, ...messageByThreadId } =
@@ -2543,6 +2567,7 @@ function removeThreadState(state: AppState, threadId: ThreadId): AppState {
     threadShellById,
     threadSessionById,
     threadTurnStateById,
+    threadGoalById,
     messageIdsByThreadId,
     messageByThreadId,
     activityIdsByThreadId,
@@ -3905,6 +3930,95 @@ function applyOrchestrationEvent(
         },
       );
 
+    case "thread.goal-created":
+      return applyThreadUpdate(
+        state,
+        event.payload.threadId,
+        (thread) => ({
+          ...thread,
+          goal: event.payload.goal,
+          updatedAt:
+            (thread.updatedAt ?? thread.createdAt) > event.payload.goal.updatedAt
+              ? thread.updatedAt
+              : event.payload.goal.updatedAt,
+        }),
+        options,
+      );
+
+    case "thread.goal-paused":
+    case "thread.goal-resumed":
+    case "thread.goal-cleared":
+    case "thread.goal-completed": {
+      const nextGoalStatus =
+        event.type === "thread.goal-paused"
+          ? "paused"
+          : event.type === "thread.goal-resumed"
+            ? "active"
+            : event.type === "thread.goal-cleared"
+              ? "cleared"
+              : "complete";
+      const goalUpdatedAt = event.payload.updatedAt;
+      return applyThreadUpdate(
+        state,
+        event.payload.threadId,
+        (thread) =>
+          thread.goal
+            ? {
+                ...thread,
+                goal: { ...thread.goal, status: nextGoalStatus, updatedAt: goalUpdatedAt },
+                updatedAt:
+                  (thread.updatedAt ?? thread.createdAt) > goalUpdatedAt
+                    ? thread.updatedAt
+                    : goalUpdatedAt,
+              }
+            : thread,
+        options,
+      );
+    }
+
+    case "thread.loop-created":
+      return applyThreadUpdate(
+        state,
+        event.payload.threadId,
+        (thread) => ({
+          ...thread,
+          loop: event.payload.loop,
+          updatedAt:
+            (thread.updatedAt ?? thread.createdAt) > event.payload.loop.updatedAt
+              ? thread.updatedAt
+              : event.payload.loop.updatedAt,
+        }),
+        options,
+      );
+
+    case "thread.loop-paused":
+    case "thread.loop-resumed":
+    case "thread.loop-cleared": {
+      const nextLoopStatus =
+        event.type === "thread.loop-paused"
+          ? "paused"
+          : event.type === "thread.loop-resumed"
+            ? "active"
+            : "cleared";
+      const loopUpdatedAt = event.payload.updatedAt;
+      return applyThreadUpdate(
+        state,
+        event.payload.threadId,
+        (thread) =>
+          thread.loop
+            ? {
+                ...thread,
+                loop: { ...thread.loop, status: nextLoopStatus, updatedAt: loopUpdatedAt },
+                updatedAt:
+                  (thread.updatedAt ?? thread.createdAt) > loopUpdatedAt
+                    ? thread.updatedAt
+                    : loopUpdatedAt,
+              }
+            : thread,
+        options,
+      );
+    }
+
     case "thread.turn-diff-completed":
       return applyThreadUpdate(
         state,
@@ -4229,6 +4343,7 @@ export function syncServerShellSnapshot(
       nextThreadIds,
     ),
     proposedPlanByThreadId: retainThreadScopedRecord(state.proposedPlanByThreadId, nextThreadIds),
+    threadGoalById: retainThreadScopedRecord(state.threadGoalById, nextThreadIds),
     turnDiffIdsByThreadId: retainThreadScopedRecord(state.turnDiffIdsByThreadId, nextThreadIds),
     turnDiffSummaryByThreadId: retainThreadScopedRecord(
       state.turnDiffSummaryByThreadId,
@@ -4373,6 +4488,7 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
       nextThreadIds,
     ),
     proposedPlanByThreadId: retainThreadScopedRecord(state.proposedPlanByThreadId, nextThreadIds),
+    threadGoalById: retainThreadScopedRecord(state.threadGoalById, nextThreadIds),
     turnDiffIdsByThreadId: retainThreadScopedRecord(state.turnDiffIdsByThreadId, nextThreadIds),
     turnDiffSummaryByThreadId: retainThreadScopedRecord(
       state.turnDiffSummaryByThreadId,

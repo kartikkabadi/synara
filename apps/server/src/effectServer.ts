@@ -29,7 +29,12 @@ import {
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor";
+import { GoalContinuationReactor } from "./orchestration/Services/GoalContinuationReactor";
+import { LoopReactor } from "./orchestration/Services/LoopReactor";
+import { CompactionReactor } from "./orchestration/Services/CompactionReactor";
 import { reconcileRestartStuckTurns } from "./orchestration/startupTurnReconciliation";
+import { reconcileRestartActiveGoals } from "./orchestration/startupGoalReconciliation";
+import { reconcileRestartActiveLoops } from "./orchestration/startupLoopReconciliation";
 import { ProviderSessionReaper } from "./provider/Services/ProviderSessionReaper";
 import { ProviderService, type ProviderServiceShape } from "./provider/Services/ProviderService";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
@@ -63,6 +68,9 @@ export interface ServerShape {
     | ServerSettingsService
     | ThreadDeletionReactor
     | SqlClient.SqlClient
+    | GoalContinuationReactor
+    | LoopReactor
+    | CompactionReactor
   >;
   readonly stopSignal: Effect.Effect<void, never>;
 }
@@ -118,6 +126,9 @@ export const createEffectServer = Effect.fn(function* () {
   const runtimeStartup = yield* ServerRuntimeStartup;
   const serverSettings = yield* ServerSettingsService;
   const threadDeletionReactor = yield* ThreadDeletionReactor;
+  const goalContinuationReactor = yield* GoalContinuationReactor;
+  const loopReactor = yield* LoopReactor;
+  const compactionReactor = yield* CompactionReactor;
   const readiness = yield* makeServerReadiness;
 
   yield* keybindings.syncDefaultKeybindingsOnStartup.pipe(
@@ -183,6 +194,9 @@ export const createEffectServer = Effect.fn(function* () {
   yield* Scope.provide(automationScheduler.start(), subscriptionsScope);
   yield* Scope.provide(automationRunReactor.start(), subscriptionsScope);
   yield* Scope.provide(threadDeletionReactor.start(), subscriptionsScope);
+  yield* Scope.provide(goalContinuationReactor.start(), subscriptionsScope);
+  yield* Scope.provide(loopReactor.start(), subscriptionsScope);
+  yield* Scope.provide(compactionReactor.start(), subscriptionsScope);
   yield* Scope.provide(providerSessionReaper.start(), subscriptionsScope);
   yield* readiness.markOrchestrationSubscriptionsReady;
   yield* readiness.markTerminalSubscriptionsReady;
@@ -195,6 +209,15 @@ export const createEffectServer = Effect.fn(function* () {
       (cause) => new ServerLifecycleError({ operation: "recoverGitHandoffOperations", cause }),
     ),
   );
+  // Re-enqueue active goals into the continuation reactor so they resume without
+  // waiting for a manual message. Runs after stuck-turn healing (so terminal turns
+  // are resolved first) and before markCommandReady (so goals are unblocked before
+  // clients connect). The reactor queues reconciliation without delaying readiness for
+  // each active thread.
+  yield* reconcileRestartActiveGoals;
+  // Re-enqueue active loops into the loop reactor so they resume without waiting
+  // for a manual message. Same pattern as goal reconciliation above.
+  yield* reconcileRestartActiveLoops;
   yield* runtimeStartup.markCommandReady;
 
   yield* lifecycleEvents.publish({

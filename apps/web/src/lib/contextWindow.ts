@@ -1,4 +1,5 @@
 import type { OrchestrationThreadActivity, ThreadTokenUsageSnapshot } from "@synara/contracts";
+import { deriveLatestContextWindowUsage } from "@synara/shared/contextWindow";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
@@ -6,18 +7,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asFiniteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function asBoolean(value: unknown): boolean | null {
-  return typeof value === "boolean" ? value : null;
-}
-
-function asContextWindowPercent(value: unknown): number | null {
-  const percent = asFiniteNumber(value);
-  if (percent === null) {
-    return null;
-  }
-  return Math.max(0, Math.min(100, percent));
 }
 
 type NullableContextWindowUsage = {
@@ -57,58 +46,44 @@ const KNOWN_CONTEXT_WINDOW_MAX_TOKENS = {
 function deriveLatestUsageContextWindowSnapshot(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): ContextWindowSnapshot | null {
-  for (let index = activities.length - 1; index >= 0; index -= 1) {
-    const activity = activities[index];
-    if (!activity || activity.kind !== "context-window.updated") {
-      continue;
-    }
-
-    const payload = asRecord(activity.payload);
-    const rawUsedTokens = asFiniteNumber(payload?.usedTokens);
-    const usedTokens = rawUsedTokens ?? 0;
-    const payloadUsedPercent = asContextWindowPercent(payload?.usedPercent);
-    const maxTokens = asFiniteNumber(payload?.maxTokens);
-    if (usedTokens <= 0 && payloadUsedPercent === null && (maxTokens === null || maxTokens <= 0)) {
-      continue;
-    }
-
-    const usedPercentage =
-      payloadUsedPercent ??
-      (maxTokens !== null && maxTokens > 0 ? Math.min(100, (usedTokens / maxTokens) * 100) : null);
-    const hasReliableTokenUsage =
-      rawUsedTokens !== null &&
-      (usedTokens > 0 || payloadUsedPercent === null || (maxTokens !== null && maxTokens > 0));
-    const remainingTokens =
-      maxTokens !== null && hasReliableTokenUsage
-        ? Math.max(0, Math.round(maxTokens - usedTokens))
-        : null;
-    const remainingPercentage = usedPercentage !== null ? Math.max(0, 100 - usedPercentage) : null;
-
-    return {
-      usedTokens,
-      usedPercent: payloadUsedPercent,
-      totalProcessedTokens: asFiniteNumber(payload?.totalProcessedTokens),
-      maxTokens,
-      remainingTokens,
-      usedPercentage,
-      remainingPercentage,
-      inputTokens: asFiniteNumber(payload?.inputTokens),
-      cachedInputTokens: asFiniteNumber(payload?.cachedInputTokens),
-      outputTokens: asFiniteNumber(payload?.outputTokens),
-      reasoningOutputTokens: asFiniteNumber(payload?.reasoningOutputTokens),
-      lastUsedTokens: asFiniteNumber(payload?.lastUsedTokens),
-      lastInputTokens: asFiniteNumber(payload?.lastInputTokens),
-      lastCachedInputTokens: asFiniteNumber(payload?.lastCachedInputTokens),
-      lastOutputTokens: asFiniteNumber(payload?.lastOutputTokens),
-      lastReasoningOutputTokens: asFiniteNumber(payload?.lastReasoningOutputTokens),
-      toolUses: asFiniteNumber(payload?.toolUses),
-      durationMs: asFiniteNumber(payload?.durationMs),
-      compactsAutomatically: asBoolean(payload?.compactsAutomatically) ?? false,
-      updatedAt: activity.createdAt,
-    };
+  const latest = deriveLatestContextWindowUsage(activities);
+  if (latest === null) {
+    return null;
   }
 
-  return null;
+  const { usage } = latest;
+  const maxTokens = usage.maxTokens ?? null;
+  const hasReliableTokenUsage =
+    usage.usedTokens > 0 || usage.usedPercent === undefined || usage.maxTokens !== undefined;
+  const remainingTokens =
+    maxTokens !== null && hasReliableTokenUsage
+      ? Math.max(0, Math.round(maxTokens - usage.usedTokens))
+      : null;
+  const remainingPercentage =
+    latest.usedPercentage !== null ? Math.max(0, 100 - latest.usedPercentage) : null;
+
+  return {
+    usedTokens: usage.usedTokens,
+    usedPercent: usage.usedPercent ?? null,
+    totalProcessedTokens: usage.totalProcessedTokens ?? null,
+    maxTokens,
+    remainingTokens,
+    usedPercentage: latest.usedPercentage,
+    remainingPercentage,
+    inputTokens: usage.inputTokens ?? null,
+    cachedInputTokens: usage.cachedInputTokens ?? null,
+    outputTokens: usage.outputTokens ?? null,
+    reasoningOutputTokens: usage.reasoningOutputTokens ?? null,
+    lastUsedTokens: usage.lastUsedTokens ?? null,
+    lastInputTokens: usage.lastInputTokens ?? null,
+    lastCachedInputTokens: usage.lastCachedInputTokens ?? null,
+    lastOutputTokens: usage.lastOutputTokens ?? null,
+    lastReasoningOutputTokens: usage.lastReasoningOutputTokens ?? null,
+    toolUses: usage.toolUses ?? null,
+    durationMs: usage.durationMs ?? null,
+    compactsAutomatically: usage.compactsAutomatically ?? false,
+    updatedAt: latest.updatedAt,
+  };
 }
 
 // Use the configured session window as the source of truth for the meter denominator.

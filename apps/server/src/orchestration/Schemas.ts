@@ -23,6 +23,11 @@ import {
   ThreadTurnDiffCompletedPayload as ContractsThreadTurnDiffCompletedPayloadSchema,
   ThreadRevertedPayload as ContractsThreadRevertedPayloadSchema,
   ThreadActivityAppendedPayload as ContractsThreadActivityAppendedPayloadSchema,
+  ThreadGoalCreatedPayload as ContractsThreadGoalCreatedPayloadSchema,
+  ThreadGoalLifecyclePayload as ContractsThreadGoalLifecyclePayloadSchema,
+  ThreadGoalBlockedPayload as ContractsThreadGoalBlockedPayloadSchema,
+  ThreadLoopCreatedPayload as ContractsThreadLoopCreatedPayloadSchema,
+  ThreadLoopLifecyclePayload as ContractsThreadLoopLifecyclePayloadSchema,
   ThreadTurnStartRequestedPayload as ContractsThreadTurnStartRequestedPayloadSchema,
   ThreadTurnInterruptRequestedPayload as ContractsThreadTurnInterruptRequestedPayloadSchema,
   ThreadApprovalResponseRequestedPayload as ContractsThreadApprovalResponseRequestedPayloadSchema,
@@ -60,6 +65,11 @@ export const ThreadSessionSetPayload = ContractsThreadSessionSetPayloadSchema;
 export const ThreadTurnDiffCompletedPayload = ContractsThreadTurnDiffCompletedPayloadSchema;
 export const ThreadRevertedPayload = ContractsThreadRevertedPayloadSchema;
 export const ThreadActivityAppendedPayload = ContractsThreadActivityAppendedPayloadSchema;
+export const ThreadGoalCreatedPayload = ContractsThreadGoalCreatedPayloadSchema;
+export const ThreadGoalLifecyclePayload = ContractsThreadGoalLifecyclePayloadSchema;
+export const ThreadGoalBlockedPayload = ContractsThreadGoalBlockedPayloadSchema;
+export const ThreadLoopCreatedPayload = ContractsThreadLoopCreatedPayloadSchema;
+export const ThreadLoopLifecyclePayload = ContractsThreadLoopLifecyclePayloadSchema;
 
 export const ThreadTurnStartRequestedPayload = ContractsThreadTurnStartRequestedPayloadSchema;
 export const ThreadTurnInterruptRequestedPayload =

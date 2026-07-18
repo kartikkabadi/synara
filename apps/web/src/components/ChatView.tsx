@@ -402,6 +402,8 @@ import {
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { ChatHeader } from "./chat/ChatHeader";
+import { GoalIndicator } from "./chat/GoalIndicator";
+import { LoopIndicator } from "./chat/LoopIndicator";
 import { dispatchThreadNotes } from "~/pinnedMessages";
 import {
   mergeProjectInstructionsIntoThreadNotes,
@@ -449,6 +451,7 @@ import {
 import { ChatTranscriptPane } from "./chat/ChatTranscriptPane";
 import type { MessagesTimelineController } from "./chat/MessagesTimeline";
 import { buildTurnDiffSummaryByAssistantMessageId } from "./chat/MessagesTimeline.logic";
+import { formatGoalCompletionSummary } from "~/lib/goalDisplay";
 import { deriveAgentActivityTimelineState } from "./chat/agentActivity.logic";
 import { ComposerSlashStatusDialog } from "./chat/ComposerSlashStatusDialog";
 import { ExpandedImagePreview } from "./chat/ExpandedImagePreview";
@@ -1735,6 +1738,15 @@ export default function ChatView({
     activities: threadActivities,
     session: activeThread?.session ?? null,
   });
+  // Last assistant completion timestamp, memoized so the LoopIndicator
+  // countdown doesn't re-scan the full message list on every render.
+  const lastAssistantCompletedAt = useMemo(
+    () =>
+      activeThread?.messages.findLast(
+        (message) => message.role === "assistant" && message.completedAt,
+      )?.completedAt,
+    [activeThread?.messages],
+  );
   const activeContextWindow = useMemo(
     () => deriveLatestContextWindowSnapshot(threadActivities),
     [threadActivities],
@@ -11105,6 +11117,14 @@ export default function ChatView({
                             </Button>
                           ) : null}
 
+                          <GoalIndicator goal={activeThread?.goal} threadId={activeThreadId} />
+                          <LoopIndicator
+                            loop={activeThread?.loop}
+                            threadId={activeThreadId}
+                            isWorking={isWorking}
+                            lastIterationCompletedAt={lastAssistantCompletedAt}
+                          />
+
                           {activeTaskList || sidebarProposedPlan || planSidebarOpen ? (
                             <Button
                               variant="ghost"
@@ -11599,6 +11619,11 @@ export default function ChatView({
                     canPinMessage={(messageId) => !isPendingSetupBubbleId(messageId)}
                     onTogglePinMessage={handleTogglePinMessageGuarded}
                     threadMarkers={threadMarkers}
+                    goalCompletionSummary={
+                      activeThread.goal
+                        ? (formatGoalCompletionSummary(activeThread.goal) ?? "Goal complete.")
+                        : null
+                    }
                     enteringUserMessageIds={enteringUserMessageIds}
                     timelineEntries={timelineEntries}
                     turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}

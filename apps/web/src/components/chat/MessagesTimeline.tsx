@@ -11,6 +11,7 @@ import {
   type TurnId,
 } from "@synara/contracts";
 import { resolveLatestTailUserMessageEditTarget } from "@synara/shared/conversationEdit";
+import { stripGoalCompletionSentinel } from "@synara/shared/orchestrationGoals";
 import { pluralize } from "@synara/shared/text";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import {
@@ -399,6 +400,8 @@ interface MessagesTimelineProps {
   onTogglePinMessage?: (messageId: MessageId) => void;
   /** Text markers for assistant messages in the active thread. */
   threadMarkers?: readonly ThreadMarker[];
+  /** Summary appended when an assistant message ends with the hidden goal marker. */
+  goalCompletionSummary?: string | null;
   /** User messages inserted locally by send actions, eligible for the subtle enter affordance. */
   enteringUserMessageIds?: ReadonlySet<MessageId>;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
@@ -460,6 +463,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   canPinMessage,
   onTogglePinMessage,
   threadMarkers = [],
+  goalCompletionSummary = null,
   enteringUserMessageIds = EMPTY_MESSAGE_ID_SET,
   timelineEntries,
   turnDiffSummaryByAssistantMessageId,
@@ -1234,7 +1238,22 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       {row.kind === "message" &&
         row.message.role === "assistant" &&
         (() => {
-          const messageText = resolveAssistantMessageDisplayText(row);
+          const sentinelDisplay =
+            goalCompletionSummary === null
+              ? { text: row.message.text, hadSentinel: false }
+              : stripGoalCompletionSentinel(row.message.text);
+          const assistantText =
+            sentinelDisplay.hadSentinel && sentinelDisplay.text.trim().length > 0
+              ? `${sentinelDisplay.text}\n\n${goalCompletionSummary ?? "Goal complete."}`
+              : sentinelDisplay.hadSentinel
+                ? (goalCompletionSummary ?? "Goal complete.")
+                : row.message.text || (row.message.streaming ? "" : "(empty response)");
+          const messageText = resolveAssistantMessageDisplayText({
+            message: { text: assistantText, streaming: row.message.streaming },
+            leadingWorkEntries: row.leadingWorkEntries,
+            inlineWorkEntries: row.inlineWorkEntries,
+            collapsedTurnItems: row.collapsedTurnItems,
+          });
           const messageMarkers =
             threadMarkersByMessageId.get(row.message.id) ?? EMPTY_MESSAGE_MARKERS;
           const buildWorkDisplay = (workEntries: WorkLogEntry[], workGroupId: string | null) => {
@@ -1502,6 +1521,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               )}
               <div className="group min-w-0 py-0.5">
                 {renderWorkDisplay(leadingWorkDisplay, "leading")}
+                {row.loopIterationNumber ? (
+                  <div className="mb-1 text-[length:var(--app-font-size-ui-sm,11px)] font-medium text-muted-foreground/70">
+                    Iteration {row.loopIterationNumber}
+                  </div>
+                ) : null}
                 {messageText !== null ? (
                   <div data-assistant-message-id={row.message.id}>
                     <ChatMarkdown
