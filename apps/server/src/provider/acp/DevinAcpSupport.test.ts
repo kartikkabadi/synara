@@ -289,26 +289,62 @@ describe("hasDevinApiKeyEnv", () => {
 });
 
 describe("resolveDevinAcpAuthMethodId", () => {
-  it("returns windsurf-api-key when that method is advertised", () =>
+  it("returns windsurf-api-key when that method is advertised and a key is present", () =>
     Effect.gen(function* () {
-      const method = yield* resolveDevinAcpAuthMethodId({
-        protocolVersion: 1,
-        authMethods: [{ id: "windsurf-api-key", name: "Windsurf API Key" }],
-      });
+      const method = yield* resolveDevinAcpAuthMethodId(
+        {
+          protocolVersion: 1,
+          authMethods: [{ id: "windsurf-api-key", name: "Windsurf API Key" }],
+        },
+        { WINDSURF_API_KEY: "wk-test-key" },
+      );
       assert.strictEqual(method, DEVIN_WINDSURF_API_KEY_AUTH_METHOD_ID);
     }));
 
-  it("returns windsurf-api-key when multiple methods are advertised", () =>
+  it("returns windsurf-api-key when multiple methods are advertised and a key is present", () =>
     Effect.gen(function* () {
-      const method = yield* resolveDevinAcpAuthMethodId({
-        protocolVersion: 1,
-        authMethods: [
-          { id: "browser_login", name: "Browser login" },
-          { id: "windsurf-api-key", name: "Windsurf API Key" },
-          { id: "oauth", name: "OAuth" },
-        ],
-      });
+      const method = yield* resolveDevinAcpAuthMethodId(
+        {
+          protocolVersion: 1,
+          authMethods: [
+            { id: "browser_login", name: "Browser login" },
+            { id: "windsurf-api-key", name: "Windsurf API Key" },
+            { id: "oauth", name: "OAuth" },
+          ],
+        },
+        { WINDSURF_API_KEY: "wk-test-key" },
+      );
       assert.strictEqual(method, "windsurf-api-key");
+    }));
+
+  it("returns browser_login when multiple methods are advertised without a key", () =>
+    Effect.gen(function* () {
+      const method = yield* resolveDevinAcpAuthMethodId(
+        {
+          protocolVersion: 1,
+          authMethods: [
+            { id: "browser_login", name: "Browser login" },
+            { id: "windsurf-api-key", name: "Windsurf API Key" },
+          ],
+        },
+        {},
+      );
+      assert.strictEqual(method, "browser_login");
+    }));
+
+  it("fails when only windsurf-api-key is advertised but no key is present", () =>
+    Effect.gen(function* () {
+      const error = yield* resolveDevinAcpAuthMethodId(
+        {
+          protocolVersion: 1,
+          authMethods: [{ id: "windsurf-api-key", name: "Windsurf API Key" }],
+        },
+        {},
+      ).pipe(Effect.flip);
+
+      assert.strictEqual(error._tag, "AcpRequestError");
+      const data = (error as EffectAcpErrors.AcpRequestError).data as { detail: string };
+      assert.match(data.detail, /WINDSURF_API_KEY/);
     }));
 
   it("fails with AcpRequestError when authMethods is undefined", () =>
@@ -331,10 +367,13 @@ describe("resolveDevinAcpAuthMethodId", () => {
 
   it("trims whitespace in auth method IDs when matching", () =>
     Effect.gen(function* () {
-      const method = yield* resolveDevinAcpAuthMethodId({
-        protocolVersion: 1,
-        authMethods: [{ id: "  windsurf-api-key  ", name: "Windsurf API Key" }],
-      });
+      const method = yield* resolveDevinAcpAuthMethodId(
+        {
+          protocolVersion: 1,
+          authMethods: [{ id: "  windsurf-api-key  ", name: "Windsurf API Key" }],
+        },
+        { WINDSURF_API_KEY: "wk-test-key" },
+      );
       assert.strictEqual(method, "windsurf-api-key");
     }));
 

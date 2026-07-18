@@ -61,14 +61,18 @@ export function hasDevinApiKeyEnv(env: NodeJS.ProcessEnv = process.env): boolean
 
 export const resolveDevinAcpAuthMethodId = (
   initializeResult: EffectAcpSchema.InitializeResponse,
+  env: NodeJS.ProcessEnv = process.env,
 ): Effect.Effect<string, EffectAcpErrors.AcpError> =>
   Effect.gen(function* () {
     const authMethodIds = availableAuthMethodIds(initializeResult);
-    if (authMethodIds.has(DEVIN_WINDSURF_API_KEY_AUTH_METHOD_ID)) {
+    const hasApiKey = hasDevinApiKeyEnv(env);
+
+    if (hasApiKey && authMethodIds.has(DEVIN_WINDSURF_API_KEY_AUTH_METHOD_ID)) {
       return DEVIN_WINDSURF_API_KEY_AUTH_METHOD_ID;
     }
-    // Fall back to the interactive browser-login method so first-time/expired
-    // sessions can recover via on-demand authenticate instead of hard-failing.
+    // Prefer the interactive flow when no API key is available. Selecting the
+    // advertised API-key method without a key makes on-demand recovery fail
+    // before the usable browser-login method gets a chance to run.
     if (authMethodIds.has(DEVIN_BROWSER_LOGIN_AUTH_METHOD_ID)) {
       return DEVIN_BROWSER_LOGIN_AUTH_METHOD_ID;
     }
@@ -78,7 +82,7 @@ export const resolveDevinAcpAuthMethodId = (
       errorMessage: "Devin ACP authentication is unavailable.",
       data: {
         authMethods: [...authMethodIds],
-        detail: hasDevinApiKeyEnv()
+        detail: hasApiKey
           ? "Devin did not advertise Windsurf API key authentication."
           : "Run `devin auth login`, or set WINDSURF_API_KEY.",
       },
