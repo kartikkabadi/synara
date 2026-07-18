@@ -1,5 +1,5 @@
 import { type ReactElement, useCallback, useEffect, useRef, useState } from "react";
-import { type OrchestrationLoop, type ThreadId } from "@t3tools/contracts";
+import { type OrchestrationLoop, type ThreadId } from "@synara/contracts";
 import { formatSecondsCompact } from "~/lib/format";
 import { readNativeApi } from "~/nativeApi";
 import { newCommandId } from "~/lib/utils";

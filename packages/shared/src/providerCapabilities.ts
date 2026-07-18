@@ -1,4 +1,4 @@
-import type { ProviderKind } from "@t3tools/contracts";
+import type { ProviderKind } from "@synara/contracts";
 
 // Keep provider capability decisions shared by the UI and server so unsupported
 // automation is hidden before it reaches the command decider.

@@ -1,7 +1,7 @@
-import type { ProviderKind, ThreadId } from "@t3tools/contracts";
+import type { ProviderKind, ThreadId } from "@synara/contracts";
 import { Cause, Duration, Effect, Layer, Option, Schedule, Stream } from "effect";
-import { deriveLatestContextWindowUsage } from "@t3tools/shared/contextWindow";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { deriveLatestContextWindowUsage } from "@synara/shared/contextWindow";
+import { makeDrainableWorker } from "@synara/shared/DrainableWorker";
 
 import { CompactionReactor, type CompactionReactorShape } from "../Services/CompactionReactor.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";

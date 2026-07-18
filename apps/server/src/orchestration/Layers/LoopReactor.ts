@@ -6,10 +6,10 @@ import {
   type ProviderKind,
   type ThreadId,
   type TurnId,
-} from "@t3tools/contracts";
+} from "@synara/contracts";
 import { Cause, Duration, Effect, Fiber, Layer, Option, Schedule, Stream } from "effect";
-import { deriveLatestContextWindowUsage } from "@t3tools/shared/contextWindow";
-import { makeDrainableWorker, type DrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { deriveLatestContextWindowUsage } from "@synara/shared/contextWindow";
+import { makeDrainableWorker, type DrainableWorker } from "@synara/shared/DrainableWorker";
 
 import { LoopReactor, type LoopReactorShape } from "../Services/LoopReactor.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";

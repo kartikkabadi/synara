@@ -1,4 +1,4 @@
-import { OrchestrationGoal } from "@t3tools/contracts";
+import { OrchestrationGoal } from "@synara/contracts";
 import { Effect, Layer, Schema, Struct } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";

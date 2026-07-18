@@ -2,7 +2,7 @@ import {
   ORCHESTRATION_GOAL_COMPLETION_SENTINEL,
   ORCHESTRATION_GOAL_BLOCKED_SENTINEL,
   type OrchestrationGoal,
-} from "@t3tools/contracts";
+} from "@synara/contracts";
 
 /**
  * Hidden goal-continuation prompt injected by {@link GoalContinuationReactor}.

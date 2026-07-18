@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EventId, TurnId, type OrchestrationThreadActivity } from "@t3tools/contracts";
+import { EventId, TurnId, type OrchestrationThreadActivity } from "@synara/contracts";
 
 import { deriveLatestContextWindowUsage } from "./contextWindow";
 

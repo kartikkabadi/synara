@@ -1,4 +1,4 @@
-import { ORCHESTRATION_GOAL_COMPLETION_SENTINEL } from "@t3tools/contracts";
+import { ORCHESTRATION_GOAL_COMPLETION_SENTINEL } from "@synara/contracts";
 
 /** Remove the internal completion marker from the user-visible assistant reply. */
 export function stripGoalCompletionSentinel(text: string): {

@@ -1,4 +1,4 @@
-import type { OrchestrationGoal, OrchestrationGoalStatus } from "@t3tools/contracts";
+import type { OrchestrationGoal, OrchestrationGoalStatus } from "@synara/contracts";
 
 // Shared goal-fold helpers used by BOTH projections: the in-memory read model
 // (projector.ts) and the SQLite projection (ProjectionPipeline.ts). Keeping the

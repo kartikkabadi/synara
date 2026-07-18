@@ -7,9 +7,9 @@ import {
   type OrchestrationThread,
   type ThreadId,
   type TurnId,
-} from "@t3tools/contracts";
+} from "@synara/contracts";
 import { Cause, Duration, Effect, Layer, Option, Schedule, Stream } from "effect";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { makeDrainableWorker } from "@synara/shared/DrainableWorker";
 
 import {
   renderGoalContinuationPrompt,

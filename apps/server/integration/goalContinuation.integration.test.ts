@@ -7,7 +7,7 @@ import {
   ORCHESTRATION_GOAL_COMPLETION_SENTINEL,
   ProjectId,
   ThreadId,
-} from "@t3tools/contracts";
+} from "@synara/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect } from "effect";
 import * as NodeServices from "@effect/platform-node/NodeServices";

@@ -1,4 +1,4 @@
-import { OrchestrationLoop, ThreadId } from "@t3tools/contracts";
+import { OrchestrationLoop, ThreadId } from "@synara/contracts";
 import { Option, Schema, ServiceMap } from "effect";
 import type { Effect } from "effect";
 

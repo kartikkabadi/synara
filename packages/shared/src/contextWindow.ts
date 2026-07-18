@@ -1,4 +1,4 @@
-import type { OrchestrationThreadActivity, ThreadTokenUsageSnapshot } from "@t3tools/contracts";
+import type { OrchestrationThreadActivity, ThreadTokenUsageSnapshot } from "@synara/contracts";
 
 export interface ContextWindowUsageSnapshot {
   readonly usage: ThreadTokenUsageSnapshot;

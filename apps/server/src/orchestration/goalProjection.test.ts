@@ -1,4 +1,4 @@
-import type { OrchestrationGoal } from "@t3tools/contracts";
+import type { OrchestrationGoal } from "@synara/contracts";
 import { describe, expect, it } from "vitest";
 
 import { applyGoalTurnAccounting } from "./goalProjection.ts";

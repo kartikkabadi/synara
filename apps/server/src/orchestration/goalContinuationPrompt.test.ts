@@ -1,4 +1,4 @@
-import { ORCHESTRATION_GOAL_COMPLETION_SENTINEL, type OrchestrationGoal } from "@t3tools/contracts";
+import { ORCHESTRATION_GOAL_COMPLETION_SENTINEL, type OrchestrationGoal } from "@synara/contracts";
 import { describe, expect, it } from "vitest";
 
 import { renderGoalContinuationPrompt } from "./goalContinuationPrompt.ts";

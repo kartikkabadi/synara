@@ -1,5 +1,5 @@
 import { type ReactElement, useCallback } from "react";
-import { type OrchestrationGoal, type ThreadId } from "@t3tools/contracts";
+import { type OrchestrationGoal, type ThreadId } from "@synara/contracts";
 import { formatGoalUsageSummary } from "~/lib/goalDisplay";
 import { readNativeApi } from "~/nativeApi";
 import { newCommandId } from "~/lib/utils";

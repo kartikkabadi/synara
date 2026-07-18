@@ -4,7 +4,7 @@ import {
   ThreadId,
   type OrchestrationCommand,
   type OrchestrationEvent,
-} from "@t3tools/contracts";
+} from "@synara/contracts";
 import { Effect, Exit } from "effect";
 import { describe, expect, it } from "vitest";
 

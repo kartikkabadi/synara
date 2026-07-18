@@ -1,4 +1,4 @@
-import type { OrchestrationGoal } from "@t3tools/contracts";
+import type { OrchestrationGoal } from "@synara/contracts";
 
 import { formatContextWindowTokens } from "./contextWindow";
 

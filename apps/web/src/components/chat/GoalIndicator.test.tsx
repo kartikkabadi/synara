@@ -1,4 +1,4 @@
-import { type OrchestrationGoal, ThreadId } from "@t3tools/contracts";
+import { type OrchestrationGoal, ThreadId } from "@synara/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
