@@ -386,7 +386,8 @@ const make = Effect.gen(function* () {
     // input — the next user message produces a non-continuation turn whose
     // starter message has a different source, naturally resetting this check.
     const starterMessage = thread.messages.find(
-      (m) => m.role === "user" && m.turnId === latestTurn.turnId && m.source === "goal-continuation",
+      (m) =>
+        m.role === "user" && m.turnId === latestTurn.turnId && m.source === "goal-continuation",
     );
     if (starterMessage !== undefined) {
       const hadToolActivity = thread.activities.some(

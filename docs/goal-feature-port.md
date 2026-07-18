@@ -56,9 +56,9 @@ only the agent's responses to them are shown (`isHiddenGoalContinuationMessage` 
 
 - `/goal <objective>` (with optional `--budget <n>`) plus `/goal status|pause|resume|clear|
 complete`, registered in `composerSlashCommands` and dispatched from
-`useComposerSlashCommands`. Synara's command is offered for every provider, including
-Claude where it intentionally takes precedence over the native name. Creating a goal
-auto-starts the first turn (pi-goal parity).
+  `useComposerSlashCommands`. Synara's command is offered for every provider, including
+  Claude where it intentionally takes precedence over the native name. Creating a goal
+  auto-starts the first turn (pi-goal parity).
 - `GoalIndicator` composer chip shows the live goal's lifecycle status and turn count.
 
 ## Commands / events / state

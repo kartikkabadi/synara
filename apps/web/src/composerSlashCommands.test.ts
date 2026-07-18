@@ -151,27 +151,21 @@ describe("composerSlashCommands", () => {
     ).toContain("goal");
   });
 
-  it.each([
-    "codex",
-    "claudeAgent",
-    "cursor",
-    "gemini",
-    "grok",
-    "kilo",
-    "opencode",
-    "pi",
-  ] as const)("offers Synara /goal for %s", (provider) => {
-    expect(
-      getAvailableComposerSlashCommands({
-        provider,
-        supportsFastSlashCommand: true,
-        canOfferCompactCommand: true,
-        canOfferReviewCommand: true,
-        canOfferForkCommand: true,
-        canOfferSideCommand: true,
-      }),
-    ).toContain("goal");
-  });
+  it.each(["codex", "claudeAgent", "cursor", "gemini", "grok", "kilo", "opencode", "pi"] as const)(
+    "offers Synara /goal for %s",
+    (provider) => {
+      expect(
+        getAvailableComposerSlashCommands({
+          provider,
+          supportsFastSlashCommand: true,
+          canOfferCompactCommand: true,
+          canOfferReviewCommand: true,
+          canOfferForkCommand: true,
+          canOfferSideCommand: true,
+        }),
+      ).toContain("goal");
+    },
+  );
 
   it("parses slash invocations with optional arguments", () => {
     expect(parseComposerSlashInvocation("/review current diff")).toEqual({
