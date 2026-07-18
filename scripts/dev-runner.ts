@@ -2,7 +2,7 @@
 
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, sep } from "node:path";
+import { delimiter, join, sep } from "node:path";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -199,10 +199,10 @@ export function createDevRunnerEnv({
 
     const pathKey = process.platform === "win32" ? "Path" : "PATH";
     const existingPath = output[pathKey] ?? output.PATH ?? "";
-    const localBin = pathJoin(homedir(), ".local", "bin");
-    if (localBin.length > 0 && !existingPath.split(pathDelimiter).includes(localBin)) {
+    const localBin = join(homedir(), ".local", "bin");
+    if (localBin.length > 0 && !existingPath.split(delimiter).includes(localBin)) {
       const augmentedPath =
-        existingPath.length > 0 ? `${localBin}${pathDelimiter}${existingPath}` : localBin;
+        existingPath.length > 0 ? `${localBin}${delimiter}${existingPath}` : localBin;
       output[pathKey] = augmentedPath;
       if (pathKey === "Path") {
         output.PATH = augmentedPath;
@@ -417,8 +417,8 @@ export function resolveDevRunnerBooleanOverrides(
 }
 
 /** Blocks QA home dirs while `.synara-devin-qa/_qa/ABORT` exists (parallel agent teardown). */
-function assertQaDevNotAborted(t3Home: string | undefined): Effect.Effect<void, DevRunnerError> {
-  const home = t3Home?.trim() ?? "";
+function assertQaDevNotAborted(synaraHome: string | undefined): Effect.Effect<void, DevRunnerError> {
+  const home = synaraHome?.trim() ?? "";
   if (!home.split(sep).includes(".synara-devin-qa")) {
     return Effect.void;
   }
@@ -466,7 +466,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     });
     const booleanOverrides = resolveDevRunnerBooleanOverrides(input, envOverrides);
 
-    yield* assertQaDevNotAborted(input.t3Home);
+    yield* assertQaDevNotAborted(input.synaraHome);
 
     const env = yield* createDevRunnerEnv({
       mode: input.mode,

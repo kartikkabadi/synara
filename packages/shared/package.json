@@ -44,6 +44,10 @@
       "types": "./src/windowsCertificate.ts",
       "import": "./src/windowsCertificate.ts"
     },
+    "./cli": {
+      "types": "./src/cli.ts",
+      "import": "./src/cli.ts"
+    },
     "./codexConfig": {
       "types": "./src/codexConfig.ts",
       "import": "./src/codexConfig.ts"
@@ -55,6 +59,10 @@
     "./desktopIdentity": {
       "types": "./src/desktopIdentity.ts",
       "import": "./src/desktopIdentity.ts"
+    },
+    "./migrationRecovery": {
+      "types": "./src/migrationRecovery.ts",
+      "import": "./src/migrationRecovery.ts"
     },
     "./Net": {
       "types": "./src/Net.ts",

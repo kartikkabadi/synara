@@ -115,6 +115,11 @@ export const AntigravityModelOptions = Schema.Struct({
 });
 export type AntigravityModelOptions = typeof AntigravityModelOptions.Type;
 
+export const DroidModelOptions = Schema.Struct({
+  reasoningEffort: Schema.optional(TrimmedNonEmptyString),
+});
+export type DroidModelOptions = typeof DroidModelOptions.Type;
+
 export const OpenCodeModelOptions = Schema.Struct({
   variant: Schema.optional(TrimmedNonEmptyString),
   agent: Schema.optional(TrimmedNonEmptyString),
@@ -158,7 +163,7 @@ export const ProviderModelOptions = Schema.Struct({
   claudeAgent: Schema.optional(ClaudeModelOptions),
   cursor: Schema.optional(CursorModelOptions),
   devin: Schema.optional(DevinModelOptions),
-  gemini: Schema.optional(GeminiModelOptions),
+  antigravity: Schema.optional(AntigravityModelOptions),
   grok: Schema.optional(GrokModelOptions),
   droid: Schema.optional(DroidModelOptions),
   kilo: Schema.optional(OpenCodeModelOptions),
@@ -559,7 +564,7 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
   ],
   // Antigravity owns its model catalog. The web app populates this provider from
   // `agy models` so CLI updates appear without a Synara release.
-  antigravity: [],
+  antigravity: [] as readonly ModelDefinition[],
   grok: [
     {
       slug: "grok-build-0.1",
@@ -997,7 +1002,7 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     gemini: "gemini-3-5-flash",
     deepseek: "deepseek-v4",
   },
-  gemini: {
+  antigravity: {
     auto: "auto-gemini-3",
     "auto-gemini-3": "auto-gemini-3",
     "auto-gemini-2.5": "auto-gemini-2.5",
@@ -1009,6 +1014,7 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     "gemini-2.5-flash": "gemini-2.5-flash",
     "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
   },
+  droid: {},
   grok: {
     grok: "grok-build-0.1",
     build: "grok-build-0.1",
@@ -1056,11 +1062,11 @@ export const PROVIDER_DISPLAY_NAMES: Record<ProviderKind, string> = {
   codex: "Codex",
   claudeAgent: "Claude",
   cursor: "Cursor",
-  devin: "Devin",
-  gemini: "Gemini",
+  antigravity: "Antigravity",
   grok: "Grok",
   droid: "Droid",
   kilo: "Kilo",
   opencode: "OpenCode",
   pi: "Pi",
+  devin: "Devin",
 };

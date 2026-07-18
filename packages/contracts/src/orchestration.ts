@@ -5,7 +5,7 @@ import {
   CodexModelOptions,
   CursorModelOptions,
   DevinModelOptions,
-  GeminiModelOptions,
+  DroidModelOptions,
   GrokModelOptions,
   OpenCodeModelOptions,
   PiModelOptions,
@@ -56,13 +56,13 @@ export const ProviderKind = Schema.Literals([
   "codex",
   "claudeAgent",
   "cursor",
-  "devin",
-  "gemini",
+  "antigravity",
   "grok",
   "droid",
   "kilo",
   "opencode",
   "pi",
+  "devin",
 ]);
 export type ProviderKind = typeof ProviderKind.Type;
 export const ProviderApprovalPolicy = Schema.Literals([
@@ -108,8 +108,8 @@ export const DevinModelSelection = Schema.Struct({
 });
 export type DevinModelSelection = typeof DevinModelSelection.Type;
 
-export const GeminiModelSelection = Schema.Struct({
-  provider: Schema.Literal("gemini"),
+export const AntigravityModelSelection = Schema.Struct({
+  provider: Schema.Literal("antigravity"),
   model: TrimmedNonEmptyString,
   options: Schema.optional(AntigravityModelOptions),
 });
@@ -155,7 +155,7 @@ export const ModelSelection = Schema.Union([
   ClaudeModelSelection,
   CursorModelSelection,
   DevinModelSelection,
-  GeminiModelSelection,
+  AntigravityModelSelection,
   GrokModelSelection,
   DroidModelSelection,
   KiloModelSelection,
@@ -217,7 +217,7 @@ export const ProviderStartOptions = Schema.Struct({
   claudeAgent: Schema.optional(ClaudeProviderStartOptions),
   cursor: Schema.optional(CursorProviderStartOptions),
   devin: Schema.optional(DevinProviderStartOptions),
-  gemini: Schema.optional(GeminiProviderStartOptions),
+  antigravity: Schema.optional(AntigravityProviderStartOptions),
   grok: Schema.optional(GrokProviderStartOptions),
   droid: Schema.optional(DroidProviderStartOptions),
   kilo: Schema.optional(KiloProviderStartOptions),
