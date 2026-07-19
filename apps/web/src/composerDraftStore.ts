@@ -1343,7 +1343,7 @@ function makeModelSelection(
       return {
         provider,
         model,
-        ...(options
+        ...(options && Object.keys(options).length > 0
           ? { options: options as Extract<ModelSelection, { provider: "devin" }>["options"] }
           : {}),
       };

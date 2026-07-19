@@ -452,7 +452,7 @@ export function buildModelSelection(
           }
         : { provider, model };
     case "devin":
-      return options
+      return options && Object.keys(options).length > 0
         ? {
             provider,
             model,

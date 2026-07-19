@@ -18,7 +18,6 @@ const COMMON_ACP_ENV_NAMES: ReadonlySet<string> = new Set([
   "LANG",
   "TERM",
   "TMPDIR",
-  "SSH_AUTH_SOCK",
   "LC_ALL",
   "LC_CTYPE",
   "XDG_RUNTIME_DIR",
