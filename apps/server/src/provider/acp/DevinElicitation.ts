@@ -6,6 +6,7 @@
  */
 import type { UserInputQuestion } from "@synara/contracts";
 import type * as EffectAcpSchema from "effect-acp/schema";
+import { runInNewContext } from "node:vm";
 
 type ElicitationForm = Extract<EffectAcpSchema.ElicitationRequest, { mode: "form" }>;
 type ElicitationProperty = EffectAcpSchema.ElicitationPropertySchema;
@@ -13,6 +14,32 @@ type ElicitationContentValue = EffectAcpSchema.ElicitationContentValue;
 
 const FALLBACK_OPTIONS = [{ label: "OK", description: "Continue" }] as const;
 const FREEFORM_OPTIONS: ReadonlyArray<{ label: string; description: string }> = [];
+const REGEX_TIMEOUT_MS = 100;
+
+type RegexMatchResult =
+  | { readonly ok: true; readonly matched: boolean }
+  | { readonly ok: false; readonly reason: "timeout" | "invalid" };
+
+/**
+ * Tests `input` against `pattern` inside an isolated V8 context with a hard
+ * wall-clock timeout. This makes provider-controlled regex validation
+ * interruptible: catastrophic backtracking cannot block the process forever.
+ */
+function testPatternInterruptibly(pattern: string, input: string): RegexMatchResult {
+  try {
+    const matched = runInNewContext(
+      `new RegExp(pattern).test(input)`,
+      { pattern, input },
+      { timeout: REGEX_TIMEOUT_MS },
+    ) as boolean;
+    return { ok: true, matched };
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("Script execution timed out")) {
+      return { ok: false, reason: "timeout" };
+    }
+    return { ok: false, reason: "invalid" };
+  }
+}
 
 export function elicitationFormToUserInputQuestions(
   request: ElicitationForm,
@@ -165,10 +192,9 @@ function validateAnswerValue(
       if (prop.pattern !== undefined && prop.pattern !== null) {
         // Defense-in-depth against catastrophic backtracking (ReDoS): the
         // pattern comes from an external ACP provider and raw is user input.
-        // Cap pattern length and input length before compilation to bound
-        // worst-case execution. The input cap is a hard safety bound that
-        // always applies regardless of the schema's maxLength, since a
-        // provider-controlled maxLength could be set arbitrarily high.
+        // Cap pattern length and input length before compilation, and run the
+        // match inside an isolated V8 context with a hard wall-clock timeout so
+        // a pathological regex cannot block the server event loop.
         const MAX_PATTERN_LENGTH = 200;
         const REJECT_INPUT_LENGTH = 10_000;
         if (prop.pattern.length > MAX_PATTERN_LENGTH) {
@@ -177,12 +203,14 @@ function validateAnswerValue(
         if (raw.length > REJECT_INPUT_LENGTH) {
           return `Answer '${key}' exceeds the maximum allowed length.`;
         }
-        try {
-          if (!new RegExp(prop.pattern).test(raw)) {
-            return `Answer '${key}' must match pattern ${prop.pattern}.`;
-          }
-        } catch {
-          return `Answer '${key}' has an invalid pattern constraint.`;
+        const result = testPatternInterruptibly(prop.pattern, raw);
+        if (!result.ok) {
+          return result.reason === "timeout"
+            ? `Answer '${key}' did not satisfy the pattern constraint within the allowed time.`
+            : `Answer '${key}' has an invalid pattern constraint.`;
+        }
+        if (!result.matched) {
+          return `Answer '${key}' must match pattern ${prop.pattern}.`;
         }
       }
       return undefined;
