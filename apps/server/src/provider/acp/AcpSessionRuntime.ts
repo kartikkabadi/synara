@@ -1066,6 +1066,10 @@ const makeAcpSessionRuntime = (
         acp.agent.initialize(initializePayload),
       );
 
+      // Tracks whether authenticate has already been run so the on-demand
+      // path only retries session setup once.
+      const authenticatedRef = yield* Ref.make(false);
+
       const runAuthenticate = Effect.gen(function* () {
         const authMethodId =
           options.resolveAuthMethodId !== undefined
@@ -1090,6 +1094,8 @@ const makeAcpSessionRuntime = (
           authenticatePayload,
           acp.agent.authenticate(authenticatePayload),
         );
+
+        yield* Ref.set(authenticatedRef, true);
       });
 
       const runSessionSetup = Effect.gen(function* () {
@@ -1153,6 +1159,24 @@ const makeAcpSessionRuntime = (
           sessionId = created.sessionId;
           sessionSetupResult = created;
           sessionSetupMethod = "new";
+        }
+
+        // On-demand authentication: if the ACP agent returned an empty model
+        // list but advertised authentication methods, the session is not yet
+        // usable. Treat this as an auth-required failure so the caller can
+        // authenticate once and retry.
+        if (options.authPolicy === "on-demand" && !(yield* Ref.get(authenticatedRef))) {
+          const setupConfigOptions = sessionConfigOptionsFromSetup(sessionSetupResult);
+          const modelOption = findSessionConfigOption(setupConfigOptions, "model");
+          const availableModels = modelOption ? collectSessionConfigOptionValues(modelOption) : [];
+          if (availableModels.length === 0 && (initializeResult.authMethods?.length ?? 0) > 0) {
+            return yield* new EffectAcpErrors.AcpRequestError({
+              code: -32000,
+              errorMessage:
+                "Authentication required: ACP agent returned an empty model list; authenticate and retry session setup.",
+              data: { authMethods: initializeResult.authMethods ?? [] },
+            });
+          }
         }
 
         return {
