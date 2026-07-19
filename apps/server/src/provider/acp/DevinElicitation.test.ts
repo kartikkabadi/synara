@@ -1081,6 +1081,26 @@ describe("validateUserInputAnswersForElicitation", () => {
     assert.match(result.issues[0]!, /exceeds the maximum allowed length/);
   });
 
+  it("interrupts catastrophic backtracking before it blocks the process", () => {
+    const form = {
+      ...baseForm,
+      requestedSchema: {
+        type: "object" as const,
+        properties: {
+          code: { type: "string" as const, pattern: "(a+)+$" },
+        },
+      },
+    };
+
+    const start = Date.now();
+    const result = validateUserInputAnswersForElicitation(form, { code: "a".repeat(40) + "b" });
+    const elapsed = Date.now() - start;
+
+    assert.strictEqual(result.valid, false);
+    assert.match(result.issues[0]!, /did not satisfy the pattern constraint|must match pattern/);
+    assert.ok(elapsed < 1000, `expected fast interruption, took ${elapsed}ms`);
+  });
+
   it("rejects arrays with fewer than minItems", () => {
     const form = {
       ...baseForm,
