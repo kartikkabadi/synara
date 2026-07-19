@@ -25,6 +25,18 @@ type RegexMatchResult =
  * wall-clock timeout. This makes provider-controlled regex validation
  * interruptible: catastrophic backtracking cannot block the process forever.
  */
+function isTimeoutError(error: unknown): boolean {
+  // vm.runInNewContext throws errors from the created context, so the error
+  // is not an instance of the main realm's Error class. Inspect the message.
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof (error as { message: unknown }).message === "string" &&
+    (error as { message: string }).message.includes("Script execution timed out")
+  );
+}
+
 function testPatternInterruptibly(pattern: string, input: string): RegexMatchResult {
   try {
     const matched = runInNewContext(
@@ -34,7 +46,7 @@ function testPatternInterruptibly(pattern: string, input: string): RegexMatchRes
     ) as boolean;
     return { ok: true, matched };
   } catch (error) {
-    if (error instanceof Error && error.message.includes("Script execution timed out")) {
+    if (isTimeoutError(error)) {
       return { ok: false, reason: "timeout" };
     }
     return { ok: false, reason: "invalid" };
