@@ -510,6 +510,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
       provider,
       capabilities: {
         sessionModelSwitch: "in-session",
+        conversationRollback: "native",
       },
       startSession,
       sendTurn,
