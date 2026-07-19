@@ -432,6 +432,42 @@ describe("applyDevinModeSelection", () => {
     }),
   );
 
+  it.effect("plan without an advertised plan mode falls back to ask from bypass", () =>
+    Effect.gen(function* () {
+      const setModes: string[] = [];
+      const modes = [makeMode("ask", "Ask"), makeMode("bypass", "Bypass Permissions")];
+      const modeState = makeModeState("bypass", modes);
+      const runtime = makeMockRuntime({
+        modeState,
+        onSetMode: (id) => {
+          setModes.push(id);
+        },
+      });
+      yield* applyDevinModeSelection({
+        runtime,
+        threadId,
+        runtimeMode: "approval-required",
+        interactionMode: "plan",
+      });
+      assert.deepStrictEqual(setModes, ["ask"]);
+    }),
+  );
+
+  it.effect("plan without an advertised plan mode and no safe default fails", () =>
+    Effect.gen(function* () {
+      const modes = [makeMode("bypass", "Bypass Permissions")];
+      const modeState = makeModeState("bypass", modes);
+      const runtime = makeMockRuntime({ modeState });
+      const error = yield* applyDevinModeSelection({
+        runtime,
+        threadId,
+        runtimeMode: "approval-required",
+        interactionMode: "plan",
+      }).pipe(Effect.flip);
+      assert.strictEqual(error._tag, "ProviderAdapterValidationError");
+    }),
+  );
+
   it.effect("does not restore to a 'task' mode via the ask alias (token boundary)", () =>
     Effect.gen(function* () {
       const setModes: string[] = [];

@@ -11,7 +11,7 @@
 
 import { Effect } from "effect";
 import type { ProviderInteractionMode, RuntimeMode, ThreadId } from "@synara/contracts";
-import type { ProviderAdapterError } from "../Errors.ts";
+import { ProviderAdapterValidationError, type ProviderAdapterError } from "../Errors.ts";
 import { mapAcpToAdapterError } from "./AcpAdapterSupport.ts";
 import type { AcpSessionMode } from "./AcpRuntimeModel.ts";
 import type { AcpSessionRuntimeShape } from "./AcpSessionRuntime.ts";
@@ -120,12 +120,25 @@ export function applyDevinModeSelection(input: {
     // mode (bypass, plan, accept-edits), we must explicitly switch back to
     // Devin's default/ask mode — otherwise the session stays stuck in the
     // previous mode.
+    //
+    // For plan turns, Devin must advertise a plan mode. If it does not, never
+    // leave the session in a bypass/full-access mode; fall back to the default
+    // mode or reject the turn if no safe default is available.
     if (
-      input.interactionMode !== "plan" &&
       modeId === undefined &&
       !isDevinDefaultModeId(modeState.availableModes, modeState.currentModeId)
     ) {
       modeId = findDevinModeByAliases(modeState.availableModes, DEVIN_DEFAULT_MODE_ALIASES)?.id;
+    }
+    if (input.interactionMode === "plan" && modeId === undefined) {
+      return yield* Effect.fail(
+        new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "applyDevinModeSelection",
+          issue:
+            "Devin does not advertise a Plan mode and the session is not in a safe default mode.",
+        }),
+      );
     }
     if (!modeId || modeId === modeState.currentModeId) return;
     yield* input.runtime
