@@ -2,9 +2,6 @@ import * as path from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  test: {
-    setupFiles: [path.resolve(import.meta.dirname, "./apps/web/src/test/setup.ts")],
-  },
   resolve: {
     alias: [
       {
