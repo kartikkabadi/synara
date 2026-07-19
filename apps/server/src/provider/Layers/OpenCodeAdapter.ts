@@ -4530,6 +4530,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
       > = () =>
         Effect.succeed({
           provider,
+          conversationRollback: "native",
           supportsSkillMentions: false,
           supportsSkillDiscovery: false,
           supportsNativeSlashCommandDiscovery: provider === "opencode",
@@ -4555,6 +4556,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         provider,
         capabilities: {
           sessionModelSwitch: "in-session",
+          conversationRollback: "native",
           supportsRuntimeModelList: true,
           supportsNativeSlashCommandDiscovery: provider === "opencode",
         },

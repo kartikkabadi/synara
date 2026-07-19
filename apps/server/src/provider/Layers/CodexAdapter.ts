@@ -2078,6 +2078,7 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
       provider: PROVIDER,
       capabilities: {
         sessionModelSwitch: "in-session",
+        conversationRollback: "native",
         supportsSkillMentions: true,
         supportsSkillDiscovery: true,
         supportsNativeSlashCommandDiscovery: false,

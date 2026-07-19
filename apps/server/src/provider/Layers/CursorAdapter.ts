@@ -1369,6 +1369,7 @@ export function makeCursorAdapter(
     > = () =>
       Effect.succeed({
         provider: PROVIDER,
+        conversationRollback: "native",
         supportsSkillMentions: true,
         supportsSkillDiscovery: true,
         supportsNativeSlashCommandDiscovery: false,
@@ -1559,6 +1560,7 @@ export function makeCursorAdapter(
       provider: PROVIDER,
       capabilities: {
         sessionModelSwitch: "in-session",
+        conversationRollback: "native",
         supportsRuntimeModelList: true,
       },
       startSession,
