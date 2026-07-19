@@ -1,4 +1,4 @@
-import { resolveDevinModelDisplayName } from "@synara/shared/devinModelDisplay";
+import { resolveDevinModelDisplayName } from "@synara/shared/devinModel";
 import {
   formatModelDisplayName,
   humanizeModelSlug,

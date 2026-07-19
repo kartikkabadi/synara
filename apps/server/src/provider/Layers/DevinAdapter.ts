@@ -35,7 +35,6 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import type * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
-import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig, type ServerConfigShape } from "../../config.ts";
 import {
   ProviderAdapterProcessError,
@@ -74,7 +73,7 @@ import {
 import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
 import { parsePermissionRequest } from "../acp/AcpRuntimeModel.ts";
 import { appendFileAttachmentsPromptBlock } from "../attachmentProjection.ts";
-import { filterProviderPromptImageAttachments } from "../promptAttachments.ts";
+import { loadProviderPromptImageBlocks } from "../promptAttachments.ts";
 import { makeDevinAcpRuntime, type DevinAcpRuntimeSettings } from "../acp/DevinAcpSupport.ts";
 import {
   elicitationFormToUserInputQuestions,
@@ -84,12 +83,12 @@ import {
 import { applyDevinModeSelection } from "../acp/DevinModeMapper.ts";
 import {
   DEVIN_FALLBACK_MODELS,
-  normalizeDevinModelSlug,
   buildDevinVariantMatrix,
+  normalizeDevinModelDisplayName,
+  normalizeDevinModelSlug,
   resolveDevinModelSlug,
   type DevinBaseModel,
 } from "../acp/DevinModelCatalog.ts";
-import { normalizeDevinModelDisplayName } from "../acp/DevinModelSlugParser.ts";
 import { extractProposedPlanMarkdown, withProviderPlanModePrompt } from "../planMode.ts";
 import { DevinAdapter, type DevinAdapterShape } from "../Services/DevinAdapter.ts";
 import type { ProviderThreadTurnSnapshot } from "../Services/ProviderAdapter.ts";
@@ -1334,35 +1333,14 @@ function makeProviderAdapter(
             promptParts.push({ type: "text", text: promptTextForTurn });
           }
           if (hasAttachments && input.attachments && serverConfig && deps) {
-            for (const attachment of filterProviderPromptImageAttachments(input.attachments)) {
-              const attachmentPath = resolveAttachmentPath({
-                attachmentsDir: serverConfig.attachmentsDir,
-                attachment,
-              });
-              if (!attachmentPath) {
-                return yield* new ProviderAdapterRequestError({
-                  provider: PROVIDER,
-                  method: "session/prompt",
-                  detail: `Invalid attachment id '${attachment.id}'.`,
-                });
-              }
-              const bytes = yield* deps.fileSystem.readFile(attachmentPath).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new ProviderAdapterRequestError({
-                      provider: PROVIDER,
-                      method: "session/prompt",
-                      detail: cause instanceof Error ? cause.message : String(cause),
-                      cause,
-                    }),
-                ),
-              );
-              promptParts.push({
-                type: "image",
-                data: Buffer.from(bytes).toString("base64"),
-                mimeType: attachment.mimeType,
-              });
-            }
+            const imageBlocks = yield* loadProviderPromptImageBlocks({
+              attachments: input.attachments,
+              attachmentsDir: serverConfig.attachmentsDir,
+              provider: PROVIDER,
+              method: "session/prompt",
+              readFile: (path) => deps.fileSystem.readFile(path),
+            });
+            promptParts.push(...imageBlocks);
           }
           if (promptParts.length === 0) {
             return yield* new ProviderAdapterRequestError({

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeDevinModelDisplayName, parseDevinModelSlug } from "./DevinModelSlugParser";
+import { normalizeDevinModelDisplayName, parseDevinModelSlug } from "./DevinModelCatalog";
 
 describe("parseDevinModelSlug", () => {
   // Mode values return null
