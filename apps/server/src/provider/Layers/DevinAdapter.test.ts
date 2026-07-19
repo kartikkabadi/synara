@@ -1030,7 +1030,7 @@ describe("DevinAdapterLive", () => {
     Effect.gen(function* () {
       const adapter = yield* DevinAdapter;
 
-      assert.strictEqual(adapter.capabilities.conversationRollback, "restart-session");
+      assert.strictEqual(adapter.capabilities.conversationRollback, undefined);
     }).pipe(
       Effect.provide(
         makeDevinAdapterLive({
