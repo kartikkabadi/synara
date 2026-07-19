@@ -35,17 +35,35 @@ export interface DevinAcpRuntimeInput extends Omit<
 
 export const DEVIN_WINDSURF_API_KEY_AUTH_METHOD_ID = "windsurf-api-key";
 export const DEVIN_BROWSER_LOGIN_AUTH_METHOD_ID = "browser_login";
-export const DEVIN_API_KEY_ENV_KEYS = ["WINDSURF_API_KEY"] as const;
+// Accept both the canonical uppercase `WINDSURF_API_KEY` and the lowercase
+// `windsurf_api_key` that some secret/credential injectors provide.
+export const DEVIN_API_KEY_ENV_KEYS = ["WINDSURF_API_KEY", "windsurf_api_key"] as const;
+
+export function resolveDevinApiKeyEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  for (const key of DEVIN_API_KEY_ENV_KEYS) {
+    const value = env[key]?.trim();
+    if (value) return value;
+  }
+  return undefined;
+}
+
+export function hasDevinApiKeyEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(resolveDevinApiKeyEnv(env));
+}
 
 export function buildDevinAcpSpawnInput(
   devinSettings: DevinAcpRuntimeSettings | null | undefined,
   cwd: string,
 ): AcpSpawnInput {
+  // The Devin ACP server expects `WINDSURF_API_KEY`. If only the lowercase
+  // variant is present, normalize it to the canonical key for the child.
+  const apiKey = resolveDevinApiKeyEnv();
+  const extraEnv = apiKey ? { extraEnv: { WINDSURF_API_KEY: apiKey } } : {};
   return {
     command: devinSettings?.binaryPath?.trim() || "devin",
     args: ["acp"],
     cwd,
-    env: buildAcpSpawnEnv({ extraPrefixes: ["DEVIN_", "WINDSURF_"] }),
+    env: buildAcpSpawnEnv({ extraPrefixes: ["DEVIN_", "WINDSURF_"], ...extraEnv }),
   };
 }
 
@@ -53,10 +71,6 @@ function availableAuthMethodIds(
   initializeResult: EffectAcpSchema.InitializeResponse,
 ): ReadonlySet<string> {
   return new Set((initializeResult.authMethods ?? []).map((method) => method.id.trim()));
-}
-
-export function hasDevinApiKeyEnv(env: NodeJS.ProcessEnv = process.env): boolean {
-  return DEVIN_API_KEY_ENV_KEYS.some((key) => Boolean(env[key]?.trim()));
 }
 
 export const resolveDevinAcpAuthMethodId = (
