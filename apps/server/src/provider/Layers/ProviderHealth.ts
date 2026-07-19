@@ -116,6 +116,7 @@ const DROID_PROVIDER = "droid" as const;
 const KILO_PROVIDER = "kilo" as const;
 const OPENCODE_PROVIDER = "opencode" as const;
 const PI_PROVIDER = "pi" as const;
+const DEVIN_PROVIDER = "devin" as const;
 type ProviderStatuses = ReadonlyArray<ServerProviderStatus>;
 const DISABLED_PROVIDER_STATUS_MESSAGE = "Provider is disabled in Synara settings.";
 const MINIMUM_ANTIGRAVITY_CLI_VERSION = "1.0.12";
@@ -130,6 +131,7 @@ const PROVIDERS = [
   KILO_PROVIDER,
   OPENCODE_PROVIDER,
   PI_PROVIDER,
+  DEVIN_PROVIDER,
 ] as const satisfies ReadonlyArray<ProviderKind>;
 
 const providerChildKind = (provider: ProviderKind): ProviderChildKind =>
@@ -1565,6 +1567,18 @@ export const checkPiProviderStatus = (
     } satisfies ServerProviderStatus;
   });
 
+// ── Devin health check (stub; full probe in stacked PR) ─────────────
+
+const checkDevinProviderStatus = (_binaryPath?: string): Effect.Effect<ServerProviderStatus> =>
+  Effect.succeed({
+    provider: DEVIN_PROVIDER,
+    status: "warning" as const,
+    available: true,
+    authStatus: "unknown" as const,
+    checkedAt: new Date().toISOString(),
+    message: "Devin health probe is part of a stacked PR and is not yet active.",
+  } satisfies ServerProviderStatus);
+
 // ── Antigravity CLI health check ──────────────────────────────────
 
 export const checkAntigravityProviderStatus = (
@@ -2135,6 +2149,8 @@ export function makeProviderHealthLive(options?: { readonly providerUpdateTimeou
             return settings.providers.opencode.binaryPath;
           case "pi":
             return settings.providers.pi.binaryPath;
+          case "devin":
+            return settings.providers.devin.binaryPath;
         }
       };
 
@@ -2347,6 +2363,11 @@ export function makeProviderHealthLive(options?: { readonly providerUpdateTimeou
                     settings.providers.pi.agentDir,
                     settings.providers.pi.binaryPath,
                   ),
+                ),
+                checkProviderWhenEnabled(
+                  settings,
+                  DEVIN_PROVIDER,
+                  checkDevinProviderStatus(settings.providers.devin.binaryPath),
                 ),
               ],
               {
