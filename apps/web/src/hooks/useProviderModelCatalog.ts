@@ -74,11 +74,14 @@ export function useProviderModelCatalog(input: {
       enabled: selectedProvider === "cursor" || discoveryEnabled,
     }),
   );
+  // Devin cold discovery spawns an interactive `devin acp` child; only warm it
+  // when Devin is the explicitly selected provider.
   const devinDynamicModelsQuery = useQuery(
     providerModelsQueryOptions({
       provider: "devin",
       binaryPath: settings.devinBinaryPath || null,
-      enabled: selectedProvider === "devin" || discoveryEnabled,
+      cwd: discoveryCwd,
+      enabled: selectedProvider === "devin",
     }),
   );
   const antigravityModelsQuery = useQuery(

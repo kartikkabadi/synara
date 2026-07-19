@@ -2204,12 +2204,14 @@ export default function ChatView({
       enabled: piModelDiscoveryEnabled,
     }),
   );
-  const devinModelDiscoveryEnabled =
-    selectedProvider === "devin" || lockedProvider === "devin" || isModelPickerOpen;
+  // Devin cold discovery spawns an interactive `devin acp` child and may request
+  // authentication. Only run it when Devin is explicitly selected or locked.
+  const devinModelDiscoveryEnabled = selectedProvider === "devin" || lockedProvider === "devin";
   const devinDynamicModelsQuery = useQuery(
     providerModelsQueryOptions({
       provider: "devin",
       binaryPath: settings.devinBinaryPath || null,
+      cwd: providerModelDiscoveryCwd,
       enabled: devinModelDiscoveryEnabled,
     }),
   );
