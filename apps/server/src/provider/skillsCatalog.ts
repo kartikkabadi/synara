@@ -433,6 +433,7 @@ const PROVIDER_SKILL_ORIGIN_PREFERENCES = {
   cursor: ["cursor", "agents", "claude", "codex"],
   antigravity: ["agents"],
   grok: ["grok", "claude", "agents"],
+  devin: ["agents"],
   droid: ["factory", "agents", "claude", "codex"],
   kilo: ["kilo", "agents", "claude"],
   opencode: ["opencode", "claude", "agents"],
