@@ -15,13 +15,17 @@ import {
   type ModelCapabilities,
 } from "@synara/contracts";
 import {
+  DEFAULT_DEVIN_CONTEXT_WINDOW_LABEL,
   devinModelDisplayNameOverride,
   formatDevinModelSlugDisplay,
   normalizeDevinModelDisplayName,
   resolveDevinLegacyModelFamilyAlias,
 } from "@synara/shared/devinModel";
 
-export { normalizeDevinModelDisplayName } from "@synara/shared/devinModel";
+export {
+  DEFAULT_DEVIN_CONTEXT_WINDOW_LABEL,
+  normalizeDevinModelDisplayName,
+} from "@synara/shared/devinModel";
 
 const MODE_VALUES = new Set(["accept-edits", "ask", "bypass", "plan"]);
 
@@ -234,7 +238,17 @@ export const DEVIN_FALLBACK_MODELS = MODEL_OPTIONS_BY_PROVIDER.devin.map((option
 
 export function normalizeDevinModelSlug(model: string): string {
   const trimmed = model.trim();
-  return MODEL_SLUG_ALIASES_BY_PROVIDER.devin[trimmed.toLowerCase()] ?? trimmed;
+  const lower = trimmed.toLowerCase();
+  const aliased = MODEL_SLUG_ALIASES_BY_PROVIDER.devin[lower];
+  if (typeof aliased === "string") return aliased;
+  // Backward compatibility: legacy persisted selections may include a
+  // removed `-medium` variant suffix that no longer exists in Devin slugs.
+  if (lower.endsWith("-medium")) {
+    const base = lower.slice(0, -"-medium".length);
+    const baseAliased = MODEL_SLUG_ALIASES_BY_PROVIDER.devin[base];
+    return typeof baseAliased === "string" ? baseAliased : base;
+  }
+  return trimmed;
 }
 
 export interface DevinModelVariant {
@@ -329,7 +343,6 @@ export function buildDevinVariantMatrix(
     const medium = variants.find((v) => v.effort === "medium");
     const defaultVariant: DevinModelVariant = bare ?? medium ?? variants[0]!;
 
-    const baseName = entries[0]!.parsed.baseName;
     const entriesBySlug = [...entries].sort((a, b) =>
       a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0,
     );
@@ -340,6 +353,8 @@ export function buildDevinVariantMatrix(
       }
       return undefined;
     };
+    const baseName =
+      pickEntryValue((entry) => entry.parsed.baseName) ?? entriesBySlug[0]!.parsed.baseName;
 
     matrix.set(baseSlug, {
       baseSlug,
@@ -384,9 +399,8 @@ export function resolveDevinModelSlug(
   const targetEffort = options.reasoningEffort ?? base.defaultVariant.effort;
   const targetFast = options.fastMode ?? base.defaultVariant.fast;
   const targetThinking = options.thinking ?? base.defaultVariant.thinking;
-  // "standard" is the UI label for the default (non-1m) context window.
   const rawContext = options.contextWindow ?? base.defaultVariant.contextWindow;
-  const targetContext = rawContext === "standard" ? null : rawContext;
+  const targetContext = rawContext === DEFAULT_DEVIN_CONTEXT_WINDOW_LABEL ? null : rawContext;
 
   const exact = base.variants.find(
     (v) =>

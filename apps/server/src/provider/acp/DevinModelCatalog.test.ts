@@ -16,8 +16,11 @@ describe("normalizeDevinModelSlug", () => {
     assert.strictEqual(normalizeDevinModelSlug(" SWE "), "swe-1-6");
   });
 
-  it("passes through unknown slugs unchanged", () => {
-    assert.strictEqual(normalizeDevinModelSlug("claude-opus-4-8-medium"), "claude-opus-4-8-medium");
+  it("strips removed -medium variant suffixes and falls back to the base slug", () => {
+    assert.strictEqual(normalizeDevinModelSlug("claude-opus-4-8-medium"), "claude-opus-4-8");
+  });
+
+  it("passes through genuinely unknown slugs unchanged", () => {
     assert.strictEqual(normalizeDevinModelSlug("unknown-model"), "unknown-model");
   });
 });

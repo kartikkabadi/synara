@@ -17,6 +17,9 @@ export function resolveDevinLegacyModelFamilyAlias(
   return alias ? { baseSlug: alias.baseSlug, thinking: alias.thinking } : null;
 }
 
+/** UI label for the default (non-1M) Devin context window. */
+export const DEFAULT_DEVIN_CONTEXT_WINDOW_LABEL = "standard" as const;
+
 const DEVIN_VARIANT_TOKENS = new Set([
   "low",
   "medium",

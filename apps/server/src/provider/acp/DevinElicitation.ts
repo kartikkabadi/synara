@@ -16,6 +16,12 @@ const FALLBACK_OPTIONS = [{ label: "OK", description: "Continue" }] as const;
 const FREEFORM_OPTIONS: ReadonlyArray<{ label: string; description: string }> = [];
 const REGEX_TIMEOUT_MS = 100;
 
+// Defense-in-depth limits for provider-controlled elicitation forms.
+const MAX_ELICITATION_PROPERTIES = 50;
+const MAX_ELICITATION_SCHEMA_SIZE_BYTES = 100_000;
+const MAX_ELICITATION_ANSWER_SIZE_BYTES = 100_000;
+const MAX_ELICITATION_TOTAL_ANSWER_SIZE_BYTES = 500_000;
+
 type RegexMatchResult =
   | { readonly ok: true; readonly matched: boolean }
   | { readonly ok: false; readonly reason: "timeout" | "invalid" };
@@ -51,6 +57,30 @@ function testPatternInterruptibly(pattern: string, input: string): RegexMatchRes
     }
     return { ok: false, reason: "invalid" };
   }
+}
+
+export function validateElicitationRequest(
+  request: ElicitationForm,
+): DevinElicitationValidationResult {
+  const issues: string[] = [];
+  const properties = request.requestedSchema.properties;
+  const propertyCount = properties ? Object.keys(properties).length : 0;
+  if (propertyCount > MAX_ELICITATION_PROPERTIES) {
+    issues.push(
+      `Elicitation form has ${propertyCount} properties; maximum is ${MAX_ELICITATION_PROPERTIES}.`,
+    );
+  }
+  try {
+    const serialized = JSON.stringify(request);
+    if (serialized.length > MAX_ELICITATION_SCHEMA_SIZE_BYTES) {
+      issues.push(
+        `Elicitation form exceeds maximum size of ${MAX_ELICITATION_SCHEMA_SIZE_BYTES} bytes.`,
+      );
+    }
+  } catch {
+    issues.push("Elicitation form is not serializable.");
+  }
+  return { valid: issues.length === 0, issues };
 }
 
 export function elicitationFormToUserInputQuestions(
@@ -143,7 +173,35 @@ export function validateUserInputAnswersForElicitation(
 ): DevinElicitationValidationResult {
   const properties = request.requestedSchema.properties;
   const hasProperties = properties !== undefined && Object.keys(properties).length > 0;
+  const propertyCount = properties ? Object.keys(properties).length : 0;
   const issues: string[] = [];
+
+  if (propertyCount > MAX_ELICITATION_PROPERTIES) {
+    issues.push(
+      `Elicitation form has ${propertyCount} properties; maximum is ${MAX_ELICITATION_PROPERTIES}.`,
+    );
+  }
+
+  let totalAnswerSize = 0;
+  for (const [key, value] of Object.entries(answers)) {
+    if (value === null || value === undefined) continue;
+    const size =
+      typeof value === "string"
+        ? value.length
+        : (value as ReadonlyArray<string>).reduce((sum, item) => sum + item.length, 0);
+    if (size > MAX_ELICITATION_ANSWER_SIZE_BYTES) {
+      issues.push(
+        `Answer '${key}' exceeds the maximum allowed size of ${MAX_ELICITATION_ANSWER_SIZE_BYTES} bytes.`,
+      );
+    }
+    totalAnswerSize += size;
+    if (totalAnswerSize > MAX_ELICITATION_TOTAL_ANSWER_SIZE_BYTES) {
+      issues.push(
+        `Total elicitation answer size exceeds the maximum allowed ${MAX_ELICITATION_TOTAL_ANSWER_SIZE_BYTES} bytes.`,
+      );
+      break;
+    }
+  }
 
   // unknown keys: only the synthetic "response" key is allowed when the form has no properties
   for (const key of Object.keys(answers)) {
