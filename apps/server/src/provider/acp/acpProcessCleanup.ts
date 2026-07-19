@@ -36,15 +36,29 @@ function killTrackedProcesses(): void {
   }
 }
 
+function onSigterm(): void {
+  // Remove this listener so the re-raised signal restores the default
+  // process-exit behavior after cleanup; other listeners (e.g. the runtime's
+  // coordinated shutdown) are still invoked in this dispatch.
+  process.removeListener("SIGTERM", onSigterm);
+  killTrackedProcesses();
+  process.nextTick(() => process.kill(process.pid, "SIGTERM"));
+}
+
+function onSigint(): void {
+  process.removeListener("SIGINT", onSigint);
+  killTrackedProcesses();
+  process.nextTick(() => process.kill(process.pid, "SIGINT"));
+}
+
 function install(): void {
   if (installed) return;
   installed = true;
   // Node does not emit `exit` on SIGTERM/SIGINT, so register signal handlers
-  // directly. Multiple listeners are allowed; this module only handles its own
-  // tracked ACP children and does not call process.exit so the runtime can
-  // continue its own shutdown sequence.
-  process.on("SIGTERM", killTrackedProcesses);
-  process.on("SIGINT", killTrackedProcesses);
+  // directly. We deliberately re-raise the signal after cleanup so we do not
+  // suppress the default process-termination behavior that supervisors rely on.
+  process.on("SIGTERM", onSigterm);
+  process.on("SIGINT", onSigint);
   process.on("exit", killTrackedProcesses);
 }
 
