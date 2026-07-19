@@ -6,10 +6,11 @@
 import { type ModelSlug, type ProviderKind, type ServerProviderStatus } from "@synara/contracts";
 import { resolveSelectableModel } from "@synara/shared/model";
 import * as Schema from "effect/Schema";
-import { useDeferredValue, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { type ProviderPickerKind, PROVIDER_OPTIONS } from "../../session-logic";
 import { formatProviderModelOptionName } from "../../providerModelOptions";
 import { compareProvidersByOrder } from "../../providerOrdering";
+import { normalizeDevinModelVariantBaseId } from "@synara/shared/devinModelVariants";
 import {
   Menu,
   MenuItem,
@@ -39,11 +40,6 @@ import {
   type ProviderModelOption,
 } from "../../providerModelOptions";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
-import {
-  FAVORITE_MODEL_STORAGE_KEYS,
-  supportsModelFavorites,
-  type FavoriteModelProvider,
-} from "../../lib/modelFavorites";
 import { Skeleton } from "../ui/skeleton";
 
 function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {
@@ -116,8 +112,25 @@ function providerIconClassName(
 }
 
 const SEARCHABLE_MODEL_PICKER_THRESHOLD = 15;
+const FAVORITE_MODEL_STORAGE_KEYS = {
+  cursor: "synara:cursor-favourite-models:v1",
+  devin: "synara:devin-favourite-models:v1",
+  kilo: "synara:kilo-favourite-models:v1",
+  opencode: "synara:opencode-favourite-models:v1",
+  pi: "synara:pi-favourite-models:v1",
+} as const;
 const FavoriteModelSlugs = Schema.Array(Schema.String);
-const EMPTY_FAVORITE_MODEL_SLUGS: ReadonlyArray<string> = [];
+type FavoriteModelProvider = keyof typeof FAVORITE_MODEL_STORAGE_KEYS;
+
+function supportsModelFavorites(provider: ProviderKind): provider is FavoriteModelProvider {
+  return (
+    provider === "cursor" ||
+    provider === "devin" ||
+    provider === "kilo" ||
+    provider === "opencode" ||
+    provider === "pi"
+  );
+}
 
 // Keeps persisted favorite slugs compact and stable while preserving the user's order.
 function toggleFavoriteModelSlug(current: ReadonlyArray<string>, slug: string): string[] {
@@ -147,6 +160,17 @@ function resolveSelectedModelLabel(input: {
     );
     if (baseMatch) {
       return baseMatch.name;
+    }
+  }
+  if (input.provider === "devin") {
+    const baseId = normalizeDevinModelVariantBaseId(input.model);
+    if (baseId) {
+      const baseMatch = input.options.find(
+        (option) => normalizeDevinModelVariantBaseId(option.slug) === baseId,
+      );
+      if (baseMatch) {
+        return baseMatch.name;
+      }
     }
   }
   return formatProviderModelOptionName({
@@ -187,64 +211,109 @@ type ProviderModelMenuItemsProps = {
 // Renders only the popup body of the provider/model picker. Designed to be
 // dropped into any shared picker popup or submenu so the same selection logic can
 // be reused by the standalone picker and the combined composer trait picker.
-export const ProviderModelMenuItems = function ProviderModelMenuItems(
+export const ProviderModelMenuItems = memo(function ProviderModelMenuItems(
   props: ProviderModelMenuItemsProps,
 ) {
   const { onAfterSelection } = props;
   const [modelSearchQuery, setModelSearchQuery] = useState("");
   const [kiloFavoriteModelSlugs, setKiloFavoriteModelSlugs] = useLocalStorage(
     FAVORITE_MODEL_STORAGE_KEYS.kilo,
-    EMPTY_FAVORITE_MODEL_SLUGS,
+    [],
     FavoriteModelSlugs,
   );
   const [cursorFavoriteModelSlugs, setCursorFavoriteModelSlugs] = useLocalStorage(
     FAVORITE_MODEL_STORAGE_KEYS.cursor,
-    EMPTY_FAVORITE_MODEL_SLUGS,
+    [],
+    FavoriteModelSlugs,
+  );
+  const [devinFavoriteModelSlugs, setDevinFavoriteModelSlugs] = useLocalStorage(
+    FAVORITE_MODEL_STORAGE_KEYS.devin,
+    [],
     FavoriteModelSlugs,
   );
   const [openCodeFavoriteModelSlugs, setOpenCodeFavoriteModelSlugs] = useLocalStorage(
     FAVORITE_MODEL_STORAGE_KEYS.opencode,
-    EMPTY_FAVORITE_MODEL_SLUGS,
+    [],
     FavoriteModelSlugs,
   );
   const [piFavoriteModelSlugs, setPiFavoriteModelSlugs] = useLocalStorage(
     FAVORITE_MODEL_STORAGE_KEYS.pi,
-    EMPTY_FAVORITE_MODEL_SLUGS,
+    [],
     FavoriteModelSlugs,
   );
   const deferredModelSearchQuery = useDeferredValue(modelSearchQuery);
   const activeProvider = props.lockedProvider ?? props.provider;
   const hiddenProviders = props.hiddenProviders;
   const providerOrder = props.providerOrder;
-  const hiddenProviderSet = new Set<ProviderKind>(hiddenProviders ?? []);
-  const protectedProviderSet = new Set<ProviderKind>([props.provider]);
-  if (props.lockedProvider !== null) {
-    protectedProviderSet.add(props.lockedProvider);
-  }
-  const visibleAvailableProviderOptions = filterProviderOptionsByVisibility(
-    AVAILABLE_PROVIDER_OPTIONS.toSorted((left, right) =>
-      compareProvidersByOrder(providerOrder ?? [], left.value, right.value),
-    ),
-    hiddenProviderSet,
-    protectedProviderSet,
+  const hiddenProviderSet = useMemo(
+    () => new Set<ProviderKind>(hiddenProviders ?? []),
+    [hiddenProviders],
   );
-  const visibleUnavailableProviderOptions = filterProviderOptionsByVisibility(
-    UNAVAILABLE_PROVIDER_OPTIONS.toSorted((left, right) =>
-      compareProvidersByOrder(providerOrder ?? [], left.value, right.value),
-    ),
-    hiddenProviderSet,
-    protectedProviderSet,
+  const protectedProviderSet = useMemo(() => {
+    const set = new Set<ProviderKind>([props.provider]);
+    if (props.lockedProvider !== null) {
+      set.add(props.lockedProvider);
+    }
+    return set;
+  }, [props.provider, props.lockedProvider]);
+  const visibleAvailableProviderOptions = useMemo(
+    () =>
+      filterProviderOptionsByVisibility(
+        [...AVAILABLE_PROVIDER_OPTIONS].sort((left, right) =>
+          compareProvidersByOrder(providerOrder ?? [], left.value, right.value),
+        ),
+        hiddenProviderSet,
+        protectedProviderSet,
+      ),
+    [hiddenProviderSet, protectedProviderSet, providerOrder],
   );
-  const kiloFavoriteModelSlugSet = new Set(kiloFavoriteModelSlugs);
-  const openCodeFavoriteModelSlugSet = new Set(openCodeFavoriteModelSlugs);
-  const cursorFavoriteModelSlugSet = new Set(cursorFavoriteModelSlugs);
-  const piFavoriteModelSlugSet = new Set(piFavoriteModelSlugs);
-  const favoriteModelSlugSets = {
-    cursor: cursorFavoriteModelSlugSet,
-    kilo: kiloFavoriteModelSlugSet,
-    opencode: openCodeFavoriteModelSlugSet,
-    pi: piFavoriteModelSlugSet,
-  };
+  const visibleUnavailableProviderOptions = useMemo(
+    () =>
+      filterProviderOptionsByVisibility(
+        [...UNAVAILABLE_PROVIDER_OPTIONS].sort((left, right) =>
+          compareProvidersByOrder(providerOrder ?? [], left.value, right.value),
+        ),
+        hiddenProviderSet,
+        protectedProviderSet,
+      ),
+    [hiddenProviderSet, protectedProviderSet, providerOrder],
+  );
+  const kiloFavoriteModelSlugSet = useMemo(
+    () => new Set(kiloFavoriteModelSlugs),
+    [kiloFavoriteModelSlugs],
+  );
+  const openCodeFavoriteModelSlugSet = useMemo(
+    () => new Set(openCodeFavoriteModelSlugs),
+    [openCodeFavoriteModelSlugs],
+  );
+  const cursorFavoriteModelSlugSet = useMemo(
+    () => new Set(cursorFavoriteModelSlugs),
+    [cursorFavoriteModelSlugs],
+  );
+  const devinFavoriteModelSlugSet = useMemo(
+    () => new Set(devinFavoriteModelSlugs),
+    [devinFavoriteModelSlugs],
+  );
+  const piFavoriteModelSlugSet = useMemo(
+    () => new Set(piFavoriteModelSlugs),
+    [piFavoriteModelSlugs],
+  );
+  const favoriteModelSlugSets = useMemo(
+    () => ({
+      cursor: cursorFavoriteModelSlugSet,
+      devin: devinFavoriteModelSlugSet,
+      kilo: kiloFavoriteModelSlugSet,
+      opencode: openCodeFavoriteModelSlugSet,
+      pi: piFavoriteModelSlugSet,
+    }),
+    [
+      cursorFavoriteModelSlugSet,
+      devinFavoriteModelSlugSet,
+      kiloFavoriteModelSlugSet,
+      openCodeFavoriteModelSlugSet,
+      piFavoriteModelSlugSet,
+    ],
+  );
   const handleModelChange = (provider: ProviderKind, value: string) => {
     if (props.disabled) return;
     if (!value) return;
@@ -257,17 +326,28 @@ export const ProviderModelMenuItems = function ProviderModelMenuItems(
     props.onProviderModelChange(provider, resolvedModel);
     onAfterSelection?.();
   };
-  const toggleFavoriteModel = (provider: FavoriteModelProvider, slug: string) => {
-    const setFavoriteModelSlugs =
-      provider === "cursor"
-        ? setCursorFavoriteModelSlugs
-        : provider === "kilo"
-          ? setKiloFavoriteModelSlugs
-          : provider === "pi"
-            ? setPiFavoriteModelSlugs
-            : setOpenCodeFavoriteModelSlugs;
-    setFavoriteModelSlugs((current) => toggleFavoriteModelSlug(current, slug));
-  };
+  const toggleFavoriteModel = useCallback(
+    (provider: FavoriteModelProvider, slug: string) => {
+      const setFavoriteModelSlugs =
+        provider === "cursor"
+          ? setCursorFavoriteModelSlugs
+          : provider === "devin"
+            ? setDevinFavoriteModelSlugs
+            : provider === "kilo"
+              ? setKiloFavoriteModelSlugs
+              : provider === "pi"
+                ? setPiFavoriteModelSlugs
+                : setOpenCodeFavoriteModelSlugs;
+      setFavoriteModelSlugs((current) => toggleFavoriteModelSlug(current, slug));
+    },
+    [
+      setCursorFavoriteModelSlugs,
+      setDevinFavoriteModelSlugs,
+      setKiloFavoriteModelSlugs,
+      setOpenCodeFavoriteModelSlugs,
+      setPiFavoriteModelSlugs,
+    ],
+  );
 
   const renderModelRadioGroup = (provider: ProviderKind) => {
     if (props.loadingModelProviders?.[provider]) {
@@ -288,7 +368,8 @@ export const ProviderModelMenuItems = function ProviderModelMenuItems(
       (provider === "kilo" ||
         provider === "opencode" ||
         provider === "cursor" ||
-        provider === "pi") &&
+        provider === "pi" ||
+        provider === "devin") &&
       providerOptions.length >= SEARCHABLE_MODEL_PICKER_THRESHOLD;
     const normalizedModelSearchQuery = deferredModelSearchQuery.trim().toLowerCase();
     const filteredOptions =
@@ -433,7 +514,7 @@ export const ProviderModelMenuItems = function ProviderModelMenuItems(
       })}
     </>
   );
-};
+});
 
 // Resolves the human-readable label for the currently selected model.
 export function resolveProviderModelLabel(input: {
@@ -478,7 +559,9 @@ type ProviderModelPickerProps = {
   onProviderModelChange: (provider: ProviderKind, model: ModelSlug) => void;
 };
 
-export const ProviderModelPicker = function ProviderModelPicker(props: ProviderModelPickerProps) {
+export const ProviderModelPicker = memo(function ProviderModelPicker(
+  props: ProviderModelPickerProps,
+) {
   const { onOpenChange, onSelectionCommitted, open } = props;
   const [uncontrolledMenuOpen, setUncontrolledMenuOpen] = useState(false);
   const selectionCommitTimerRef = useRef<number | null>(null);
@@ -492,13 +575,16 @@ export const ProviderModelPicker = function ProviderModelPicker(props: ProviderM
   });
   const ProviderIcon = PROVIDER_ICON_COMPONENT_BY_PROVIDER[activeProvider];
 
-  const setMenuOpen = (nextOpen: boolean) => {
-    if (open === undefined) {
-      setUncontrolledMenuOpen(nextOpen);
-    }
-    onOpenChange?.(nextOpen);
-  };
-  const scheduleSelectionCommitted = () => {
+  const setMenuOpen = useCallback(
+    (nextOpen: boolean) => {
+      if (open === undefined) {
+        setUncontrolledMenuOpen(nextOpen);
+      }
+      onOpenChange?.(nextOpen);
+    },
+    [onOpenChange, open],
+  );
+  const scheduleSelectionCommitted = useCallback(() => {
     if (selectionCommitTimerRef.current !== null) {
       window.clearTimeout(selectionCommitTimerRef.current);
     }
@@ -507,7 +593,7 @@ export const ProviderModelPicker = function ProviderModelPicker(props: ProviderM
       selectionCommitTimerRef.current = null;
       onSelectionCommitted?.();
     }, 0);
-  };
+  }, [onSelectionCommitted]);
   useEffect(
     () => () => {
       if (selectionCommitTimerRef.current !== null) {
@@ -517,10 +603,10 @@ export const ProviderModelPicker = function ProviderModelPicker(props: ProviderM
     [],
   );
 
-  const handleAfterSelection = () => {
+  const handleAfterSelection = useCallback(() => {
     setMenuOpen(false);
     scheduleSelectionCommitted();
-  };
+  }, [scheduleSelectionCommitted, setMenuOpen]);
 
   const triggerButton = (
     <PickerTriggerButton
@@ -574,7 +660,7 @@ export const ProviderModelPicker = function ProviderModelPicker(props: ProviderM
           <span className="sr-only">{selectedModelLabel}</span>
         </MenuTrigger>
       )}
-      <ComposerPickerMenuPopup align="start" fixedWidth>
+      <ComposerPickerMenuPopup align="start" fixedWidth={props.lockedProvider !== null}>
         <ProviderModelMenuItems
           provider={props.provider}
           model={props.model}
@@ -593,4 +679,4 @@ export const ProviderModelPicker = function ProviderModelPicker(props: ProviderM
       </ComposerPickerMenuPopup>
     </Menu>
   );
-};
+});

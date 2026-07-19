@@ -78,7 +78,11 @@ import {
 } from "~/lib/gitReactQuery";
 import { resolveProviderDiscoveryCwd } from "~/lib/providerDiscovery";
 import {
-  isInitialModelDiscoveryPending,
+  providerRequiresRuntimeModelDiscovery,
+  resolveProviderModelsLoading,
+  resolveProviderRuntimeModelDiscoveryPending,
+} from "~/lib/providerRuntimeModelDiscovery";
+import {
   providerAgentsQueryOptions,
   providerComposerCapabilitiesQueryOptions,
   providerCommandsQueryOptions,
@@ -89,6 +93,8 @@ import {
   supportsPluginDiscovery,
   supportsSkillDiscovery,
   supportsThreadCompaction,
+  supportsRollback,
+  isInitialModelDiscoveryPending,
 } from "~/lib/providerDiscoveryReactQuery";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
@@ -888,6 +894,10 @@ function getProviderStartOptionsCustomBinaryPath(
       return normalizeCustomBinaryPath(providerOptions?.codex?.binaryPath);
     case "claudeAgent":
       return normalizeCustomBinaryPath(providerOptions?.claudeAgent?.binaryPath);
+    case "cursor":
+      return normalizeCustomBinaryPath(providerOptions?.cursor?.binaryPath);
+    case "devin":
+      return normalizeCustomBinaryPath(providerOptions?.devin?.binaryPath);
     case "antigravity":
       return normalizeCustomBinaryPath(providerOptions?.antigravity?.binaryPath);
     case "grok":
@@ -898,8 +908,6 @@ function getProviderStartOptionsCustomBinaryPath(
       return normalizeCustomBinaryPath(providerOptions?.kilo?.binaryPath);
     case "opencode":
       return normalizeCustomBinaryPath(providerOptions?.opencode?.binaryPath);
-    case "cursor":
-      return normalizeCustomBinaryPath(providerOptions?.cursor?.binaryPath);
     case "pi":
       return normalizeCustomBinaryPath(providerOptions?.pi?.binaryPath);
   }
@@ -2110,6 +2118,7 @@ export default function ChatView({
       codex: resolveHint("codex"),
       claudeAgent: resolveHint("claudeAgent"),
       cursor: resolveHint("cursor"),
+      devin: resolveHint("devin"),
       antigravity: resolveHint("antigravity"),
       grok: resolveHint("grok"),
       droid: resolveHint("droid"),
@@ -2195,6 +2204,15 @@ export default function ChatView({
       enabled: piModelDiscoveryEnabled,
     }),
   );
+  const devinModelDiscoveryEnabled =
+    selectedProvider === "devin" || lockedProvider === "devin" || isModelPickerOpen;
+  const devinDynamicModelsQuery = useQuery(
+    providerModelsQueryOptions({
+      provider: "devin",
+      binaryPath: settings.devinBinaryPath || null,
+      enabled: devinModelDiscoveryEnabled,
+    }),
+  );
   const claudeDynamicAgentsQuery = useQuery(
     providerAgentsQueryOptions({ provider: "claudeAgent" }),
   );
@@ -2228,14 +2246,14 @@ export default function ChatView({
   const cursorModelDiscoveryPending =
     cursorModelDiscoveryEnabled &&
     !hasResolvedCursorModelDiscovery &&
-    isInitialModelDiscoveryPending(cursorDynamicModelsQuery);
-  const hasResolvedDroidModelDiscovery =
-    droidDynamicModelsQuery.data?.source === "droid-acp" &&
-    (droidDynamicModelsQuery.data.models.length ?? 0) > 0;
-  const droidModelDiscoveryPending =
-    droidModelDiscoveryEnabled &&
-    !hasResolvedDroidModelDiscovery &&
-    isInitialModelDiscoveryPending(droidDynamicModelsQuery);
+    (cursorDynamicModelsQuery.isLoading || cursorDynamicModelsQuery.isFetching);
+  const hasResolvedDevinModelDiscovery =
+    devinDynamicModelsQuery.data?.source === "devin.acp" &&
+    (devinDynamicModelsQuery.data.models.length ?? 0) > 0;
+  const devinModelDiscoveryPending =
+    devinModelDiscoveryEnabled &&
+    !hasResolvedDevinModelDiscovery &&
+    (devinDynamicModelsQuery.isLoading || devinDynamicModelsQuery.isFetching);
   const hasResolvedKiloModelDiscovery =
     (kiloDynamicModelsQuery.data?.source === "kilo-cli" ||
       kiloDynamicModelsQuery.data?.source === "kilo") &&
@@ -2281,6 +2299,11 @@ export default function ChatView({
         customModelsByProvider.cursor,
         composerModelHintByProvider.cursor,
       ),
+      devin: getAppModelOptions(
+        "devin",
+        customModelsByProvider.devin,
+        composerModelHintByProvider.devin,
+      ),
       antigravity: getAppModelOptions(
         "antigravity",
         customModelsByProvider.antigravity,
@@ -2325,6 +2348,7 @@ export default function ChatView({
       droid: droidDynamicModelsQuery.data,
       kilo: kiloDynamicModelsQuery.data,
       opencode: openCodeDynamicModelsQuery.data,
+      devin: devinDynamicModelsQuery.data,
       pi: piDynamicModelsQuery.data,
     };
 
@@ -2332,6 +2356,7 @@ export default function ChatView({
       "claudeAgent",
       "codex",
       "cursor",
+      "devin",
       "antigravity",
       "grok",
       "droid",
@@ -2357,7 +2382,7 @@ export default function ChatView({
     cursorDynamicModelsQuery.data,
     cursorRuntimeModels,
     customModelsByProvider,
-    droidDynamicModelsQuery.data,
+    devinDynamicModelsQuery.data,
     antigravityModelsQuery.data,
     grokDynamicModelsQuery.data,
     kiloDynamicModelsQuery.data,
@@ -2382,13 +2407,14 @@ export default function ChatView({
       droid: droidDynamicModelsQuery.data?.models ?? [],
       kilo: kiloDynamicModelsQuery.data?.models ?? [],
       opencode: openCodeDynamicModelsQuery.data?.models ?? [],
+      devin: devinDynamicModelsQuery.data?.models ?? [],
       pi: piDynamicModelsQuery.data?.models ?? [],
     }),
     [
       claudeDynamicModelsQuery.data?.models,
       codexDynamicModelsQuery.data?.models,
       cursorRuntimeModels,
-      droidDynamicModelsQuery.data?.models,
+      devinDynamicModelsQuery.data?.models,
       antigravityModelsQuery.data?.models,
       grokDynamicModelsQuery.data?.models,
       kiloDynamicModelsQuery.data?.models,
@@ -2405,6 +2431,7 @@ export default function ChatView({
     droid: droidDynamicModelsQuery,
     kilo: kiloDynamicModelsQuery,
     opencode: openCodeDynamicModelsQuery,
+    devin: devinDynamicModelsQuery,
     pi: piDynamicModelsQuery,
   } as const;
   const selectedRuntimeModel = useMemo(
@@ -2464,44 +2491,25 @@ export default function ChatView({
         : null
       : (activeThread?.modelSelection ?? activeProject?.defaultModelSelection ?? null);
   const selectedProviderModelsQuery = providerModelsQueryByProvider[selectedProvider];
-  const providerModelsLoading =
-    selectedProvider === "antigravity"
-      ? antigravityModelDiscoveryPending
-      : selectedProvider === "cursor"
-        ? cursorModelDiscoveryPending
-        : selectedProvider === "droid"
-          ? droidModelDiscoveryPending
-          : selectedProvider === "kilo"
-            ? kiloModelDiscoveryPending
-            : selectedProvider === "opencode"
-              ? openCodeModelDiscoveryPending
-              : selectedProvider === "pi"
-                ? piModelDiscoveryPending
-                : selectedProviderModelsQuery !== undefined &&
-                  (selectedProviderModelsQuery.isLoading ||
-                    (selectedProviderModelsQuery.isFetching &&
-                      selectedProviderModelsQuery.data === undefined));
+  const runtimeModelDiscoveryPendingByProvider = {
+    cursor: cursorModelDiscoveryPending,
+    devin: devinModelDiscoveryPending,
+    kilo: kiloModelDiscoveryPending,
+    opencode: openCodeModelDiscoveryPending,
+    pi: piModelDiscoveryPending,
+  } as const;
+  const providerModelsLoading = resolveProviderModelsLoading(
+    selectedProvider,
+    runtimeModelDiscoveryPendingByProvider,
+    selectedProviderModelsQuery,
+  );
   const selectedProviderRequiresRuntimeModels =
-    selectedProvider === "cursor" ||
-    selectedProvider === "antigravity" ||
-    selectedProvider === "droid" ||
-    selectedProvider === "kilo" ||
-    selectedProvider === "opencode" ||
-    selectedProvider === "pi";
-  const selectedProviderRuntimeModelDiscoveryPending =
-    selectedProvider === "antigravity"
-      ? antigravityModelDiscoveryPending
-      : selectedProvider === "cursor"
-        ? cursorModelDiscoveryPending
-        : selectedProvider === "droid"
-          ? droidModelDiscoveryPending
-          : selectedProvider === "kilo"
-            ? kiloModelDiscoveryPending
-            : selectedProvider === "opencode"
-              ? openCodeModelDiscoveryPending
-              : selectedProvider === "pi"
-                ? piModelDiscoveryPending
-                : false;
+    providerRequiresRuntimeModelDiscovery(selectedProvider);
+  const selectedProviderRuntimeModelDiscoveryPending = resolveProviderRuntimeModelDiscoveryPending(
+    selectedProvider,
+    runtimeModelDiscoveryPendingByProvider,
+    selectedProviderModelsQuery,
+  );
   const showComposerModelBootstrapSkeleton = shouldShowComposerModelBootstrapSkeleton({
     selectedProvider,
     selectedModel,
@@ -3460,8 +3468,13 @@ export default function ChatView({
       })),
       messages: messagesForDiffAnchoring,
     });
-  }, [inferredCheckpointTurnCountByTurnId, turnDiffSummaries, timelineMessages]);
+  }, [turnDiffSummaries, timelineMessages]);
+  const providerComposerCapabilitiesQuery = useQuery(
+    providerComposerCapabilitiesQueryOptions(selectedProvider),
+  );
+  const providerSupportsRollback = supportsRollback(providerComposerCapabilitiesQuery.data);
   const revertTurnCountByUserMessageId = useMemo(() => {
+    if (!providerSupportsRollback) return new Map<MessageId, number>();
     const byUserMessageId = new Map<MessageId, number>();
     for (let index = 0; index < timelineEntries.length; index += 1) {
       const entry = timelineEntries[index];
@@ -3492,7 +3505,12 @@ export default function ChatView({
     }
 
     return byUserMessageId;
-  }, [inferredCheckpointTurnCountByTurnId, timelineEntries, turnDiffSummaryByAssistantMessageId]);
+  }, [
+    inferredCheckpointTurnCountByTurnId,
+    providerSupportsRollback,
+    timelineEntries,
+    turnDiffSummaryByAssistantMessageId,
+  ]);
 
   const threadWorkspaceCwd = activeProject
     ? resolveSharedThreadWorkspaceCwd({
@@ -3530,9 +3548,6 @@ export default function ChatView({
   );
   const effectiveMentionQuery = mentionTriggerQuery.length > 0 ? debouncedPathQuery : "";
   const composerSkillCwd = providerModelDiscoveryCwd;
-  const providerComposerCapabilitiesQuery = useQuery(
-    providerComposerCapabilitiesQueryOptions(selectedProvider),
-  );
   const providerCommandsQuery = useQuery(
     providerCommandsQueryOptions({
       provider: selectedProvider,
@@ -4034,27 +4049,6 @@ export default function ChatView({
       },
     });
   }, [diffEnvironmentPending, diffOpen, navigate, onToggleDiffPanel, threadId]);
-  // Open-only diff action (no toggle): used by affordances like the live-changes
-  // "Review" strip where a second click should never close an already-open panel.
-  const onOpenDiff = useCallback(() => {
-    if (diffEnvironmentPending || resolvedDiffOpen) {
-      return;
-    }
-    if (onToggleDiffPanel) {
-      onToggleDiffPanel();
-      return;
-    }
-    void navigate({
-      to: "/$threadId",
-      params: { threadId },
-      replace: true,
-      search: (previous) => ({
-        ...stripDiffSearchParams(previous),
-        panel: "diff",
-        diff: "1",
-      }),
-    });
-  }, [diffEnvironmentPending, navigate, onToggleDiffPanel, resolvedDiffOpen, threadId]);
   const onToggleBrowser = useCallback(() => {
     if (onToggleBrowserPanel) {
       onToggleBrowserPanel();
@@ -4584,7 +4578,6 @@ export default function ChatView({
       removeThreadFromSplitViews,
       storeClearTerminalState,
       storeCloseTerminal,
-      syncServerShellSnapshot,
       settings.confirmTerminalTabClose,
       terminalState.entryPoint,
       terminalState.runningTerminalIds,
@@ -6804,6 +6797,13 @@ export default function ChatView({
       const api = readNativeApi();
       if (!api || !activeThread || isRevertingCheckpoint) return;
 
+      if (!providerSupportsRollback) {
+        setThreadError(
+          activeThread.id,
+          "Checkpoint revert cannot be performed for this provider. The Agent Client Protocol does not support session rollback, so the session cannot be rewound to match the filesystem restore. Restoring files without also rolling back the session would cause the files and session context to be out of sync. To revert changes, start a new session from the desired git checkpoint.",
+        );
+        return;
+      }
       if (hasLiveTurn || isSendBusy || isConnecting) {
         setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
         return;
@@ -6838,7 +6838,15 @@ export default function ChatView({
       }
       setIsRevertingCheckpoint(false);
     },
-    [activeThread, hasLiveTurn, isConnecting, isRevertingCheckpoint, isSendBusy, setThreadError],
+    [
+      activeThread,
+      hasLiveTurn,
+      isConnecting,
+      isRevertingCheckpoint,
+      isSendBusy,
+      providerSupportsRollback,
+      setThreadError,
+    ],
   );
 
   const onUndoTurnFiles = useCallback(
@@ -8844,6 +8852,13 @@ export default function ChatView({
       if (!api || !activeThread || !isServerThread || isRevertingCheckpoint) {
         return false;
       }
+      if (!providerSupportsRollback) {
+        setThreadError(
+          activeThread.id,
+          "This provider does not support editing and resending messages.",
+        );
+        return false;
+      }
       const editTarget = resolveTailUserMessageEditTarget({
         messages: activeThread.messages,
         messageId,
@@ -8927,6 +8942,7 @@ export default function ChatView({
       selectedModelSelection,
       selectedPromptEffort,
       selectedProvider,
+      providerSupportsRollback,
       setThreadError,
       assistantDeliveryMode,
     ],
@@ -9381,7 +9397,7 @@ export default function ChatView({
         loadingModelProviders={{
           antigravity: antigravityModelDiscoveryPending,
           cursor: cursorModelDiscoveryPending,
-          droid: droidModelDiscoveryPending,
+          devin: devinModelDiscoveryPending,
           kilo: kiloModelDiscoveryPending,
           opencode: openCodeModelDiscoveryPending,
           pi: piModelDiscoveryPending,
@@ -9424,7 +9440,7 @@ export default function ChatView({
       loadingModelProviders={{
         antigravity: antigravityModelDiscoveryPending,
         cursor: cursorModelDiscoveryPending,
-        droid: droidModelDiscoveryPending,
+        devin: devinModelDiscoveryPending,
         kilo: kiloModelDiscoveryPending,
         opencode: openCodeModelDiscoveryPending,
         pi: piModelDiscoveryPending,
@@ -11669,8 +11685,7 @@ export default function ChatView({
                     subagentToolTraceByThreadId={subagentToolTraceByThreadId}
                     revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                     onRevertUserMessage={onRevertUserMessage}
-                    onUndoTurnFiles={onUndoTurnFiles}
-                    onEditUserMessage={onEditUserMessage}
+                    {...(providerSupportsRollback ? { onEditUserMessage } : {})}
                     isRevertingCheckpoint={isRevertingCheckpoint}
                     onExpandTimelineImage={onExpandTimelineImage}
                     followLiveOutput={hasStreamingAssistantText}

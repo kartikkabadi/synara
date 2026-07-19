@@ -199,6 +199,7 @@ describe("resolveAppModelSelection", () => {
           droid: [],
           kilo: [],
           opencode: [],
+          devin: [],
           pi: [],
         },
         "galapagos-alpha",
@@ -219,6 +220,7 @@ describe("resolveAppModelSelection", () => {
           droid: [],
           kilo: [],
           opencode: [],
+          devin: [],
           pi: [],
         },
         "",
@@ -239,6 +241,7 @@ describe("resolveAppModelSelection", () => {
           droid: [],
           kilo: [],
           opencode: [],
+          devin: [],
           pi: [],
         },
         "GPT-5.3 Codex",
@@ -259,6 +262,7 @@ describe("resolveAppModelSelection", () => {
           droid: [],
           kilo: [],
           opencode: [],
+          devin: [],
           pi: [],
         },
         "sonnet",
@@ -279,6 +283,7 @@ describe("resolveAppModelSelection", () => {
           droid: [],
           kilo: [],
           opencode: [],
+          devin: [],
           pi: [],
         },
         "custom/selected-model",
@@ -440,6 +445,7 @@ describe("getProviderStartOptions", () => {
         openCodeBinaryPath: "",
         openCodeExperimentalWebSockets: false,
         openCodeServerUrl: "",
+        devinBinaryPath: "",
         piAgentDir: "",
         piBinaryPath: "",
       }),
@@ -479,6 +485,7 @@ describe("getProviderStartOptions", () => {
         openCodeBinaryPath: "",
         openCodeExperimentalWebSockets: false,
         openCodeServerUrl: "",
+        devinBinaryPath: "",
         piAgentDir: "",
         piBinaryPath: "",
       }),
@@ -501,6 +508,7 @@ describe("getProviderStartOptions", () => {
         openCodeBinaryPath: "opencode",
         openCodeExperimentalWebSockets: false,
         openCodeServerUrl: "",
+        devinBinaryPath: "devin",
         piAgentDir: "",
         piBinaryPath: "pi",
       }),
@@ -513,11 +521,12 @@ describe("provider-indexed custom model settings", () => {
     customCodexModels: ["custom/codex-model"],
     customClaudeModels: ["claude/custom-opus"],
     customCursorModels: ["cursor/custom-model"],
-    customAntigravityModels: ["Gemini 3.5 Flash (Experimental)"],
+    customAntigravityModels: ["Antigravity 3.5 Flash (Experimental)"],
     customGrokModels: ["grok/custom-fast"],
     customDroidModels: ["claude-opus-4-8-custom"],
     customKiloModels: ["kilo/kilo-auto/free"],
     customOpenCodeModels: ["openrouter/gpt-oss-120b"],
+    customDevinModels: ["sonnet", "devin/custom-model"],
     customPiModels: ["anthropic/custom-pi"],
   } as const;
 
@@ -528,6 +537,7 @@ describe("provider-indexed custom model settings", () => {
       "cursor",
       "antigravity",
       "grok",
+      "devin",
       "droid",
       "kilo",
       "opencode",
@@ -549,6 +559,7 @@ describe("provider-indexed custom model settings", () => {
     expect(getCustomModelsForProvider(settings, "droid")).toEqual(["claude-opus-4-8-custom"]);
     expect(getCustomModelsForProvider(settings, "kilo")).toEqual(["kilo/kilo-auto/free"]);
     expect(getCustomModelsForProvider(settings, "opencode")).toEqual(["openrouter/gpt-oss-120b"]);
+    expect(getCustomModelsForProvider(settings, "devin")).toEqual(["sonnet", "devin/custom-model"]);
     expect(getCustomModelsForProvider(settings, "pi")).toEqual(["anthropic/custom-pi"]);
   });
 
@@ -557,11 +568,12 @@ describe("provider-indexed custom model settings", () => {
       customCodexModels: ["default/codex-model"],
       customClaudeModels: ["claude/default-opus"],
       customCursorModels: ["cursor/default-model"],
-      customAntigravityModels: ["Gemini 3.5 Flash (Experimental)"],
+      customAntigravityModels: ["Antigravity 3.5 Flash (Experimental)"],
       customGrokModels: ["grok/default-fast"],
       customDroidModels: ["droid/default-model"],
       customKiloModels: ["kilo/default-auto"],
       customOpenCodeModels: ["openai/gpt-5"],
+      customDevinModels: ["opus"],
       customPiModels: ["anthropic/default-pi"],
     } as const;
 
@@ -571,12 +583,13 @@ describe("provider-indexed custom model settings", () => {
     ]);
     expect(getDefaultCustomModelsForProvider(defaults, "cursor")).toEqual(["cursor/default-model"]);
     expect(getDefaultCustomModelsForProvider(defaults, "antigravity")).toEqual([
-      "Gemini 3.5 Flash (Experimental)",
+      "Antigravity 3.5 Flash (Experimental)",
     ]);
     expect(getDefaultCustomModelsForProvider(defaults, "grok")).toEqual(["grok/default-fast"]);
     expect(getDefaultCustomModelsForProvider(defaults, "droid")).toEqual(["droid/default-model"]);
     expect(getDefaultCustomModelsForProvider(defaults, "kilo")).toEqual(["kilo/default-auto"]);
     expect(getDefaultCustomModelsForProvider(defaults, "opencode")).toEqual(["openai/gpt-5"]);
+    expect(getDefaultCustomModelsForProvider(defaults, "devin")).toEqual(["opus"]);
     expect(getDefaultCustomModelsForProvider(defaults, "pi")).toEqual(["anthropic/default-pi"]);
   });
 
@@ -593,8 +606,8 @@ describe("provider-indexed custom model settings", () => {
   });
 
   it("patches custom models for Antigravity", () => {
-    expect(patchCustomModels("antigravity", ["Gemini 3.5 Flash (Experimental)"])).toEqual({
-      customAntigravityModels: ["Gemini 3.5 Flash (Experimental)"],
+    expect(patchCustomModels("antigravity", ["Antigravity 3.5 Flash (Experimental)"])).toEqual({
+      customAntigravityModels: ["Antigravity 3.5 Flash (Experimental)"],
     });
   });
 
@@ -634,16 +647,23 @@ describe("provider-indexed custom model settings", () => {
     });
   });
 
+  it("patches custom models for devin", () => {
+    expect(patchCustomModels("devin", ["sonnet"])).toEqual({
+      customDevinModels: ["sonnet"],
+    });
+  });
+
   it("builds a complete provider-indexed custom model record", () => {
     expect(getCustomModelsByProvider(settings)).toEqual({
       codex: ["custom/codex-model"],
       claudeAgent: ["claude/custom-opus"],
       cursor: ["cursor/custom-model"],
-      antigravity: ["Gemini 3.5 Flash (Experimental)"],
+      antigravity: ["Antigravity 3.5 Flash (Experimental)"],
       grok: ["grok/custom-fast"],
       droid: ["claude-opus-4-8-custom"],
       kilo: ["kilo/kilo-auto/free"],
       opencode: ["openrouter/gpt-oss-120b"],
+      devin: ["sonnet", "devin/custom-model"],
       pi: ["anthropic/custom-pi"],
     });
   });
@@ -662,7 +682,7 @@ describe("provider-indexed custom model settings", () => {
     ).toBe(true);
     expect(
       modelOptionsByProvider.antigravity.some(
-        (option) => option.slug === "Gemini 3.5 Flash (Experimental)",
+        (option) => option.slug === "Antigravity 3.5 Flash (Experimental)",
       ),
     ).toBe(true);
     expect(modelOptionsByProvider.grok.some((option) => option.slug === "grok/custom-fast")).toBe(
@@ -673,6 +693,9 @@ describe("provider-indexed custom model settings", () => {
     ).toBe(true);
     expect(
       modelOptionsByProvider.opencode.some((option) => option.slug === "openrouter/gpt-oss-120b"),
+    ).toBe(true);
+    expect(
+      modelOptionsByProvider.devin.some((option) => option.slug === "devin/custom-model"),
     ).toBe(true);
     expect(modelOptionsByProvider.pi.some((option) => option.slug === "anthropic/custom-pi")).toBe(
       true,
@@ -685,9 +708,9 @@ describe("provider-indexed custom model settings", () => {
       customClaudeModels: [" sonnet ", "claude/custom-opus", "claude/custom-opus"],
       customCursorModels: [" composer-2 ", "cursor/custom-model", "cursor/custom-model"],
       customAntigravityModels: [
-        " Gemini 3.5 Flash ",
-        "Gemini 3.5 Flash (Experimental)",
-        "Gemini 3.5 Flash (Experimental)",
+        " Antigravity 3.5 Flash ",
+        "Antigravity 3.5 Flash (Experimental)",
+        "Antigravity 3.5 Flash (Experimental)",
       ],
       customGrokModels: [" grok-build ", "grok/custom-fast", "grok/custom-fast"],
       customDroidModels: [" opus ", "droid/custom-model", "droid/custom-model"],
@@ -697,6 +720,7 @@ describe("provider-indexed custom model settings", () => {
         "openrouter/gpt-oss-120b",
         "openrouter/gpt-oss-120b",
       ],
+      customDevinModels: [" sonnet ", "devin/custom-model", "devin/custom-model"],
       customPiModels: [
         " anthropic/claude-sonnet-4-5 ",
         "anthropic/custom-pi",
@@ -722,7 +746,7 @@ describe("provider-indexed custom model settings", () => {
     ).toHaveLength(1);
     expect(
       modelOptionsByProvider.antigravity.filter(
-        (option) => option.slug === "Gemini 3.5 Flash (Experimental)",
+        (option) => option.slug === "Antigravity 3.5 Flash (Experimental)",
       ),
     ).toHaveLength(1);
     expect(
@@ -739,23 +763,26 @@ describe("provider-indexed custom model settings", () => {
       modelOptionsByProvider.opencode.filter((option) => option.slug === "openrouter/gpt-oss-120b"),
     ).toHaveLength(1);
     expect(
+      modelOptionsByProvider.devin.filter((option) => option.slug === "devin/custom-model"),
+    ).toHaveLength(1);
+    expect(
       modelOptionsByProvider.pi.filter((option) => option.slug === "anthropic/custom-pi"),
     ).toHaveLength(1);
   });
 });
 
 describe("AppSettingsSchema", () => {
-  it("migrates persisted Gemini provider settings to Antigravity", () => {
+  it("migrates persisted Antigravity provider settings to Antigravity", () => {
     const decode = Schema.decodeSync(Schema.fromJsonString(AppSettingsSchema));
     const decoded = decode(
       JSON.stringify({
-        textGenerationProvider: "gemini",
-        defaultProvider: "gemini",
-        hiddenProviders: ["gemini"],
-        providerOrder: ["codex", "gemini"],
-        hiddenModels: [{ provider: "gemini", slug: "gemini-3.1-pro-preview" }],
-        geminiBinaryPath: "/custom/bin/gemini",
-        customGeminiModels: ["gemini-custom-preview"],
+        textGenerationProvider: "antigravity",
+        defaultProvider: "antigravity",
+        hiddenProviders: ["antigravity"],
+        providerOrder: ["codex", "antigravity"],
+        hiddenModels: [{ provider: "antigravity", slug: "antigravity-3.1-pro-preview" }],
+        antigravityBinaryPath: "/custom/bin/antigravity",
+        customAntigravityModels: ["antigravity-custom-preview"],
       }),
     );
 
@@ -764,11 +791,11 @@ describe("AppSettingsSchema", () => {
       defaultProvider: "antigravity",
       hiddenProviders: ["antigravity"],
       providerOrder: ["codex", "antigravity"],
-      hiddenModels: [{ provider: "antigravity", slug: "gemini-3.1-pro-preview" }],
+      hiddenModels: [{ provider: "antigravity", slug: "antigravity-3.1-pro-preview" }],
     });
     expect(normalizeStoredAppSettings(decoded)).toMatchObject({
-      antigravityBinaryPath: "/custom/bin/gemini",
-      customAntigravityModels: ["gemini-custom-preview"],
+      antigravityBinaryPath: "/custom/bin/antigravity",
+      customAntigravityModels: ["antigravity-custom-preview"],
     });
     expect(normalizeStoredAppSettings(decoded)).not.toHaveProperty("geminiBinaryPath");
     expect(normalizeStoredAppSettings(decoded)).not.toHaveProperty("customGeminiModels");
@@ -817,6 +844,7 @@ describe("AppSettingsSchema", () => {
       customDroidModels: [],
       customKiloModels: [],
       customOpenCodeModels: [],
+      customDevinModels: [],
       customPiModels: [],
     });
   });

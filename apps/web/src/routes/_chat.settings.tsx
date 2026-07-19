@@ -226,7 +226,18 @@ const THEME_OPTIONS = [
   },
 ] as const;
 
-const PROVIDER_SELECT_OPTIONS = PROVIDER_DESCRIPTORS.map((descriptor) => descriptor.kind);
+const PROVIDER_SELECT_OPTIONS = [
+  "codex",
+  "claudeAgent",
+  "cursor",
+  "devin",
+  "antigravity",
+  "grok",
+  "droid",
+  "kilo",
+  "opencode",
+  "pi",
+] as const satisfies readonly ProviderKind[];
 
 const TIMESTAMP_FORMAT_LABELS = {
   locale: "System default",
@@ -285,6 +296,7 @@ type InstallBinarySettingsKey =
   | "claudeBinaryPath"
   | "codexBinaryPath"
   | "cursorBinaryPath"
+  | "devinBinaryPath"
   | "antigravityBinaryPath"
   | "grokBinaryPath"
   | "droidBinaryPath"
@@ -320,11 +332,17 @@ type InstallProviderSettings = {
   agentDirDescription?: ReactNode;
 };
 
-const PROVIDER_VISIBILITY_OPTIONS: ReadonlyArray<{ provider: ProviderKind; title: string }> =
-  PROVIDER_DESCRIPTORS.map((descriptor) => ({
-    provider: descriptor.kind,
-    title: descriptor.displayName,
-  }));
+const PROVIDER_VISIBILITY_OPTIONS: ReadonlyArray<{ provider: ProviderKind; title: string }> = [
+  { provider: "codex", title: PROVIDER_DISPLAY_NAMES.codex },
+  { provider: "claudeAgent", title: PROVIDER_DISPLAY_NAMES.claudeAgent },
+  { provider: "cursor", title: PROVIDER_DISPLAY_NAMES.cursor },
+  { provider: "devin", title: PROVIDER_DISPLAY_NAMES.devin },
+  { provider: "antigravity", title: PROVIDER_DISPLAY_NAMES.antigravity },
+  { provider: "grok", title: PROVIDER_DISPLAY_NAMES.grok },
+  { provider: "kilo", title: PROVIDER_DISPLAY_NAMES.kilo },
+  { provider: "opencode", title: PROVIDER_DISPLAY_NAMES.opencode },
+  { provider: "pi", title: PROVIDER_DISPLAY_NAMES.pi },
+];
 
 // Pure helper kept at module scope so the toggle handler stays trivial and the
 // dedupe logic is shared between the toggle and the schema normalizer.
@@ -444,6 +462,24 @@ const INSTALL_PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     apiEndpointKey: "cursorApiEndpoint",
     apiEndpointPlaceholder: "https://api2.cursor.sh",
     apiEndpointDescription: "Optional Cursor API endpoint override passed to `cursor-agent -e`.",
+  },
+  {
+    provider: "devin",
+    title: "Devin",
+    docs: [
+      { label: "Install", href: "https://docs.devin.ai/cli/installation" },
+      { label: "Auth", href: "https://docs.devin.ai/cli/authentication" },
+      { label: "Commands", href: "https://docs.devin.ai/cli/reference" },
+    ],
+    binaryPathKey: "devinBinaryPath",
+    binaryPlaceholder: "Devin binary path",
+    binaryDescription: (
+      <>
+        Leave blank to use <code>devin</code> from your PATH. Requires Devin CLI installed and
+        authenticated with <code>devin auth login</code>. Model availability depends on your
+        Devin/Windsurf account/team settings.
+      </>
+    ),
   },
   {
     provider: "antigravity",
@@ -699,8 +735,8 @@ function SettingsRouteView() {
   const removeDeletedThreadFromClientState = useStore(
     (store) => store.removeDeletedThreadFromClientState,
   );
-  const syncServerShellSnapshot = useStore((store) => store.syncServerShellSnapshot);
   const syncServerReadModel = useStore((store) => store.syncServerReadModel);
+  const syncServerShellSnapshot = useStore((store) => store.syncServerShellSnapshot);
   // Shell-level subscription on purpose: the full-thread selector invalidates on every
   // streaming message/activity tick, which would re-render this whole route while a
   // turn is running. Settings only needs thread metadata (and message emptiness below).
@@ -733,6 +769,7 @@ function SettingsRouteView() {
     codex: Boolean(settings.codexBinaryPath || settings.codexHomePath),
     claudeAgent: Boolean(settings.claudeBinaryPath),
     cursor: Boolean(settings.cursorBinaryPath || settings.cursorApiEndpoint),
+    devin: Boolean(settings.devinBinaryPath),
     antigravity: Boolean(settings.antigravityBinaryPath),
     grok: Boolean(settings.grokBinaryPath),
     droid: Boolean(settings.droidBinaryPath),
@@ -758,6 +795,7 @@ function SettingsRouteView() {
     codex: "",
     claudeAgent: "",
     cursor: "",
+    devin: "",
     antigravity: "",
     grok: "",
     droid: "",
@@ -838,6 +876,7 @@ function SettingsRouteView() {
   const claudeBinaryPath = settings.claudeBinaryPath;
   const cursorBinaryPath = settings.cursorBinaryPath;
   const cursorApiEndpoint = settings.cursorApiEndpoint;
+  const devinBinaryPath = settings.devinBinaryPath;
   const antigravityBinaryPath = settings.antigravityBinaryPath;
   const grokBinaryPath = settings.grokBinaryPath;
   const droidBinaryPath = settings.droidBinaryPath;
@@ -1012,6 +1051,16 @@ function SettingsRouteView() {
   )!;
   const selectedCustomModelInput = customModelInputByProvider[selectedCustomModelProvider];
   const selectedCustomModelError = customModelErrorByProvider[selectedCustomModelProvider] ?? null;
+  const totalCustomModels =
+    settings.customCodexModels.length +
+    settings.customClaudeModels.length +
+    settings.customCursorModels.length +
+    settings.customDevinModels.length +
+    settings.customAntigravityModels.length +
+    settings.customGrokModels.length +
+    settings.customKiloModels.length +
+    settings.customOpenCodeModels.length +
+    settings.customPiModels.length;
   const savedCustomModelRows = useMemo(
     () =>
       CUSTOM_MODEL_EDITOR_PROVIDER_SETTINGS.flatMap((providerSettings) =>
@@ -1031,6 +1080,7 @@ function SettingsRouteView() {
     settings.claudeBinaryPath !== defaults.claudeBinaryPath ||
     settings.cursorBinaryPath !== defaults.cursorBinaryPath ||
     settings.cursorApiEndpoint !== defaults.cursorApiEndpoint ||
+    settings.devinBinaryPath !== defaults.devinBinaryPath ||
     settings.antigravityBinaryPath !== defaults.antigravityBinaryPath ||
     settings.grokBinaryPath !== defaults.grokBinaryPath ||
     settings.droidBinaryPath !== defaults.droidBinaryPath ||
@@ -1099,6 +1149,7 @@ function SettingsRouteView() {
     ...(settings.customCodexModels.length > 0 ||
     settings.customClaudeModels.length > 0 ||
     settings.customCursorModels.length > 0 ||
+    settings.customDevinModels.length > 0 ||
     settings.customAntigravityModels.length > 0 ||
     settings.customGrokModels.length > 0 ||
     settings.customDroidModels.length > 0 ||
@@ -1296,6 +1347,7 @@ function SettingsRouteView() {
       codex: false,
       claudeAgent: false,
       cursor: false,
+      devin: false,
       antigravity: false,
       grok: false,
       droid: false,
@@ -1308,6 +1360,7 @@ function SettingsRouteView() {
       codex: "",
       claudeAgent: "",
       cursor: "",
+      devin: "",
       antigravity: "",
       grok: "",
       droid: "",
@@ -2798,6 +2851,7 @@ function SettingsRouteView() {
                     customCodexModels: defaults.customCodexModels,
                     customClaudeModels: defaults.customClaudeModels,
                     customCursorModels: defaults.customCursorModels,
+                    customDevinModels: defaults.customDevinModels,
                     customAntigravityModels: defaults.customAntigravityModels,
                     customGrokModels: defaults.customGrokModels,
                     customKiloModels: defaults.customKiloModels,
@@ -2820,6 +2874,7 @@ function SettingsRouteView() {
                     value !== "codex" &&
                     value !== "claudeAgent" &&
                     value !== "cursor" &&
+                    value !== "devin" &&
                     value !== "antigravity" &&
                     value !== "grok" &&
                     value !== "droid" &&
@@ -3112,6 +3167,7 @@ function SettingsRouteView() {
                     openCodeExperimentalWebSockets: defaults.openCodeExperimentalWebSockets,
                     openCodeServerUrl: defaults.openCodeServerUrl,
                     openCodeServerPassword: defaults.openCodeServerPassword,
+                    devinBinaryPath: defaults.devinBinaryPath,
                     piAgentDir: defaults.piAgentDir,
                     piBinaryPath: defaults.piBinaryPath,
                   });
@@ -3119,6 +3175,7 @@ function SettingsRouteView() {
                     codex: false,
                     claudeAgent: false,
                     cursor: false,
+                    devin: false,
                     antigravity: false,
                     grok: false,
                     droid: false,
@@ -3144,17 +3201,16 @@ function SettingsRouteView() {
                       : providerSettings.provider === "cursor"
                         ? settings.cursorBinaryPath !== defaults.cursorBinaryPath ||
                           settings.cursorApiEndpoint !== defaults.cursorApiEndpoint
-                        : providerSettings.provider === "antigravity"
-                          ? settings.antigravityBinaryPath !== defaults.antigravityBinaryPath
-                          : providerSettings.provider === "grok"
-                            ? settings.grokBinaryPath !== defaults.grokBinaryPath
-                            : providerSettings.provider === "droid"
-                              ? settings.droidBinaryPath !== defaults.droidBinaryPath
+                        : providerSettings.provider === "devin"
+                          ? settings.devinBinaryPath !== defaults.devinBinaryPath
+                          : providerSettings.provider === "antigravity"
+                            ? settings.antigravityBinaryPath !== defaults.antigravityBinaryPath
+                            : providerSettings.provider === "grok"
+                              ? settings.grokBinaryPath !== defaults.grokBinaryPath
                               : providerSettings.provider === "kilo"
                                 ? settings.kiloBinaryPath !== defaults.kiloBinaryPath ||
                                   settings.kiloServerUrl !== defaults.kiloServerUrl ||
-                                  settings.kiloServerPasswordConfigured !==
-                                    defaults.kiloServerPasswordConfigured
+                                  settings.kiloServerPassword !== defaults.kiloServerPassword
                                 : providerSettings.provider === "pi"
                                   ? settings.piBinaryPath !== defaults.piBinaryPath ||
                                     settings.piAgentDir !== defaults.piAgentDir
@@ -3162,19 +3218,19 @@ function SettingsRouteView() {
                                     settings.openCodeExperimentalWebSockets !==
                                       defaults.openCodeExperimentalWebSockets ||
                                     settings.openCodeServerUrl !== defaults.openCodeServerUrl ||
-                                    settings.openCodeServerPasswordConfigured !==
-                                      defaults.openCodeServerPasswordConfigured;
+                                    settings.openCodeServerPassword !==
+                                      defaults.openCodeServerPassword;
                 const binaryPathValue =
                   providerSettings.binaryPathKey === "claudeBinaryPath"
                     ? claudeBinaryPath
                     : providerSettings.binaryPathKey === "cursorBinaryPath"
                       ? cursorBinaryPath
-                      : providerSettings.binaryPathKey === "antigravityBinaryPath"
-                        ? antigravityBinaryPath
-                        : providerSettings.binaryPathKey === "grokBinaryPath"
-                          ? grokBinaryPath
-                          : providerSettings.binaryPathKey === "droidBinaryPath"
-                            ? droidBinaryPath
+                      : providerSettings.binaryPathKey === "devinBinaryPath"
+                        ? devinBinaryPath
+                        : providerSettings.binaryPathKey === "antigravityBinaryPath"
+                          ? antigravityBinaryPath
+                          : providerSettings.binaryPathKey === "grokBinaryPath"
+                            ? grokBinaryPath
                             : providerSettings.binaryPathKey === "kiloBinaryPath"
                               ? kiloBinaryPath
                               : providerSettings.binaryPathKey === "openCodeBinaryPath"
@@ -3330,12 +3386,13 @@ function SettingsRouteView() {
                                       ? { claudeBinaryPath: nextValue }
                                       : providerSettings.binaryPathKey === "cursorBinaryPath"
                                         ? { cursorBinaryPath: nextValue }
-                                        : providerSettings.binaryPathKey === "antigravityBinaryPath"
-                                          ? { antigravityBinaryPath: nextValue }
-                                          : providerSettings.binaryPathKey === "grokBinaryPath"
-                                            ? { grokBinaryPath: nextValue }
-                                            : providerSettings.binaryPathKey === "droidBinaryPath"
-                                              ? { droidBinaryPath: nextValue }
+                                        : providerSettings.binaryPathKey === "devinBinaryPath"
+                                          ? { devinBinaryPath: nextValue }
+                                          : providerSettings.binaryPathKey ===
+                                              "antigravityBinaryPath"
+                                            ? { antigravityBinaryPath: nextValue }
+                                            : providerSettings.binaryPathKey === "grokBinaryPath"
+                                              ? { grokBinaryPath: nextValue }
                                               : providerSettings.binaryPathKey === "kiloBinaryPath"
                                                 ? { kiloBinaryPath: nextValue }
                                                 : providerSettings.binaryPathKey ===

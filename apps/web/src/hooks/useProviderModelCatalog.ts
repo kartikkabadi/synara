@@ -10,6 +10,7 @@ import type {
   ProviderModelDescriptor,
 } from "@synara/contracts";
 import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 
 import { getAppModelOptions, getCustomModelsByProvider, useAppSettings } from "../appSettings";
 import { resolveRuntimeModelDescriptor } from "../components/chat/runtimeModelCapabilities";
@@ -59,7 +60,7 @@ export function useProviderModelCatalog(input: {
   const { selectedProvider, discoveryEnabled, modelHintByProvider } = input;
   const discoveryCwd = input.cwd ?? null;
   const { settings } = useAppSettings();
-  const customModelsByProvider = getCustomModelsByProvider(settings);
+  const customModelsByProvider = useMemo(() => getCustomModelsByProvider(settings), [settings]);
 
   const claudeDynamicModelsQuery = useQuery(
     providerModelsQueryOptions({ provider: "claudeAgent" }),
@@ -71,6 +72,13 @@ export function useProviderModelCatalog(input: {
       binaryPath: settings.cursorBinaryPath || null,
       apiEndpoint: settings.cursorApiEndpoint || null,
       enabled: selectedProvider === "cursor" || discoveryEnabled,
+    }),
+  );
+  const devinDynamicModelsQuery = useQuery(
+    providerModelsQueryOptions({
+      provider: "devin",
+      binaryPath: settings.devinBinaryPath || null,
+      enabled: selectedProvider === "devin" || discoveryEnabled,
     }),
   );
   const antigravityModelsQuery = useQuery(
@@ -151,8 +159,9 @@ export function useProviderModelCatalog(input: {
     }),
   );
 
-  const cursorRuntimeModels = collapseCursorModelVariants(
-    cursorDynamicModelsQuery.data?.models ?? [],
+  const cursorRuntimeModels = useMemo(
+    () => collapseCursorModelVariants(cursorDynamicModelsQuery.data?.models ?? []),
+    [cursorDynamicModelsQuery.data?.models],
   );
 
   const cursorModelDiscoveryEnabled = selectedProvider === "cursor" || discoveryEnabled;
@@ -163,15 +172,15 @@ export function useProviderModelCatalog(input: {
   const cursorModelDiscoveryPending =
     cursorModelDiscoveryEnabled &&
     !hasResolvedCursorModelDiscovery &&
-    isInitialModelDiscoveryPending(cursorDynamicModelsQuery);
-  const droidModelDiscoveryEnabled = selectedProvider === "droid";
-  const hasResolvedDroidModelDiscovery =
-    droidDynamicModelsQuery.data?.source === "droid-acp" &&
-    (droidDynamicModelsQuery.data.models.length ?? 0) > 0;
-  const droidModelDiscoveryPending =
-    droidModelDiscoveryEnabled &&
-    !hasResolvedDroidModelDiscovery &&
-    isInitialModelDiscoveryPending(droidDynamicModelsQuery);
+    (cursorDynamicModelsQuery.isLoading || cursorDynamicModelsQuery.isFetching);
+  const devinModelDiscoveryEnabled = selectedProvider === "devin" || discoveryEnabled;
+  const hasResolvedDevinModelDiscovery =
+    devinDynamicModelsQuery.data?.source === "devin.acp" &&
+    (devinDynamicModelsQuery.data.models.length ?? 0) > 0;
+  const devinModelDiscoveryPending =
+    devinModelDiscoveryEnabled &&
+    !hasResolvedDevinModelDiscovery &&
+    (devinDynamicModelsQuery.isLoading || devinDynamicModelsQuery.isFetching);
   const kiloModelDiscoveryEnabled = selectedProvider === "kilo" || discoveryEnabled;
   const hasResolvedKiloModelDiscovery =
     (kiloDynamicModelsQuery.data?.source === "kilo-cli" ||
@@ -204,100 +213,152 @@ export function useProviderModelCatalog(input: {
       (antigravityModelsQuery.data.models.length ?? 0) > 0
     ) && isInitialModelDiscoveryPending(antigravityModelsQuery);
 
-  const staticOptions: Record<ProviderKind, ReturnType<typeof getAppModelOptions>> = {
-    codex: getAppModelOptions("codex", customModelsByProvider.codex, modelHintByProvider?.codex),
-    claudeAgent: getAppModelOptions(
+  const modelOptionsByProvider = useMemo(() => {
+    const staticOptions: Record<ProviderKind, ReturnType<typeof getAppModelOptions>> = {
+      codex: getAppModelOptions("codex", customModelsByProvider.codex, modelHintByProvider?.codex),
+      claudeAgent: getAppModelOptions(
+        "claudeAgent",
+        customModelsByProvider.claudeAgent,
+        modelHintByProvider?.claudeAgent,
+      ),
+      cursor: getAppModelOptions(
+        "cursor",
+        customModelsByProvider.cursor,
+        modelHintByProvider?.cursor,
+      ),
+      devin: getAppModelOptions("devin", customModelsByProvider.devin, modelHintByProvider?.devin),
+      antigravity: getAppModelOptions(
+        "antigravity",
+        customModelsByProvider.antigravity,
+        modelHintByProvider?.antigravity,
+      ),
+      grok: getAppModelOptions("grok", customModelsByProvider.grok, modelHintByProvider?.grok),
+      droid: getAppModelOptions("droid", customModelsByProvider.droid, modelHintByProvider?.droid),
+      kilo: getAppModelOptions("kilo", customModelsByProvider.kilo, modelHintByProvider?.kilo),
+      opencode: getAppModelOptions(
+        "opencode",
+        customModelsByProvider.opencode,
+        modelHintByProvider?.opencode,
+      ),
+      pi: getAppModelOptions("pi", customModelsByProvider.pi, modelHintByProvider?.pi),
+    };
+    const result: Record<
+      ProviderKind,
+      ReadonlyArray<ProviderModelOption & { isCustom?: boolean }>
+    > = { ...staticOptions };
+
+    const dynamicSources: Record<ProviderKind, typeof claudeDynamicModelsQuery.data> = {
+      claudeAgent: claudeDynamicModelsQuery.data,
+      codex: codexDynamicModelsQuery.data,
+      cursor:
+        cursorDynamicModelsQuery.data === undefined
+          ? undefined
+          : { ...cursorDynamicModelsQuery.data, models: cursorRuntimeModels },
+      devin: devinDynamicModelsQuery.data,
+      antigravity: antigravityModelsQuery.data,
+      grok: grokDynamicModelsQuery.data,
+      droid: droidDynamicModelsQuery.data,
+      kilo: kiloDynamicModelsQuery.data,
+      opencode: openCodeDynamicModelsQuery.data,
+      pi: piDynamicModelsQuery.data,
+    };
+
+    for (const provider of [
       "claudeAgent",
-      customModelsByProvider.claudeAgent,
-      modelHintByProvider?.claudeAgent,
-    ),
-    cursor: getAppModelOptions(
+      "codex",
       "cursor",
-      customModelsByProvider.cursor,
-      modelHintByProvider?.cursor,
-    ),
-    antigravity: getAppModelOptions(
+      "devin",
       "antigravity",
-      customModelsByProvider.antigravity,
-      modelHintByProvider?.antigravity,
-    ),
-    grok: getAppModelOptions("grok", customModelsByProvider.grok, modelHintByProvider?.grok),
-    droid: getAppModelOptions("droid", customModelsByProvider.droid, modelHintByProvider?.droid),
-    kilo: getAppModelOptions("kilo", customModelsByProvider.kilo, modelHintByProvider?.kilo),
-    opencode: getAppModelOptions(
+      "grok",
+      "droid",
+      "kilo",
       "opencode",
-      customModelsByProvider.opencode,
-      modelHintByProvider?.opencode,
-    ),
-    pi: getAppModelOptions("pi", customModelsByProvider.pi, modelHintByProvider?.pi),
-  };
-  const modelOptionsByProvider: Record<
-    ProviderKind,
-    ReadonlyArray<ProviderModelOption & { isCustom?: boolean }>
-  > = { ...staticOptions };
-
-  const dynamicSources: Record<ProviderKind, typeof claudeDynamicModelsQuery.data> = {
-    claudeAgent: claudeDynamicModelsQuery.data,
-    codex: codexDynamicModelsQuery.data,
-    cursor:
-      cursorDynamicModelsQuery.data === undefined
-        ? undefined
-        : { ...cursorDynamicModelsQuery.data, models: cursorRuntimeModels },
-    antigravity: antigravityModelsQuery.data,
-    grok: grokDynamicModelsQuery.data,
-    droid: droidDynamicModelsQuery.data,
-    kilo: kiloDynamicModelsQuery.data,
-    opencode: openCodeDynamicModelsQuery.data,
-    pi: piDynamicModelsQuery.data,
-  };
-
-  for (const provider of [
-    "claudeAgent",
-    "codex",
-    "cursor",
-    "antigravity",
-    "grok",
-    "droid",
-    "kilo",
-    "opencode",
-    "pi",
-  ] as const) {
-    const dynamicModels = dynamicSources[provider]?.models;
-    if (dynamicModels && dynamicModels.length > 0) {
-      modelOptionsByProvider[provider] = mergeDynamicModelOptions({
-        provider,
-        staticOptions: staticOptions[provider],
-        dynamicModels,
-      });
+      "pi",
+    ] as const) {
+      const dynamicModels = dynamicSources[provider]?.models;
+      if (dynamicModels && dynamicModels.length > 0) {
+        result[provider] = mergeDynamicModelOptions({
+          provider,
+          staticOptions: staticOptions[provider],
+          dynamicModels,
+        });
+      }
     }
-  }
 
-  const loadingModelProviders: Partial<Record<ProviderKind, boolean>> = {
-    antigravity: antigravityModelDiscoveryPending,
-    cursor: cursorModelDiscoveryPending,
-    droid: droidModelDiscoveryPending,
-    kilo: kiloModelDiscoveryPending,
-    opencode: openCodeModelDiscoveryPending,
-    pi: piModelDiscoveryPending,
-  };
+    return result;
+  }, [
+    claudeDynamicModelsQuery.data,
+    antigravityModelsQuery.data,
+    codexDynamicModelsQuery.data,
+    cursorDynamicModelsQuery.data,
+    cursorRuntimeModels,
+    customModelsByProvider,
+    devinDynamicModelsQuery.data,
+    antigravityModelsQuery.data,
+    grokDynamicModelsQuery.data,
+    kiloDynamicModelsQuery.data,
+    modelHintByProvider,
+    openCodeDynamicModelsQuery.data,
+    piDynamicModelsQuery.data,
+  ]);
 
-  const runtimeModelsByProvider: Record<ProviderKind, ReadonlyArray<ProviderModelDescriptor>> = {
-    claudeAgent: claudeDynamicModelsQuery.data?.models ?? [],
-    codex: codexDynamicModelsQuery.data?.models ?? [],
-    cursor: cursorRuntimeModels,
-    antigravity: antigravityModelsQuery.data?.models ?? [],
-    grok: grokDynamicModelsQuery.data?.models ?? [],
-    droid: droidDynamicModelsQuery.data?.models ?? [],
-    kilo: kiloDynamicModelsQuery.data?.models ?? [],
-    opencode: openCodeDynamicModelsQuery.data?.models ?? [],
-    pi: piDynamicModelsQuery.data?.models ?? [],
-  };
+  const loadingModelProviders = useMemo<Partial<Record<ProviderKind, boolean>>>(
+    () => ({
+      antigravity: antigravityModelDiscoveryPending,
+      cursor: cursorModelDiscoveryPending,
+      devin: devinModelDiscoveryPending,
+      kilo: kiloModelDiscoveryPending,
+      opencode: openCodeModelDiscoveryPending,
+      pi: piModelDiscoveryPending,
+    }),
+    [
+      antigravityModelDiscoveryPending,
+      cursorModelDiscoveryPending,
+      devinModelDiscoveryPending,
+      kiloModelDiscoveryPending,
+      openCodeModelDiscoveryPending,
+      piModelDiscoveryPending,
+    ],
+  );
 
-  const selectedRuntimeModel = resolveRuntimeModelDescriptor({
-    provider: selectedProvider,
-    model: modelHintByProvider?.[selectedProvider] ?? null,
-    runtimeModels: runtimeModelsByProvider[selectedProvider],
-  });
+  const runtimeModelsByProvider = useMemo<
+    Record<ProviderKind, ReadonlyArray<ProviderModelDescriptor>>
+  >(
+    () => ({
+      claudeAgent: claudeDynamicModelsQuery.data?.models ?? [],
+      codex: codexDynamicModelsQuery.data?.models ?? [],
+      cursor: cursorRuntimeModels,
+      devin: devinDynamicModelsQuery.data?.models ?? [],
+      antigravity: antigravityModelsQuery.data?.models ?? [],
+      grok: grokDynamicModelsQuery.data?.models ?? [],
+      droid: droidDynamicModelsQuery.data?.models ?? [],
+      kilo: kiloDynamicModelsQuery.data?.models ?? [],
+      opencode: openCodeDynamicModelsQuery.data?.models ?? [],
+      pi: piDynamicModelsQuery.data?.models ?? [],
+    }),
+    [
+      claudeDynamicModelsQuery.data?.models,
+      antigravityModelsQuery.data?.models,
+      codexDynamicModelsQuery.data?.models,
+      cursorRuntimeModels,
+      devinDynamicModelsQuery.data?.models,
+      antigravityModelsQuery.data?.models,
+      grokDynamicModelsQuery.data?.models,
+      kiloDynamicModelsQuery.data?.models,
+      openCodeDynamicModelsQuery.data?.models,
+      piDynamicModelsQuery.data?.models,
+    ],
+  );
+
+  const selectedRuntimeModel = useMemo(
+    () =>
+      resolveRuntimeModelDescriptor({
+        provider: selectedProvider,
+        model: modelHintByProvider?.[selectedProvider] ?? null,
+        runtimeModels: runtimeModelsByProvider[selectedProvider],
+      }),
+    [modelHintByProvider, runtimeModelsByProvider, selectedProvider],
+  );
 
   const selectedDynamicAgents =
     selectedProvider === "claudeAgent"
@@ -307,11 +368,14 @@ export function useProviderModelCatalog(input: {
         : selectedProvider === "opencode"
           ? (openCodeDynamicAgentsQuery.data?.agents ?? EMPTY_PROVIDER_AGENTS)
           : (codexDynamicAgentsQuery.data?.agents ?? EMPTY_PROVIDER_AGENTS);
-  const selectedRuntimeAgents: ReadonlyArray<ProviderAgentDescriptor> = selectedDynamicAgents.map(
-    (agent) =>
-      agent.description
-        ? { name: agent.name, displayName: agent.displayName, description: agent.description }
-        : { name: agent.name, displayName: agent.displayName },
+  const selectedRuntimeAgents = useMemo<ReadonlyArray<ProviderAgentDescriptor>>(
+    () =>
+      selectedDynamicAgents.map((agent) =>
+        agent.description
+          ? { name: agent.name, displayName: agent.displayName, description: agent.description }
+          : { name: agent.name, displayName: agent.displayName },
+      ),
+    [selectedDynamicAgents],
   );
 
   return {

@@ -54,6 +54,12 @@ const MODEL_OPTIONS_BY_PROVIDER = {
       upstreamProviderName: "OpenAI",
     },
   ],
+  devin: [
+    {
+      slug: "sonnet",
+      name: "Sonnet",
+    },
+  ],
   pi: [
     {
       slug: "anthropic/claude-sonnet-4-5",
@@ -64,8 +70,8 @@ const MODEL_OPTIONS_BY_PROVIDER = {
   ],
   antigravity: [
     {
-      slug: "Gemini 3.5 Flash",
-      name: "Gemini 3.5 Flash",
+      slug: "Antigravity 3.5 Flash",
+      name: "Antigravity 3.5 Flash",
     },
   ],
 } as const satisfies Record<ProviderKind, ReadonlyArray<ProviderModelOption & { slug: ModelSlug }>>;

@@ -1,3 +1,4 @@
+import { resolveDevinModelDisplayName } from "@synara/shared/devinModelDisplay";
 import {
   formatModelDisplayName,
   humanizeModelSlug,
@@ -12,6 +13,8 @@ import type {
   CodexModelSelection,
   CursorModelOptions,
   CursorModelSelection,
+  DevinModelOptions,
+  DevinModelSelection,
   DroidModelOptions,
   DroidModelSelection,
   GrokModelOptions,
@@ -62,6 +65,10 @@ export function formatProviderModelOptionName(input: {
       ? trimmedSlug.slice(trimmedSlug.lastIndexOf("/") + 1)
       : trimmedSlug;
     return formatModelDisplayName(modelIdentifier) ?? humanizeModelSlug(modelIdentifier);
+  }
+
+  if (input.provider === "devin") {
+    return resolveDevinModelDisplayName(trimmedSlug, trimmedSlug);
   }
 
   return formatModelDisplayName(trimmedSlug) ?? trimmedSlug;
@@ -157,7 +164,8 @@ export function mergeDynamicModelOptions(input: {
     (model) => !("isCustom" in model) || model.isCustom !== true,
   );
   const missingStaticBuiltIns =
-    (input.provider === "antigravity" ||
+    (input.provider === "devin" ||
+      input.provider === "antigravity" ||
       input.provider === "kilo" ||
       input.provider === "opencode" ||
       input.provider === "cursor" ||
@@ -279,6 +287,12 @@ export function buildNextProviderOptions(
   if (provider === "cursor") {
     return { ...(modelOptions as CursorModelOptions | undefined), ...patch } as CursorModelOptions;
   }
+  if (provider === "devin") {
+    return {
+      ...(modelOptions as DevinModelOptions | undefined),
+      ...patch,
+    } as DevinModelOptions;
+  }
   if (provider === "antigravity") {
     return {
       ...(modelOptions as AntigravityModelOptions | undefined),
@@ -337,6 +351,11 @@ export function buildModelSelection(
   model: string,
   options?: AntigravityModelOptions | null | undefined,
 ): AntigravityModelSelection;
+export function buildModelSelection(
+  provider: "devin",
+  model: string,
+  options?: DevinModelOptions | null | undefined,
+): DevinModelSelection;
 export function buildModelSelection(
   provider: "grok",
   model: string,
@@ -411,6 +430,14 @@ export function buildModelSelection(
             provider,
             model,
             options: options as GrokModelOptions,
+          }
+        : { provider, model };
+    case "devin":
+      return options
+        ? {
+            provider,
+            model,
+            options: options as DevinModelOptions,
           }
         : { provider, model };
     case "droid":
