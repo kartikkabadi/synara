@@ -26,6 +26,7 @@ const RuntimeEventRawSource = Schema.Literals([
   "claude.sdk.hook",
   "codex.sdk.thread-event",
   "antigravity.cli.event",
+  "devin.cli.event",
   "acp.jsonrpc",
   "acp.cursor.extension",
   "kilo.sdk.event",
@@ -465,6 +466,9 @@ export const UserInputQuestion = Schema.Struct({
   question: TrimmedNonEmptyStringSchema,
   options: Schema.Array(UserInputQuestionOption),
   multiSelect: Schema.optional(Schema.Boolean).pipe(
+    Schema.withConstructorDefault(() => Option.some(false)),
+  ),
+  optional: Schema.optional(Schema.Boolean).pipe(
     Schema.withConstructorDefault(() => Option.some(false)),
   ),
 });

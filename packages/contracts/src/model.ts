@@ -115,6 +115,11 @@ export const AntigravityModelOptions = Schema.Struct({
 });
 export type AntigravityModelOptions = typeof AntigravityModelOptions.Type;
 
+export const DroidModelOptions = Schema.Struct({
+  reasoningEffort: Schema.optional(TrimmedNonEmptyString),
+});
+export type DroidModelOptions = typeof DroidModelOptions.Type;
+
 export const OpenCodeModelOptions = Schema.Struct({
   variant: Schema.optional(TrimmedNonEmptyString),
   agent: Schema.optional(TrimmedNonEmptyString),
@@ -139,15 +144,25 @@ export const GrokModelOptions = Schema.Struct({
 });
 export type GrokModelOptions = typeof GrokModelOptions.Type;
 
-export const DroidModelOptions = Schema.Struct({
+/**
+ * Devin model options — variant selections resolved to full slugs by the adapter.
+ * Devin encodes variants in model slugs (e.g. claude-opus-4-8-high_fast), not
+ * via runtime config options. The adapter uses a variant matrix to resolve
+ * base + options to the correct full slug before calling session/set_model.
+ */
+export const DevinModelOptions = Schema.Struct({
   reasoningEffort: Schema.optional(TrimmedNonEmptyString),
+  fastMode: Schema.optional(Schema.Boolean),
+  thinking: Schema.optional(Schema.Boolean),
+  contextWindow: Schema.optional(Schema.String),
 });
-export type DroidModelOptions = typeof DroidModelOptions.Type;
+export type DevinModelOptions = typeof DevinModelOptions.Type;
 
 export const ProviderModelOptions = Schema.Struct({
   codex: Schema.optional(CodexModelOptions),
   claudeAgent: Schema.optional(ClaudeModelOptions),
   cursor: Schema.optional(CursorModelOptions),
+  devin: Schema.optional(DevinModelOptions),
   antigravity: Schema.optional(AntigravityModelOptions),
   grok: Schema.optional(GrokModelOptions),
   droid: Schema.optional(DroidModelOptions),
@@ -424,6 +439,24 @@ const CLAUDE_EXTENDED_THINKING_CAPABILITIES: ModelCapabilities = {
 // Sonnet 5 adds xhigh for long agentic work, while staying in the Sonnet no-fast-mode lane.
 const CLAUDE_SONNET_5_CAPABILITIES: ModelCapabilities = CLAUDE_NO_FAST_XHIGH_CAPABILITIES;
 
+// Devin ACP exposes context only via -1m slug variants; static fallbacks must not
+// inherit Claude Code context menus when discovery has not found those slugs.
+const DEVIN_CLAUDE_FABLE_CAPABILITIES: ModelCapabilities = {
+  ...CLAUDE_FABLE_CAPABILITIES,
+  contextWindowOptions: [],
+  autoCompactWindowOptions: [],
+};
+const DEVIN_CLAUDE_FLAGSHIP_CAPABILITIES: ModelCapabilities = {
+  ...CLAUDE_FLAGSHIP_CAPABILITIES,
+  contextWindowOptions: [],
+  autoCompactWindowOptions: [],
+};
+const DEVIN_CLAUDE_SONNET_5_CAPABILITIES: ModelCapabilities = {
+  ...CLAUDE_SONNET_5_CAPABILITIES,
+  contextWindowOptions: [],
+  autoCompactWindowOptions: [],
+};
+
 type ModelDefinition = {
   readonly slug: string;
   readonly name: string;
@@ -534,7 +567,7 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
   ],
   // Antigravity owns its model catalog. The web app populates this provider from
   // `agy models` so CLI updates appear without a Synara release.
-  antigravity: [],
+  antigravity: [] as readonly ModelDefinition[],
   grok: [
     {
       slug: "grok-build-0.1",
@@ -814,6 +847,80 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
       },
     },
   ],
+  devin: [
+    {
+      slug: "adaptive",
+      name: "Adaptive",
+      capabilities: {
+        reasoningEffortLevels: [],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+        contextWindowOptions: [],
+      },
+    },
+    {
+      slug: "claude-5-fable",
+      name: "Claude 5 Fable",
+      capabilities: DEVIN_CLAUDE_FABLE_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-8",
+      name: "Claude Opus 4.8",
+      capabilities: DEVIN_CLAUDE_FLAGSHIP_CAPABILITIES,
+    },
+    {
+      slug: "claude-sonnet-5",
+      name: "Claude Sonnet 5",
+      capabilities: DEVIN_CLAUDE_SONNET_5_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-5",
+      name: "GPT-5.5",
+      capabilities: CODEX_GPT_5_5_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-3-codex",
+      name: "GPT-5.3 Codex",
+      capabilities: CODEX_GPT_5_CAPABILITIES,
+    },
+    {
+      slug: "gemini-3-5-flash",
+      name: "Gemini 3.5 Flash",
+      capabilities: {
+        reasoningEffortLevels: [
+          { value: "HIGH", label: "High", isDefault: true },
+          { value: "LOW", label: "Low" },
+        ],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+        contextWindowOptions: [],
+      },
+    },
+    {
+      slug: "swe-1-6",
+      name: "SWE 1.6",
+      capabilities: {
+        reasoningEffortLevels: [],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+        contextWindowOptions: [],
+      },
+    },
+    {
+      slug: "deepseek-v4",
+      name: "DeepSeek V4",
+      capabilities: {
+        reasoningEffortLevels: [],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+        contextWindowOptions: [],
+      },
+    },
+  ],
 } as const satisfies Record<ProviderKind, readonly ModelDefinition[]>;
 export type ModelOptionsByProvider = typeof MODEL_OPTIONS_BY_PROVIDER;
 
@@ -831,6 +938,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderWithDefaultModel, ModelSl
   droid: "claude-opus-4-8",
   kilo: "kilo/kilo-auto/free",
   opencode: "openai/gpt-5",
+  devin: "adaptive",
 };
 
 // Backward compatibility for existing Codex-only call sites.
@@ -886,45 +994,30 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     "codex-5.3": "gpt-5.3-codex",
     "gemini-3": "gemini-3-pro",
   },
-  antigravity: {},
-  droid: {
-    droid: "claude-opus-4-8",
-    factory: "claude-opus-4-8",
+  devin: {
+    swe: "swe-1-6",
     opus: "claude-opus-4-8",
-    "opus-4.8": "claude-opus-4-8",
-    "opus-fast": "claude-opus-4-8-fast",
-    "opus-4.8-fast": "claude-opus-4-8-fast",
-    "opus-4.7": "claude-opus-4-7",
-    "opus-4.7-fast": "claude-opus-4-7-fast",
-    "opus-4.6": "claude-opus-4-6",
     sonnet: "claude-sonnet-5",
-    "sonnet-5": "claude-sonnet-5",
-    "sonnet-4.6": "claude-sonnet-4-6",
-    "sonnet-4.5": "claude-sonnet-4-5-20250929",
-    fable: "claude-fable-5",
-    haiku: "claude-haiku-4-5-20251001",
-    "5.5": "gpt-5.5",
-    "5.5-fast": "gpt-5.5-fast",
-    "5.5-pro": "gpt-5.5-pro",
-    "5.4": "gpt-5.4",
-    "5.4-fast": "gpt-5.4-fast",
-    "5.4-mini": "gpt-5.4-mini",
-    "5.3": "gpt-5.3-codex",
-    "5.3-fast": "gpt-5.3-codex-fast",
-    "gpt-5.3": "gpt-5.3-codex",
-    "gemini-3-pro": "gemini-3.1-pro-preview",
-    "gemini-3.1-pro": "gemini-3.1-pro-preview",
-    "gemini-3.5-flash": "gemini-3.5-flash",
-    "gemini-3-flash": "gemini-3-flash-preview",
-    glm: "glm-5.2",
-    "glm-5.2": "glm-5.2",
-    "glm-5.1": "glm-5.1",
-    nemotron: "nemotron-3-ultra",
-    kimi: "kimi-k2.7-code",
-    "kimi-code": "kimi-k2.7-code",
-    deepseek: "deepseek-v4-pro",
-    minimax: "minimax-m3",
+    fable: "claude-5-fable",
+    "fable-5": "claude-5-fable",
+    gpt: "gpt-5-5",
+    codex: "gpt-5-3-codex",
+    gemini: "gemini-3-5-flash",
+    deepseek: "deepseek-v4",
   },
+  antigravity: {
+    auto: "auto-gemini-3",
+    "auto-gemini-3": "auto-gemini-3",
+    "auto-gemini-2.5": "auto-gemini-2.5",
+    "gemini-3-pro-preview": "gemini-3.1-pro-preview",
+    "gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview": "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite-preview": "gemini-3.1-flash-lite-preview",
+    "gemini-2.5-pro": "gemini-2.5-pro",
+    "gemini-2.5-flash": "gemini-2.5-flash",
+    "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
+  },
+  droid: {},
   grok: {
     grok: "grok-build-0.1",
     build: "grok-build-0.1",
@@ -978,4 +1071,5 @@ export const PROVIDER_DISPLAY_NAMES: Record<ProviderKind, string> = {
   kilo: "Kilo",
   opencode: "OpenCode",
   pi: "Pi",
+  devin: "Devin",
 };

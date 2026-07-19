@@ -17,6 +17,7 @@ const ProviderDiscoveryKind = Schema.Literals([
   "kilo",
   "opencode",
   "pi",
+  "devin",
 ]);
 
 export const ProviderSkillInterface = Schema.Struct({
@@ -58,6 +59,9 @@ export const ProviderComposerCapabilities = Schema.Struct({
   supportsRuntimeModelList: Schema.Boolean,
   supportsThreadCompaction: Schema.optional(Schema.Boolean),
   supportsThreadImport: Schema.optional(Schema.Boolean),
+  conversationRollback: Schema.optional(
+    Schema.Union([Schema.Literal("native"), Schema.Literal("restart-session")]),
+  ),
 });
 export type ProviderComposerCapabilities = typeof ProviderComposerCapabilities.Type;
 
