@@ -117,13 +117,10 @@ describe("buildDevinAcpSpawnInput — env allowlist filtering", () => {
     });
   });
 
-  it("includes SSH_AUTH_SOCK from the allowlist", () => {
+  it("does not forward SSH_AUTH_SOCK to the child", () => {
     withEnv({ SSH_AUTH_SOCK: "/private/tmp/com.apple.launchd.ssh/agent.sock" }, () => {
       const result = buildDevinAcpSpawnInput(undefined, "/tmp");
-      assert.strictEqual(
-        result.env!.SSH_AUTH_SOCK,
-        "/private/tmp/com.apple.launchd.ssh/agent.sock",
-      );
+      assert.strictEqual(result.env!.SSH_AUTH_SOCK, undefined);
     });
   });
 
