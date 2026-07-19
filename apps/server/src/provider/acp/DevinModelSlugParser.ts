@@ -34,6 +34,7 @@ const SLUG_VARIANT_TOKENS = new Set([
   "slow",
   "fast",
   "priority",
+  "lightning",
   "thinking",
   "1m",
   "nvfp4",
@@ -41,7 +42,7 @@ const SLUG_VARIANT_TOKENS = new Set([
 
 const EFFORT_TOKENS = new Set(["low", "medium", "high", "xhigh", "max", "none", "minimal", "slow"]);
 
-const FAST_TOKENS = new Set(["fast", "priority"]);
+const FAST_TOKENS = new Set(["fast", "priority", "lightning"]);
 
 const DISPLAY_VARIANT_WORDS = new Set([
   "fast",

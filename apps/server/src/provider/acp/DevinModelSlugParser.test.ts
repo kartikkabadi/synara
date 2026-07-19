@@ -225,6 +225,19 @@ describe("parseDevinModelSlug", () => {
     });
   });
 
+  it("parses swe-1-7-lightning as a fast variant of swe-1-7", () => {
+    expect(parseDevinModelSlug("swe-1-7-lightning", "SWE 1.7 Lightning")).toEqual({
+      baseSlug: "swe-1-7",
+      baseName: "SWE 1.7",
+      effort: null,
+      fast: true,
+      thinking: false,
+      contextWindow: null,
+      upstreamProviderId: "devin",
+      upstreamProviderName: "Devin",
+    });
+  });
+
   // gpt-5-4-mini — "mini" is NOT an effort, must stay in base
   it("parses gpt-5-4-mini-high without stripping mini", () => {
     expect(parseDevinModelSlug("gpt-5-4-mini-high", "GPT-5.4 Mini High")).toEqual({
