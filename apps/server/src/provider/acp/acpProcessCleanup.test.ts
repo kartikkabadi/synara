@@ -34,8 +34,17 @@ function isAlive(pid: number): boolean {
   }
 }
 
+async function waitUntilDead(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isAlive(pid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return !isAlive(pid);
+}
+
 describe("acpProcessCleanup", () => {
-  it("terminates tracked descendants and exits on SIGTERM", async () => {
+  it("kills tracked descendants after coordinated async shutdown completes", async () => {
     const fixture = path.join(__dirname, "acpProcessCleanup.subprocessTest.ts");
     const bunExe = (globalThis as unknown as { Bun?: { execPath: string } }).Bun?.execPath ?? "bun";
     const proc = spawn(bunExe, [fixture], {
@@ -45,23 +54,45 @@ describe("acpProcessCleanup", () => {
     if (!proc.stdout) {
       throw new Error("Subprocess stdout is not available");
     }
+
     const reader = readline.createInterface(proc.stdout);
     const childPid = await readReadyLine(reader, proc);
-    reader.close();
-
     expect(Number.isFinite(childPid)).toBe(true);
     expect(isAlive(childPid)).toBe(true);
 
-    // Give the subprocess a moment to finish installing its signal handlers.
+    // Let NodeRuntime.runMain install its signal handlers before we SIGTERM.
     await new Promise((resolve) => setTimeout(resolve, 200));
 
-    const [code, signal] = await new Promise<[number | null, NodeJS.Signals | null]>((resolve) => {
+    const closePromise = new Promise<[number | null, NodeJS.Signals | null]>((resolve) => {
       proc.on("close", (code, signal) => resolve([code, signal]));
-      proc.kill("SIGTERM");
     });
 
-    expect(signal).toBe("SIGTERM");
-    expect(code).toBeNull();
-    expect(isAlive(childPid)).toBe(false);
+    let finalizerDone = false;
+    let teardownDone = false;
+    const teardownPromise = new Promise<void>((resolve) => {
+      reader.on("line", (line) => {
+        const trimmed = line.trim();
+        if (trimmed === "finalizer done") {
+          finalizerDone = true;
+        } else if (trimmed === "teardown done") {
+          teardownDone = true;
+          resolve();
+        }
+      });
+      reader.on("close", () => resolve());
+    });
+
+    proc.kill("SIGTERM");
+
+    await teardownPromise;
+    expect(finalizerDone).toBe(true);
+    expect(teardownDone).toBe(true);
+
+    const [code] = await closePromise;
+    expect(code).not.toBeNull();
+
+    reader.close();
+
+    expect(await waitUntilDead(childPid, 2000)).toBe(true);
   });
 });
