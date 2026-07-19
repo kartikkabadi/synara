@@ -24,6 +24,7 @@ const DEVIN_VARIANT_TOKENS = new Set([
   "slow",
   "fast",
   "priority",
+  "lightning",
   "thinking",
   "1m",
   "nvfp4",

@@ -903,7 +903,18 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
       name: "SWE 1.6",
       capabilities: {
         reasoningEffortLevels: [],
-        supportsFastMode: false,
+        supportsFastMode: true,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+        contextWindowOptions: [],
+      },
+    },
+    {
+      slug: "swe-1-7",
+      name: "SWE 1.7",
+      capabilities: {
+        reasoningEffortLevels: [],
+        supportsFastMode: true,
         supportsThinkingToggle: false,
         promptInjectedEffortLevels: [],
         contextWindowOptions: [],
