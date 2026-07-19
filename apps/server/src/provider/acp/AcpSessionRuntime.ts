@@ -49,11 +49,17 @@ export const ACP_MAX_INCOMING_FRAME_BYTES = 8 * 1024 * 1024;
 const ACP_AUTH_REQUIRED_CODE = -32000;
 
 export function isAcpAuthRequiredError(error: EffectAcpErrors.AcpError): boolean {
-  return (
-    error._tag === "AcpRequestError" &&
-    (error.code === ACP_AUTH_REQUIRED_CODE ||
-      /\bauth(entication|orization)?\b/i.test(error.errorMessage ?? ""))
-  );
+  if (error._tag !== "AcpRequestError") {
+    return false;
+  }
+  const message = error.errorMessage ?? "";
+  // Protocol-level auth-required uses -32000 in ACP/effect-acp. Validate the
+  // semantics by also requiring the message describe an auth failure, so a
+  // generic -32000 server error is not misclassified as an auth challenge.
+  if (error.code === ACP_AUTH_REQUIRED_CODE) {
+    return /\bauth/i.test(message);
+  }
+  return /\bauth(entication|orization)?\b/i.test(message);
 }
 
 export function causeIndicatesAuthRequired(cause: Cause.Cause<EffectAcpErrors.AcpError>): boolean {
@@ -1310,7 +1316,25 @@ const makeAcpSessionRuntime = (
       ),
       setModel: (model) =>
         getStartedState.pipe(
-          Effect.flatMap((started) => setConfigOption(started.modelConfigId ?? "model", model)),
+          Effect.flatMap((started) => {
+            if (!started.modelConfigId) {
+              return Ref.get(configOptionsRef).pipe(
+                Effect.flatMap((configOptions) =>
+                  Effect.fail(
+                    new EffectAcpErrors.AcpRequestError({
+                      code: -32602,
+                      errorMessage: "ACP session did not advertise a model config option.",
+                      data: {
+                        requestedModel: model,
+                        configOptionIds: configOptions.map((option) => option.id),
+                      },
+                    }),
+                  ),
+                ),
+              );
+            }
+            return setConfigOption(started.modelConfigId, model);
+          }),
           Effect.asVoid,
         ),
       forkSession: (payload) =>
