@@ -8,6 +8,7 @@ import {
   proposedPlanTitle,
   resolvePlanFollowUpSubmission,
   stripDisplayedPlanMarkdown,
+  stripProposedPlanBlocksFromText,
 } from "./proposedPlan";
 
 describe("proposedPlanTitle", () => {
@@ -110,5 +111,28 @@ describe("buildProposedPlanMarkdownFilename", () => {
 
   it("falls back to a generic filename when the plan has no heading", () => {
     expect(buildProposedPlanMarkdownFilename("- step 1")).toBe("plan.md");
+  });
+});
+
+describe("stripProposedPlanBlocksFromText", () => {
+  it("removes complete proposed_plan blocks and keeps preamble", () => {
+    expect(
+      stripProposedPlanBlocksFromText(
+        "Here is the plan:\n<proposed_plan>\n# Ship it\n\n- step\n</proposed_plan>\nThanks",
+      ),
+    ).toBe("Here is the plan:\n\nThanks");
+  });
+
+  it("hides incomplete open tags while the plan is still streaming", () => {
+    expect(
+      stripProposedPlanBlocksFromText(
+        "I'll explore first.\n\n<proposed_plan>\n## Summary\nStill writing",
+      ),
+    ).toBe("I'll explore first.");
+  });
+
+  it("removes orphan open/close tag fragments", () => {
+    expect(stripProposedPlanBlocksFromText("<proposed_plan>")).toBe("");
+    expect(stripProposedPlanBlocksFromText("</proposed_plan>")).toBe("");
   });
 });

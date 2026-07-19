@@ -26,9 +26,9 @@ describe("Antigravity model options", () => {
     });
 
     expect(options).toEqual({ reasoningEffort: "high" });
-    expect(buildModelSelection("antigravity", "Gemini 3.5 Flash", options)).toEqual({
+    expect(buildModelSelection("antigravity", "Antigravity 3.5 Flash", options)).toEqual({
       provider: "antigravity",
-      model: "Gemini 3.5 Flash",
+      model: "Antigravity 3.5 Flash",
       options: { reasoningEffort: "high" },
     });
   });
@@ -61,6 +61,51 @@ describe("formatProviderModelOptionName", () => {
       }),
     ).toBe("custom/internal-model");
   });
+
+  it("formats legacy Devin MODEL_* slugs for picker fallbacks", () => {
+    expect(
+      formatProviderModelOptionName({
+        provider: "devin",
+        slug: "MODEL_SWE_1_5",
+      }),
+    ).toBe("SWE 1.5");
+    expect(
+      formatProviderModelOptionName({
+        provider: "devin",
+        slug: "MODEL_PRIVATE_3",
+      }),
+    ).toBe("Claude Sonnet 4.5 Thinking");
+    expect(
+      formatProviderModelOptionName({
+        provider: "devin",
+        slug: "MODEL_CLAUDE_4_5_OPUS",
+      }),
+    ).toBe("Claude Opus 4.5");
+    expect(
+      formatProviderModelOptionName({
+        provider: "devin",
+        slug: "claude-opus-4-8-high-fast",
+      }),
+    ).toBe("Claude Opus 4.8");
+  });
+});
+
+describe("mergeDynamicModelOptions", () => {
+  it("does not re-insert static Devin variant slugs when dynamic discovery already returned the base family", () => {
+    const staticOptions = [
+      { slug: "claude-opus-4-8", name: "Claude Opus 4.8" },
+      { slug: "claude-opus-4-8-medium", name: "Claude Opus 4.8 Medium" },
+    ] satisfies ProviderModelOption[];
+    const dynamicModels = [{ slug: "claude-opus-4-8", name: "Claude Opus 4.8" }];
+
+    const merged = mergeDynamicModelOptions({
+      provider: "devin",
+      staticOptions,
+      dynamicModels,
+    });
+
+    expect(merged.map((m) => m.slug)).toEqual(["claude-opus-4-8"]);
+  });
 });
 
 describe("mergeDynamicModelOptions", () => {
@@ -69,17 +114,17 @@ describe("mergeDynamicModelOptions", () => {
       mergeDynamicModelOptions({
         provider: "antigravity",
         staticOptions: [
-          { slug: "Gemini 3.5 Flash", name: "Gemini 3.5 Flash" },
+          { slug: "Antigravity 3.5 Flash", name: "Antigravity 3.5 Flash" },
           { slug: "Claude Sonnet 4.6", name: "Claude Sonnet 4.6" },
           { slug: "custom/private-model", name: "custom/private-model", isCustom: true },
         ],
         dynamicModels: [
-          { slug: "Gemini 4 Pro", name: "Gemini 4 Pro" },
+          { slug: "Antigravity 4 Pro", name: "Antigravity 4 Pro" },
           { slug: "Claude Sonnet 5", name: "Claude Sonnet 5" },
         ],
       }),
     ).toEqual([
-      { slug: "Gemini 4 Pro", name: "Gemini 4 Pro" },
+      { slug: "Antigravity 4 Pro", name: "Antigravity 4 Pro" },
       { slug: "Claude Sonnet 5", name: "Claude Sonnet 5" },
       { slug: "custom/private-model", name: "custom/private-model", isCustom: true },
     ]);
@@ -201,6 +246,25 @@ describe("groupProviderModelOptions", () => {
     const groupedOptions = groupProviderModelOptions(options);
 
     expect(groupedOptions.map((group) => group.label)).toEqual(["Anthropic", "OpenAI"]);
+  });
+
+  it("keeps Moonshot AI and Z.AI labels exact", () => {
+    const groupedOptions = groupProviderModelOptions([
+      {
+        slug: "kimi-k2-6",
+        name: "Kimi K2.6",
+        upstreamProviderId: "moonshot",
+        upstreamProviderName: "Moonshot AI",
+      },
+      {
+        slug: "glm-5-2",
+        name: "GLM 5.2",
+        upstreamProviderId: "z-ai",
+        upstreamProviderName: "Z.AI",
+      },
+    ] satisfies ProviderModelOption[]);
+
+    expect(groupedOptions.map((group) => group.label)).toEqual(["Moonshot AI", "Z.AI"]);
   });
 });
 

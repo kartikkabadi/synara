@@ -86,6 +86,18 @@ const PROVIDER_ICON: Record<ProviderKind, React.FC<React.SVGProps<SVGSVGElement>
   ...PROVIDER_ICON_COMPONENT_BY_PROVIDER,
   codex: HammerIcon,
 };
+const PROVIDER_DISCOVERY_ORDER: ReadonlyArray<ProviderKind> = [
+  "codex",
+  "claudeAgent",
+  "cursor",
+  "devin",
+  "antigravity",
+  "grok",
+  "droid",
+  "kilo",
+  "opencode",
+  "pi",
+];
 const KNOWN_PLUGIN_BRANDS: Record<string, PluginBrandArtwork> = {
   canva: { icon: SiCanva, color: "#00C4CC" },
   figma: { icon: SiFigma, color: "#F24E1E" },
@@ -387,6 +399,7 @@ export function PluginLibrary() {
   const codexCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("codex"));
   const claudeCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("claudeAgent"));
   const cursorCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("cursor"));
+  const devinCapabilitiesQuery = useQuery(providerComposerCapabilitiesQueryOptions("devin"));
   const antigravityCapabilitiesQuery = useQuery(
     providerComposerCapabilitiesQueryOptions("antigravity"),
   );
@@ -409,6 +422,10 @@ export function PluginLibrary() {
       cursor: {
         plugins: supportsPluginDiscovery(cursorCapabilitiesQuery.data),
         skills: supportsSkillDiscovery(cursorCapabilitiesQuery.data),
+      },
+      devin: {
+        plugins: supportsPluginDiscovery(devinCapabilitiesQuery.data),
+        skills: supportsSkillDiscovery(devinCapabilitiesQuery.data),
       },
       antigravity: {
         plugins: supportsPluginDiscovery(antigravityCapabilitiesQuery.data),
@@ -439,6 +456,7 @@ export function PluginLibrary() {
       claudeCapabilitiesQuery.data,
       codexCapabilitiesQuery.data,
       cursorCapabilitiesQuery.data,
+      devinCapabilitiesQuery.data,
       antigravityCapabilitiesQuery.data,
       grokCapabilitiesQuery.data,
       droidCapabilitiesQuery.data,

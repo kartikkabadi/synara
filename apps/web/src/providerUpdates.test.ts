@@ -71,6 +71,7 @@ function serverSettings(overrides: Partial<ServerSettings["providers"]> = {}): S
         serverPasswordConfigured: false,
         experimentalWebSockets: false,
       },
+      devin: { ...provider, binaryPath: "devin" },
       pi: { ...provider, binaryPath: "pi", agentDir: "" },
       ...overrides,
     },

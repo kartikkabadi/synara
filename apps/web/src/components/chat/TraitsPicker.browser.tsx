@@ -49,6 +49,7 @@ function ClaudeTraitsPickerHarness(props: {
       droid: [],
       kilo: [],
       opencode: [],
+      devin: [],
       pi: [],
     },
   });
@@ -652,6 +653,7 @@ function OpenCodeTraitsPickerHarness(props: {
       droid: [],
       kilo: [],
       opencode: [],
+      devin: [],
       pi: [],
     },
   });

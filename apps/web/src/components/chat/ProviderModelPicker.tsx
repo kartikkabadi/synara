@@ -10,6 +10,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useSta
 import { type ProviderPickerKind, PROVIDER_OPTIONS } from "../../session-logic";
 import { formatProviderModelOptionName } from "../../providerModelOptions";
 import { compareProvidersByOrder } from "../../providerOrdering";
+import { normalizeDevinModelVariantBaseId } from "@synara/shared/devinModelVariants";
 import {
   Menu,
   MenuItem,
@@ -39,11 +40,6 @@ import {
   type ProviderModelOption,
 } from "../../providerModelOptions";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
-import {
-  FAVORITE_MODEL_STORAGE_KEYS,
-  supportsModelFavorites,
-  type FavoriteModelProvider,
-} from "../../lib/modelFavorites";
 import { Skeleton } from "../ui/skeleton";
 
 function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {
@@ -116,7 +112,25 @@ function providerIconClassName(
 }
 
 const SEARCHABLE_MODEL_PICKER_THRESHOLD = 15;
+const FAVORITE_MODEL_STORAGE_KEYS = {
+  cursor: "synara:cursor-favourite-models:v1",
+  devin: "synara:devin-favourite-models:v1",
+  kilo: "synara:kilo-favourite-models:v1",
+  opencode: "synara:opencode-favourite-models:v1",
+  pi: "synara:pi-favourite-models:v1",
+} as const;
 const FavoriteModelSlugs = Schema.Array(Schema.String);
+type FavoriteModelProvider = keyof typeof FAVORITE_MODEL_STORAGE_KEYS;
+
+function supportsModelFavorites(provider: ProviderKind): provider is FavoriteModelProvider {
+  return (
+    provider === "cursor" ||
+    provider === "devin" ||
+    provider === "kilo" ||
+    provider === "opencode" ||
+    provider === "pi"
+  );
+}
 
 // Keeps persisted favorite slugs compact and stable while preserving the user's order.
 function toggleFavoriteModelSlug(current: ReadonlyArray<string>, slug: string): string[] {
@@ -146,6 +160,17 @@ function resolveSelectedModelLabel(input: {
     );
     if (baseMatch) {
       return baseMatch.name;
+    }
+  }
+  if (input.provider === "devin") {
+    const baseId = normalizeDevinModelVariantBaseId(input.model);
+    if (baseId) {
+      const baseMatch = input.options.find(
+        (option) => normalizeDevinModelVariantBaseId(option.slug) === baseId,
+      );
+      if (baseMatch) {
+        return baseMatch.name;
+      }
     }
   }
   return formatProviderModelOptionName({
@@ -198,6 +223,11 @@ export const ProviderModelMenuItems = memo(function ProviderModelMenuItems(
   );
   const [cursorFavoriteModelSlugs, setCursorFavoriteModelSlugs] = useLocalStorage(
     FAVORITE_MODEL_STORAGE_KEYS.cursor,
+    [],
+    FavoriteModelSlugs,
+  );
+  const [devinFavoriteModelSlugs, setDevinFavoriteModelSlugs] = useLocalStorage(
+    FAVORITE_MODEL_STORAGE_KEYS.devin,
     [],
     FavoriteModelSlugs,
   );
@@ -260,6 +290,10 @@ export const ProviderModelMenuItems = memo(function ProviderModelMenuItems(
     () => new Set(cursorFavoriteModelSlugs),
     [cursorFavoriteModelSlugs],
   );
+  const devinFavoriteModelSlugSet = useMemo(
+    () => new Set(devinFavoriteModelSlugs),
+    [devinFavoriteModelSlugs],
+  );
   const piFavoriteModelSlugSet = useMemo(
     () => new Set(piFavoriteModelSlugs),
     [piFavoriteModelSlugs],
@@ -267,12 +301,14 @@ export const ProviderModelMenuItems = memo(function ProviderModelMenuItems(
   const favoriteModelSlugSets = useMemo(
     () => ({
       cursor: cursorFavoriteModelSlugSet,
+      devin: devinFavoriteModelSlugSet,
       kilo: kiloFavoriteModelSlugSet,
       opencode: openCodeFavoriteModelSlugSet,
       pi: piFavoriteModelSlugSet,
     }),
     [
       cursorFavoriteModelSlugSet,
+      devinFavoriteModelSlugSet,
       kiloFavoriteModelSlugSet,
       openCodeFavoriteModelSlugSet,
       piFavoriteModelSlugSet,
@@ -295,15 +331,18 @@ export const ProviderModelMenuItems = memo(function ProviderModelMenuItems(
       const setFavoriteModelSlugs =
         provider === "cursor"
           ? setCursorFavoriteModelSlugs
-          : provider === "kilo"
-            ? setKiloFavoriteModelSlugs
-            : provider === "pi"
-              ? setPiFavoriteModelSlugs
-              : setOpenCodeFavoriteModelSlugs;
+          : provider === "devin"
+            ? setDevinFavoriteModelSlugs
+            : provider === "kilo"
+              ? setKiloFavoriteModelSlugs
+              : provider === "pi"
+                ? setPiFavoriteModelSlugs
+                : setOpenCodeFavoriteModelSlugs;
       setFavoriteModelSlugs((current) => toggleFavoriteModelSlug(current, slug));
     },
     [
       setCursorFavoriteModelSlugs,
+      setDevinFavoriteModelSlugs,
       setKiloFavoriteModelSlugs,
       setOpenCodeFavoriteModelSlugs,
       setPiFavoriteModelSlugs,
@@ -329,7 +368,8 @@ export const ProviderModelMenuItems = memo(function ProviderModelMenuItems(
       (provider === "kilo" ||
         provider === "opencode" ||
         provider === "cursor" ||
-        provider === "pi") &&
+        provider === "pi" ||
+        provider === "devin") &&
       providerOptions.length >= SEARCHABLE_MODEL_PICKER_THRESHOLD;
     const normalizedModelSearchQuery = deferredModelSearchQuery.trim().toLowerCase();
     const filteredOptions =

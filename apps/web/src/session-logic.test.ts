@@ -344,9 +344,8 @@ describe("derivePendingUserInputs", () => {
         tone: "info",
         payload: {
           requestId: "req-user-input-2",
-          answers: {
-            sandbox_mode: "workspace-write",
-          },
+          answeredQuestionIds: ["sandbox_mode"],
+          redacted: true,
         },
       }),
       makeActivity({
@@ -3299,6 +3298,62 @@ describe("deriveTimelineEntries", () => {
 
     expect(entries.map((entry) => entry.kind)).toEqual(["proposed-plan"]);
   });
+
+  it("hides incomplete proposed_plan tags while streaming before the plan card exists", () => {
+    const entries = deriveTimelineEntries(
+      [
+        {
+          id: MessageId.makeUnsafe("message-streaming-plan"),
+          role: "assistant",
+          text: "I'll explore first.\n\n<proposed_plan>\n## Summary\nStill writing",
+          turnId: TurnId.makeUnsafe("turn-streaming"),
+          createdAt: "2026-02-23T00:00:01.000Z",
+          streaming: true,
+        },
+        {
+          id: MessageId.makeUnsafe("message-only-open-tag"),
+          role: "assistant",
+          text: "<proposed_plan>",
+          turnId: TurnId.makeUnsafe("turn-streaming"),
+          createdAt: "2026-02-23T00:00:01.100Z",
+          streaming: true,
+        },
+      ],
+      [],
+      [],
+    );
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      kind: "message",
+      message: {
+        text: "I'll explore first.",
+      },
+    });
+  });
+
+  it("strips complete plan tags from chat even before a proposed plan row exists", () => {
+    const entries = deriveTimelineEntries(
+      [
+        {
+          id: MessageId.makeUnsafe("message-complete-tags-no-card"),
+          role: "assistant",
+          text: "Done.\n<proposed_plan>\n# Ship it\n</proposed_plan>",
+          turnId: TurnId.makeUnsafe("turn-no-card-yet"),
+          createdAt: "2026-02-23T00:00:01.000Z",
+          streaming: false,
+        },
+      ],
+      [],
+      [],
+    );
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      kind: "message",
+      message: { text: "Done." },
+    });
+  });
 });
 
 describe("deriveWorkLogEntries context window handling", () => {
@@ -3773,6 +3828,7 @@ describe("PROVIDER_OPTIONS", () => {
     const droid = PROVIDER_OPTIONS.find((option) => option.value === "droid");
     const kilo = PROVIDER_OPTIONS.find((option) => option.value === "kilo");
     const opencode = PROVIDER_OPTIONS.find((option) => option.value === "opencode");
+    const devin = PROVIDER_OPTIONS.find((option) => option.value === "devin");
     const pi = PROVIDER_OPTIONS.find((option) => option.value === "pi");
     expect(PROVIDER_OPTIONS).toEqual([
       { value: "codex", label: "Codex", available: true },
@@ -3780,6 +3836,7 @@ describe("PROVIDER_OPTIONS", () => {
       { value: "cursor", label: "Cursor", available: true },
       { value: "antigravity", label: "Antigravity", available: true },
       { value: "grok", label: "Grok", available: true },
+      { value: "devin", label: "Devin", available: true },
       { value: "droid", label: "Droid", available: true },
       { value: "kilo", label: "Kilo", available: true },
       { value: "opencode", label: "OpenCode", available: true },
@@ -3813,6 +3870,11 @@ describe("PROVIDER_OPTIONS", () => {
     expect(opencode).toEqual({
       value: "opencode",
       label: "OpenCode",
+      available: true,
+    });
+    expect(devin).toEqual({
+      value: "devin",
+      label: "Devin",
       available: true,
     });
     expect(pi).toEqual({

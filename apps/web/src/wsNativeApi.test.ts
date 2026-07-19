@@ -322,6 +322,7 @@ describe("wsNativeApi", () => {
             experimentalWebSockets: false,
             customModels: [],
           },
+          devin: { enabled: true, binaryPath: "devin", customModels: [] },
           pi: { enabled: true, binaryPath: "pi", agentDir: "", customModels: [] },
         },
         skills: { disabled: [] },

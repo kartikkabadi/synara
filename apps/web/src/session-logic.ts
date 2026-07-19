@@ -50,11 +50,18 @@ export const PROVIDER_OPTIONS: Array<{
   value: ProviderPickerKind;
   label: string;
   available: boolean;
-}> = PROVIDER_DESCRIPTORS.map((descriptor) => ({
-  value: descriptor.kind,
-  label: descriptor.displayName,
-  available: descriptor.available,
-}));
+}> = [
+  { value: "codex", label: "Codex", available: true },
+  { value: "claudeAgent", label: "Claude", available: true },
+  { value: "cursor", label: "Cursor", available: true },
+  { value: "antigravity", label: "Antigravity", available: true },
+  { value: "grok", label: "Grok", available: true },
+  { value: "devin", label: "Devin", available: true },
+  { value: "droid", label: "Droid", available: true },
+  { value: "kilo", label: "Kilo", available: true },
+  { value: "opencode", label: "OpenCode", available: true },
+  { value: "pi", label: "Pi", available: true },
+];
 
 export interface WorkLogEntry {
   id: string;
@@ -1002,7 +1009,11 @@ function isUninformativeCommandStartActivity(activity: OrchestrationThreadActivi
 }
 
 function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): boolean {
-  if (activity.kind !== "tool.updated" && activity.kind !== "tool.completed") {
+  if (
+    activity.kind !== "tool.started" &&
+    activity.kind !== "tool.updated" &&
+    activity.kind !== "tool.completed"
+  ) {
     return false;
   }
 
@@ -1010,7 +1021,23 @@ function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): bool
     activity.payload && typeof activity.payload === "object"
       ? (activity.payload as Record<string, unknown>)
       : null;
-  return typeof payload?.detail === "string" && payload.detail.startsWith("ExitPlanMode:");
+  if (typeof payload?.detail === "string" && payload.detail.startsWith("ExitPlanMode:")) {
+    return true;
+  }
+  // Devin ACP surfaces the same boundary as a switch_mode tool titled "Exit plan mode".
+  const title =
+    (typeof payload?.title === "string" && payload.title) ||
+    (typeof activity.summary === "string" ? activity.summary : "");
+  const normalizedTitle = title.toLowerCase();
+  if (normalizedTitle.includes("exit plan mode") || normalizedTitle.includes("exitplanmode")) {
+    return true;
+  }
+  const data =
+    payload?.data && typeof payload.data === "object"
+      ? (payload.data as Record<string, unknown>)
+      : null;
+  const kind = typeof data?.kind === "string" ? data.kind.toLowerCase() : "";
+  return kind === "switch_mode" && normalizedTitle.includes("exit plan");
 }
 
 function normalizeWorkLogTextForComparison(value: string | undefined): string {
@@ -2325,26 +2352,29 @@ export function deriveTimelineEntries(
   proposedPlans: ProposedPlan[],
   workEntries: WorkLogEntry[],
 ): TimelineEntry[] {
-  const proposedPlanTurnIds = new Set(
-    proposedPlans.flatMap((proposedPlan) => (proposedPlan.turnId ? [proposedPlan.turnId] : [])),
-  );
   const messageRows: TimelineEntry[] = messages.flatMap((message) => {
-    const displayMessage =
-      message.role === "assistant" && message.turnId && proposedPlanTurnIds.has(message.turnId)
-        ? { ...message, text: stripProposedPlanBlocksFromText(message.text) }
-        : message;
-    if (
-      displayMessage.role === "assistant" &&
-      displayMessage.text.length === 0 &&
-      displayMessage.turnId &&
-      proposedPlanTurnIds.has(displayMessage.turnId)
-    ) {
+    // Always strip plan-tag markup from assistant chat. Plan content belongs in
+    // the plan card (once complete); mid-stream incomplete tags should not leak.
+    if (message.role !== "assistant") {
+      return [
+        {
+          id: message.id,
+          kind: "message" as const,
+          createdAt: message.createdAt,
+          message,
+        },
+      ];
+    }
+    const strippedText = stripProposedPlanBlocksFromText(message.text);
+    // Hide rows that only carried plan markup (complete or still streaming).
+    if (strippedText.length === 0) {
       return [];
     }
+    const displayMessage = { ...message, text: strippedText };
     return [
       {
         id: displayMessage.id,
-        kind: "message",
+        kind: "message" as const,
         createdAt: displayMessage.createdAt,
         message: displayMessage,
       },

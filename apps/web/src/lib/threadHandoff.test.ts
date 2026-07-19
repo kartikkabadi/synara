@@ -14,6 +14,7 @@ describe("threadHandoff", () => {
       "cursor",
       "antigravity",
       "grok",
+      "devin",
       "droid",
       "kilo",
       "opencode",
@@ -37,7 +38,7 @@ describe("threadHandoff", () => {
   it("prefers sticky model selection for the chosen handoff target", () => {
     const stickySelection = {
       provider: "antigravity",
-      model: "Gemini 3.5 Flash",
+      model: "Antigravity 3.5 Flash",
     } satisfies ModelSelection;
 
     expect(
@@ -66,7 +67,7 @@ describe("threadHandoff", () => {
         sourceThread: {
           modelSelection: {
             provider: "antigravity",
-            model: "Gemini 3.5 Flash",
+            model: "Antigravity 3.5 Flash",
           },
         },
         targetProvider: "codex",

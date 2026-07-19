@@ -97,6 +97,7 @@ type CustomModelSettingsKey =
   | "customAntigravityModels"
   | "customGrokModels"
   | "customDroidModels"
+  | "customDevinModels"
   | "customKiloModels"
   | "customOpenCodeModels"
   | "customPiModels";
@@ -117,6 +118,7 @@ const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>
   antigravity: new Set(getModelOptions("antigravity").map((option) => option.slug)),
   grok: new Set(getModelOptions("grok").map((option) => option.slug)),
   droid: new Set(getModelOptions("droid").map((option) => option.slug)),
+  devin: new Set(getModelOptions("devin").map((option) => option.slug)),
   kilo: new Set(getModelOptions("kilo").map((option) => option.slug)),
   opencode: new Set(getModelOptions("opencode").map((option) => option.slug)),
   pi: new Set(getModelOptions("pi").map((option) => option.slug)),
@@ -143,6 +145,7 @@ const PersistedProviderKind = Schema.Literals([
   "gemini",
   "grok",
   "droid",
+  "devin",
   "kilo",
   "opencode",
   "pi",
@@ -174,6 +177,7 @@ export const AppSettingsSchema = Schema.Struct({
   geminiBinaryPath: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
   grokBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   droidBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
+  devinBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   kiloBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   kiloServerUrl: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   kiloServerPassword: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
@@ -241,6 +245,7 @@ export const AppSettingsSchema = Schema.Struct({
   customGeminiModels: Schema.optionalKey(Schema.Array(Schema.String)),
   customGrokModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
   customDroidModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
+  customDevinModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
   customKiloModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
   customOpenCodeModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
   customPiModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
@@ -324,6 +329,15 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
     description: "Save additional Grok model slugs for the picker and `/model` command.",
     placeholder: "your-grok-model-slug",
     example: "grok-build-0.1",
+  },
+  devin: {
+    provider: "devin",
+    settingsKey: "customDevinModels",
+    defaultSettingsKey: "customDevinModels",
+    title: "Devin",
+    description: "Save additional Devin model aliases for the picker and `/model` command.",
+    placeholder: "your-devin-model-alias",
+    example: "swe-1.7",
   },
   droid: {
     provider: "droid",
@@ -487,6 +501,7 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     ),
     grokBinaryPath: normalizeProviderBinaryPathOverride("grok", settings.grokBinaryPath),
     droidBinaryPath: normalizeProviderBinaryPathOverride("droid", settings.droidBinaryPath),
+    devinBinaryPath: normalizeProviderBinaryPathOverride("devin", settings.devinBinaryPath),
     kiloBinaryPath: normalizeProviderBinaryPathOverride("kilo", settings.kiloBinaryPath),
     openCodeBinaryPath: normalizeProviderBinaryPathOverride(
       "opencode",
@@ -506,6 +521,7 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     ),
     customGrokModels: normalizeCustomModelSlugs(settings.customGrokModels, "grok"),
     customDroidModels: normalizeCustomModelSlugs(settings.customDroidModels, "droid"),
+    customDevinModels: normalizeCustomModelSlugs(settings.customDevinModels, "devin"),
     customKiloModels: normalizeCustomModelSlugs(settings.customKiloModels, "kilo"),
     customOpenCodeModels: normalizeCustomModelSlugs(settings.customOpenCodeModels, "opencode"),
     customPiModels: normalizeCustomModelSlugs(settings.customPiModels, "pi"),
@@ -528,6 +544,7 @@ function serverSettingsToAppSettings(settings: ServerSettingsView): Partial<AppS
     antigravityBinaryPath: settings.providers.antigravity.binaryPath,
     grokBinaryPath: settings.providers.grok.binaryPath,
     droidBinaryPath: settings.providers.droid.binaryPath,
+    devinBinaryPath: settings.providers.devin.binaryPath,
     kiloBinaryPath: settings.providers.kilo.binaryPath,
     kiloServerPasswordConfigured: settings.providers.kilo.serverPasswordConfigured,
     kiloServerUrl: settings.providers.kilo.serverUrl,
@@ -543,6 +560,7 @@ function serverSettingsToAppSettings(settings: ServerSettingsView): Partial<AppS
     customAntigravityModels: settings.providers.antigravity.customModels,
     customGrokModels: settings.providers.grok.customModels,
     customDroidModels: settings.providers.droid.customModels,
+    customDevinModels: settings.providers.devin.customModels,
     customKiloModels: settings.providers.kilo.customModels,
     customOpenCodeModels: settings.providers.opencode.customModels,
     customPiModels: settings.providers.pi.customModels,
@@ -653,6 +671,14 @@ function appSettingsPatchToServerSettingsPatch(patch: Partial<AppSettings>): Ser
     providers.grok = {
       ...(hasOwn(patch, "grokBinaryPath") ? { binaryPath: patch.grokBinaryPath ?? "" } : {}),
       ...(hasOwn(patch, "customGrokModels") ? { customModels: patch.customGrokModels ?? [] } : {}),
+    };
+  }
+  if (hasOwn(patch, "devinBinaryPath") || hasOwn(patch, "customDevinModels")) {
+    providers.devin = {
+      ...(hasOwn(patch, "devinBinaryPath") ? { binaryPath: patch.devinBinaryPath ?? "" } : {}),
+      ...(hasOwn(patch, "customDevinModels")
+        ? { customModels: patch.customDevinModels ?? [] }
+        : {}),
     };
   }
   if (hasOwn(patch, "droidBinaryPath") || hasOwn(patch, "customDroidModels")) {
@@ -822,6 +848,7 @@ export function getCustomModelsByProvider(
     antigravity: getCustomModelsForProvider(settings, "antigravity"),
     grok: getCustomModelsForProvider(settings, "grok"),
     droid: getCustomModelsForProvider(settings, "droid"),
+    devin: getCustomModelsForProvider(settings, "devin"),
     kilo: getCustomModelsForProvider(settings, "kilo"),
     opencode: getCustomModelsForProvider(settings, "opencode"),
     pi: getCustomModelsForProvider(settings, "pi"),
@@ -970,6 +997,7 @@ export function getCustomModelOptionsByProvider(
     antigravity: getAppModelOptions("antigravity", customModelsByProvider.antigravity),
     grok: getAppModelOptions("grok", customModelsByProvider.grok),
     droid: getAppModelOptions("droid", customModelsByProvider.droid),
+    devin: getAppModelOptions("devin", customModelsByProvider.devin),
     kilo: getAppModelOptions("kilo", customModelsByProvider.kilo),
     opencode: getAppModelOptions("opencode", customModelsByProvider.opencode),
     pi: getAppModelOptions("pi", customModelsByProvider.pi),
@@ -987,6 +1015,7 @@ export function getProviderStartOptions(
     | "antigravityBinaryPath"
     | "grokBinaryPath"
     | "droidBinaryPath"
+    | "devinBinaryPath"
     | "kiloBinaryPath"
     | "kiloServerUrl"
     | "openCodeBinaryPath"
@@ -1008,6 +1037,7 @@ export function getProviderStartOptions(
   );
   const grokBinaryPath = normalizeProviderBinaryPathOverride("grok", settings.grokBinaryPath);
   const droidBinaryPath = normalizeProviderBinaryPathOverride("droid", settings.droidBinaryPath);
+  const devinBinaryPath = normalizeProviderBinaryPathOverride("devin", settings.devinBinaryPath);
   const kiloBinaryPath = normalizeProviderBinaryPathOverride("kilo", settings.kiloBinaryPath);
   const openCodeBinaryPath = normalizeProviderBinaryPathOverride(
     "opencode",
@@ -1062,6 +1092,13 @@ export function getProviderStartOptions(
           },
         }
       : {}),
+    ...(devinBinaryPath
+      ? {
+          devin: {
+            binaryPath: devinBinaryPath,
+          },
+        }
+      : {}),
     ...(kiloBinaryPath || settings.kiloServerUrl
       ? {
           kilo: {
@@ -1111,6 +1148,7 @@ export function getCustomBinaryPathForProvider(
     | "antigravityBinaryPath"
     | "grokBinaryPath"
     | "droidBinaryPath"
+    | "devinBinaryPath"
     | "kiloBinaryPath"
     | "openCodeBinaryPath"
     | "piBinaryPath"
@@ -1130,6 +1168,8 @@ export function getCustomBinaryPathForProvider(
       return normalizeProviderBinaryPathOverride(provider, settings.grokBinaryPath);
     case "droid":
       return normalizeProviderBinaryPathOverride(provider, settings.droidBinaryPath);
+    case "devin":
+      return normalizeProviderBinaryPathOverride(provider, settings.devinBinaryPath);
     case "kilo":
       return normalizeProviderBinaryPathOverride(provider, settings.kiloBinaryPath);
     case "opencode":

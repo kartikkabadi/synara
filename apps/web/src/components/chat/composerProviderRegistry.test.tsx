@@ -5,7 +5,7 @@ import {
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./composerProviderRegistry";
-import { getComposerTraitSelection } from "./composerTraits";
+import { getComposerTraitSelection, hasVisibleComposerTraitControls } from "./composerTraits";
 
 const OPENCODE_RUNTIME_MODEL_WITH_REASONING: ProviderModelDescriptor = {
   slug: "openai/gpt-5.4",
@@ -77,8 +77,8 @@ const DROID_RUNTIME_GPT_5_6_WITH_REASONING: ProviderModelDescriptor = {
 };
 
 const ANTIGRAVITY_RUNTIME_GEMINI_WITH_REASONING: ProviderModelDescriptor = {
-  slug: "Gemini 3.5 Flash",
-  name: "Gemini 3.5 Flash",
+  slug: "Antigravity 3.5 Flash",
+  name: "Antigravity 3.5 Flash",
   supportedReasoningEfforts: [
     { value: "low", label: "Low" },
     { value: "medium", label: "Medium" },
@@ -110,7 +110,7 @@ describe("getComposerProviderState", () => {
   it("dispatches Antigravity effort separately from its base model", () => {
     const state = getComposerProviderState({
       provider: "antigravity",
-      model: "Gemini 3.5 Flash",
+      model: "Antigravity 3.5 Flash",
       runtimeModel: ANTIGRAVITY_RUNTIME_GEMINI_WITH_REASONING,
       prompt: "",
       modelOptions: { antigravity: { reasoningEffort: "high" } },
@@ -124,7 +124,7 @@ describe("getComposerProviderState", () => {
     expect(
       getComposerTraitSelection(
         "antigravity",
-        "Gemini 3.5 Flash",
+        "Antigravity 3.5 Flash",
         "",
         { reasoningEffort: "high" },
         ANTIGRAVITY_RUNTIME_GEMINI_WITH_REASONING,
@@ -134,7 +134,7 @@ describe("getComposerProviderState", () => {
       renderProviderTraitsPicker({
         provider: "antigravity",
         threadId: ThreadId.makeUnsafe("thread-antigravity-effort"),
-        model: "Gemini 3.5 Flash",
+        model: "Antigravity 3.5 Flash",
         runtimeModel: ANTIGRAVITY_RUNTIME_GEMINI_WITH_REASONING,
         modelOptions: { reasoningEffort: "high" },
         prompt: "",
@@ -730,6 +730,32 @@ describe("getComposerProviderState", () => {
         reasoningEffort: "xhigh",
       },
     });
+  });
+
+  it("does not expose Devin context controls when runtime discovery omits contextWindowOptions", () => {
+    const runtimeModel: ProviderModelDescriptor = {
+      slug: "claude-opus-4-8",
+      name: "Claude Opus 4.8",
+      supportedReasoningEfforts: [{ value: "low" }, { value: "medium" }, { value: "high" }],
+      defaultReasoningEffort: "medium",
+      supportsFastMode: true,
+    };
+    const selection = getComposerTraitSelection(
+      "devin",
+      "claude-opus-4-8",
+      "",
+      undefined,
+      runtimeModel,
+    );
+
+    expect(selection.contextWindowOptions).toEqual([]);
+    expect(hasVisibleComposerTraitControls(selection)).toBe(true);
+  });
+
+  it("does not expose Devin context controls from static fallbacks for Claude families", () => {
+    const selection = getComposerTraitSelection("devin", "claude-sonnet-5", "", undefined);
+
+    expect(selection.contextWindowOptions).toEqual([]);
   });
 
   it("keeps Pi runtime thinking selections on the thinkingLevel field", () => {
