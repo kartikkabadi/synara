@@ -312,15 +312,11 @@ export function supportsThreadImport(
 }
 
 export function supportsRollback(capabilities: ProviderComposerCapabilities | undefined): boolean {
-  // Undefined capabilities (still loading) → false to avoid enabling rollback
-  // before the provider's capabilities resolve. Providers that advertise a
-  // specific rollback mode support it; the absence of the field preserves the
-  // legacy default of true to avoid disabling rollback for older adapters.
-  if (capabilities === undefined) {
+  // Capabilities still loading, null, or an unexpected value → false. Do not
+  // enable rollback/edit affordances until the provider explicitly advertises
+  // a supported conversationRollback mode.
+  if (!capabilities || typeof capabilities !== "object") {
     return false;
-  }
-  if (capabilities.conversationRollback === undefined) {
-    return true;
   }
   return (
     capabilities.conversationRollback === "native" ||

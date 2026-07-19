@@ -113,9 +113,9 @@ const make = Effect.gen(function* () {
   const receiptBus = yield* RuntimeReceiptBus;
   const pendingMessageStartByThread = new Map<ThreadId, MessageId>();
   // Coalesces live turn-diff recomputes: at most one queued + one in-flight per
-  // thread. The flag is cleared when the worker starts processing the job so an
-  // edit arriving during the git work re-schedules and captures the newest tree.
-  const liveDiffScheduledThreads = new Set<ThreadId>();
+  // thread+turn. The flag is cleared when the worker starts processing the job so
+  // an edit arriving during the git work re-schedules and captures the newest tree.
+  const liveDiffScheduledThreads = new Set<string>();
 
   // Providers that stream their own unified diff (e.g. Codex) update the live
   // turn diff through ProviderRuntimeIngestion. For providers without that
@@ -1069,6 +1069,32 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    // Fail closed before restoring the filesystem: only proceed when the
+    // provider explicitly advertises a supported conversation rollback mode.
+    // This prevents a filesystem-only revert from leaving the conversation
+    // state inconsistent when rollback is not available.
+    const provider = thread.modelSelection?.provider;
+    const canRollback =
+      provider !== undefined &&
+      provider !== null &&
+      (yield* providerService.getCapabilities(provider).pipe(
+        Effect.map(
+          (capabilities) =>
+            capabilities.conversationRollback === "native" ||
+            capabilities.conversationRollback === "restart-session",
+        ),
+        Effect.catch(() => Effect.succeed(false)),
+      ));
+    if (!canRollback) {
+      yield* appendRevertFailureActivity({
+        threadId: event.payload.threadId,
+        turnCount: event.payload.turnCount,
+        detail: `Provider ${provider ?? "unknown"} does not advertise conversation rollback support.`,
+        createdAt: now,
+      }).pipe(Effect.catch(() => Effect.void));
+      return;
+    }
+
     const earliestManagedBaselineRef = thread.checkpoints
       .toSorted((left, right) => left.checkpointTurnCount - right.checkpointTurnCount)
       .map((checkpoint) =>
@@ -1193,7 +1219,7 @@ const make = Effect.gen(function* () {
     if (event.type === "item.completed") {
       // Clear the coalescing flag before the git work so edits arriving during
       // it re-schedule and snapshot the newest tree.
-      liveDiffScheduledThreads.delete(event.threadId);
+      liveDiffScheduledThreads.delete(`${event.threadId}:${event.turnId ?? "none"}`);
       yield* captureLiveTurnDiff(event);
       return;
     }
@@ -1262,14 +1288,15 @@ const make = Effect.gen(function* () {
           if (event.type === "item.completed" && event.payload.itemType === "file_change") {
             return Effect.gen(function* () {
               // Coalesce first (cheap) so bursts of edits collapse to one recompute.
-              if (liveDiffScheduledThreads.has(event.threadId)) {
+              const liveDiffKey = `${event.threadId}:${event.turnId ?? "none"}`;
+              if (liveDiffScheduledThreads.has(liveDiffKey)) {
                 return;
               }
               // Skip providers that stream their own live diff (handled elsewhere).
               if (yield* supportsLiveTurnDiffPatch(event.provider)) {
                 return;
               }
-              liveDiffScheduledThreads.add(event.threadId);
+              liveDiffScheduledThreads.add(liveDiffKey);
               yield* worker.enqueue({ source: "runtime", event });
             });
           }
