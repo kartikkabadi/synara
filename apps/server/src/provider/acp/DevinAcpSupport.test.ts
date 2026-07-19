@@ -143,6 +143,14 @@ describe("buildDevinAcpSpawnInput — env allowlist filtering", () => {
     });
   });
 
+  it("maps lowercase windsurf_api_key to WINDSURF_API_KEY for the child", () => {
+    withEnv({ WINDSURF_API_KEY: undefined, windsurf_api_key: "wk-lower" }, () => {
+      const result = buildDevinAcpSpawnInput(undefined, "/tmp");
+      assert.strictEqual(result.env!.WINDSURF_API_KEY, "wk-lower");
+      assert.strictEqual(result.env!.windsurf_api_key, undefined);
+    });
+  });
+
   it("excludes vars that don't match prefix or allowlist", () => {
     withEnv(
       {
@@ -233,13 +241,20 @@ describe("buildDevinAcpSpawnInput — env allowlist filtering", () => {
 });
 
 describe("hasDevinApiKeyEnv", () => {
-  it("returns false when WINDSURF_API_KEY is not set", () => {
-    const saved = process.env.WINDSURF_API_KEY;
+  it("returns false when no Devin API key env var is set", () => {
+    const saved: Record<string, string | undefined> = {
+      WINDSURF_API_KEY: process.env.WINDSURF_API_KEY,
+      windsurf_api_key: process.env.windsurf_api_key,
+    };
     delete process.env.WINDSURF_API_KEY;
+    delete process.env.windsurf_api_key;
     try {
       assert.strictEqual(hasDevinApiKeyEnv(), false);
     } finally {
-      if (saved !== undefined) process.env.WINDSURF_API_KEY = saved;
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
     }
   });
 
@@ -254,25 +269,48 @@ describe("hasDevinApiKeyEnv", () => {
     }
   });
 
+  it("returns true when lowercase windsurf_api_key is set", () => {
+    const savedUpper = process.env.WINDSURF_API_KEY;
+    const savedLower = process.env.windsurf_api_key;
+    delete process.env.WINDSURF_API_KEY;
+    process.env.windsurf_api_key = "wk-test-key";
+    try {
+      assert.strictEqual(hasDevinApiKeyEnv(), true);
+    } finally {
+      if (savedUpper === undefined) delete process.env.WINDSURF_API_KEY;
+      else process.env.WINDSURF_API_KEY = savedUpper;
+      if (savedLower === undefined) delete process.env.windsurf_api_key;
+      else process.env.windsurf_api_key = savedLower;
+    }
+  });
+
   it("returns false when WINDSURF_API_KEY is empty string", () => {
     const saved = process.env.WINDSURF_API_KEY;
+    const savedLower = process.env.windsurf_api_key;
     process.env.WINDSURF_API_KEY = "";
+    delete process.env.windsurf_api_key;
     try {
       assert.strictEqual(hasDevinApiKeyEnv(), false);
     } finally {
       if (saved === undefined) delete process.env.WINDSURF_API_KEY;
       else process.env.WINDSURF_API_KEY = saved;
+      if (savedLower === undefined) delete process.env.windsurf_api_key;
+      else process.env.windsurf_api_key = savedLower;
     }
   });
 
   it("returns false when WINDSURF_API_KEY is whitespace-only", () => {
     const saved = process.env.WINDSURF_API_KEY;
+    const savedLower = process.env.windsurf_api_key;
     process.env.WINDSURF_API_KEY = "   ";
+    delete process.env.windsurf_api_key;
     try {
       assert.strictEqual(hasDevinApiKeyEnv(), false);
     } finally {
       if (saved === undefined) delete process.env.WINDSURF_API_KEY;
       else process.env.WINDSURF_API_KEY = saved;
+      if (savedLower === undefined) delete process.env.windsurf_api_key;
+      else process.env.windsurf_api_key = savedLower;
     }
   });
 
@@ -281,10 +319,12 @@ describe("hasDevinApiKeyEnv", () => {
     assert.strictEqual(hasDevinApiKeyEnv({}), false);
     assert.strictEqual(hasDevinApiKeyEnv({ WINDSURF_API_KEY: "" }), false);
     assert.strictEqual(hasDevinApiKeyEnv({ WINDSURF_API_KEY: "  " }), false);
+    assert.strictEqual(hasDevinApiKeyEnv({ windsurf_api_key: "key" }), true);
+    assert.strictEqual(hasDevinApiKeyEnv({ WINDSURF_API_KEY: "", windsurf_api_key: "" }), false);
   });
 
-  it("DEVIN_API_KEY_ENV_KEYS contains only WINDSURF_API_KEY", () => {
-    assert.deepStrictEqual([...DEVIN_API_KEY_ENV_KEYS], ["WINDSURF_API_KEY"]);
+  it("DEVIN_API_KEY_ENV_KEYS includes both canonical and lowercase variants", () => {
+    assert.deepStrictEqual([...DEVIN_API_KEY_ENV_KEYS], ["WINDSURF_API_KEY", "windsurf_api_key"]);
   });
 });
 
