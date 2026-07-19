@@ -24,6 +24,7 @@ import { KiloAdapter } from "../Services/KiloAdapter.ts";
 import { OpenCodeAdapter } from "../Services/OpenCodeAdapter.ts";
 import { PiAdapter } from "../Services/PiAdapter.ts";
 import { AntigravityAdapter } from "../Services/AntigravityAdapter.ts";
+import { DevinAdapter } from "../Services/DevinAdapter.ts";
 
 export interface ProviderAdapterRegistryLiveOptions {
   readonly adapters?: ReadonlyArray<ProviderAdapterShape<ProviderAdapterError>>;
@@ -40,6 +41,7 @@ const makeProviderAdapterRegistry = (options?: ProviderAdapterRegistryLiveOption
             yield* CursorAdapter,
             yield* AntigravityAdapter,
             yield* GrokAdapter,
+            yield* DevinAdapter,
             yield* DroidAdapter,
             yield* KiloAdapter,
             yield* OpenCodeAdapter,

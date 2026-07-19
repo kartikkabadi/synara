@@ -11,6 +11,10 @@ export default mergeConfig(
       // is running under CI load.
       testTimeout: 90_000,
       hookTimeout: 90_000,
+      // ACP runtime tests spawn stdio child processes; use multiple fork
+      // workers to avoid state carried by a single Bun process between suites.
+      pool: "forks",
+      maxWorkers: 4,
     },
   }),
 );
