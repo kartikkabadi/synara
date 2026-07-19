@@ -78,10 +78,12 @@ import { makeDevinAcpRuntime, type DevinAcpRuntimeSettings } from "../acp/DevinA
 import {
   elicitationFormToUserInputQuestions,
   userInputAnswersToElicitationContent,
+  validateElicitationRequest,
   validateUserInputAnswersForElicitation,
 } from "../acp/DevinElicitation.ts";
 import { applyDevinModeSelection } from "../acp/DevinModeMapper.ts";
 import {
+  DEFAULT_DEVIN_CONTEXT_WINDOW_LABEL,
   DEVIN_FALLBACK_MODELS,
   buildDevinVariantMatrix,
   normalizeDevinModelDisplayName,
@@ -497,7 +499,7 @@ function extractDevinModelsFromConfigOptions(
       base.contextWindowOptions.length > 0
         ? [
             {
-              value: "standard",
+              value: DEFAULT_DEVIN_CONTEXT_WINDOW_LABEL,
               label: "Standard",
               ...(defaultVariant.contextWindow === null ? { isDefault: true as const } : {}),
             },
@@ -524,7 +526,11 @@ function extractDevinModelsFromConfigOptions(
       ...(contextWindowOptions ? { contextWindowOptions } : {}),
       ...(defaultVariant.contextWindow
         ? { defaultContextWindow: defaultVariant.contextWindow }
-        : { ...(contextWindowOptions ? { defaultContextWindow: "standard" } : {}) }),
+        : {
+            ...(contextWindowOptions
+              ? { defaultContextWindow: DEFAULT_DEVIN_CONTEXT_WINDOW_LABEL }
+              : {}),
+          }),
     });
   }
 
@@ -861,6 +867,21 @@ function makeProviderAdapter(
             yield* acp.handleElicitation((request) =>
               Effect.gen(function* () {
                 if (request.mode !== "form") {
+                  return { action: { action: "decline" as const } };
+                }
+                const requestValidation = validateElicitationRequest(request);
+                if (!requestValidation.valid) {
+                  yield* publish({
+                    type: "runtime.error",
+                    ...(yield* makeEventStamp()),
+                    provider: PROVIDER,
+                    threadId: input.threadId,
+                    turnId: ctx?.activeTurnId,
+                    payload: {
+                      message: `Devin elicitation request rejected: ${requestValidation.issues.join("; ")}`,
+                      class: "validation_error",
+                    },
+                  });
                   return { action: { action: "decline" as const } };
                 }
                 const requestId = ApprovalRequestId.makeUnsafe(crypto.randomUUID());
