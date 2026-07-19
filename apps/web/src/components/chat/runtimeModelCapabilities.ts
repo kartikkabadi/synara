@@ -16,7 +16,7 @@ import {
   trimOrNull,
 } from "@synara/shared/model";
 import { normalizeCursorModelVariantBaseId } from "../../cursorModelVariants";
-import { normalizeDevinModelVariantBaseId } from "@synara/shared/devinModelVariants";
+import { normalizeDevinModelVariantBaseId } from "@synara/shared/devinModel";
 
 function runtimeEffortLabel(value: string): string {
   switch (value) {

@@ -196,13 +196,9 @@
       "types": "./src/migrationRecovery.ts",
       "import": "./src/migrationRecovery.ts"
     },
-    "./devinModelDisplay": {
-      "types": "./src/devinModelDisplay.ts",
-      "import": "./src/devinModelDisplay.ts"
-    },
-    "./devinModelVariants": {
-      "types": "./src/devinModelVariants.ts",
-      "import": "./src/devinModelVariants.ts"
+    "./devinModel": {
+      "types": "./src/devinModel.ts",
+      "import": "./src/devinModel.ts"
     }
   },
   "scripts": {

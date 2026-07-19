@@ -10,7 +10,7 @@ import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useSta
 import { type ProviderPickerKind, PROVIDER_OPTIONS } from "../../session-logic";
 import { formatProviderModelOptionName } from "../../providerModelOptions";
 import { compareProvidersByOrder } from "../../providerOrdering";
-import { normalizeDevinModelVariantBaseId } from "@synara/shared/devinModelVariants";
+import { normalizeDevinModelVariantBaseId } from "@synara/shared/devinModel";
 import {
   Menu,
   MenuItem,

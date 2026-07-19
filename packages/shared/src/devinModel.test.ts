@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   formatDevinModelSlugDisplay,
   normalizeDevinModelDisplayName,
+  normalizeDevinModelVariantBaseId,
   resolveDevinModelDisplayName,
-} from "./devinModelDisplay";
-import { normalizeDevinModelVariantBaseId } from "./devinModelVariants";
+} from "./devinModel";
 
 describe("formatDevinModelSlugDisplay", () => {
   it("formats unknown legacy MODEL_* slugs", () => {
@@ -62,6 +62,11 @@ describe("normalizeDevinModelVariantBaseId", () => {
   it("collapses legacy Sonnet 4.5 thinking alias to the shared base slug", () => {
     expect(normalizeDevinModelVariantBaseId("MODEL_PRIVATE_3")).toBe("MODEL_PRIVATE_2");
     expect(normalizeDevinModelVariantBaseId("MODEL_PRIVATE_2")).toBe("MODEL_PRIVATE_2");
+  });
+
+  it("strips known variant suffixes", () => {
+    expect(normalizeDevinModelVariantBaseId("claude-opus-4-8-high-fast")).toBe("claude-opus-4-8");
+    expect(normalizeDevinModelVariantBaseId("glm-5-2-max-1m")).toBe("glm-5-2");
   });
 });
 
