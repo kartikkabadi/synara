@@ -1539,7 +1539,6 @@ function makeProviderAdapter(
         sessionModelSwitch: "in-session",
         supportsRuntimeModelList: true,
         supportsNativeSlashCommandDiscovery: true,
-        conversationRollback: "restart-session",
       },
       startSession,
       sendTurn,
@@ -1712,7 +1711,6 @@ function makeProviderAdapter(
           supportsPluginMentions: false,
           supportsPluginDiscovery: false,
           supportsRuntimeModelList: true,
-          conversationRollback: "restart-session",
           // Compaction sends /compact as a prompt via compactThread. Import is not yet mapped.
           supportsThreadCompaction: true,
           supportsThreadImport: false,
