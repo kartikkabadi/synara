@@ -585,6 +585,7 @@ describe("DevinAdapterLive", () => {
           name: "SWE 1.6",
           upstreamProviderId: "devin",
           upstreamProviderName: "Devin",
+          variantOptions: [{ value: "swe-1-6", label: "SWE 1.6", isDefault: true }],
         },
       );
       assert.deepStrictEqual(
@@ -596,6 +597,13 @@ describe("DevinAdapterLive", () => {
           upstreamProviderName: "Anthropic",
           supportedReasoningEfforts: [{ value: "medium", label: "Medium" }],
           defaultReasoningEffort: "medium",
+          variantOptions: [
+            {
+              value: "claude-opus-4-8-medium",
+              label: "Claude Opus 4.8 Medium",
+              isDefault: true,
+            },
+          ],
         },
       );
     }).pipe(
@@ -648,6 +656,7 @@ describe("DevinAdapterLive", () => {
           name: "Vendor Model A",
           upstreamProviderId: "moonshot",
           upstreamProviderName: "Moonshot AI",
+          variantOptions: [{ value: "vendor-model-a", label: "Vendor Model A", isDefault: true }],
         },
       );
       assert.deepStrictEqual(
@@ -657,6 +666,7 @@ describe("DevinAdapterLive", () => {
           name: "Vendor Model B",
           upstreamProviderId: "z-ai",
           upstreamProviderName: "Z.AI",
+          variantOptions: [{ value: "vendor-model-b", label: "Vendor Model B", isDefault: true }],
         },
       );
     }).pipe(

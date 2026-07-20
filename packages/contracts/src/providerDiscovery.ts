@@ -268,6 +268,14 @@ export const ProviderContextWindowDescriptor = Schema.Struct({
 });
 export type ProviderContextWindowDescriptor = typeof ProviderContextWindowDescriptor.Type;
 
+export const ProviderVariantOptionDescriptor = Schema.Struct({
+  value: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+  description: Schema.optional(TrimmedNonEmptyString),
+  isDefault: Schema.optional(Schema.Literal(true)),
+});
+export type ProviderVariantOptionDescriptor = typeof ProviderVariantOptionDescriptor.Type;
+
 export const ProviderModelDescriptor = Schema.Struct({
   slug: TrimmedNonEmptyString,
   name: TrimmedNonEmptyString,
@@ -283,6 +291,7 @@ export const ProviderModelDescriptor = Schema.Struct({
   supportsThinkingToggle: Schema.optional(Schema.Boolean),
   contextWindowOptions: Schema.optional(Schema.Array(ProviderContextWindowDescriptor)),
   defaultContextWindow: Schema.optional(TrimmedNonEmptyString),
+  variantOptions: Schema.optional(Schema.Array(ProviderVariantOptionDescriptor)),
 });
 export type ProviderModelDescriptor = typeof ProviderModelDescriptor.Type;
 

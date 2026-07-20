@@ -237,9 +237,12 @@ const PROVIDER_TARGET_OPTION_RULES = {
     },
   }),
   devin: defineProviderOptionConfig<"devin">({
-    primaryOptionKey: "reasoningEffort",
+    primaryOptionKey: "variant",
     options: {
-      reasoningEffort: providerOptionRule("string", [], "model-discovery"),
+      variant: providerOptionRule("string", [], "model-discovery"),
+      reasoningEffort: providerOptionRule("string", [], "model-discovery", {
+        advertised: false,
+      }),
       fastMode: providerOptionRule("boolean", [], "model-discovery", {
         advertised: false,
         validation: { kind: "boolean-capability", capability: "supportsFastMode" },

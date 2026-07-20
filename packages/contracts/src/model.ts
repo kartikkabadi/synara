@@ -146,15 +146,17 @@ export type GrokModelOptions = typeof GrokModelOptions.Type;
 
 /**
  * Devin model options — variant selections resolved to full slugs by the adapter.
- * Devin encodes variants in model slugs (e.g. claude-opus-4-8-high_fast), not
- * via runtime config options. The adapter uses a variant matrix to resolve
- * base + options to the correct full slug before calling session/set_model.
+ * Devin encodes variants in model slugs (e.g. claude-opus-4-8-high_fast). The
+ * adapter uses a variant matrix to resolve base + options to the correct full
+ * slug before calling session/set_model. When runtime discovery exposes concrete
+ * variant rows, the `variant` option carries the selected full slug directly.
  */
 export const DevinModelOptions = Schema.Struct({
   reasoningEffort: Schema.optional(TrimmedNonEmptyString),
   fastMode: Schema.optional(Schema.Boolean),
   thinking: Schema.optional(Schema.Boolean),
   contextWindow: Schema.optional(Schema.String),
+  variant: Schema.optional(TrimmedNonEmptyString),
 });
 export type DevinModelOptions = typeof DevinModelOptions.Type;
 

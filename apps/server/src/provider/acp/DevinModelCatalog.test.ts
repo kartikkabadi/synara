@@ -115,6 +115,26 @@ describe("buildDevinVariantMatrix", () => {
     assert.strictEqual(base!.defaultVariant.slug, "deepseek-v4");
   });
 
+  it("uses preferredDefaultSlug as the default variant when it matches an option", () => {
+    const preferred = buildDevinVariantMatrix(MATRIX_INPUT, {
+      preferredDefaultSlug: "claude-opus-4-8-high-fast",
+    });
+    const base = preferred.get("claude-opus-4-8");
+    assert.ok(base, "expected claude-opus-4-8 base");
+    assert.strictEqual(base!.defaultVariant.slug, "claude-opus-4-8-high-fast");
+    assert.strictEqual(base!.defaultVariant.effort, "high");
+    assert.strictEqual(base!.defaultVariant.fast, true);
+  });
+
+  it("falls back to the bare/medium default when preferredDefaultSlug does not match", () => {
+    const preferred = buildDevinVariantMatrix(MATRIX_INPUT, {
+      preferredDefaultSlug: "claude-opus-4-8-nonexistent",
+    });
+    const base = preferred.get("claude-opus-4-8");
+    assert.ok(base, "expected claude-opus-4-8 base");
+    assert.strictEqual(base!.defaultVariant.slug, "claude-opus-4-8-medium");
+  });
+
   it("prefers group metadata for upstream provider labels", () => {
     const grouped = buildDevinVariantMatrix([
       { slug: "vendor-model-a", name: "Model A", groupId: "moonshot", groupName: "Moonshot AI" },

@@ -100,6 +100,13 @@ export function getRuntimeAwareModelCapabilities(input: {
       label: option.label,
       ...(option.isDefault === true ? { isDefault: true as const } : {}),
     }));
+  const mapVariantOptions = (options: NonNullable<ProviderModelDescriptor["variantOptions"]>) =>
+    options.map((option) => ({
+      value: option.value,
+      label: option.label,
+      ...(option.description ? { description: option.description } : {}),
+      ...(option.isDefault === true ? { isDefault: true as const } : {}),
+    }));
   // Devin ACP encodes context in slug variants; when discovery is present, do not
   // fall back to static Claude context menus the live adapter did not advertise.
   const contextWindowOptions =
@@ -160,6 +167,21 @@ export function getRuntimeAwareModelCapabilities(input: {
       variantOptions: runtimeOptions,
       supportsThinkingToggle,
       contextWindowOptions,
+    };
+  }
+
+  // Devin ACP exposes a sparse variant matrix; surface it as a single Variant
+  // select so the composer cannot combine invalid effort/fast/thinking/context
+  // tuples. The concrete variant slug already encodes the full configuration.
+  if (input.provider === "devin" && input.runtimeModel?.variantOptions) {
+    return {
+      ...staticCapabilities,
+      ...(optionDescriptors ? { optionDescriptors } : {}),
+      variantOptions: mapVariantOptions(input.runtimeModel.variantOptions),
+      reasoningEffortLevels: [],
+      supportsFastMode: false,
+      supportsThinkingToggle: false,
+      contextWindowOptions: [],
     };
   }
 

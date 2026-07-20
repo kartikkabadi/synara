@@ -232,7 +232,18 @@ function getProviderStateFromCapabilities(
       break;
     }
     case "devin": {
-      normalizedOptions = modelOptions?.devin;
+      const providerOptions = modelOptions?.devin;
+      rawEffort = trimOrNull(providerOptions?.variant);
+      const variantOptions = caps.variantOptions ?? [];
+      const variant =
+        rawEffort && variantOptions.some((option) => option.value === rawEffort)
+          ? rawEffort
+          : undefined;
+      if (variantOptions.length > 0) {
+        normalizedOptions = variant ? { variant } : undefined;
+      } else {
+        normalizedOptions = providerOptions;
+      }
       break;
     }
     case "pi": {
@@ -249,7 +260,7 @@ function getProviderStateFromCapabilities(
     ? caps.promptInjectedEffortLevels.includes(draftEffort)
     : false;
   const promptEffort =
-    provider === "kilo" || provider === "opencode"
+    provider === "kilo" || provider === "opencode" || provider === "devin"
       ? resolveLabeledOptionValue(caps.variantOptions, draftEffort)
       : draftEffort &&
           !isPromptInjected &&

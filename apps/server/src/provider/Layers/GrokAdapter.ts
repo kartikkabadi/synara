@@ -2034,7 +2034,6 @@ export function makeGrokAdapter(
     const getComposerCapabilities: NonNullable<GrokAdapterShape["getComposerCapabilities"]> = () =>
       Effect.succeed({
         provider: PROVIDER,
-        conversationRollback: "native",
         supportsSkillMentions: false,
         supportsSkillDiscovery: false,
         supportsNativeSlashCommandDiscovery: false,
@@ -2368,7 +2367,6 @@ export function makeGrokAdapter(
       provider: PROVIDER,
       capabilities: {
         sessionModelSwitch: "restart-session",
-        conversationRollback: "native",
       },
       startSession,
       sendTurn,

@@ -179,6 +179,9 @@ type DevinModelEntry = {
     | ReadonlyArray<{ value: string; label: string; isDefault?: true | undefined }>
     | undefined;
   readonly defaultContextWindow?: string | undefined;
+  readonly variantOptions?:
+    | ReadonlyArray<{ value: string; label: string; isDefault?: true | undefined }>
+    | undefined;
 };
 
 interface DevinSessionContext {
@@ -513,8 +516,14 @@ function extractDevinModelsFromConfigOptions(
         }),
   );
 
-  const matrix = buildDevinVariantMatrix(rawEntries);
+  const matrix = buildDevinVariantMatrix(rawEntries, {
+    preferredDefaultSlug: modelOption.currentValue,
+  });
 
+  // The Devin variant matrix is sparse, so expose each base model with a
+  // variant picker containing the concrete tuples the ACP runtime advertises.
+  // This keeps the composer from presenting independent Cartesian controls
+  // (effort x fast x thinking x context) that can produce invalid slugs.
   const models: DevinModelEntry[] = [];
   for (const base of matrix.values()) {
     const supportedReasoningEfforts =
@@ -538,6 +547,12 @@ function extractDevinModelsFromConfigOptions(
           ]
         : undefined;
 
+    const variantOptions = base.variants.map((variant) => ({
+      value: variant.slug,
+      label: variant.name,
+      ...(variant.slug === defaultVariant.slug ? { isDefault: true as const } : {}),
+    }));
+
     // Recover upstream provider info from the variants (first one wins, they should be consistent).
     const firstVariantEntry = rawEntries.find((e) => e.slug === defaultVariant.slug);
 
@@ -558,6 +573,7 @@ function extractDevinModelsFromConfigOptions(
               ? { defaultContextWindow: DEFAULT_DEVIN_CONTEXT_WINDOW_LABEL }
               : {}),
           }),
+      variantOptions,
     });
   }
 
@@ -989,6 +1005,7 @@ function makeProviderAdapter(
                       fastMode?: boolean;
                       thinking?: boolean;
                       contextWindow?: string;
+                      variant?: string;
                     }
                   | undefined,
                 sessionVariantMatrix,
@@ -1338,6 +1355,7 @@ function makeProviderAdapter(
                       fastMode?: boolean;
                       thinking?: boolean;
                       contextWindow?: string;
+                      variant?: string;
                     }
                   | undefined,
                 ctx.variantMatrix ?? new Map(),

@@ -341,7 +341,13 @@ export function buildDevinVariantMatrix(
     groupId?: string | undefined;
     groupName?: string | undefined;
   }>,
+  options?: {
+    readonly preferredDefaultSlug?: string | undefined;
+  },
 ): ReadonlyMap<string, DevinBaseModel> {
+  const preferredDefault = options?.preferredDefaultSlug
+    ? parseDevinModelSlug(options.preferredDefaultSlug, options.preferredDefaultSlug)
+    : null;
   // Pair each model with its parsed result so variants retain the original slug/name.
   type Entry = {
     slug: string;
@@ -397,7 +403,17 @@ export function buildDevinVariantMatrix(
       (v) => v.effort === null && !v.fast && !v.thinking && v.contextWindow === null,
     );
     const medium = variants.find((v) => v.effort === "medium");
-    const defaultVariant: DevinModelVariant = bare ?? medium ?? variants[0]!;
+    const preferredVariant =
+      preferredDefault && preferredDefault.baseSlug === baseSlug
+        ? variants.find(
+            (v) =>
+              v.effort === preferredDefault.effort &&
+              v.fast === preferredDefault.fast &&
+              v.thinking === preferredDefault.thinking &&
+              v.contextWindow === preferredDefault.contextWindow,
+          )
+        : null;
+    const defaultVariant: DevinModelVariant = preferredVariant ?? bare ?? medium ?? variants[0]!;
 
     const entriesBySlug = [...entries].sort((a, b) =>
       a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0,
@@ -450,18 +466,46 @@ export class DevinModelIncompatibilityError {
 export function resolveDevinModelSlug(
   model: string,
   options:
-    | { reasoningEffort?: string; fastMode?: boolean; thinking?: boolean; contextWindow?: string }
+    | {
+        reasoningEffort?: string;
+        fastMode?: boolean;
+        thinking?: boolean;
+        contextWindow?: string;
+        variant?: string;
+      }
     | undefined,
   matrix: ReadonlyMap<string, DevinBaseModel>,
 ): string | DevinModelIncompatibilityError {
-  const base = matrix.get(model);
+  // When the composer has selected a concrete variant row, the full slug is
+  // authoritative and is already a valid ACP `model` value.
+  if (options?.variant) {
+    return options.variant;
+  }
+
+  const parsed = parseDevinModelSlug(model, "");
+  if (!parsed) return model;
+
+  const base = matrix.get(parsed.baseSlug);
   // Unknown base slugs are passed through so future/custom models are not rejected.
   if (!base) return model;
 
-  const targetEffort = options?.reasoningEffort ?? base.defaultVariant.effort;
-  const targetFast = options?.fastMode ?? base.defaultVariant.fast;
-  const targetThinking = options?.thinking ?? base.defaultVariant.thinking;
-  const rawContext = options?.contextWindow ?? base.defaultVariant.contextWindow;
+  const hasExplicitOption =
+    options !== undefined &&
+    (options.reasoningEffort !== undefined ||
+      options.fastMode !== undefined ||
+      options.thinking !== undefined ||
+      options.contextWindow !== undefined);
+  const isBareParsed =
+    parsed.effort === null && !parsed.fast && !parsed.thinking && parsed.contextWindow === null;
+
+  if (isBareParsed && !hasExplicitOption) {
+    return base.defaultVariant.slug;
+  }
+
+  const targetEffort = options?.reasoningEffort ?? parsed.effort;
+  const targetFast = options?.fastMode ?? parsed.fast;
+  const targetThinking = options?.thinking ?? parsed.thinking;
+  const rawContext = options?.contextWindow ?? parsed.contextWindow;
   const targetContext = rawContext === DEFAULT_DEVIN_CONTEXT_WINDOW_LABEL ? null : rawContext;
 
   const exact = base.variants.find(
