@@ -62,7 +62,13 @@ export function ComposerInputBanners({
 
   return (
     <div
-      className={cn(COMPOSER_INPUT_SURFACE_BANNER_CLASS_NAME, roundedTopReset && "!rounded-t-none")}
+      className={cn(
+        COMPOSER_INPUT_SURFACE_BANNER_CLASS_NAME,
+        // Stacked banners separate with an internal divider instead of each
+        // banner carrying its own chrome.
+        "divide-y divide-border/50",
+        roundedTopReset && "!rounded-t-none",
+      )}
     >
       {banners}
     </div>
