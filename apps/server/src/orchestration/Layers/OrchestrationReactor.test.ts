@@ -2,6 +2,7 @@ import { Effect, Exit, Layer, ManagedRuntime, Scope } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
+import { LoopReactor } from "../Services/LoopReactor.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { StudioOutputReactor } from "../Services/StudioOutputReactor.ts";
@@ -60,6 +61,17 @@ describe("OrchestrationReactor", () => {
           }),
         ),
         Layer.provideMerge(
+          Layer.succeed(LoopReactor, {
+            start: Effect.acquireRelease(
+              Effect.sync(() => {
+                started.push("loop-reactor");
+              }),
+              () => Effect.sync(() => stopped.push("loop-reactor")),
+            ),
+            restoreActiveLoops: Effect.void,
+          }),
+        ),
+        Layer.provideMerge(
           Layer.succeed(StudioOutputReactor, {
             captureBaselineBeforeTurn: () => Effect.void,
             cancelPendingTurnBaseline: () => Effect.void,
@@ -82,6 +94,7 @@ describe("OrchestrationReactor", () => {
     expect(started).toEqual([
       "studio-output-reactor",
       "checkpoint-reactor",
+      "loop-reactor",
       "provider-runtime-ingestion",
       "provider-command-reactor",
     ]);
@@ -90,6 +103,7 @@ describe("OrchestrationReactor", () => {
     expect(stopped).toEqual([
       "provider-command-reactor",
       "provider-runtime-ingestion",
+      "loop-reactor",
       "checkpoint-reactor",
       "studio-output-reactor",
     ]);
