@@ -223,7 +223,8 @@ const COMPOSER_SLASH_COMMAND_DEFINITIONS: Record<
   loop: {
     command: "loop",
     label: "/loop <n|30m> [prompt]",
-    description: "Repeat a prompt: `/loop 10 fix failing tests`, `/loop 30m`, or `/loop` to toggle.",
+    description:
+      "Repeat a prompt: `/loop 10 fix failing tests`, `/loop 30m`, or `/loop` to toggle.",
     source: "app",
   },
 };

@@ -279,8 +279,7 @@ export function LoopIndicator({ loop, thread, onStop, className }: LoopIndicator
   const isOffChip = !loop.active;
   const dismissed = isOffChip && dismissedStopAt === loop.updatedAt;
   const visible =
-    loop.active ||
-    (loop.lastStopReason != null && isLoopRecentlyOff(loop.updatedAt) && !dismissed);
+    loop.active || (loop.lastStopReason != null && isLoopRecentlyOff(loop.updatedAt) && !dismissed);
 
   if (isOffChip && loop.lastStopReason == null) {
     return null;
@@ -292,7 +291,7 @@ export function LoopIndicator({ loop, thread, onStop, className }: LoopIndicator
   const view = deriveLoopViewState(loop, thread);
 
   return (
-    <DisclosureRegion open={visible && entered} className={className}>
+    <DisclosureRegion open={visible && entered} {...(className != null ? { className } : {})}>
       <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-4 sm:px-6 sm:pt-4.5 sm:pb-5">
         <div className="flex min-w-0 items-center gap-2">
           <Badge variant={view.badgeVariant}>
