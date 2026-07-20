@@ -5,11 +5,13 @@
 // Layer: Chat composer UI
 
 import type { ThreadId, ThreadLoop } from "@synara/contracts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { StopIcon } from "~/lib/icons";
-import { Button } from "../ui/button";
-import { cn } from "~/lib/utils";
+import { ClockIcon, RefreshCwIcon, StopIcon, XIcon } from "~/lib/icons";
+import { Badge } from "../ui/badge";
+import { DisclosureRegion } from "../ui/DisclosureRegion";
+import { Spinner } from "../ui/spinner";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import type { Thread } from "../../types";
 
@@ -20,7 +22,7 @@ interface LoopIndicatorProps {
   className?: string;
 }
 
-const OFF_CHIP_TTL_MS = 10_000;
+const OFF_CHIP_TTL_MS = 60_000;
 
 function formatRemainingTime(seconds: number): string {
   if (seconds <= 0) return "now";
@@ -182,25 +184,28 @@ function useLoopTick(loop: ThreadLoop) {
   return tick;
 }
 
-export function LoopIndicator({ loop, thread, onStop, className }: LoopIndicatorProps) {
-  useLoopTick(loop);
-  useLoopOffToast(loop, thread?.id);
+type LoopBadgeVariant = "info" | "warning" | "outline" | "error" | "secondary";
 
-  if (!loop.active && (loop.lastStopReason == null || !isLoopRecentlyOff(loop.updatedAt))) {
-    return null;
-  }
+interface LoopIndicatorViewState {
+  icon: ReactNode;
+  badgeVariant: LoopBadgeVariant;
+  badgeLabel: string;
+  detail: string | null;
+}
+
+function deriveLoopViewState(loop: ThreadLoop, thread: Thread | undefined): LoopIndicatorViewState {
   if (!loop.active) {
-    return (
-      <div
-        className={cn(
-          "flex items-center justify-between gap-2 rounded-t-lg border-b border-border/50 bg-accent/40 px-3 py-2 text-xs text-accent-foreground",
-          className,
-        )}
-      >
-        <span className="font-medium">Loop</span>
-        <span className="text-muted-foreground">{`off · ${formatStopReason(loop.lastStopReason!)}`}</span>
-      </div>
-    );
+    const reason = loop.lastStopReason!;
+    const detail =
+      loop.iteration > 0
+        ? `${formatStopReason(reason)} · ${loop.iteration} ${loop.iteration === 1 ? "iteration" : "iterations"}`
+        : formatStopReason(reason);
+    return {
+      icon: <StopIcon />,
+      badgeVariant: reason === "consecutive_errors" ? "error" : "secondary",
+      badgeLabel: "Loop off",
+      detail,
+    };
   }
 
   const promptMissing = loop.prompt.trim().length === 0;
@@ -209,61 +214,128 @@ export function LoopIndicator({ loop, thread, onStop, className }: LoopIndicator
       ? Math.max(0, (new Date(loop.endsAt).getTime() - Date.now()) / 1000)
       : null;
 
-  let statusLabel: string;
-  let progressLabel: string | null = null;
-
   if (promptMissing) {
-    statusLabel = "on";
-    progressLabel = "next message starts it";
-  } else if (thread?.hasPendingApprovals === true) {
-    statusLabel = "waiting";
-    progressLabel = "approval";
-  } else if (thread?.hasPendingUserInput === true) {
-    statusLabel = "waiting";
-    progressLabel = "user input";
-  } else if (isLoopRunning(loop, thread)) {
-    statusLabel = "running";
+    return {
+      icon: <RefreshCwIcon />,
+      badgeVariant: "outline",
+      badgeLabel: "Loop on",
+      detail: "next message starts it",
+    };
+  }
+  if (thread?.hasPendingApprovals === true) {
+    return {
+      icon: <ClockIcon />,
+      badgeVariant: "warning",
+      badgeLabel: "Loop waiting",
+      detail: "approval",
+    };
+  }
+  if (thread?.hasPendingUserInput === true) {
+    return {
+      icon: <ClockIcon />,
+      badgeVariant: "warning",
+      badgeLabel: "Loop waiting",
+      detail: "user input",
+    };
+  }
+  if (isLoopRunning(loop, thread)) {
     const runningIteration = thread?.latestTurn?.purpose?.iteration;
-    progressLabel = runningIteration != null ? `iteration ${runningIteration}` : null;
+    return {
+      icon: <Spinner className="size-3" />,
+      badgeVariant: "info",
+      badgeLabel: "Loop running",
+      detail: runningIteration != null ? `iteration ${runningIteration}` : null,
+    };
+  }
+  let detail: string;
+  if (loop.maxIterations !== null) {
+    detail = `${loop.iteration}/${loop.maxIterations} · next message replaces prompt`;
+  } else if (remainingSeconds !== null) {
+    detail = `ends in ${formatRemainingTime(remainingSeconds)} · next message replaces prompt`;
   } else {
-    statusLabel = "on";
-    if (loop.maxIterations !== null) {
-      progressLabel = `${loop.iteration}/${loop.maxIterations} · next message replaces prompt`;
-    } else if (remainingSeconds !== null) {
-      progressLabel = `ends in ${formatRemainingTime(remainingSeconds)} · next message replaces prompt`;
-    } else {
-      progressLabel = "next message replaces prompt";
-    }
+    detail = "next message replaces prompt";
+  }
+  return {
+    icon: <RefreshCwIcon />,
+    badgeVariant: "outline",
+    badgeLabel: "Loop on",
+    detail,
+  };
+}
+
+export function LoopIndicator({ loop, thread, onStop, className }: LoopIndicatorProps) {
+  useLoopTick(loop);
+  useLoopOffToast(loop, thread?.id);
+  // The banner enters through the shared disclosure motion: it mounts closed and
+  // opens on the next frame so the composer surface grows instead of popping.
+  const [entered, setEntered] = useState(false);
+  // Off-chip dismissal is keyed to the stop event so a later stop re-shows it.
+  const [dismissedStopAt, setDismissedStopAt] = useState<string | null>(null);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  const isOffChip = !loop.active;
+  const dismissed = isOffChip && dismissedStopAt === loop.updatedAt;
+  const visible =
+    loop.active ||
+    (loop.lastStopReason != null && isLoopRecentlyOff(loop.updatedAt) && !dismissed);
+
+  if (isOffChip && loop.lastStopReason == null) {
+    return null;
+  }
+  if (!visible && !entered) {
+    return null;
   }
 
-  const label = progressLabel ? `Loop ${statusLabel} · ${progressLabel}` : `Loop ${statusLabel}`;
+  const view = deriveLoopViewState(loop, thread);
 
   return (
-    <div
-      className={cn(
-        "flex items-center justify-between gap-2 rounded-t-lg border-b border-border/50 bg-accent/40 px-3 py-2 text-xs text-accent-foreground",
-        className,
-      )}
-    >
-      <span className="font-medium">Loop</span>
-      <span
-        className="text-muted-foreground"
-        title={loop.prompt.trim().length > 0 ? loop.prompt : undefined}
-      >
-        {label}
-      </span>
-      {onStop != null ? (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          aria-label="Stop loop"
-          onClick={onStop}
-          className="h-6 w-6"
-        >
-          <StopIcon className="h-3.5 w-3.5" />
-        </Button>
-      ) : null}
-    </div>
+    <DisclosureRegion open={visible && entered} className={className}>
+      <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-4 sm:px-6 sm:pt-4.5 sm:pb-5">
+        <div className="flex min-w-0 items-center gap-2">
+          <Badge variant={view.badgeVariant}>
+            {view.icon}
+            {view.badgeLabel}
+          </Badge>
+          {view.detail !== null ? (
+            <span
+              className="truncate text-[11px] text-muted-foreground"
+              title={loop.active && loop.prompt.trim().length > 0 ? loop.prompt : undefined}
+            >
+              {view.detail}
+            </span>
+          ) : null}
+        </div>
+        {isOffChip ? (
+          <button
+            type="button"
+            aria-label="Dismiss loop status"
+            onClick={() => setDismissedStopAt(loop.updatedAt)}
+            className="rounded-full p-1 text-muted-foreground/70 transition-colors duration-150 hover:bg-[var(--color-background-button-secondary-hover)] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-border)]"
+          >
+            <XIcon className="size-3.5" />
+          </button>
+        ) : onStop != null ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="Stop loop"
+                  onClick={onStop}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--color-border-light)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-foreground-secondary)] transition-colors duration-150 hover:border-destructive/40 hover:bg-destructive/8 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-border)] dark:hover:bg-destructive/16"
+                >
+                  <StopIcon className="size-3" />
+                  Stop
+                </button>
+              }
+            />
+            <TooltipPopup>Turn the loop off</TooltipPopup>
+          </Tooltip>
+        ) : null}
+      </div>
+    </DisclosureRegion>
   );
 }
