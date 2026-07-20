@@ -21,10 +21,12 @@ function getDesktopWsUrl(): string | null {
 
 // The island window only needs the WebSocket URL from the main desktop bridge;
 // exposing it under the same name lets the shared web transport code work
-// unchanged inside the island renderer.
+// unchanged inside the island renderer. `setTheme` is a no-op: the overlay has
+// no native window chrome to theme, but shared web code may still call it.
 contextBridge.exposeInMainWorld("desktopBridge", {
   getWsUrl: getDesktopWsUrl,
-} satisfies Pick<DesktopBridge, "getWsUrl">);
+  setTheme: async () => {},
+} satisfies Pick<DesktopBridge, "getWsUrl" | "setTheme">);
 
 contextBridge.exposeInMainWorld("islandBridge", {
   getContext: () => ipcRenderer.invoke(IPC.island.getContext),
