@@ -1057,7 +1057,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                     <div className="mb-1 self-end">
                       <Badge variant="outline">
                         <RefreshCwIcon />
-                        Loop
+                        Loop iteration {row.loopIteration}
                       </Badge>
                     </div>
                   ) : null}
