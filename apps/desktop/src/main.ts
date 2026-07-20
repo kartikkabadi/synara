@@ -178,6 +178,13 @@ import {
   sendAppSnapError,
   sendAppSnapState,
 } from "./appSnapIpc";
+import { resolveIslandEnabled } from "./island/islandGeometry";
+import { registerIslandIpcHandlers } from "./island/islandIpc";
+import {
+  IslandWindowManager,
+  readStoredIslandEnabled,
+  writeStoredIslandEnabled,
+} from "./island/islandWindow";
 
 // Capture the real archive identity before any explicit app.asar lookup. Static
 // snapshotting and the runtime watcher both use this same generation as their
@@ -199,6 +206,7 @@ const BASE_DIR =
   Path.join(OS.homedir(), desktopIdentity.defaultHomeDirectoryName);
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_WINDOW_STATE_PATH = Path.join(STATE_DIR, "desktop-window-state.json");
+const ISLAND_SETTINGS_PATH = Path.join(STATE_DIR, "island-settings.json");
 const DESKTOP_SCHEME = desktopIdentity.scheme;
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const APP_DISPLAY_NAME = desktopIdentity.displayName;
@@ -272,6 +280,7 @@ let browserPerfInterval: ReturnType<typeof setInterval> | null = null;
 const browserManager = new DesktopBrowserManager();
 let browserUsePipeServer: BrowserUsePipeServer | null = null;
 let appSnapManager: DesktopAppSnapManager | null = null;
+let islandManager: IslandWindowManager | null = null;
 let configuredGitHubUpdateSource: ReturnType<typeof resolveGitHubUpdateSource> = null;
 let configuredUpdaterCacheDirName: string | null = null;
 
@@ -2882,6 +2891,8 @@ async function shutdownDesktopRuntime(reason: string): Promise<void> {
       cancelBackendReadinessWait();
       appSnapManager?.dispose();
       appSnapManager = null;
+      islandManager?.destroy();
+      islandManager = null;
       await disposeBrowserUsePipeServerForShutdown(reason);
       await stopBackendAndWaitForExit();
       browserManager.dispose();
@@ -3223,9 +3234,56 @@ function registerIpcHandlers(): void {
   if (appSnapManager) {
     registerAppSnapIpcHandlers(ipcMain, appSnapManager);
   }
+  registerIslandIpcHandlers(ipcMain, {
+    getManager: () => islandManager,
+    getEnabled: isIslandEnabled,
+    setEnabled: setIslandEnabled,
+    focusThread: (threadId) => {
+      focusMainWindow();
+      mainWindow?.webContents.send(IPC.menuAction, `notification-open-thread:${threadId}`);
+    },
+  });
   registerDesktopVoiceTranscriptionHandler();
   startBrowserPerformanceLogging();
   registerBrowserIpcHandlers(ipcMain, browserManager);
+}
+
+function islandEntryUrl(): string {
+  const base = isDevelopment
+    ? (process.env.VITE_DEV_SERVER_URL as string)
+    : desktopIdentity.entryUrl;
+  return `${base}#/island`;
+}
+
+function isIslandEnabled(): boolean {
+  return resolveIslandEnabled(readStoredIslandEnabled(ISLAND_SETTINGS_PATH), process.platform);
+}
+
+function setIslandEnabled(enabled: boolean): boolean {
+  try {
+    writeStoredIslandEnabled(ISLAND_SETTINGS_PATH, enabled);
+  } catch (error) {
+    console.warn(`[desktop] Failed to persist island setting: ${formatErrorMessage(error)}`);
+  }
+  if (enabled) {
+    ensureIslandWindow();
+  } else {
+    islandManager?.destroy();
+    islandManager = null;
+  }
+  return enabled;
+}
+
+function ensureIslandWindow(): void {
+  if (isQuitting) return;
+  if (!islandManager) {
+    islandManager = new IslandWindowManager({
+      preloadPath: Path.join(__dirname, "islandPreload.js"),
+      url: islandEntryUrl(),
+      platform: process.platform,
+    });
+  }
+  islandManager.create();
 }
 
 function getIconOption(): { icon: string } | Record<string, never> {
@@ -3593,6 +3651,9 @@ if (hasSingleInstanceLock) {
       void bootstrap().catch((error) => {
         handleFatalStartupError("bootstrap", error);
       });
+      if (isIslandEnabled()) {
+        ensureIslandWindow();
+      }
 
       app.on("browser-window-blur", () => {
         markDesktopAppBackgrounded();
