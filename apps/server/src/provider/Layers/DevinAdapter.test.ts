@@ -1613,6 +1613,121 @@ describe("DevinAdapterLive", () => {
     ),
   );
 
+  // ── sendTurn preflight failure recovery ───────────────────────────
+
+  it.effect("recovers from a setModel preflight failure without wedging activeTurnId", () =>
+    Effect.gen(function* () {
+      const adapter = yield* DevinAdapter;
+      yield* adapter.startSession({
+        threadId,
+        provider: "devin",
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+
+      const error = yield* adapter
+        .sendTurn({
+          threadId,
+          input: "plan this refactor",
+          modelSelection: { provider: "devin", model: "swe-1-6" },
+        })
+        .pipe(Effect.flip);
+
+      assert.strictEqual(error._tag, "ProviderAdapterRequestError");
+      assert.match(error.message, /set_model failed/);
+
+      // A second turn should still be accepted because activeTurnId was not set.
+      let resolved = false;
+      yield* adapter.sendTurn({
+        threadId,
+        input: "second turn",
+      }).pipe(
+        Effect.tap(() => Effect.sync(() => {
+          resolved = true;
+        })),
+      );
+      assert.strictEqual(resolved, true);
+    }).pipe(
+      Effect.provide(
+        makeDevinAdapterLive({
+          makeRuntime: () =>
+            Effect.succeed(
+              makeMockRuntime({
+                onSetModel: () =>
+                  Effect.fail(
+                    new ProviderAdapterRequestError({
+                      provider: "devin",
+                      method: "session/set_model",
+                      detail: "set_model failed",
+                    }),
+                  ),
+              }),
+            ),
+        }),
+      ),
+    ),
+  );
+
+  it.effect("recovers from an applyDevinModeSelection preflight failure without wedging activeTurnId", () =>
+    Effect.gen(function* () {
+      const adapter = yield* DevinAdapter;
+      yield* adapter.startSession({
+        threadId,
+        provider: "devin",
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+
+      const error = yield* adapter
+        .sendTurn({
+          threadId,
+          input: "plan this refactor",
+          interactionMode: "plan",
+        })
+        .pipe(Effect.flip);
+
+      assert.strictEqual(error._tag, "ProviderAdapterRequestError");
+      assert.match(error.message, /set_mode failed/);
+
+      // A second turn should still be accepted because activeTurnId was not set.
+      let resolved = false;
+      yield* adapter.sendTurn({
+        threadId,
+        input: "second turn",
+      }).pipe(
+        Effect.tap(() => Effect.sync(() => {
+          resolved = true;
+        })),
+      );
+      assert.strictEqual(resolved, true);
+    }).pipe(
+      Effect.provide(
+        makeDevinAdapterLive({
+          makeRuntime: () =>
+            Effect.succeed(
+              makeMockRuntime({
+                modeState: {
+                  currentModeId: "default",
+                  availableModes: [
+                    { id: "default", name: "Default" },
+                    { id: "plan", name: "Plan" },
+                  ],
+                },
+                onSetMode: () =>
+                  Effect.fail(
+                    new ProviderAdapterRequestError({
+                      provider: "devin",
+                      method: "session/set_mode",
+                      detail: "set_mode failed",
+                    }),
+                  ),
+              }),
+            ),
+        }),
+      ),
+    ),
+  );
+
   // ── sendTurn interruption ─────────────────────────────────────────
 
   it.effect("interruptTurn is a no-op when no turn is active", () => {
