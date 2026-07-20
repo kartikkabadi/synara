@@ -21,6 +21,10 @@ const MAX_ELICITATION_PROPERTIES = 50;
 const MAX_ELICITATION_SCHEMA_SIZE_BYTES = 100_000;
 const MAX_ELICITATION_ANSWER_SIZE_BYTES = 100_000;
 const MAX_ELICITATION_TOTAL_ANSWER_SIZE_BYTES = 500_000;
+// Total wall-clock budget for all regex validations in a single elicitation
+// answer set, to prevent cumulative catastrophic backtracking from stalling
+// the server event loop.
+const MAX_ELICITATION_REGEX_TOTAL_MS = 1_000;
 
 type RegexMatchResult =
   | { readonly ok: true; readonly matched: boolean }
@@ -43,12 +47,16 @@ function isTimeoutError(error: unknown): boolean {
   );
 }
 
-function testPatternInterruptibly(pattern: string, input: string): RegexMatchResult {
+function testPatternInterruptibly(
+  pattern: string,
+  input: string,
+  timeoutMs: number = REGEX_TIMEOUT_MS,
+): RegexMatchResult {
   try {
     const matched = runInNewContext(
       `new RegExp(pattern).test(input)`,
       { pattern, input },
-      { timeout: REGEX_TIMEOUT_MS },
+      { timeout: timeoutMs },
     ) as boolean;
     return { ok: true, matched };
   } catch (error) {
@@ -175,6 +183,7 @@ export function validateUserInputAnswersForElicitation(
   const hasProperties = properties !== undefined && Object.keys(properties).length > 0;
   const propertyCount = properties ? Object.keys(properties).length : 0;
   const issues: string[] = [];
+  const regexBudget = { remaining: MAX_ELICITATION_REGEX_TOTAL_MS };
 
   if (propertyCount > MAX_ELICITATION_PROPERTIES) {
     issues.push(
@@ -226,7 +235,7 @@ export function validateUserInputAnswersForElicitation(
     for (const [key, value] of Object.entries(answers)) {
       const prop = Object.hasOwn(properties, key) ? properties[key] : undefined;
       if (!prop || value === null) continue;
-      const issue = validateAnswerValue(key, prop, value);
+      const issue = validateAnswerValue(key, prop, value, regexBudget);
       if (issue !== undefined) {
         issues.push(issue);
       }
@@ -240,6 +249,7 @@ function validateAnswerValue(
   key: string,
   prop: ElicitationProperty,
   value: string | ReadonlyArray<string>,
+  regexBudget?: { remaining: number },
 ): string | undefined {
   switch (prop.type) {
     case "string": {
@@ -262,9 +272,10 @@ function validateAnswerValue(
       if (prop.pattern !== undefined && prop.pattern !== null) {
         // Defense-in-depth against catastrophic backtracking (ReDoS): the
         // pattern comes from an external ACP provider and raw is user input.
-        // Cap pattern length and input length before compilation, and run the
-        // match inside an isolated V8 context with a hard wall-clock timeout so
-        // a pathological regex cannot block the server event loop.
+        // Cap pattern length and input length before compilation, run the
+        // match inside an isolated V8 context with a hard wall-clock timeout,
+        // and enforce a per-answer-set CPU budget so many properties cannot
+        // cumulatively stall the server event loop.
         const MAX_PATTERN_LENGTH = 200;
         const REJECT_INPUT_LENGTH = 10_000;
         if (prop.pattern.length > MAX_PATTERN_LENGTH) {
@@ -273,7 +284,17 @@ function validateAnswerValue(
         if (raw.length > REJECT_INPUT_LENGTH) {
           return `Answer '${key}' exceeds the maximum allowed length.`;
         }
-        const result = testPatternInterruptibly(prop.pattern, raw);
+        if (regexBudget && regexBudget.remaining <= 0) {
+          return `Answer '${key}' could not be validated because the elicitation validation CPU budget was exhausted.`;
+        }
+        const timeoutMs = regexBudget
+          ? Math.min(REGEX_TIMEOUT_MS, regexBudget.remaining)
+          : REGEX_TIMEOUT_MS;
+        const start = Date.now();
+        const result = testPatternInterruptibly(prop.pattern, raw, timeoutMs);
+        if (regexBudget) {
+          regexBudget.remaining -= Date.now() - start;
+        }
         if (!result.ok) {
           return result.reason === "timeout"
             ? `Answer '${key}' did not satisfy the pattern constraint within the allowed time.`

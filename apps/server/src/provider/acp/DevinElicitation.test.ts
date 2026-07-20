@@ -1101,6 +1101,38 @@ describe("validateUserInputAnswersForElicitation", () => {
     assert.ok(elapsed < 1000, `expected fast interruption, took ${elapsed}ms`);
   });
 
+  it("enforces a total CPU budget across multiple regex properties", () => {
+    const form = {
+      ...baseForm,
+      requestedSchema: {
+        type: "object" as const,
+        properties: {
+          a: { type: "string" as const, pattern: "(a+)+$" },
+          b: { type: "string" as const, pattern: "(a+)+$" },
+          c: { type: "string" as const, pattern: "(a+)+$" },
+        },
+      },
+    };
+
+    const start = Date.now();
+    const result = validateUserInputAnswersForElicitation(form, {
+      a: "a".repeat(40) + "b",
+      b: "a".repeat(40) + "b",
+      c: "a".repeat(40) + "b",
+    });
+    const elapsed = Date.now() - start;
+
+    assert.strictEqual(result.valid, false);
+    assert.ok(
+      result.issues.some(
+        (issue) =>
+          issue.includes("did not satisfy the pattern constraint") ||
+          issue.includes("CPU budget was exhausted"),
+      ),
+    );
+    assert.ok(elapsed < 1500, `expected total budget to cap validation, took ${elapsed}ms`);
+  });
+
   it("rejects arrays with fewer than minItems", () => {
     const form = {
       ...baseForm,
