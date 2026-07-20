@@ -60,7 +60,12 @@ const TOAST_ICONS = {
 } as const;
 
 function shouldUseCompactToast(toast: ToastObject<ThreadToastData>): boolean {
-  return !toast.data?.copyText && !toast.actionProps && !toast.data?.secondaryActionProps;
+  return (
+    !toast.description &&
+    !toast.data?.copyText &&
+    !toast.actionProps &&
+    !toast.data?.secondaryActionProps
+  );
 }
 
 function isArchiveUndoToast(toast: ToastObject<ThreadToastData>): boolean {
