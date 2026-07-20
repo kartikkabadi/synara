@@ -13,7 +13,8 @@ export type ComposerSlashCommand = BuiltInComposerSlashCommand;
 
 export interface ComposerSlashCommandDefinition {
   command: ComposerSlashCommand;
-  label: `/${ComposerSlashCommand}`;
+  // Starts with the command name; may append a usage hint (e.g. `/loop <n|30m> [prompt]`).
+  label: `/${ComposerSlashCommand}${string}`;
   description: string;
   source: "app" | "shared";
 }
@@ -221,8 +222,8 @@ const COMPOSER_SLASH_COMMAND_DEFINITIONS: Record<
   },
   loop: {
     command: "loop",
-    label: "/loop",
-    description: "Run repeated iterations on a prompt",
+    label: "/loop <n|30m> [prompt]",
+    description: "Repeat a prompt: `/loop 10 fix failing tests`, `/loop 30m`, or `/loop` to toggle.",
     source: "app",
   },
 };
