@@ -1,6 +1,7 @@
 import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@synara/contracts";
 import {
   OrchestrationCheckpointSummary,
+  OrchestrationLatestTurn,
   OrchestrationMessage,
   OrchestrationSession,
   OrchestrationThread,
@@ -1023,6 +1024,61 @@ export function projectEvent(
           session.status === "running" && session.activeTurnId !== null;
 
         const isExistingActiveTurn = thread.latestTurn?.turnId === session.activeTurnId;
+
+        const terminalStateForPendingStart = ((): OrchestrationLatestTurn["state"] => {
+          if (session.status === "error") return "error";
+          if (session.status === "stopped" && session.lastError !== null) return "error";
+          return "interrupted";
+        })();
+
+        const shouldCreateTerminalFromPendingStart =
+          isTerminalBeforeRunning &&
+          thread.latestTurn?.state !== "running" &&
+          thread.pendingTurnStart !== null &&
+          thread.pendingTurnStart !== undefined;
+
+        const nextLatestTurn = isRunningWithActiveTurn
+          ? isExistingActiveTurn && isTerminalLatestTurn(thread.latestTurn)
+            ? thread.latestTurn
+            : {
+                turnId: session.activeTurnId,
+                state: "running" as const,
+                requestedAt: isExistingActiveTurn
+                  ? thread.latestTurn.requestedAt
+                  : session.updatedAt,
+                startedAt: isExistingActiveTurn
+                  ? (thread.latestTurn.startedAt ?? session.updatedAt)
+                  : session.updatedAt,
+                completedAt: null,
+                assistantMessageId: isExistingActiveTurn
+                  ? thread.latestTurn.assistantMessageId
+                  : null,
+                purpose: isExistingActiveTurn
+                  ? thread.latestTurn.purpose
+                  : thread.pendingTurnStart?.purpose,
+                ...(isExistingActiveTurn
+                  ? thread.latestTurn.sourceProposedPlan !== undefined
+                    ? { sourceProposedPlan: thread.latestTurn.sourceProposedPlan }
+                    : {}
+                  : thread.pendingTurnStart?.sourceProposedPlan !== undefined
+                    ? { sourceProposedPlan: thread.pendingTurnStart.sourceProposedPlan }
+                    : {}),
+              }
+          : shouldCreateTerminalFromPendingStart
+            ? {
+                turnId: null,
+                state: terminalStateForPendingStart,
+                requestedAt: thread.pendingTurnStart.requestedAt,
+                startedAt: null,
+                completedAt: session.updatedAt,
+                assistantMessageId: null,
+                purpose: thread.pendingTurnStart.purpose,
+                ...(thread.pendingTurnStart.sourceProposedPlan !== undefined
+                  ? { sourceProposedPlan: thread.pendingTurnStart.sourceProposedPlan }
+                  : {}),
+              }
+            : settleLatestTurnForSessionStatus(thread.latestTurn, session);
+
         return {
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
@@ -1033,34 +1089,7 @@ export function projectEvent(
                 : thread.hasPendingTurnStart,
             pendingTurnStart:
               isRunningWithActiveTurn || isTerminalBeforeRunning ? null : thread.pendingTurnStart,
-            latestTurn: isRunningWithActiveTurn
-              ? isExistingActiveTurn && isTerminalLatestTurn(thread.latestTurn)
-                ? thread.latestTurn
-                : {
-                    turnId: session.activeTurnId,
-                    state: "running",
-                    requestedAt: isExistingActiveTurn
-                      ? thread.latestTurn.requestedAt
-                      : session.updatedAt,
-                    startedAt: isExistingActiveTurn
-                      ? (thread.latestTurn.startedAt ?? session.updatedAt)
-                      : session.updatedAt,
-                    completedAt: null,
-                    assistantMessageId: isExistingActiveTurn
-                      ? thread.latestTurn.assistantMessageId
-                      : null,
-                    purpose: isExistingActiveTurn
-                      ? thread.latestTurn.purpose
-                      : thread.pendingTurnStart?.purpose,
-                    ...(isExistingActiveTurn
-                      ? thread.latestTurn.sourceProposedPlan !== undefined
-                        ? { sourceProposedPlan: thread.latestTurn.sourceProposedPlan }
-                        : {}
-                      : thread.pendingTurnStart?.sourceProposedPlan !== undefined
-                        ? { sourceProposedPlan: thread.pendingTurnStart.sourceProposedPlan }
-                        : {}),
-                  }
-              : settleLatestTurnForSessionStatus(thread.latestTurn, session),
+            latestTurn: nextLatestTurn,
             updatedAt: event.occurredAt,
           }),
         };
