@@ -1,10 +1,4 @@
-import {
-  CheckpointRef,
-  LoopAttemptId,
-  MessageId,
-  OrchestrationProposedPlanId,
-  TurnId,
-} from "@synara/contracts";
+import { CheckpointRef, MessageId, OrchestrationProposedPlanId, TurnId } from "@synara/contracts";
 import { describe, expect, it } from "vitest";
 import {
   buildTurnDiffSummaryByAssistantMessageId,
@@ -1328,7 +1322,6 @@ describe("deriveMessagesTimelineRows", () => {
             purpose: {
               kind: "loop-iteration",
               activationId: "activation-1",
-              attemptId: LoopAttemptId.makeUnsafe("attempt-1"),
               iteration: 3,
             },
             createdAt: "2026-01-01T00:00:00Z",
