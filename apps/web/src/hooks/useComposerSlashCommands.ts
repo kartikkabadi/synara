@@ -1,4 +1,5 @@
 import {
+  type ClientOrchestrationCommand,
   type ModelSelection,
   type OrchestrationShellSnapshot,
   type ProviderInteractionMode,
@@ -8,12 +9,16 @@ import {
   type RuntimeMode,
   type ThreadId,
 } from "@synara/contracts";
-import { buildPromptThreadTitleFallback } from "@synara/shared/chatThreads";
+import {
+  buildPromptThreadTitleFallback,
+  GENERIC_CHAT_THREAD_TITLE,
+} from "@synara/shared/chatThreads";
 import { parseLoopCommand } from "@synara/shared/loop";
 import { deriveAssociatedWorktreeMetadata } from "@synara/shared/threadWorkspace";
 import { useCallback, useEffect, useState } from "react";
 import { newCommandId, newMessageId, newThreadId } from "../lib/utils";
 import { readNativeApi } from "../nativeApi";
+import { promoteThreadCreate } from "../lib/threadCreatePromotion";
 import type { Project, Thread } from "../types";
 import type { ComposerTrigger } from "../composer-logic";
 import { extendReplacementRangeForTrailingSpace } from "../composerTriggerInsertion";
@@ -38,6 +43,8 @@ import { registerSidechatCreator } from "../lib/sidechatCreatorRegistry";
 import { downloadUrlAsBlob } from "../lib/browserDownload";
 import { resolveWsHttpUrl } from "../lib/wsHttpUrl";
 import { useFeedbackDialogStore } from "../feedbackDialogStore";
+
+type ThreadCreateCommand = Extract<ClientOrchestrationCommand, { type: "thread.create" }>;
 
 type ComposerSnapshot = {
   value: string;
@@ -643,6 +650,48 @@ export function useComposerSlashCommands(input: {
       }
       const isBareToggle = parsed.budget === null && parsed.prompt === null;
 
+      if (!isServerThread) {
+        const titleSeed = parsed.prompt ?? "";
+        const createCommand: ThreadCreateCommand = {
+          type: "thread.create",
+          commandId: newCommandId(),
+          threadId,
+          projectId: activeProject.id,
+          title: buildPromptThreadTitleFallback(titleSeed),
+          modelSelection: selectedModelSelection,
+          runtimeMode,
+          interactionMode,
+          envMode: activeThread.envMode ?? "local",
+          branch: activeThread.branch,
+          worktreePath: activeThread.worktreePath,
+          associatedWorktreePath: activeThread.associatedWorktreePath ?? null,
+          associatedWorktreeBranch: activeThread.associatedWorktreeBranch ?? null,
+          associatedWorktreeRef: activeThread.associatedWorktreeRef ?? null,
+          lastKnownPr: activeThread.lastKnownPr ?? null,
+          createdAt: new Date().toISOString(),
+        };
+        try {
+          const result = await promoteThreadCreate(createCommand, api, { force: true });
+          if (result === "unavailable") {
+            toastManager.add({
+              type: "error",
+              title: "Could not start loop",
+              description: "Unable to connect to the app server.",
+            });
+            return;
+          }
+        } catch (error) {
+          editorActions.setComposerPromptValue(trimmed);
+          toastManager.add({
+            type: "error",
+            title: "Could not start loop",
+            description:
+              error instanceof Error ? error.message : "An error occurred while starting the loop.",
+          });
+          return;
+        }
+      }
+
       if (isBareToggle) {
         if (activeThread.loop?.active !== true && hasComposerAttachments) {
           editorActions.clearComposerSlashDraft();
@@ -720,6 +769,10 @@ export function useComposerSlashCommands(input: {
       activeThread,
       editorActions,
       hasComposerAttachments,
+      isServerThread,
+      runtimeMode,
+      interactionMode,
+      selectedModelSelection,
       syncServerShellSnapshot,
       threadId,
     ],
