@@ -15,6 +15,7 @@ import {
   OrchestrationCheckpointFile,
   OrchestrationCheckpointStatus,
   ThreadId,
+  ThreadTurnPurpose,
   TurnId,
 } from "@synara/contracts";
 import { Option, Schema, ServiceMap } from "effect";
@@ -39,6 +40,7 @@ export const ProjectionTurn = Schema.Struct({
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
   assistantMessageId: Schema.NullOr(MessageId),
   state: ProjectionTurnState,
+  purpose: Schema.optional(ThreadTurnPurpose),
   requestedAt: IsoDateTime,
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
@@ -51,12 +53,13 @@ export type ProjectionTurn = typeof ProjectionTurn.Type;
 
 export const ProjectionTurnById = Schema.Struct({
   threadId: ThreadId,
-  turnId: TurnId,
+  turnId: Schema.NullOr(TurnId),
   pendingMessageId: Schema.NullOr(MessageId),
   sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
   assistantMessageId: Schema.NullOr(MessageId),
   state: ProjectionTurnState,
+  purpose: Schema.optional(ThreadTurnPurpose),
   requestedAt: IsoDateTime,
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
@@ -72,6 +75,7 @@ export const ProjectionPendingTurnStart = Schema.Struct({
   messageId: MessageId,
   sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
+  purpose: Schema.optional(ThreadTurnPurpose),
   requestedAt: IsoDateTime,
 });
 export type ProjectionPendingTurnStart = typeof ProjectionPendingTurnStart.Type;
