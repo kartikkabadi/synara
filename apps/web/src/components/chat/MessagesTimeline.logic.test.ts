@@ -1290,6 +1290,7 @@ describe("deriveMessagesTimelineRows", () => {
       ],
     });
 
+    expect(messageRow(rows, "loop-user")?.loopIteration).toBe(3);
     expect(messageRow(rows, "loop-assistant")?.loopIteration).toBe(3);
   });
 
@@ -1359,7 +1360,9 @@ describe("deriveMessagesTimelineRows", () => {
       ],
     });
 
+    expect(messageRow(rows, "loop-user")?.loopIteration).toBe(2);
     expect(messageRow(rows, "loop-assistant")?.loopIteration).toBe(2);
+    expect(messageRow(rows, "manual-user")?.loopIteration).toBeUndefined();
     expect(messageRow(rows, "manual-assistant")?.loopIteration).toBeUndefined();
   });
 });

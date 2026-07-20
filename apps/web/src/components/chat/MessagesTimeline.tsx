@@ -53,11 +53,13 @@ import {
   type LucideIcon,
   NewThreadIcon,
   PinIcon,
+  RefreshCwIcon,
   SteerIcon,
   Undo2Icon,
   WorktreeIcon,
 } from "~/lib/icons";
 import { pinActionLabel } from "~/lib/pin";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { CrossTaskOriginLabel, type CrossTaskOrigin } from "./CrossTaskOriginLabel";
 import { SynaraThreadCreationCard } from "./SynaraThreadCreationCard";
@@ -1051,6 +1053,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   )}
                 >
                   {/* Keep user-message chrome outside the bubble so the message reads as one simple block. */}
+                  {row.loopIteration != null ? (
+                    <div className="mb-1 self-end">
+                      <Badge variant="outline">
+                        <RefreshCwIcon />
+                        Loop
+                      </Badge>
+                    </div>
+                  ) : null}
                   <UserDispatchModeChip
                     dispatchMode={row.message.dispatchMode}
                     dispatchOrigin={row.message.dispatchOrigin}
@@ -1282,16 +1292,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           // fragments. `showAssistantCopyButton` is exactly the terminal-message
           // signal (see deriveTerminalAssistantMessageIds).
           const isTerminalAssistantMessage = row.showAssistantCopyButton;
-          const loopLabel =
-            row.loopIteration != null ? `Loop iteration ${row.loopIteration}` : null;
-          const assistantMeta = [
-            loopLabel,
-            isTerminalAssistantMessage
-              ? formatShortTimestamp(row.message.createdAt, timestampFormat)
-              : null,
-          ]
-            .filter((value): value is string => Boolean(value))
-            .join(" • ");
+          const assistantMeta = isTerminalAssistantMessage
+            ? formatShortTimestamp(row.message.createdAt, timestampFormat)
+            : "";
           const allTurnWorkEntries = [
             ...(row.leadingWorkEntries ?? []),
             ...(row.inlineWorkEntries ?? []),
@@ -1479,6 +1482,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                 </div>
               )}
               <div className="group min-w-0 py-0.5">
+                {row.loopIteration != null ? (
+                  <div className="mb-1.5">
+                    <Badge variant="outline">
+                      <RefreshCwIcon />
+                      Loop iteration {row.loopIteration}
+                    </Badge>
+                  </div>
+                ) : null}
                 {renderWorkDisplay(leadingWorkDisplay, "leading")}
                 {messageText !== null ? (
                   <div data-assistant-message-id={row.message.id}>

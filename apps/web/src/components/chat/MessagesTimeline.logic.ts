@@ -64,7 +64,7 @@ export type MessagesTimelineRow =
       // pre-empt the composer's live changes strip mid-turn.
       assistantTurnInProgress?: boolean | undefined;
       revertTurnCount?: number | undefined;
-      // Set on assistant rows whose turn originated from an active `/loop`.
+      // Set on user and assistant rows whose turn originated from an active `/loop`.
       loopIteration?: number | undefined;
     }
   | {
@@ -456,6 +456,9 @@ export function deriveMessagesTimelineRows(input: {
               precedingLoopPurpose;
             return purpose?.kind === "loop-iteration" ? { loopIteration: purpose.iteration } : {};
           })()
+        : {}),
+      ...(message.role === "user" && message.purpose?.kind === "loop-iteration"
+        ? { loopIteration: message.purpose.iteration }
         : {}),
     });
   }
