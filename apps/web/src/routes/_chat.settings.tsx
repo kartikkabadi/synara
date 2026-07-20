@@ -1052,16 +1052,6 @@ function SettingsRouteView() {
   )!;
   const selectedCustomModelInput = customModelInputByProvider[selectedCustomModelProvider];
   const selectedCustomModelError = customModelErrorByProvider[selectedCustomModelProvider] ?? null;
-  const totalCustomModels =
-    settings.customCodexModels.length +
-    settings.customClaudeModels.length +
-    settings.customCursorModels.length +
-    settings.customDevinModels.length +
-    settings.customAntigravityModels.length +
-    settings.customGrokModels.length +
-    settings.customKiloModels.length +
-    settings.customOpenCodeModels.length +
-    settings.customPiModels.length;
   const savedCustomModelRows = useMemo(
     () =>
       CUSTOM_MODEL_EDITOR_PROVIDER_SETTINGS.flatMap((providerSettings) =>
@@ -1074,6 +1064,7 @@ function SettingsRouteView() {
       ),
     [settings],
   );
+  const totalCustomModels = savedCustomModelRows.length;
   const visibleCustomModelRows = showAllCustomModels
     ? savedCustomModelRows
     : savedCustomModelRows.slice(0, 5);
