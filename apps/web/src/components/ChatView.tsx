@@ -10575,13 +10575,17 @@ export default function ChatView({
                             : "Type your own answer, or leave this blank to use the selected option"
                           : showPlanFollowUpPrompt && activeProposedPlan
                             ? "Add feedback to refine the plan, or leave this blank to implement it"
-                            : activeThread?.parentThreadId
-                              ? "Message this subagent while it works"
-                              : hasLiveTurn
-                                ? "Ask for follow-up changes"
-                                : phase === "disconnected"
-                                  ? "Ask for follow-up changes or attach images"
-                                  : "Ask anything, @tag files/folders, or use / to show available commands"
+                            : activeThread?.loop?.active
+                              ? activeThread.loop.prompt.trim().length === 0
+                                ? "Your next message starts the loop"
+                                : "Your next message replaces the loop prompt"
+                              : activeThread?.parentThreadId
+                                ? "Message this subagent while it works"
+                                : hasLiveTurn
+                                  ? "Ask for follow-up changes"
+                                  : phase === "disconnected"
+                                    ? "Ask for follow-up changes or attach images"
+                                    : "Ask anything, @tag files/folders, or use / to show available commands"
                     }
                     disabled={isComposerEditorDisabled}
                   />

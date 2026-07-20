@@ -214,7 +214,7 @@ export function LoopIndicator({ loop, thread, onStop, className }: LoopIndicator
 
   if (promptMissing) {
     statusLabel = "on";
-    progressLabel = "waiting for prompt";
+    progressLabel = "next message starts it";
   } else if (thread?.hasPendingApprovals === true) {
     statusLabel = "waiting";
     progressLabel = "approval";
@@ -228,11 +228,11 @@ export function LoopIndicator({ loop, thread, onStop, className }: LoopIndicator
   } else {
     statusLabel = "on";
     if (loop.maxIterations !== null) {
-      progressLabel = `${loop.iteration}/${loop.maxIterations}`;
+      progressLabel = `${loop.iteration}/${loop.maxIterations} · next message replaces prompt`;
     } else if (remainingSeconds !== null) {
-      progressLabel = `ends in ${formatRemainingTime(remainingSeconds)}`;
+      progressLabel = `ends in ${formatRemainingTime(remainingSeconds)} · next message replaces prompt`;
     } else {
-      progressLabel = null;
+      progressLabel = "next message replaces prompt";
     }
   }
 
