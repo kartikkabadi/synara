@@ -520,11 +520,19 @@ async function waitForBackendWindowReady(baseUrl: string): Promise<"listening" |
   });
 }
 
+function isIslandBrowserWindow(window: BrowserWindow): boolean {
+  return islandManager?.window === window;
+}
+
+function firstAppWindow(): BrowserWindow | null {
+  return BrowserWindow.getAllWindows().find((window) => !isIslandBrowserWindow(window)) ?? null;
+}
+
 function ensureInitialBackendWindowOpen(baseUrl: string): void {
   openInitialBackendWindow({
     isDevelopment,
     baseUrl,
-    hasExistingWindow: () => (mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null) !== null,
+    hasExistingWindow: () => (mainWindow ?? firstAppWindow()) !== null,
     createWindow: () => {
       mainWindow = createWindow();
     },
@@ -1161,8 +1169,7 @@ function registerDesktopProtocol(): void {
 }
 
 function dispatchMenuAction(action: string): void {
-  const existingWindow =
-    BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
+  const existingWindow = BrowserWindow.getFocusedWindow() ?? mainWindow ?? firstAppWindow();
   const targetWindow = existingWindow ?? createWindow();
   if (!existingWindow) {
     mainWindow = targetWindow;
@@ -1186,7 +1193,7 @@ function dispatchMenuAction(action: string): void {
 }
 
 function resolveMenuTargetWindow(): BrowserWindow | null {
-  return BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
+  return BrowserWindow.getFocusedWindow() ?? mainWindow ?? firstAppWindow();
 }
 
 function sendDesktopZoomFactor(webContents: Electron.WebContents): void {
@@ -1246,7 +1253,7 @@ function handleCheckForUpdatesMenuClick(): void {
     return;
   }
 
-  if (!BrowserWindow.getAllWindows().length) {
+  if (!firstAppWindow()) {
     mainWindow = createWindow();
   }
   void checkForUpdatesFromMenu();
@@ -3239,8 +3246,10 @@ function registerIpcHandlers(): void {
     getEnabled: isIslandEnabled,
     setEnabled: setIslandEnabled,
     focusThread: (threadId) => {
-      focusMainWindow();
-      mainWindow?.webContents.send(IPC.menuAction, `notification-open-thread:${threadId}`);
+      focusMainWindow({ stealAppFocus: true });
+      // dispatchMenuAction recreates the main window when none is open and
+      // defers the send until the renderer has finished loading.
+      dispatchMenuAction(`notification-open-thread:${threadId}`);
     },
   });
   registerDesktopVoiceTranscriptionHandler();
@@ -3668,7 +3677,7 @@ if (hasSingleInstanceLock) {
           return;
         }
         handleDesktopAppForegrounded();
-        if (BrowserWindow.getAllWindows().length === 0) {
+        if (firstAppWindow() === null) {
           if (!isDevelopment) {
             ensureInitialBackendWindowOpen(backendHttpUrl);
             return;
