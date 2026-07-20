@@ -9,6 +9,7 @@ import {
   type ThreadId,
 } from "@synara/contracts";
 import { buildPromptThreadTitleFallback } from "@synara/shared/chatThreads";
+import { parseLoopCommand } from "@synara/shared/loop";
 import { deriveAssociatedWorktreeMetadata } from "@synara/shared/threadWorkspace";
 import { useCallback, useEffect, useState } from "react";
 import { newCommandId, newMessageId, newThreadId } from "../lib/utils";
@@ -63,6 +64,7 @@ export function useComposerSlashCommands(input: {
   fastModeEnabled: boolean;
   providerNativeCommands: readonly ProviderNativeCommandDescriptor[];
   providerCommandDiscoveryCwd: string | null;
+  hasComposerAttachments: boolean;
   selectedProvider: ProviderKind;
   currentProviderModelOptions: ProviderModelOptions[ProviderKind] | undefined;
   selectedModelSelection: ModelSelection;
@@ -114,6 +116,7 @@ export function useComposerSlashCommands(input: {
     fastModeEnabled,
     providerNativeCommands,
     providerCommandDiscoveryCwd,
+    hasComposerAttachments,
     selectedProvider,
     currentProviderModelOptions,
     selectedModelSelection,
@@ -601,6 +604,122 @@ export function useComposerSlashCommands(input: {
     });
   }, [canOfferExportCommand, threadId]);
 
+  const runLoopSlashCommand = useCallback(
+    async (trimmed: string) => {
+      const api = readNativeApi();
+      if (!api || !activeProject || !activeThread) {
+        toastManager.add({
+          type: "warning",
+          title: "Loop is unavailable",
+          description: "Open a thread before starting a loop.",
+        });
+        return;
+      }
+      if (activeThread.parentThreadId != null) {
+        toastManager.add({
+          type: "warning",
+          title: "Loop is unavailable",
+          description: "Loops are only allowed on top-level threads.",
+        });
+        return;
+      }
+
+      const parsed = parseLoopCommand(trimmed);
+      if (parsed === null) {
+        return;
+      }
+      if (parsed.kind === "invalid") {
+        toastManager.add({
+          type: "warning",
+          title: "Invalid /loop command",
+          description: `Could not parse loop: ${parsed.reason}`,
+        });
+        return;
+      }
+      const isBareToggle = parsed.budget === null && parsed.prompt === null;
+
+      if (isBareToggle) {
+        if (activeThread.loop?.active !== true && hasComposerAttachments) {
+          editorActions.clearComposerSlashDraft();
+          toastManager.add({
+            type: "warning",
+            title: "Loop is unavailable",
+            description: "Remove attachments before starting a loop.",
+          });
+          return;
+        }
+
+        editorActions.clearComposerSlashDraft();
+        try {
+          await api.orchestration.dispatchCommand({
+            type: "thread.loop.toggle",
+            commandId: newCommandId(),
+            threadId,
+            createdAt: new Date().toISOString(),
+          });
+          const snapshot = await api.orchestration.getShellSnapshot();
+          syncServerShellSnapshot(snapshot);
+          return;
+        } catch (error) {
+          editorActions.setComposerPromptValue(trimmed);
+          toastManager.add({
+            type: "error",
+            title:
+              activeThread.loop?.active === true ? "Could not stop loop" : "Could not start loop",
+            description:
+              error instanceof Error ? error.message : "An error occurred while toggling the loop.",
+          });
+          return;
+        }
+      }
+
+      if (hasComposerAttachments) {
+        editorActions.clearComposerSlashDraft();
+        toastManager.add({
+          type: "warning",
+          title: "Loop is unavailable",
+          description: "Remove attachments before starting or reconfiguring a loop.",
+        });
+        return;
+      }
+
+      const maxIterations = parsed.budget?.kind === "count" ? parsed.budget.value : null;
+      const durationSeconds = parsed.budget?.kind === "duration" ? parsed.budget.seconds : null;
+
+      editorActions.clearComposerSlashDraft();
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.loop.set",
+          commandId: newCommandId(),
+          threadId,
+          prompt: parsed.prompt,
+          maxIterations,
+          durationSeconds,
+          createdAt: new Date().toISOString(),
+        });
+        const snapshot = await api.orchestration.getShellSnapshot();
+        syncServerShellSnapshot(snapshot);
+        return;
+      } catch (error) {
+        editorActions.setComposerPromptValue(trimmed);
+        toastManager.add({
+          type: "error",
+          title: "Could not start loop",
+          description:
+            error instanceof Error ? error.message : "An error occurred while starting the loop.",
+        });
+      }
+    },
+    [
+      activeProject,
+      activeThread,
+      editorActions,
+      hasComposerAttachments,
+      syncServerShellSnapshot,
+      threadId,
+    ],
+  );
+
   const openFeedbackDialog = useCallback(() => {
     openGlobalFeedbackDialog({
       provider: selectedProvider,
@@ -763,6 +882,11 @@ export function useComposerSlashCommands(input: {
         }
         return true;
       }
+      if (slashInvocation.command === "loop") {
+        editorActions.clearComposerSlashDraft();
+        await runLoopSlashCommand(trimmed);
+        return true;
+      }
       return false;
     },
     [
@@ -782,6 +906,7 @@ export function useComposerSlashCommands(input: {
       runCodexReviewStart,
       runExportSlashCommand,
       runFastSlashCommand,
+      runLoopSlashCommand,
     ],
   );
 
@@ -875,6 +1000,26 @@ export function useComposerSlashCommands(input: {
         );
         if (wasPromptReplacementApplied(applied)) {
           editorActions.setComposerHighlightedItemId(null);
+        }
+        return;
+      }
+
+      if (item.command === "loop") {
+        const replacement = "/loop ";
+        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+          snapshot.value,
+          trigger.rangeEnd,
+          replacement,
+        );
+        const applied = editorActions.applyPromptReplacement(
+          trigger.rangeStart,
+          replacementRangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+        );
+        if (wasPromptReplacementApplied(applied)) {
+          editorActions.setComposerHighlightedItemId(null);
+          editorActions.scheduleComposerFocus();
         }
         return;
       }
@@ -1000,6 +1145,7 @@ export function useComposerSlashCommands(input: {
       supportsTextNativeReviewCommand,
       runExportSlashCommand,
       runFastSlashCommand,
+      runLoopSlashCommand,
     ],
   );
 

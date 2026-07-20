@@ -111,6 +111,7 @@ function toThreadShell(thread: Thread): ThreadShell {
     ...(thread.pendingInteractions !== undefined
       ? { pendingInteractions: thread.pendingInteractions }
       : {}),
+    loop: thread.loop ?? null,
     ...(thread.lastVisitedAt !== undefined ? { lastVisitedAt: thread.lastVisitedAt } : {}),
   };
 }

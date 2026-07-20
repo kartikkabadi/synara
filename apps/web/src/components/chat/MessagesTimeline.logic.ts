@@ -3,7 +3,7 @@
 // Layer: Web chat presentation helpers
 // Exports: row derivation, structural sharing, copy/timer helpers
 
-import { type MessageId, type TurnId } from "@synara/contracts";
+import { type MessageId, type ThreadTurnPurpose, type TurnId } from "@synara/contracts";
 import { type TimelineEntry, type WorkLogEntry, formatElapsed } from "../../session-logic";
 import { normalizeCompactToolLabel as normalizeCompactToolLabelValue } from "../../lib/toolCallLabel";
 import {
@@ -64,6 +64,8 @@ export type MessagesTimelineRow =
       // pre-empt the composer's live changes strip mid-turn.
       assistantTurnInProgress?: boolean | undefined;
       revertTurnCount?: number | undefined;
+      // Set on assistant rows whose turn originated from an active `/loop`.
+      loopIteration?: number | undefined;
     }
   | {
       kind: "proposed-plan";
@@ -319,6 +321,7 @@ export function deriveMessagesTimelineRows(input: {
   );
   const durationStartByMessageId = computeMessageDurationStart(timelineMessages);
   const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(timelineMessages);
+  const purposeByTurnId = new Map<string, ThreadTurnPurpose>();
   let pendingWorkGroup: Extract<MessagesTimelineRow, { kind: "work" }> | null = null;
 
   const groupedEntriesEqual = (
@@ -412,6 +415,13 @@ export function deriveMessagesTimelineRows(input: {
     } else {
       flushPendingWorkGroup();
     }
+    if (
+      message.role === "user" &&
+      message.turnId != null &&
+      message.purpose?.kind === "loop-iteration"
+    ) {
+      purposeByTurnId.set(message.turnId, message.purpose);
+    }
 
     const assistantTurnStillInProgress =
       message.role === "assistant" &&
@@ -437,6 +447,12 @@ export function deriveMessagesTimelineRows(input: {
           : undefined,
       revertTurnCount:
         message.role === "user" ? input.revertTurnCountByUserMessageId.get(message.id) : undefined,
+      ...(message.role === "assistant"
+        ? (() => {
+            const purpose = message.turnId != null ? purposeByTurnId.get(message.turnId) : null;
+            return purpose?.kind === "loop-iteration" ? { loopIteration: purpose.iteration } : {};
+          })()
+        : {}),
     });
   }
 
@@ -902,7 +918,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.assistantCopyStreaming === bm.assistantCopyStreaming &&
         a.assistantTurnInProgress === bm.assistantTurnInProgress &&
         a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
-        a.revertTurnCount === bm.revertTurnCount
+        a.revertTurnCount === bm.revertTurnCount &&
+        a.loopIteration === bm.loopIteration
       );
     }
   }

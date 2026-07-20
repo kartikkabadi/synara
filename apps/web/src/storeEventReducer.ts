@@ -606,6 +606,7 @@ function mergeStreamingMessage(
       ? incomingMessage.dispatchOrigin
       : existingMessage.dispatchOrigin;
   const nextSource = incomingMessage.source ?? existingMessage.source;
+  const nextPurpose = incomingMessage.purpose;
 
   if (
     existingMessage.text === nextText &&
@@ -617,7 +618,8 @@ function mergeStreamingMessage(
     existingMessage.turnId === nextTurnId &&
     existingMessage.dispatchMode === nextDispatchMode &&
     existingMessage.dispatchOrigin === nextDispatchOrigin &&
-    existingMessage.source === nextSource
+    existingMessage.source === nextSource &&
+    existingMessage.purpose === nextPurpose
   ) {
     return null;
   }
@@ -634,6 +636,7 @@ function mergeStreamingMessage(
     ...(nextDispatchOrigin !== undefined ? { dispatchOrigin: nextDispatchOrigin } : {}),
     ...(nextSource !== undefined ? { source: nextSource } : {}),
     ...(nextCompletedAt !== undefined ? { completedAt: nextCompletedAt } : {}),
+    purpose: nextPurpose,
   };
 }
 
@@ -647,6 +650,7 @@ function applyThreadMessageSentEvent(thread: Thread, event: ThreadMessageSentEve
       dispatchMode: payload.dispatchMode,
       dispatchOrigin: payload.dispatchOrigin,
       turnId: payload.turnId,
+      purpose: payload.purpose,
       attachments: payload.attachments ?? [],
       ...(payload.skills !== undefined ? { skills: payload.skills } : {}),
       ...(payload.mentions !== undefined ? { mentions: payload.mentions } : {}),
@@ -1191,6 +1195,32 @@ function applyOrchestrationEvent(
         {
           ...options,
           updateSidebarSummary: true,
+        },
+      );
+
+    case "thread.loop-set":
+    case "thread.loop-off":
+    case "thread.loop-continued":
+      return applyThreadUpdate(
+        state,
+        event.payload.threadId,
+        (thread) => {
+          const loop = event.payload.loop;
+          if (deepEqualJson(thread.loop ?? null, loop)) {
+            return thread;
+          }
+          return {
+            ...thread,
+            loop,
+            updatedAt:
+              (thread.updatedAt ?? thread.createdAt) > event.occurredAt
+                ? thread.updatedAt
+                : event.occurredAt,
+          };
+        },
+        {
+          ...options,
+          updateSidebarSummary: false,
         },
       );
 
