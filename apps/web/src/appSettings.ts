@@ -749,7 +749,9 @@ function isServerSettingsPatchEmpty(patch: ServerSettingsPatch): boolean {
   return Object.keys(patch).length === 0;
 }
 
-function buildInitialServerSettingsMigrationPatch(settings: AppSettings): ServerSettingsPatch {
+export function buildInitialServerSettingsMigrationPatch(
+  settings: AppSettings,
+): ServerSettingsPatch {
   const patch: Partial<Mutable<AppSettings>> = {};
   const normalizedSettings = normalizeAppSettings(settings);
   const defaults = DEFAULT_APP_SETTINGS;
@@ -766,6 +768,7 @@ function buildInitialServerSettingsMigrationPatch(settings: AppSettings): Server
     "antigravityBinaryPath",
     "grokBinaryPath",
     "droidBinaryPath",
+    "devinBinaryPath",
     "kiloBinaryPath",
     "kiloServerPassword",
     "kiloServerUrl",
@@ -799,6 +802,7 @@ function buildInitialServerSettingsMigrationPatch(settings: AppSettings): Server
     "customAntigravityModels",
     "customGrokModels",
     "customDroidModels",
+    "customDevinModels",
     "customKiloModels",
     "customOpenCodeModels",
     "customPiModels",

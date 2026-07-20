@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   AppSettingsSchema,
+  buildInitialServerSettingsMigrationPatch,
   CUSTOM_MODEL_EDITOR_PROVIDER_SETTINGS,
   DEFAULT_CHAT_FONT_SIZE_PX,
   DEFAULT_SIDEBAR_PROJECT_SORT_ORDER,
@@ -860,5 +861,27 @@ describe("AppSettingsSchema", () => {
     expect(
       normalizeStoredAppSettings(decode(JSON.stringify({ enableAppshots: true }))),
     ).not.toHaveProperty("enableAppshots");
+  });
+});
+
+describe("buildInitialServerSettingsMigrationPatch", () => {
+  it("migrates devin binary path and custom models", () => {
+    const settings = AppSettingsSchema.makeUnsafe({
+      devinBinaryPath: "/usr/local/bin/devin",
+      customDevinModels: ["devin/custom-model", "unknown/custom"],
+    });
+
+    const patch = buildInitialServerSettingsMigrationPatch(settings);
+
+    expect(patch.providers?.devin).toEqual({
+      binaryPath: "/usr/local/bin/devin",
+      customModels: ["devin/custom-model", "unknown/custom"],
+    });
+  });
+
+  it("is empty when devin settings match defaults", () => {
+    const settings = AppSettingsSchema.makeUnsafe({});
+    const patch = buildInitialServerSettingsMigrationPatch(settings);
+    expect(Object.keys(patch)).toEqual([]);
   });
 });
