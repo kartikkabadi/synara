@@ -182,6 +182,9 @@ describe("orchestration projector", () => {
         sidechatSourceThreadId: null,
         lastKnownPr: null,
         latestTurn: null,
+        loop: null,
+        hasPendingTurnStart: false,
+        pendingTurnStart: null,
         createdAt: now,
         updatedAt: now,
         archivedAt: null,
@@ -1675,5 +1678,75 @@ describe("orchestration projector", () => {
       "accepted-first-user",
       "accepted-first-assistant",
     ]);
+  });
+
+  it("clears hasPendingTurnStart on a terminal session that never reached running", async () => {
+    const createdAt = "2026-02-23T08:00:00.000Z";
+    const requestedAt = "2026-02-23T08:00:05.000Z";
+    const errorAt = "2026-02-23T08:00:06.000Z";
+
+    const afterCreate = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(createdAt),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: createdAt,
+          commandId: "cmd-create",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "demo",
+            modelSelection: { provider: "codex", model: "gpt-5-codex" },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        }),
+      ),
+    );
+
+    const afterRequest = await Effect.runPromise(
+      projectEvent(
+        afterCreate,
+        makeEvent({
+          sequence: 2,
+          type: "thread.turn-start-requested",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: requestedAt,
+          commandId: "cmd-turn-start",
+          payload: {
+            threadId: "thread-1",
+            messageId: "message-1",
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            createdAt: requestedAt,
+          },
+        }),
+      ),
+    );
+    expect(afterRequest.threads[0]?.hasPendingTurnStart).toBe(true);
+
+    const afterError = await Effect.runPromise(
+      projectEvent(
+        afterRequest,
+        makeSessionSetEvent({
+          sequence: 3,
+          commandId: "cmd-session-error",
+          occurredAt: errorAt,
+          status: "error",
+          activeTurnId: "turn-1",
+          lastError: "provider crashed",
+          updatedAt: errorAt,
+        }),
+      ),
+    );
+
+    expect(afterError.threads[0]?.hasPendingTurnStart).toBe(false);
   });
 });

@@ -41,6 +41,9 @@ import {
   ThreadMarkerRemovedPayload,
   ThreadProposedPlanUpsertedPayload,
   ThreadConversationRolledBackPayload,
+  ThreadLoopContinuedPayload,
+  ThreadLoopOffPayload,
+  ThreadLoopSetPayload,
   ThreadRuntimeModeSetPayload,
   ThreadUnarchivedPayload,
   ThreadRevertedPayload,
@@ -78,36 +81,53 @@ function isTerminalLatestTurn(
 // no provider event will ever mark the turn complete on its own, so a running
 // latestTurn is settled here. Checkpoint diff events (thread.turn-diff-completed)
 // only enrich the terminal state afterwards — they are not the lifecycle authority.
-// A retained activeTurnId blocks settlement (except on error): stop-requested flows
-// deliberately emit "interrupted" while keeping the turn active until the provider's
-// terminal event decides the real outcome, and a premature settle here could never
-// be corrected because settlement only applies to running turns.
+// Error is settled immediately even if activeTurnId is still set, because the
+// provider has already abandoned the turn. Interrupted/stopped/ready are only
+// settled once activeTurnId has cleared, so a stop-requested or completed state
+// never overwrites a still-live turn before the provider confirms the outcome.
 function settleLatestTurnForSessionStatus(
   latestTurn: OrchestrationThread["latestTurn"],
-  session: Pick<OrchestrationSession, "status" | "activeTurnId" | "updatedAt">,
+  session: Pick<OrchestrationSession, "status" | "activeTurnId" | "updatedAt" | "lastError">,
 ): OrchestrationThread["latestTurn"] {
   if (latestTurn?.state !== "running") {
     return latestTurn;
   }
-  const settledState =
-    session.status === "error"
-      ? ("error" as const)
-      : session.status === "interrupted" || session.status === "stopped"
-        ? ("interrupted" as const)
-        : session.status === "ready"
-          ? ("completed" as const)
-          : null;
-  if (settledState === null) {
-    return latestTurn;
+
+  if (session.status === "error") {
+    return {
+      ...latestTurn,
+      state: "error" as const,
+      completedAt: latestTurn.completedAt ?? session.updatedAt,
+    };
   }
-  if (session.activeTurnId !== null && settledState !== "error") {
-    return latestTurn;
+
+  if (session.status === "interrupted" || session.status === "stopped") {
+    if (session.activeTurnId !== null) {
+      return latestTurn;
+    }
+    const stoppedState =
+      session.status === "stopped" && session.lastError !== null
+        ? ("error" as const)
+        : ("interrupted" as const);
+    return {
+      ...latestTurn,
+      state: stoppedState,
+      completedAt: latestTurn.completedAt ?? session.updatedAt,
+    };
   }
-  return {
-    ...latestTurn,
-    state: settledState,
-    completedAt: latestTurn.completedAt ?? session.updatedAt,
-  };
+
+  if (session.status === "ready") {
+    if (session.activeTurnId !== null) {
+      return latestTurn;
+    }
+    return {
+      ...latestTurn,
+      state: "completed" as const,
+      completedAt: latestTurn.completedAt ?? session.updatedAt,
+    };
+  }
+
+  return latestTurn;
 }
 
 function updateThread(
@@ -713,6 +733,7 @@ export function projectEvent(
         })),
       );
 
+    case "thread.turn-queued":
     case "thread.turn-start-requested":
       return decodeForEvent(
         ThreadTurnStartRequestedPayload,
@@ -739,6 +760,15 @@ export function projectEvent(
               ...modelSelectionPatch,
               runtimeMode: payload.runtimeMode,
               interactionMode: payload.interactionMode,
+              hasPendingTurnStart: true,
+              pendingTurnStart: {
+                messageId: payload.messageId,
+                requestedAt: payload.createdAt,
+                ...(payload.purpose !== undefined ? { purpose: payload.purpose } : {}),
+                ...(payload.sourceProposedPlan !== undefined
+                  ? { sourceProposedPlan: payload.sourceProposedPlan }
+                  : {}),
+              },
               updatedAt: payload.createdAt,
             }),
           };
@@ -770,6 +800,7 @@ export function projectEvent(
             turnId: payload.turnId,
             streaming: payload.streaming,
             source: payload.source,
+            ...(payload.purpose !== undefined ? { purpose: payload.purpose } : {}),
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
           },
@@ -800,6 +831,7 @@ export function projectEvent(
                       : {}),
                     ...(message.skills !== undefined ? { skills: message.skills } : {}),
                     ...(message.mentions !== undefined ? { mentions: message.mentions } : {}),
+                    purpose: message.purpose,
                   }
                 : entry,
             )
@@ -835,33 +867,57 @@ export function projectEvent(
           "session",
         );
 
+        // A terminal session before the provider ever reached running cancels any
+        // pending turn start the same way ProjectionPipeline deletes the pending
+        // row. `error` is terminal immediately; `interrupted`/`stopped` only once the
+        // active turn has cleared, so an in-flight interrupt does not drop a queued
+        // replacement.
+        const isTerminalBeforeRunning =
+          session.status === "error" ||
+          ((session.status === "interrupted" || session.status === "stopped") &&
+            session.activeTurnId === null);
+        const isRunningWithActiveTurn =
+          session.status === "running" && session.activeTurnId !== null;
+
+        const isExistingActiveTurn = thread.latestTurn?.turnId === session.activeTurnId;
         return {
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             session,
-            latestTurn:
-              session.status === "running" && session.activeTurnId !== null
-                ? thread.latestTurn?.turnId === session.activeTurnId &&
-                  isTerminalLatestTurn(thread.latestTurn)
-                  ? thread.latestTurn
-                  : {
-                      turnId: session.activeTurnId,
-                      state: "running",
-                      requestedAt:
-                        thread.latestTurn?.turnId === session.activeTurnId
-                          ? thread.latestTurn.requestedAt
-                          : session.updatedAt,
-                      startedAt:
-                        thread.latestTurn?.turnId === session.activeTurnId
-                          ? (thread.latestTurn.startedAt ?? session.updatedAt)
-                          : session.updatedAt,
-                      completedAt: null,
-                      assistantMessageId:
-                        thread.latestTurn?.turnId === session.activeTurnId
-                          ? thread.latestTurn.assistantMessageId
-                          : null,
-                    }
-                : settleLatestTurnForSessionStatus(thread.latestTurn, session),
+            hasPendingTurnStart:
+              isRunningWithActiveTurn || isTerminalBeforeRunning
+                ? false
+                : thread.hasPendingTurnStart,
+            pendingTurnStart:
+              isRunningWithActiveTurn || isTerminalBeforeRunning ? null : thread.pendingTurnStart,
+            latestTurn: isRunningWithActiveTurn
+              ? isExistingActiveTurn && isTerminalLatestTurn(thread.latestTurn)
+                ? thread.latestTurn
+                : {
+                    turnId: session.activeTurnId,
+                    state: "running",
+                    requestedAt: isExistingActiveTurn
+                      ? thread.latestTurn.requestedAt
+                      : session.updatedAt,
+                    startedAt: isExistingActiveTurn
+                      ? (thread.latestTurn.startedAt ?? session.updatedAt)
+                      : session.updatedAt,
+                    completedAt: null,
+                    assistantMessageId: isExistingActiveTurn
+                      ? thread.latestTurn.assistantMessageId
+                      : null,
+                    purpose: isExistingActiveTurn
+                      ? thread.latestTurn.purpose
+                      : thread.pendingTurnStart?.purpose,
+                    ...(isExistingActiveTurn
+                      ? thread.latestTurn.sourceProposedPlan !== undefined
+                        ? { sourceProposedPlan: thread.latestTurn.sourceProposedPlan }
+                        : {}
+                      : thread.pendingTurnStart?.sourceProposedPlan !== undefined
+                        ? { sourceProposedPlan: thread.pendingTurnStart.sourceProposedPlan }
+                        : {}),
+                  }
+              : settleLatestTurnForSessionStatus(thread.latestTurn, session),
             updatedAt: event.occurredAt,
           }),
         };
@@ -983,6 +1039,17 @@ export function projectEvent(
                     : payload.completedAt,
                 completedAt: payload.completedAt,
                 assistantMessageId: preservedAssistantMessageId,
+                purpose:
+                  thread.latestTurn?.turnId === payload.turnId
+                    ? thread.latestTurn.purpose
+                    : thread.pendingTurnStart?.purpose,
+                ...(thread.latestTurn?.turnId === payload.turnId
+                  ? thread.latestTurn.sourceProposedPlan !== undefined
+                    ? { sourceProposedPlan: thread.latestTurn.sourceProposedPlan }
+                    : {}
+                  : thread.pendingTurnStart?.sourceProposedPlan !== undefined
+                    ? { sourceProposedPlan: thread.pendingTurnStart.sourceProposedPlan }
+                    : {}),
               };
 
         return {
@@ -1126,6 +1193,39 @@ export function projectEvent(
             }),
           };
         }),
+      );
+
+    case "thread.loop-set":
+      return decodeForEvent(ThreadLoopSetPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            loop: payload.loop,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.loop-off":
+      return decodeForEvent(ThreadLoopOffPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            loop: payload.loop,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.loop-continued":
+      return decodeForEvent(ThreadLoopContinuedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            loop: payload.loop,
+            updatedAt: event.occurredAt,
+          }),
+        })),
       );
 
     default:
