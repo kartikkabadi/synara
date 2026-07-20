@@ -288,6 +288,22 @@ describe("composerSlashCommands", () => {
     expect(shouldHideProviderNativeCommandFromComposerMenu("claudeAgent", "feedback")).toBe(true);
   });
 
+  it("keeps app-level /loop available even if a provider exposes a native collision", () => {
+    const availableCommands = getAvailableComposerSlashCommands({
+      provider: "claudeAgent",
+      supportsFastSlashCommand: true,
+      canOfferCompactCommand: true,
+      canOfferReviewCommand: true,
+      canOfferForkCommand: true,
+      canOfferSideCommand: true,
+      canOfferExportCommand: true,
+      providerNativeCommandNames: ["loop"],
+    });
+
+    expect(availableCommands).toContain("loop");
+    expect(shouldHideProviderNativeCommandFromComposerMenu("claudeAgent", "loop")).toBe(true);
+  });
+
   it("only exposes Synara-owned app commands for claude", () => {
     expect(
       getAvailableComposerSlashCommands({
@@ -299,7 +315,7 @@ describe("composerSlashCommands", () => {
         canOfferSideCommand: true,
         canOfferExportCommand: true,
       }),
-    ).toEqual(["side", "export", "feedback", "automation"]);
+    ).toEqual(["side", "export", "feedback", "automation", "loop"]);
   });
 
   it("offers the app-level /export command on every provider", () => {
@@ -412,6 +428,7 @@ describe("composerSlashCommands", () => {
       "export",
       "feedback",
       "automation",
+      "loop",
     ]);
   });
 

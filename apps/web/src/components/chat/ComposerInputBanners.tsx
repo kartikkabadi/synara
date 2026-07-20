@@ -10,8 +10,10 @@
 import { type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
+import type { Thread } from "../../types";
 import { ComposerAutomationSetupBanner } from "./ComposerAutomationSetupBanner";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
+import { isLoopIndicatorVisible, LoopIndicator } from "./LoopIndicator";
 import { COMPOSER_INPUT_SURFACE_BANNER_CLASS_NAME } from "./composerPickerStyles";
 
 interface ComposerInputBannersProps {
@@ -23,21 +25,38 @@ interface ComposerInputBannersProps {
   // Setup-mode control while gathering an automation's task/schedule (the exchange
   // itself renders as bubbles in the transcript).
   automationSetup: { onCancel: () => void } | null;
+  thread: Thread | null | undefined;
+  onStopLoop: () => void;
 }
 
 export function ComposerInputBanners({
   roundedTopReset,
   planFollowUp,
   automationSetup,
+  thread,
+  onStopLoop,
 }: ComposerInputBannersProps) {
-  let content: ReactNode = null;
+  const loop = thread?.loop;
+  const banners: ReactNode[] = [];
+  // Actionable blocker-resolution controls (plan follow-up, automation setup)
+  // take visual precedence over the passive loop status banner.
   if (planFollowUp) {
-    content = <ComposerPlanFollowUpBanner key={planFollowUp.id} planTitle={planFollowUp.title} />;
-  } else if (automationSetup) {
-    content = <ComposerAutomationSetupBanner onCancel={automationSetup.onCancel} />;
+    banners.push(
+      <ComposerPlanFollowUpBanner key={planFollowUp.id} planTitle={planFollowUp.title} />,
+    );
+  }
+  if (automationSetup) {
+    banners.push(
+      <ComposerAutomationSetupBanner key="automation" onCancel={automationSetup.onCancel} />,
+    );
+  }
+  if (loop != null && isLoopIndicatorVisible(loop)) {
+    banners.push(
+      <LoopIndicator key="loop" loop={loop} thread={thread ?? undefined} onStop={onStopLoop} />,
+    );
   }
 
-  if (!content) {
+  if (banners.length === 0) {
     return null;
   }
 
@@ -45,7 +64,7 @@ export function ComposerInputBanners({
     <div
       className={cn(COMPOSER_INPUT_SURFACE_BANNER_CLASS_NAME, roundedTopReset && "!rounded-t-none")}
     >
-      {content}
+      {banners}
     </div>
   );
 }

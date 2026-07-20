@@ -1,4 +1,10 @@
-import { CheckpointRef, MessageId, OrchestrationProposedPlanId, TurnId } from "@synara/contracts";
+import {
+  CheckpointRef,
+  LoopAttemptId,
+  MessageId,
+  OrchestrationProposedPlanId,
+  TurnId,
+} from "@synara/contracts";
 import { describe, expect, it } from "vitest";
 import {
   buildTurnDiffSummaryByAssistantMessageId,
@@ -1304,6 +1310,49 @@ describe("deriveMessagesTimelineRows", () => {
     });
 
     expect(rows.map((row) => row.kind)).toEqual(["message", "working"]);
+  });
+
+  it("labels loop-owned assistant messages by correlated turn ID", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [
+        {
+          id: "entry-loop-user",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: MessageId.makeUnsafe("loop-user"),
+            role: "user",
+            text: "fix tests",
+            turnId: TurnId.makeUnsafe("t-loop"),
+            purpose: {
+              kind: "loop-iteration",
+              activationId: "activation-1",
+              attemptId: LoopAttemptId.makeUnsafe("attempt-1"),
+              iteration: 3,
+            },
+            createdAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "entry-loop-assistant",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:05Z",
+          message: {
+            id: MessageId.makeUnsafe("loop-assistant"),
+            role: "assistant",
+            text: "Done",
+            turnId: TurnId.makeUnsafe("t-loop"),
+            createdAt: "2026-01-01T00:00:05Z",
+            completedAt: "2026-01-01T00:00:05Z",
+            streaming: false,
+          },
+        },
+      ],
+    });
+
+    expect(messageRow(rows, "loop-assistant")?.loopIteration).toBe(3);
   });
 });
 

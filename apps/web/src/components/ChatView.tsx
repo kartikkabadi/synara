@@ -1200,6 +1200,7 @@ export default function ChatView({
   );
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
   const durablyPersistedComposerImageIds = composerDraft.persistedAttachments;
+  const hasComposerAttachments = effectiveComposerAttachmentCount(composerDraft) > 0;
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
   const setComposerDraftPromptHistorySavedDraft = useComposerDraftStore(
     (store) => store.setPromptHistorySavedDraft,
@@ -2621,7 +2622,7 @@ export default function ChatView({
     // marking every task completed, and an unfinished list must not linger forever.
     return latestTurnSettled
       ? null
-      : deriveActiveTaskListState(threadActivities, activeLatestTurn?.turnId);
+      : deriveActiveTaskListState(threadActivities, activeLatestTurn?.turnId ?? undefined);
   }, [activeLatestTurn?.turnId, latestTurnSettled, showDebugTaskBanner, threadActivities]);
   const activeBackgroundTasks = useMemo(
     () =>
@@ -4393,6 +4394,31 @@ export default function ChatView({
       createdAt: new Date().toISOString(),
     });
   }, [activeThread, isServerThread]);
+
+  const handleStopLoop = useCallback(async () => {
+    const api = readNativeApi();
+    if (!api || !activeThread || activeThread.loop?.active !== true) {
+      return;
+    }
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.loop.off",
+        commandId: newCommandId(),
+        threadId: activeThread.id,
+        createdAt: new Date().toISOString(),
+      });
+      const snapshot = await api.orchestration.getShellSnapshot();
+      syncServerShellSnapshot(snapshot);
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not stop loop",
+        description:
+          error instanceof Error ? error.message : "An error occurred while stopping the loop.",
+      });
+    }
+  }, [activeThread, syncServerShellSnapshot]);
+
   const {
     handoffBusy,
     worktreeHandoffDialogOpen,
@@ -9345,6 +9371,7 @@ export default function ChatView({
     fastModeEnabled,
     providerNativeCommands,
     providerCommandDiscoveryCwd: composerSkillCwd,
+    hasComposerAttachments,
     selectedProvider,
     currentProviderModelOptions,
     selectedModelSelection,
@@ -10435,6 +10462,8 @@ export default function ChatView({
               >
                 <ComposerInputBanners
                   roundedTopReset={false}
+                  thread={activeThread}
+                  onStopLoop={handleStopLoop}
                   planFollowUp={
                     !activePendingApproval &&
                     pendingUserInputs.length === 0 &&

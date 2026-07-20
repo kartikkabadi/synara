@@ -1399,7 +1399,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           // signal (see deriveTerminalAssistantMessageIds).
           const isTerminalAssistantMessage =
             row.showAssistantCopyButton && !row.assistantTurnInProgress;
+          const loopLabel =
+            row.loopIteration != null ? `Loop iteration ${row.loopIteration}` : null;
           const assistantMeta = [
+            loopLabel,
             isTerminalAssistantMessage
               ? formatShortTimestamp(row.message.createdAt, timestampFormat)
               : null,

@@ -85,6 +85,7 @@ function shouldKeepBuiltInSlashCommandDespiteNativeCollision(
     command === "automation" ||
     command === "export" ||
     command === "feedback" ||
+    command === "loop" ||
     (providerUsesAppOwnedReviewSlashCommand(provider) && command === "review")
   );
 }
@@ -100,6 +101,7 @@ export function shouldHideProviderNativeCommandFromComposerMenu(
     normalizedCommand === "automation" ||
     (normalizedCommand === "export" && appCommandIsAvailable) ||
     (normalizedCommand === "feedback" && appCommandIsAvailable) ||
+    (normalizedCommand === "loop" && appCommandIsAvailable) ||
     (providerUsesAppOwnedReviewSlashCommand(provider) && normalizedCommand === "review")
   );
 }
@@ -215,6 +217,12 @@ const COMPOSER_SLASH_COMMAND_DEFINITIONS: Record<
     command: "automation",
     label: "/automation",
     description: "Create a scheduled automation from this prompt",
+    source: "app",
+  },
+  loop: {
+    command: "loop",
+    label: "/loop",
+    description: "Run repeated iterations on a prompt",
     source: "app",
   },
 };
@@ -413,6 +421,7 @@ export function getAvailableComposerSlashCommands(input: {
           ...(input.canOfferExportCommand ? (["export"] as const) : []),
           "feedback",
           "automation",
+          "loop",
         ]
       : [
           // Claude owns most slash-command UX natively; sidechat remains app-level because it
@@ -423,6 +432,7 @@ export function getAvailableComposerSlashCommands(input: {
           ...(input.canOfferExportCommand ? (["export"] as const) : []),
           "feedback",
           "automation",
+          "loop",
         ];
   return availableCommands.filter((command) => !collidingNativeCommandNames.has(command));
 }
