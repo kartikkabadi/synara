@@ -8,7 +8,7 @@ import type { IslandWindowState } from "@synara/contracts";
 import { ISLAND_IPC_CHANNELS } from "../ipcChannels";
 import type { IslandWindowManager } from "./islandWindow";
 
-const ISLAND_WINDOW_STATES: readonly IslandWindowState[] = ["collapsed", "hover", "expanded"];
+const ISLAND_WINDOW_STATES: ReadonlySet<string> = new Set(["collapsed", "hover", "expanded"]);
 
 export interface IslandIpcDelegate {
   getManager: () => IslandWindowManager | null;
@@ -28,7 +28,7 @@ export function registerIslandIpcHandlers(ipcMain: IpcMain, delegate: IslandIpcD
 
   ipcMain.removeHandler(ISLAND_IPC_CHANNELS.setState);
   ipcMain.handle(ISLAND_IPC_CHANNELS.setState, async (_event, state: unknown) => {
-    if (ISLAND_WINDOW_STATES.includes(state as IslandWindowState)) {
+    if (typeof state === "string" && ISLAND_WINDOW_STATES.has(state)) {
       delegate.getManager()?.setState(state as IslandWindowState);
     }
   });
