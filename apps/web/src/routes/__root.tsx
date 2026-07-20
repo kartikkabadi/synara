@@ -158,6 +158,17 @@ export const Route = createRootRouteWithContext<{
 });
 
 function RootRouteView() {
+  // The island overlay window renders bare: no app chrome, toasts, or coordinators.
+  const isIslandRoute = useRouterState({
+    select: (state) => state.location.pathname === "/island",
+  });
+  if (isIslandRoute) {
+    return <Outlet />;
+  }
+  return <RootAppShellView />;
+}
+
+function RootAppShellView() {
   useAppTypography();
   useAppDensity();
   usePreloadSettingsRoute();
