@@ -116,6 +116,16 @@ const DEVIN_TURN_IDLE_TIMEOUT_MS = resolveAcpTurnIdleTimeoutMs({
 });
 const DEVIN_TURN_WATCHDOG_INTERVAL_MS = 5_000;
 
+function isProviderAdapterError(error: unknown): error is ProviderAdapterError {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "_tag" in error &&
+    typeof (error as { _tag: unknown })._tag === "string" &&
+    (error as { _tag: string })._tag.startsWith("ProviderAdapter")
+  );
+}
+
 export interface DevinAcpRuntimeFactoryInput {
   readonly devinSettings: DevinAcpRuntimeSettings;
   readonly cwd: string;
@@ -1244,9 +1254,7 @@ function makeProviderAdapter(
               threadId: input.threadId,
               payload: { providerThreadId: started.sessionId },
             });
-          }).pipe(
-            Effect.onError(() => stopSessionInternal(ctx, "error")),
-          );
+          }).pipe(Effect.onError(() => stopSessionInternal(ctx, "error")));
 
           return session;
         }).pipe(Effect.scoped),
@@ -1565,7 +1573,7 @@ function makeProviderAdapter(
                 };
               }),
             ),
-            Effect.onInterrupt(
+            Effect.onInterrupt(() =>
               Effect.gen(function* () {
                 if (!clearActiveTurn(ctx, turnId)) return;
                 const { activeTurnId: _activeTurnId, ...sessionRest } = ctx.session;
@@ -1874,6 +1882,18 @@ function makeProviderAdapter(
                   ),
                 onSome: (result) => Effect.succeed(result),
               }),
+            ),
+            Effect.catch((error) =>
+              Effect.fail(
+                isProviderAdapterError(error)
+                  ? error
+                  : mapAcpToAdapterError(
+                      PROVIDER,
+                      ThreadId.makeUnsafe("devin-model-discovery"),
+                      "model/list",
+                      error as EffectAcpErrors.AcpError,
+                    ),
+              ),
             ),
           );
 

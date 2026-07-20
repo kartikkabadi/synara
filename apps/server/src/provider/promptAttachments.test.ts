@@ -44,9 +44,7 @@ describe("loadProviderPromptImageBlocks", () => {
     sizeBytes: 128,
   } satisfies ChatImageAttachment;
 
-  const makeInput = (
-    readFile: (path: string) => Effect.Effect<Uint8Array, unknown>,
-  ) => ({
+  const makeInput = (readFile: (path: string) => Effect.Effect<Uint8Array, unknown>) => ({
     attachments: [imageAttachment],
     attachmentsDir: "/tmp/attachments",
     provider: "devin" as const,

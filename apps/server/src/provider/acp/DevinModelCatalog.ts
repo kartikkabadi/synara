@@ -146,7 +146,9 @@ export function parseDevinModelSlug(slug: string, displayName: string): ParsedDe
   const hadDisplayOverride = slugEchoed && isModelPrefix;
 
   const segments = splitSlugSegments(trimmedSlug);
-  const tokens = segments.filter((s): s is Extract<SlugSegment, { type: "token" }> => s.type === "token");
+  const tokens = segments.filter(
+    (s): s is Extract<SlugSegment, { type: "token" }> => s.type === "token",
+  );
 
   let effort: string | null = null;
   let fast = false;

@@ -1,6 +1,6 @@
 import { describe, it, assert } from "@effect/vitest";
 import { Effect, Fiber, Option, Stream } from "effect";
-import type * as EffectAcpErrors from "effect-acp/errors";
+import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 import {
   ApprovalRequestId,
@@ -29,9 +29,9 @@ function makeMockRuntime(input?: {
   readonly prompt?: (
     payload: Omit<EffectAcpSchema.PromptRequest, "sessionId">,
   ) => Effect.Effect<EffectAcpSchema.PromptResponse, EffectAcpErrors.AcpError>;
-  readonly onSetModel?: (model: string) => Effect.Effect<void>;
+  readonly onSetModel?: (model: string) => Effect.Effect<void, EffectAcpErrors.AcpError>;
   readonly modeState?: AcpSessionModeState;
-  readonly onSetMode?: (modeId: string) => Effect.Effect<void>;
+  readonly onSetMode?: (modeId: string) => Effect.Effect<void, EffectAcpErrors.AcpError>;
   readonly cancel?: Effect.Effect<void, EffectAcpErrors.AcpError>;
   readonly onHandleElicitation?: (
     handler: (
@@ -696,18 +696,16 @@ describe("DevinAdapterLive", () => {
     Effect.gen(function* () {
       const adapter = yield* DevinAdapter;
 
-      const result = yield* adapter.listModels!({ provider: "devin" }).pipe(
+      const error = yield* adapter.listModels!({ provider: "devin" }).pipe(
         Effect.match({
-          onSuccess: (value) => ({ ok: true as const, value }),
-          onFailure: (error) => ({ ok: false as const, error }),
+          onSuccess: () => null,
+          onFailure: (error) => error,
         }),
       );
 
-      assert.strictEqual(result.ok, false);
       assert.ok(
-        result.error instanceof ProviderAdapterRequestError &&
-          result.error.message.includes("Discovery failed"),
-        `expected discovery error, got ${String(result.error)}`,
+        error instanceof ProviderAdapterRequestError && error.message.includes("Discovery failed"),
+        `expected discovery error, got ${String(error)}`,
       );
     }).pipe(
       Effect.provide(
@@ -824,18 +822,17 @@ describe("DevinAdapterLive", () => {
   it.effect("propagates a typed error when the mock runtime fails", () =>
     Effect.gen(function* () {
       const adapter = yield* DevinAdapter;
-      const result = yield* adapter.listModels!({ provider: "devin" }).pipe(
+      const error = yield* adapter.listModels!({ provider: "devin" }).pipe(
         Effect.match({
-          onSuccess: (value) => ({ ok: true as const, value }),
-          onFailure: (error) => ({ ok: false as const, error }),
+          onSuccess: () => null,
+          onFailure: (error) => error,
         }),
       );
 
-      assert.strictEqual(result.ok, false);
       assert.ok(
-        result.error instanceof ProviderAdapterRequestError &&
-          result.error.message.includes("Mock runtime failure"),
-        `expected runtime failure error, got ${String(result.error)}`,
+        error instanceof ProviderAdapterRequestError &&
+          error.message.includes("Mock runtime failure"),
+        `expected runtime failure error, got ${String(error)}`,
       );
     }).pipe(
       Effect.provide(
@@ -1638,14 +1635,18 @@ describe("DevinAdapterLive", () => {
 
       // A second turn should still be accepted because activeTurnId was not set.
       let resolved = false;
-      yield* adapter.sendTurn({
-        threadId,
-        input: "second turn",
-      }).pipe(
-        Effect.tap(() => Effect.sync(() => {
-          resolved = true;
-        })),
-      );
+      yield* adapter
+        .sendTurn({
+          threadId,
+          input: "second turn",
+        })
+        .pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              resolved = true;
+            }),
+          ),
+        );
       assert.strictEqual(resolved, true);
     }).pipe(
       Effect.provide(
@@ -1655,10 +1656,9 @@ describe("DevinAdapterLive", () => {
               makeMockRuntime({
                 onSetModel: () =>
                   Effect.fail(
-                    new ProviderAdapterRequestError({
-                      provider: "devin",
-                      method: "session/set_model",
-                      detail: "set_model failed",
+                    new EffectAcpErrors.AcpRequestError({
+                      code: -1,
+                      errorMessage: "set_model failed",
                     }),
                   ),
               }),
@@ -1668,64 +1668,69 @@ describe("DevinAdapterLive", () => {
     ),
   );
 
-  it.effect("recovers from an applyDevinModeSelection preflight failure without wedging activeTurnId", () =>
-    Effect.gen(function* () {
-      const adapter = yield* DevinAdapter;
-      yield* adapter.startSession({
-        threadId,
-        provider: "devin",
-        cwd: "/tmp/project",
-        runtimeMode: "full-access",
-      });
-
-      const error = yield* adapter
-        .sendTurn({
+  it.effect(
+    "recovers from an applyDevinModeSelection preflight failure without wedging activeTurnId",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* DevinAdapter;
+        yield* adapter.startSession({
           threadId,
-          input: "plan this refactor",
-          interactionMode: "plan",
-        })
-        .pipe(Effect.flip);
+          provider: "devin",
+          cwd: "/tmp/project",
+          runtimeMode: "full-access",
+        });
 
-      assert.strictEqual(error._tag, "ProviderAdapterRequestError");
-      assert.match(error.message, /set_mode failed/);
+        const error = yield* adapter
+          .sendTurn({
+            threadId,
+            input: "plan this refactor",
+            interactionMode: "plan",
+          })
+          .pipe(Effect.flip);
 
-      // A second turn should still be accepted because activeTurnId was not set.
-      let resolved = false;
-      yield* adapter.sendTurn({
-        threadId,
-        input: "second turn",
-      }).pipe(
-        Effect.tap(() => Effect.sync(() => {
-          resolved = true;
-        })),
-      );
-      assert.strictEqual(resolved, true);
-    }).pipe(
-      Effect.provide(
-        makeDevinAdapterLive({
-          makeRuntime: () =>
-            Effect.succeed(
-              makeMockRuntime({
-                modeState: {
-                  currentModeId: "default",
-                  availableModes: [
-                    { id: "default", name: "Default" },
-                    { id: "plan", name: "Plan" },
-                  ],
-                },
-                onSetMode: () =>
-                  Effect.fail(
-                    new ProviderAdapterRequestError({
-                      provider: "devin",
-                      method: "session/set_mode",
-                      detail: "set_mode failed",
-                    }),
-                  ),
+        assert.strictEqual(error._tag, "ProviderAdapterRequestError");
+        assert.match(error.message, /set_mode failed/);
+
+        // A second turn should still be accepted because activeTurnId was not set.
+        let resolved = false;
+        yield* adapter
+          .sendTurn({
+            threadId,
+            input: "second turn",
+          })
+          .pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                resolved = true;
               }),
             ),
-        }),
+          );
+        assert.strictEqual(resolved, true);
+      }).pipe(
+        Effect.provide(
+          makeDevinAdapterLive({
+            makeRuntime: () =>
+              Effect.succeed(
+                makeMockRuntime({
+                  modeState: {
+                    currentModeId: "default",
+                    availableModes: [
+                      { id: "default", name: "Default" },
+                      { id: "plan", name: "Plan" },
+                    ],
+                  },
+                  onSetMode: () =>
+                    Effect.fail(
+                      new EffectAcpErrors.AcpRequestError({
+                        code: -1,
+                        errorMessage: "set_mode failed",
+                      }),
+                    ),
+                }),
+              ),
+          }),
+        ),
       ),
-    ),
   );
 
   // ── sendTurn interruption ─────────────────────────────────────────
