@@ -451,8 +451,9 @@ export function normalizeModelSlug(
         ? trimmed.toLowerCase().slice(0, -"-medium".length)
         : trimmed;
   const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[provider] as Record<string, ModelSlug>;
-  const aliased = Object.prototype.hasOwnProperty.call(aliases, providerScopedModel)
-    ? aliases[providerScopedModel]
+  const aliasKey = providerScopedModel.toLowerCase();
+  const aliased = Object.prototype.hasOwnProperty.call(aliases, aliasKey)
+    ? aliases[aliasKey]
     : undefined;
   return typeof aliased === "string" ? aliased : (providerScopedModel as ModelSlug);
 }

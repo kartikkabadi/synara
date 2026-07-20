@@ -73,6 +73,13 @@ describe("normalizeModelSlug", () => {
     expect(normalizeModelSlug("grok-code-fast-1", "grok")).toBe("grok-build-0.1");
     expect(normalizeModelSlug("grok-code-fast-1-0825", "grok")).toBe("grok-build-0.1");
   });
+
+  it("is case-insensitive for aliases", () => {
+    expect(normalizeModelSlug("5.5")).toBe("gpt-5.5");
+    expect(normalizeModelSlug("SWE", "devin")).toBe("swe-1-6");
+    expect(normalizeModelSlug("Sonnet-4.6", "claudeAgent")).toBe("claude-sonnet-4-6");
+    expect(normalizeModelSlug("GROK-LATEST", "grok")).toBe("grok-build");
+  });
 });
 
 describe("resolveModelSlug", () => {
