@@ -1,4 +1,10 @@
-import { CheckpointRef, MessageId, OrchestrationProposedPlanId, TurnId } from "@synara/contracts";
+import {
+  CheckpointRef,
+  MessageId,
+  OrchestrationProposedPlanId,
+  type ThreadLoop,
+  TurnId,
+} from "@synara/contracts";
 import { describe, expect, it } from "vitest";
 import {
   buildTurnDiffSummaryByAssistantMessageId,
@@ -1419,6 +1425,82 @@ describe("deriveMessagesTimelineRows", () => {
     expect(messageRow(rows, "loop-assistant")?.loopIteration).toBe(2);
     expect(messageRow(rows, "manual-user")?.loopIteration).toBeUndefined();
     expect(messageRow(rows, "manual-assistant")?.loopIteration).toBeUndefined();
+  });
+
+  const makeLoop = (overrides: Partial<ThreadLoop> = {}): ThreadLoop => ({
+    active: false,
+    prompt: "keep going",
+    iteration: 3,
+    maxIterations: null,
+    endsAt: null,
+    hardCap: 100,
+    consecutiveErrors: 0,
+    lastStopReason: "budget_iterations",
+    activationId: "activation-1",
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:10:00Z",
+    ...overrides,
+  });
+
+  it("appends a loop-end row when the loop is off with a stop reason", () => {
+    const loop = makeLoop();
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [userEntry("u1", "2026-01-01T00:00:00Z")],
+      loop,
+    });
+
+    const tail = rows.at(-1);
+    expect(tail).toEqual({ kind: "loop-end", id: "loop-end", loop });
+  });
+
+  it("does not append a loop-end row while the loop is active", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [userEntry("u1", "2026-01-01T00:00:00Z")],
+      loop: makeLoop({ active: true, lastStopReason: null }),
+    });
+
+    expect(rows.some((row) => row.kind === "loop-end")).toBe(false);
+  });
+
+  it("does not append a loop-end row without a stop reason or loop", () => {
+    const withoutReason = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [userEntry("u1", "2026-01-01T00:00:00Z")],
+      loop: makeLoop({ lastStopReason: null }),
+    });
+    expect(withoutReason.some((row) => row.kind === "loop-end")).toBe(false);
+
+    const withoutLoop = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [userEntry("u1", "2026-01-01T00:00:00Z")],
+    });
+    expect(withoutLoop.some((row) => row.kind === "loop-end")).toBe(false);
+  });
+
+  it("keeps the loop-end row stable across renders until the loop state changes", () => {
+    const timelineEntries = [userEntry("u1", "2026-01-01T00:00:00Z")];
+    const rowsFor = (loop: ThreadLoop): MessagesTimelineRow[] =>
+      deriveMessagesTimelineRows({
+        ...baseInput,
+        timelineEntries,
+        loop,
+      });
+
+    const first = computeStableMessagesTimelineRows(rowsFor(makeLoop()), {
+      byId: new Map(),
+      result: [],
+    });
+    const unchanged = computeStableMessagesTimelineRows(rowsFor(makeLoop()), first);
+    expect(unchanged).toBe(first);
+
+    const changed = computeStableMessagesTimelineRows(
+      rowsFor(makeLoop({ lastStopReason: "user_stop", updatedAt: "2026-01-01T00:20:00Z" })),
+      unchanged,
+    );
+    expect(changed).not.toBe(unchanged);
+    expect(changed.result.at(-1)).not.toBe(unchanged.result.at(-1));
   });
 });
 

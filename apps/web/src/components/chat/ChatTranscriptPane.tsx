@@ -45,6 +45,7 @@ interface ChatTranscriptPaneProps {
   hasMessages: boolean;
   isRevertingCheckpoint: boolean;
   isWorking: boolean;
+  loop?: ComponentProps<typeof MessagesTimeline>["loop"];
   followLiveOutput: boolean;
   listRef: RefObject<LegendListRef | null>;
   timelineControllerRef?: RefObject<MessagesTimelineController | null>;
@@ -102,6 +103,7 @@ export function ChatTranscriptPane({
   hasMessages,
   isRevertingCheckpoint,
   isWorking,
+  loop,
   followLiveOutput,
   listRef,
   timelineControllerRef,
@@ -188,6 +190,7 @@ export function ChatTranscriptPane({
             hasMessages={hasMessages}
             isWorking={isWorking}
             worktreeSetup={worktreeSetup}
+            loop={loop ?? null}
             activeTurnId={activeTurnId ?? null}
             activeTurnInProgress={activeTurnInProgress}
             activeTurnStartedAt={activeTurnStartedAt}

@@ -3,7 +3,12 @@
 // Layer: Web chat presentation helpers
 // Exports: row derivation, structural sharing, copy/timer helpers
 
-import { type MessageId, type ThreadTurnPurpose, type TurnId } from "@synara/contracts";
+import {
+  type MessageId,
+  type ThreadLoop,
+  type ThreadTurnPurpose,
+  type TurnId,
+} from "@synara/contracts";
 import { type TimelineEntry, type WorkLogEntry, formatElapsed } from "../../session-logic";
 import { normalizeCompactToolLabel as normalizeCompactToolLabelValue } from "../../lib/toolCallLabel";
 import {
@@ -258,6 +263,14 @@ export type MessagesTimelineRow =
       id: string;
       steps: ReadonlyArray<WorktreeSetupStep>;
       open: boolean;
+    }
+  | {
+      // Durable transcript record left behind when a `/loop` turns off. Derived
+      // purely from the thread's loop projection (never a fake message), so it
+      // disappears if a new loop activates.
+      kind: "loop-end";
+      id: "loop-end";
+      loop: ThreadLoop;
     };
 
 export interface StableMessagesTimelineRowsState {
@@ -482,6 +495,7 @@ export function deriveMessagesTimelineRows(input: {
   activeTurnStartedAt: string | null;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
+  loop?: ThreadLoop | null | undefined;
 }): MessagesTimelineRow[] {
   const nextRows: MessagesTimelineRow[] = [];
   const timelineMessages = input.timelineEntries.flatMap((entry) =>
@@ -675,6 +689,12 @@ export function deriveMessagesTimelineRows(input: {
       id: "working-header-row",
       createdAt: input.activeTurnStartedAt,
     });
+  }
+
+  // A finished loop leaves a durable transcript record at the tail so the stop
+  // reason survives the composer chip's TTL and page refreshes.
+  if (input.loop && !input.loop.active && input.loop.lastStopReason != null) {
+    nextRows.push({ kind: "loop-end", id: "loop-end", loop: input.loop });
   }
 
   return nextRows;
@@ -1094,6 +1114,15 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
     case "proposed-plan":
       return a.proposedPlan === (b as typeof a).proposedPlan;
+
+    case "loop-end": {
+      const bl = (b as typeof a).loop;
+      return (
+        a.loop.lastStopReason === bl.lastStopReason &&
+        a.loop.iteration === bl.iteration &&
+        a.loop.updatedAt === bl.updatedAt
+      );
+    }
 
     case "work":
       return (
