@@ -2271,9 +2271,28 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
 
       if (decision.type === "wait") {
-        // Waits never persist: a re-evaluation on a later signal re-derives the
-        // same error accounting from the same authoritative state.
-        return [];
+        // Waits persist no accounting, but must still produce an event: a
+        // zero-event command is rejected with a durable receipt, permanently
+        // burning this deterministic commandId. Re-emitting the unchanged loop
+        // with a bumped updatedAt rotates the next continuation commandId so a
+        // later signal can retry.
+        const loop: ThreadLoop = {
+          ...thread.loop,
+          updatedAt: command.createdAt,
+        };
+        return {
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          }),
+          type: "thread.loop-set",
+          payload: {
+            threadId: command.threadId,
+            loop,
+          },
+        };
       }
       if (decision.type === "off") {
         const loop: ThreadLoop = {

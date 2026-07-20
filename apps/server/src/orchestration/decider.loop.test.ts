@@ -654,6 +654,33 @@ describe("decider loop commands", () => {
     });
   });
 
+  it("bumps loop.updatedAt on thread.loop.continue when the decision is wait", async () => {
+    const readModel = await addActiveTurn(await projectLoopSet(await makeReadModelWithThread()), {
+      turnId: "turn-running",
+      messageId: "msg-running-user",
+    });
+    const later = "2026-07-19T12:30:00.000Z";
+
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.loop.continue",
+          commandId: asCommandId("cmd-loop-continue-wait"),
+          threadId: asThreadId("thread-loop"),
+          createdAt: later,
+        },
+        readModel,
+      }),
+    );
+    const events = Array.isArray(result) ? result : [result];
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe("thread.loop-set");
+    expect(events[0]?.payload).toMatchObject({
+      threadId: asThreadId("thread-loop"),
+      loop: { active: true, iteration: 0, updatedAt: later },
+    });
+  });
+
   it("emits thread.loop-off on thread.loop.continue for a deleted thread", async () => {
     const readModel = await deleteThread(await projectLoopSet(await makeReadModelWithThread()));
 
