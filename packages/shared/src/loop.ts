@@ -13,9 +13,16 @@ import {
 
 export type LoopBudget = { kind: "count"; value: number } | { kind: "duration"; seconds: number };
 
+export type LoopParseErrorReason =
+  | "invalid_budget"
+  | "missing_budget"
+  | "ambiguous_second_budget"
+  | "prompt_starts_with_slash"
+  | "prompt_too_long";
+
 export type LoopCommandParseResult =
   | { kind: "valid"; budget: LoopBudget | null; prompt: string | null }
-  | { kind: "invalid"; reason: string };
+  | { kind: "invalid"; reason: LoopParseErrorReason };
 
 const COUNT_RE = /^[1-9][0-9]*$/;
 const DURATION_RE = /^([1-9][0-9]*)(s|m|min|mins|h|hr|hrs)$/i;

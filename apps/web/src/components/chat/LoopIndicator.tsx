@@ -41,6 +41,8 @@ function formatStopReason(reason: NonNullable<ThreadLoop["lastStopReason"]>): st
     case "user_stop":
     case "toggled_off":
       return "stopped";
+    case "replaced_by_manual_policy":
+      return "replaced by manual send";
     case "attachments_not_supported":
       return "attachments not supported";
     case "prompt_invalid":
@@ -52,7 +54,7 @@ function formatStopReason(reason: NonNullable<ThreadLoop["lastStopReason"]>): st
     case "thread_unrunnable":
       return "thread unavailable";
     default:
-      return reason;
+      return reason satisfies never;
   }
 }
 
@@ -123,6 +125,12 @@ function loopOffToast(reason: NonNullable<ThreadLoop["lastStopReason"]>) {
         title: "Loop stopped",
         description: "Invalid loop prompt.",
       };
+    case "replaced_by_manual_policy":
+      return {
+        type: "info" as const,
+        title: "Loop stopped",
+        description: "Your manual message replaced the loop, so it turned off.",
+      };
     case "user_stop":
     case "toggled_off":
       return {
@@ -131,10 +139,7 @@ function loopOffToast(reason: NonNullable<ThreadLoop["lastStopReason"]>) {
         description: "Loop stopped by user.",
       };
     default:
-      return {
-        type: "info" as const,
-        title: "Loop stopped",
-      };
+      return reason satisfies never;
   }
 }
 

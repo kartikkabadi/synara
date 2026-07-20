@@ -13,7 +13,7 @@ import {
   buildPromptThreadTitleFallback,
   GENERIC_CHAT_THREAD_TITLE,
 } from "@synara/shared/chatThreads";
-import { parseLoopCommand } from "@synara/shared/loop";
+import { parseLoopCommand, type LoopParseErrorReason } from "@synara/shared/loop";
 import { deriveAssociatedWorktreeMetadata } from "@synara/shared/threadWorkspace";
 import { useCallback, useEffect, useState } from "react";
 import { newCommandId, newMessageId, newThreadId } from "../lib/utils";
@@ -56,6 +56,23 @@ type SlashCommandItem = Extract<ComposerCommandItem, { type: "slash-command" }>;
 
 function wasPromptReplacementApplied(result: number | false): boolean {
   return result !== false;
+}
+
+function formatLoopParseError(reason: LoopParseErrorReason): string {
+  switch (reason) {
+    case "missing_budget":
+      return "Add a budget first, e.g. `/loop 10 fix the tests` or `/loop 30m`.";
+    case "invalid_budget":
+      return "That budget isn't valid. Use a count up to 100 (`/loop 10`) or a duration (`/loop 30m`, `/loop 2h`).";
+    case "ambiguous_second_budget":
+      return "The prompt can't start with a second budget. Quote or reword it, e.g. `/loop 10 run 5 checks`.";
+    case "prompt_starts_with_slash":
+      return "The loop prompt can't start with `/`. Try `/loop 10 fix the tests`.";
+    case "prompt_too_long":
+      return "That loop prompt is too long. Shorten it and try again.";
+    default:
+      return reason satisfies never;
+  }
 }
 
 export function useComposerSlashCommands(input: {
@@ -639,7 +656,7 @@ export function useComposerSlashCommands(input: {
         toastManager.add({
           type: "warning",
           title: "Invalid /loop command",
-          description: `Could not parse loop: ${parsed.reason}`,
+          description: formatLoopParseError(parsed.reason),
         });
         return;
       }
