@@ -210,6 +210,14 @@ export function useProviderModelCatalog(input: {
     piModelDiscoveryEnabled &&
     !hasResolvedPiModelDiscovery &&
     isInitialModelDiscoveryPending(piDynamicModelsQuery);
+  const droidModelDiscoveryEnabled = selectedProvider === "droid";
+  const hasResolvedDroidModelDiscovery =
+    droidDynamicModelsQuery.data?.source === "droid-acp" &&
+    (droidDynamicModelsQuery.data.models.length ?? 0) > 0;
+  const droidModelDiscoveryPending =
+    droidModelDiscoveryEnabled &&
+    !hasResolvedDroidModelDiscovery &&
+    isInitialModelDiscoveryPending(droidDynamicModelsQuery);
   const antigravityModelDiscoveryPending =
     !(
       antigravityModelsQuery.data?.source === "antigravity.cli" &&
@@ -297,7 +305,7 @@ export function useProviderModelCatalog(input: {
     cursorRuntimeModels,
     customModelsByProvider,
     devinDynamicModelsQuery.data,
-    antigravityModelsQuery.data,
+    droidDynamicModelsQuery.data,
     grokDynamicModelsQuery.data,
     kiloDynamicModelsQuery.data,
     modelHintByProvider,
@@ -310,6 +318,7 @@ export function useProviderModelCatalog(input: {
       antigravity: antigravityModelDiscoveryPending,
       cursor: cursorModelDiscoveryPending,
       devin: devinModelDiscoveryPending,
+      droid: droidModelDiscoveryPending,
       kilo: kiloModelDiscoveryPending,
       opencode: openCodeModelDiscoveryPending,
       pi: piModelDiscoveryPending,
@@ -318,6 +327,7 @@ export function useProviderModelCatalog(input: {
       antigravityModelDiscoveryPending,
       cursorModelDiscoveryPending,
       devinModelDiscoveryPending,
+      droidModelDiscoveryPending,
       kiloModelDiscoveryPending,
       openCodeModelDiscoveryPending,
       piModelDiscoveryPending,
@@ -345,7 +355,7 @@ export function useProviderModelCatalog(input: {
       codexDynamicModelsQuery.data?.models,
       cursorRuntimeModels,
       devinDynamicModelsQuery.data?.models,
-      antigravityModelsQuery.data?.models,
+      droidDynamicModelsQuery.data?.models,
       grokDynamicModelsQuery.data?.models,
       kiloDynamicModelsQuery.data?.models,
       openCodeDynamicModelsQuery.data?.models,
