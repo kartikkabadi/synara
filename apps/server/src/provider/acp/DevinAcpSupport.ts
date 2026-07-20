@@ -19,7 +19,7 @@ import {
   type AcpSessionRuntimeShape,
   type AcpSpawnInput,
 } from "./AcpSessionRuntime.ts";
-import { buildAcpSpawnEnv } from "./acpSpawnEnv.ts";
+import { buildProviderChildEnvironment } from "../../providerChildEnvironment.ts";
 
 export interface DevinAcpRuntimeSettings {
   readonly binaryPath?: string;
@@ -58,12 +58,15 @@ export function buildDevinAcpSpawnInput(
   // The Devin ACP server expects `WINDSURF_API_KEY`. If only the lowercase
   // variant is present, normalize it to the canonical key for the child.
   const apiKey = resolveDevinApiKeyEnv();
-  const extraEnv = apiKey ? { extraEnv: { WINDSURF_API_KEY: apiKey } } : {};
+  const overrides: NodeJS.ProcessEnv = apiKey ? { WINDSURF_API_KEY: apiKey } : {};
   return {
     command: devinSettings?.binaryPath?.trim() || "devin",
     args: ["acp"],
     cwd,
-    env: buildAcpSpawnEnv({ extraPrefixes: ["DEVIN_", "WINDSURF_"], ...extraEnv }),
+    env: buildProviderChildEnvironment({
+      provider: "devin",
+      overrides,
+    }),
   };
 }
 

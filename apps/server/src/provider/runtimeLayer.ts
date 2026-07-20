@@ -81,7 +81,7 @@ export function makeServerProviderLayer(
     ).pipe(Layer.provide(agentGatewayCredentialsLayer));
     const devinAdapterLayer = makeDevinAdapterLive(
       nativeEventLogger ? { nativeEventLogger } : undefined,
-    );
+    ).pipe(Layer.provide(agentGatewayCredentialsLayer));
     const piAdapterLayer = makePiAdapterLive(
       nativeEventLogger ? { nativeEventLogger } : undefined,
     ).pipe(Layer.provide(agentGatewayCredentialsLayer));

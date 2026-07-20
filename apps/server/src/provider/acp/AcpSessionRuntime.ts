@@ -41,7 +41,6 @@ import {
   type AcpSessionModeState,
   type AcpToolCallState,
 } from "./AcpRuntimeModel.ts";
-import { trackAcpProcess, untrackAcpProcess } from "./acpProcessCleanup.ts";
 
 const CONFIG_OPTION_UPDATE_TIMEOUT = "5 seconds";
 const ACP_INCOMING_CHUNK_QUEUE_CAPACITY = 64;
@@ -831,14 +830,6 @@ const makeAcpSessionRuntime = (
       );
 
     yield* Effect.addFinalizer(() => teardownAcpChildProcess(child, options.teardownProcessTree));
-
-    trackAcpProcess(child.pid);
-    yield* Effect.forkIn(runtimeScope)(
-      child.exitCode.pipe(
-        Effect.tap(() => Effect.sync(() => untrackAcpProcess(child.pid))),
-        Effect.ignore,
-      ),
-    );
 
     const acp = yield* makeOfficialSdkClient(child, runtimeScope, options.protocolLogging);
 
