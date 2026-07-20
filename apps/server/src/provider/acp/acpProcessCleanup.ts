@@ -6,17 +6,30 @@
 
 import { execSync } from "node:child_process";
 
+const isWindows = process.platform === "win32";
+
 const trackedPids = new Set<number>();
 
-export function killTrackedProcesses(): void {
-  const pids = [...trackedPids];
-  trackedPids.clear();
-  for (const pid of pids) {
+function killProcessTree(pid: number, force: boolean): void {
+  if (isWindows) {
     try {
-      process.kill(pid, "SIGTERM");
+      // /T terminates the process and any child processes started by it.
+      execSync(`taskkill ${force ? "/F " : ""}/T /PID ${pid}`, {
+        stdio: "ignore",
+        timeout: 500,
+      });
     } catch {
-      // process may already be gone
+      // process may already be gone, or taskkill is unavailable.
     }
+    return;
+  }
+
+  try {
+    process.kill(pid, force ? "SIGKILL" : "SIGTERM");
+  } catch {
+    // process may already be gone
+  }
+  if (!force) {
     try {
       // Best-effort synchronous cleanup of any immediate children so they
       // are not reparented to init when the parent exits.
@@ -27,11 +40,15 @@ export function killTrackedProcesses(): void {
     } catch {
       // ignore
     }
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      // process may already be gone
-    }
+  }
+}
+
+export function killTrackedProcesses(): void {
+  const pids = [...trackedPids];
+  trackedPids.clear();
+  for (const pid of pids) {
+    killProcessTree(pid, false);
+    killProcessTree(pid, true);
   }
 }
 
