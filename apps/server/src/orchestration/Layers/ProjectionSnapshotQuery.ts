@@ -2394,40 +2394,39 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             return Option.none<OrchestrationThreadShell>();
           }
 
-          const [latestTurnRow, sessionRow, loopRow, hasPendingTurnStart] =
-            yield* Effect.all([
-              getLatestTurnRowByThread({ threadId }).pipe(
-                Effect.mapError(
-                  toPersistenceSqlOrDecodeError(
-                    "ProjectionSnapshotQuery.getThreadShellById:getLatestTurn:query",
-                    "ProjectionSnapshotQuery.getThreadShellById:getLatestTurn:decodeRow",
-                  ),
+          const [latestTurnRow, sessionRow, loopRow, hasPendingTurnStart] = yield* Effect.all([
+            getLatestTurnRowByThread({ threadId }).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getThreadShellById:getLatestTurn:query",
+                  "ProjectionSnapshotQuery.getThreadShellById:getLatestTurn:decodeRow",
                 ),
               ),
-              getThreadSessionRowByThread({ threadId }).pipe(
-                Effect.mapError(
-                  toPersistenceSqlOrDecodeError(
-                    "ProjectionSnapshotQuery.getThreadShellById:getSession:query",
-                    "ProjectionSnapshotQuery.getThreadShellById:getSession:decodeRow",
-                  ),
+            ),
+            getThreadSessionRowByThread({ threadId }).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getThreadShellById:getSession:query",
+                  "ProjectionSnapshotQuery.getThreadShellById:getSession:decodeRow",
                 ),
               ),
-              getThreadLoopRowByThread({ threadId }).pipe(
-                Effect.mapError(
-                  toPersistenceSqlOrDecodeError(
-                    "ProjectionSnapshotQuery.getThreadShellById:getLoop:query",
-                    "ProjectionSnapshotQuery.getThreadShellById:getLoop:decodeRow",
-                  ),
+            ),
+            getThreadLoopRowByThread({ threadId }).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getThreadShellById:getLoop:query",
+                  "ProjectionSnapshotQuery.getThreadShellById:getLoop:decodeRow",
                 ),
               ),
-              hasPendingTurnStartForThread(threadId).pipe(
-                Effect.mapError(
-                  toPersistenceSqlError(
-                    "ProjectionSnapshotQuery.getThreadShellById:hasPendingTurnStart:query",
-                  ),
+            ),
+            hasPendingTurnStartForThread(threadId).pipe(
+              Effect.mapError(
+                toPersistenceSqlError(
+                  "ProjectionSnapshotQuery.getThreadShellById:hasPendingTurnStart:query",
                 ),
               ),
-            ]);
+            ),
+          ]);
 
           return Option.some(
             toProjectedThreadShellFromStoredSummary({

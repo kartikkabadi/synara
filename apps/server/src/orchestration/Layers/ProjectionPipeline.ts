@@ -1,8 +1,4 @@
-import {
-  ApprovalRequestId,
-  CommandId,
-  type OrchestrationEvent,
-} from "@synara/contracts";
+import { ApprovalRequestId, CommandId, type OrchestrationEvent } from "@synara/contracts";
 import {
   addPinnedMessage,
   removePinnedMessage,
