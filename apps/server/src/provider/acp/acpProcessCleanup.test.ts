@@ -1,14 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { spawn } from "node:child_process";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as childProcess from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import readline from "node:readline";
+
+import { killTrackedProcesses, trackAcpProcess } from "./acpProcessCleanup";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function readReadyLine(
   reader: readline.Interface,
-  proc: ReturnType<typeof spawn>,
+  proc: ReturnType<typeof childProcess.spawn>,
 ): Promise<number> {
   const stderr: string[] = [];
   if (!proc.stderr) {
@@ -47,7 +49,7 @@ describe("acpProcessCleanup", () => {
   it("kills tracked descendants after coordinated async shutdown completes", async () => {
     const fixture = path.join(__dirname, "acpProcessCleanup.subprocessTest.ts");
     const bunExe = (globalThis as unknown as { Bun?: { execPath: string } }).Bun?.execPath ?? "bun";
-    const proc = spawn(bunExe, [fixture], {
+    const proc = childProcess.spawn(bunExe, [fixture], {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
@@ -94,5 +96,97 @@ describe("acpProcessCleanup", () => {
     reader.close();
 
     expect(await waitUntilDead(childPid, 2000)).toBe(true);
+  });
+
+  describe("killTrackedProcesses platform branches", () => {
+    const originalPlatform = process.platform;
+    let execSyncMock: ReturnType<typeof vi.fn>;
+    let processKillSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(async () => {
+      execSyncMock = vi.fn().mockImplementation(() => Buffer.from(""));
+      processKillSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      vi.doUnmock("node:child_process");
+      Object.defineProperty(process, "platform", {
+        value: originalPlatform,
+        configurable: true,
+      });
+    });
+
+    async function loadCleanupModule() {
+      vi.resetModules();
+      return import("./acpProcessCleanup");
+    }
+
+    it("uses taskkill /T and /F on Windows", async () => {
+      vi.doMock("node:child_process", async () => ({
+        ...(await import("node:child_process")),
+        execSync: execSyncMock,
+      }));
+      Object.defineProperty(process, "platform", {
+        value: "win32",
+        configurable: true,
+      });
+
+      const { trackAcpProcess: track, killTrackedProcesses: kill } = await loadCleanupModule();
+
+      track(12345);
+      kill();
+
+      expect(execSyncMock).toHaveBeenCalledWith("taskkill /T /PID 12345", {
+        stdio: "ignore",
+        timeout: 500,
+      });
+      expect(execSyncMock).toHaveBeenCalledWith("taskkill /F /T /PID 12345", {
+        stdio: "ignore",
+        timeout: 500,
+      });
+      expect(processKillSpy).not.toHaveBeenCalled();
+    });
+
+    it("uses SIGTERM, pkill, then SIGKILL on POSIX", async () => {
+      vi.doMock("node:child_process", async () => ({
+        ...(await import("node:child_process")),
+        execSync: execSyncMock,
+      }));
+
+      const { trackAcpProcess: track, killTrackedProcesses: kill } = await loadCleanupModule();
+
+      track(12345);
+      kill();
+
+      expect(processKillSpy).toHaveBeenCalledWith(12345, "SIGTERM");
+      expect(processKillSpy).toHaveBeenCalledWith(12345, "SIGKILL");
+      expect(execSyncMock).toHaveBeenCalledWith("pkill -TERM -P 12345 2>/dev/null || true", {
+        stdio: "ignore",
+        timeout: 500,
+      });
+      expect(execSyncMock).not.toHaveBeenCalledWith(
+        expect.stringContaining("taskkill"),
+        expect.anything(),
+      );
+    });
+
+    it("does not throw when processes are already gone", async () => {
+      vi.doMock("node:child_process", async () => ({
+        ...(await import("node:child_process")),
+        execSync: execSyncMock,
+      }));
+      execSyncMock.mockImplementation(() => {
+        throw new Error("failed");
+      });
+      processKillSpy.mockImplementation(() => {
+        throw new Error("ESRCH");
+      });
+
+      const { trackAcpProcess: track, killTrackedProcesses: kill } = await loadCleanupModule();
+
+      track(12345);
+      expect(() => kill()).not.toThrow();
+    });
   });
 });

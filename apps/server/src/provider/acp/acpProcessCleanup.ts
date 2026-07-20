@@ -6,12 +6,10 @@
 
 import { execSync } from "node:child_process";
 
-const isWindows = process.platform === "win32";
-
 const trackedPids = new Set<number>();
 
 function killProcessTree(pid: number, force: boolean): void {
-  if (isWindows) {
+  if (process.platform === "win32") {
     try {
       // /T terminates the process and any child processes started by it.
       execSync(`taskkill ${force ? "/F " : ""}/T /PID ${pid}`, {
