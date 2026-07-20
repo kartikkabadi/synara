@@ -1,0 +1,177 @@
+// FILE: loopDecision.ts
+// Purpose: Pure continuation policy for thread-local `/loop` mode.
+// Layer: Orchestration decision logic
+// Depends on: @synara/contracts loop types
+
+import {
+  LOOP_DEFAULT_CONSECUTIVE_ERROR_THRESHOLD,
+  type LoopStopReason,
+  type OrchestrationThreadShell,
+  type ThreadLoop,
+  type ThreadTurnPurpose,
+} from "@synara/contracts";
+
+export type LoopWaitReason =
+  | "loop_inactive"
+  | "missing_prompt"
+  | "turn_in_flight"
+  | "turn_start_pending"
+  | "approval_pending"
+  | "user_input_pending"
+  | "plan_mode"
+  | "session_unavailable";
+
+export type LoopDecision =
+  | {
+      type: "off";
+      reason: LoopStopReason;
+      nextConsecutiveErrors: number;
+    }
+  | {
+      type: "wait";
+      why: LoopWaitReason;
+      nextConsecutiveErrors: number;
+    }
+  | {
+      type: "continue";
+      nextIteration: number;
+      nextConsecutiveErrors: number;
+    };
+
+export interface LoopContinuationThreadView {
+  deletedAt: string | null;
+  archivedAt: string | null;
+  parentThreadId: string | null;
+  interactionMode: "default" | "plan" | string;
+  sessionStatus: string | null;
+  sessionActiveTurnId: string | null;
+  latestTurnState: "running" | "completed" | "error" | "interrupted" | null;
+  latestTurnPurpose: ThreadTurnPurpose | null;
+  hasPendingApproval: boolean;
+  hasPendingUserInput: boolean;
+  hasQueuedTurnStart: boolean;
+}
+
+export function buildLoopContinuationThreadView(
+  thread: OrchestrationThreadShell,
+): LoopContinuationThreadView {
+  const latestTurn = thread.latestTurn;
+  const session = thread.session;
+  return {
+    deletedAt: thread.deletedAt ?? null,
+    archivedAt: thread.archivedAt ?? null,
+    parentThreadId: thread.parentThreadId ?? null,
+    interactionMode: thread.interactionMode,
+    sessionStatus: session?.status ?? null,
+    sessionActiveTurnId: session?.activeTurnId ?? null,
+    latestTurnState: latestTurn?.state ?? null,
+    latestTurnPurpose: latestTurn?.purpose ?? null,
+    hasPendingApproval: thread.hasPendingApprovals ?? false,
+    hasPendingUserInput: thread.hasPendingUserInput ?? false,
+    hasQueuedTurnStart: thread.hasPendingTurnStart ?? false,
+  };
+}
+
+// Busy session states that own the provider and cannot accept a new loop turn.
+// Terminal/restartable states (ready, idle, error, stopped, interrupted) are not
+// in this set because a loop turn must be able to restart the provider the same
+// way a manual turn can.
+export const RUNNING_SESSION_STATUSES = new Set(["starting", "running", "stopping"]);
+
+export function effectiveCap(loop: ThreadLoop): number {
+  // Explicit maxIterations is capped by the hard cap so a user-provided budget
+  // can never exceed the global ceiling.
+  return Math.min(loop.maxIterations ?? loop.hardCap, loop.hardCap);
+}
+
+export function chooseStopReason(loop: ThreadLoop): LoopStopReason {
+  if (loop.maxIterations !== null && loop.iteration >= loop.maxIterations) {
+    return "budget_iterations";
+  }
+  return "hard_cap";
+}
+
+/**
+ * Pure continue-on-yield policy (issue #49 section 6). `loop.iteration` counts
+ * loop-owned turns already accepted/dispatched in this activation; a continue
+ * decision proposes `loop.iteration + 1`. Consecutive-error accounting derives
+ * from the latest loop-owned terminal turn of the current activation, and only
+ * commits when a continue/off decision is persisted.
+ */
+export function decideLoopContinuation(input: {
+  loop: ThreadLoop;
+  nowMs: number;
+  thread: LoopContinuationThreadView;
+}): LoopDecision {
+  const { loop, nowMs, thread } = input;
+  const unchanged = { nextConsecutiveErrors: loop.consecutiveErrors };
+
+  if (!loop.active) {
+    return { type: "wait", why: "loop_inactive", ...unchanged };
+  }
+  if (thread.deletedAt !== null) {
+    return { type: "off", reason: "thread_deleted", ...unchanged };
+  }
+  if (thread.archivedAt !== null) {
+    return { type: "off", reason: "thread_archived", ...unchanged };
+  }
+  if (thread.parentThreadId !== null) {
+    return { type: "off", reason: "thread_unrunnable", ...unchanged };
+  }
+  if (loop.endsAt !== null && nowMs >= Date.parse(loop.endsAt)) {
+    return { type: "off", reason: "budget_duration", ...unchanged };
+  }
+  if (loop.iteration >= effectiveCap(loop)) {
+    return { type: "off", reason: chooseStopReason(loop), ...unchanged };
+  }
+  if (loop.prompt === "") {
+    return { type: "wait", why: "missing_prompt", ...unchanged };
+  }
+
+  // Error accounting from the latest loop-owned terminal turn of this
+  // activation. The turn was dispatched as iteration `loop.iteration`, so a
+  // later continue (which advances `iteration`) never recounts it.
+  let nextConsecutiveErrors = loop.consecutiveErrors;
+  const purpose = thread.latestTurnPurpose;
+  const settledCurrentIteration =
+    purpose !== null &&
+    purpose.kind === "loop-iteration" &&
+    purpose.activationId === loop.activationId &&
+    purpose.iteration === loop.iteration;
+  if (settledCurrentIteration) {
+    if (thread.latestTurnState === "completed") {
+      nextConsecutiveErrors = 0;
+    } else if (thread.latestTurnState === "error") {
+      nextConsecutiveErrors = loop.consecutiveErrors + 1;
+      if (nextConsecutiveErrors >= LOOP_DEFAULT_CONSECUTIVE_ERROR_THRESHOLD) {
+        return { type: "off", reason: "consecutive_errors", nextConsecutiveErrors };
+      }
+    }
+  }
+  const settledState = { nextConsecutiveErrors };
+
+  if (thread.sessionActiveTurnId !== null || thread.latestTurnState === "running") {
+    return { type: "wait", why: "turn_in_flight", ...settledState };
+  }
+  if (thread.hasQueuedTurnStart) {
+    return { type: "wait", why: "turn_start_pending", ...settledState };
+  }
+  if (thread.hasPendingApproval) {
+    return { type: "wait", why: "approval_pending", ...settledState };
+  }
+  if (thread.hasPendingUserInput) {
+    return { type: "wait", why: "user_input_pending", ...settledState };
+  }
+  if (thread.interactionMode === "plan") {
+    return { type: "wait", why: "plan_mode", ...settledState };
+  }
+  if (thread.sessionStatus !== null && RUNNING_SESSION_STATUSES.has(thread.sessionStatus)) {
+    return { type: "wait", why: "session_unavailable", ...settledState };
+  }
+
+  return {
+    type: "continue",
+    nextIteration: loop.iteration + 1,
+    ...settledState,
+  };
+}

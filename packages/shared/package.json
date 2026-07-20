@@ -192,6 +192,10 @@
       "types": "./src/cli.ts",
       "import": "./src/cli.ts"
     },
+    "./loop": {
+      "types": "./src/loop.ts",
+      "import": "./src/loop.ts"
+    },
     "./migrationRecovery": {
       "types": "./src/migrationRecovery.ts",
       "import": "./src/migrationRecovery.ts"
