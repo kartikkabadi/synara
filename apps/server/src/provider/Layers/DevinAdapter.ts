@@ -1304,38 +1304,10 @@ function makeProviderAdapter(
           const model = turnModel || ctx.session.model;
           const interactionMode: ProviderInteractionMode =
             input.interactionMode === "plan" ? "plan" : "default";
-          // Run mode/model preflight before claiming the active turn so a
-          // preflight failure doesn't leave the session stuck with a turnId.
-          yield* applyDevinModeSelection({
-            runtime: ctx.acp,
-            threadId: input.threadId,
-            runtimeMode: ctx.session.runtimeMode,
-            interactionMode,
-          });
-          if (turnModel) {
-            yield* ctx.acp
-              .setModel(turnModel)
-              .pipe(
-                Effect.mapError((error) =>
-                  mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", error),
-                ),
-              );
-          }
 
-          const turnId = TurnId.makeUnsafe(crypto.randomUUID());
-          ctx.activeTurnId = turnId;
-          ctx.lastEventTurnId = turnId;
-          ctx.activeTurnFailedToolDetail = undefined;
-          ctx.lastTurnActivityAt = Date.now();
-          ctx.activeInteractionMode = interactionMode;
-          ctx.activePlanAssistantText = "";
-          ctx.completedPlanFingerprint = undefined;
-          ctx.planCaptureSettled = false;
-
-          // Build prompt parts: text (with file attachment context appended) +
-          // image attachments as ACP image content blocks, matching Cursor/Grok.
-          // deps (fileSystem/serverConfig) are only available in the live path;
-          // mock tests don't provide them, so attachments are unsupported in mocks.
+          // Build and validate the prompt before any session mutation, so a
+          // failure to serialize attachments or produce a non-empty payload
+          // cannot wedge the session with an activeTurnId.
           const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
           const serverConfig = deps?.serverConfig ?? null;
           const textWithFileAttachments = serverConfig
@@ -1371,6 +1343,34 @@ function makeProviderAdapter(
                 "Prompt payload is empty: no text and no serializable attachments were produced.",
             });
           }
+
+          // Run mode/model preflight only after the prompt is serializable.
+          yield* applyDevinModeSelection({
+            runtime: ctx.acp,
+            threadId: input.threadId,
+            runtimeMode: ctx.session.runtimeMode,
+            interactionMode,
+          });
+          if (turnModel) {
+            yield* ctx.acp
+              .setModel(turnModel)
+              .pipe(
+                Effect.mapError((error) =>
+                  mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", error),
+                ),
+              );
+          }
+
+          const turnId = TurnId.makeUnsafe(crypto.randomUUID());
+          ctx.activeTurnId = turnId;
+          ctx.lastEventTurnId = turnId;
+          ctx.activeTurnFailedToolDetail = undefined;
+          ctx.lastTurnActivityAt = Date.now();
+          ctx.activeInteractionMode = interactionMode;
+          ctx.activePlanAssistantText = "";
+          ctx.completedPlanFingerprint = undefined;
+          ctx.planCaptureSettled = false;
+
           const { lastError: _lastError, ...sessionWithoutLastError } = ctx.session;
           ctx.session = {
             ...sessionWithoutLastError,
@@ -1379,15 +1379,6 @@ function makeProviderAdapter(
             ...(model ? { model } : {}),
             updatedAt: yield* nowIso(),
           };
-
-          yield* publish({
-            type: "turn.started",
-            ...(yield* makeEventStamp()),
-            provider: PROVIDER,
-            threadId: input.threadId,
-            turnId,
-            payload: model ? { model } : {},
-          });
 
           const runPrompt = ctx.acp.prompt({ prompt: promptParts }).pipe(
             Effect.mapError((error) =>
@@ -1508,7 +1499,42 @@ function makeProviderAdapter(
             Effect.ignoreCause({ log: true }),
             Effect.forkIn(ctx.scope),
           );
-          ctx.activePromptFiber = yield* runPrompt;
+
+          yield* Effect.gen(function* () {
+            yield* publish({
+              type: "turn.started",
+              ...(yield* makeEventStamp()),
+              provider: PROVIDER,
+              threadId: input.threadId,
+              turnId,
+              payload: model ? { model } : {},
+            });
+            const fiber = yield* runPrompt;
+            ctx.activePromptFiber = fiber;
+          }).pipe(
+            Effect.onError(() =>
+              Effect.gen(function* () {
+                if (!clearActiveTurn(ctx, turnId)) return;
+                const { activeTurnId: _activeTurnId, ...sessionRest } = ctx.session;
+                ctx.session = {
+                  ...sessionRest,
+                  status: "ready",
+                  updatedAt: yield* nowIso(),
+                };
+              }),
+            ),
+            Effect.onInterrupt(
+              Effect.gen(function* () {
+                if (!clearActiveTurn(ctx, turnId)) return;
+                const { activeTurnId: _activeTurnId, ...sessionRest } = ctx.session;
+                ctx.session = {
+                  ...sessionRest,
+                  status: "ready",
+                  updatedAt: yield* nowIso(),
+                };
+              }),
+            ),
+          );
 
           yield* forkAcpTurnIdleWatchdog({
             idleTimeoutMs: DEVIN_TURN_IDLE_TIMEOUT_MS,
