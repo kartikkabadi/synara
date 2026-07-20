@@ -708,7 +708,7 @@ describe("LoopReactor", () => {
     await runtime.dispose();
   });
 
-  it("dispatches continue on settlement even when loop.iteration advanced for a queued manual replacement", async () => {
+  it("does not dispatch continue while a queued turn start is pending", async () => {
     const loop = makeLoop({ iteration: 2, consecutiveErrors: 1 });
     const thread = makeThread({
       loop,
@@ -758,12 +758,7 @@ describe("LoopReactor", () => {
 
     const commands = await Effect.runPromise(Ref.get(dispatchLog));
     const continueCommand = commands.find((command) => command.type === "thread.loop.continue");
-    expect(continueCommand).toBeDefined();
-    expect(continueCommand).toMatchObject({
-      threadId: thread.id,
-      commandId: `loop-continue:${thread.id}:${loop.updatedAt}:${loop.iteration}`,
-      expectedUpdatedAt: loop.updatedAt,
-    });
+    expect(continueCommand).toBeUndefined();
 
     await Effect.runPromise(Scope.close(scope, Exit.void));
     await runtime.dispose();
