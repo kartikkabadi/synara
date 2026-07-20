@@ -42,6 +42,15 @@ export const DESKTOP_IPC_CHANNELS = {
     error: "desktop:appsnap-error",
     state: "desktop:appsnap-state",
   },
+  island: {
+    getContext: "desktop:island-get-context",
+    setIgnoreMouse: "desktop:island-set-ignore-mouse",
+    setState: "desktop:island-set-state",
+    focusThread: "desktop:island-focus-thread",
+    getEnabled: "desktop:island-get-enabled",
+    setEnabled: "desktop:island-set-enabled",
+    stateChanged: "desktop:island-state-changed",
+  },
   browser: {
     state: "desktop:browser-state",
     open: "desktop:browser-open",
@@ -70,5 +79,6 @@ export const DESKTOP_IPC_CHANNELS = {
 
 export const BROWSER_IPC_CHANNELS = DESKTOP_IPC_CHANNELS.browser;
 export const APPSNAP_IPC_CHANNELS = DESKTOP_IPC_CHANNELS.appSnap;
+export const ISLAND_IPC_CHANNELS = DESKTOP_IPC_CHANNELS.island;
 export const DESKTOP_WS_URL_CHANNEL = DESKTOP_IPC_CHANNELS.wsUrl;
 export const SERVER_TRANSCRIBE_VOICE_CHANNEL = DESKTOP_IPC_CHANNELS.transcribeVoice;
