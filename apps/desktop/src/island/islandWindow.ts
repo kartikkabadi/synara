@@ -54,7 +54,7 @@ export class IslandWindowManager {
   #options: IslandWindowManagerOptions;
   #window: BrowserWindow | null = null;
   #state: IslandWindowState = "collapsed";
-  #displayListenersAttached = false;
+  #detachDisplayListeners: (() => void) | null = null;
 
   constructor(options: IslandWindowManagerOptions) {
     this.#options = options;
@@ -154,6 +154,8 @@ export class IslandWindowManager {
 
   destroy(): void {
     globalShortcut.unregister(ISLAND_GLOBAL_SHORTCUT);
+    this.#detachDisplayListeners?.();
+    this.#detachDisplayListeners = null;
     const window = this.#window;
     this.#window = null;
     if (window && !window.isDestroyed()) {
@@ -208,11 +210,15 @@ export class IslandWindowManager {
   }
 
   #attachDisplayListeners(): void {
-    if (this.#displayListenersAttached) return;
-    this.#displayListenersAttached = true;
+    if (this.#detachDisplayListeners) return;
     const reanchor = () => this.reanchor();
     screen.on("display-metrics-changed", reanchor);
     screen.on("display-added", reanchor);
     screen.on("display-removed", reanchor);
+    this.#detachDisplayListeners = () => {
+      screen.removeListener("display-metrics-changed", reanchor);
+      screen.removeListener("display-added", reanchor);
+      screen.removeListener("display-removed", reanchor);
+    };
   }
 }
