@@ -23,6 +23,7 @@ import {
   ThreadId,
   type ProviderSession,
   type RuntimeMode,
+  type ThreadTurnPurpose,
   TurnId,
 } from "@synara/contracts";
 import {
@@ -635,7 +636,44 @@ const make = Effect.gen(function* () {
       messageId: event.payload.messageId,
       dispatchMode: event.payload.dispatchMode,
       createdAt: event.payload.createdAt,
+      ...(event.payload.purpose?.kind === "loop-iteration"
+        ? {
+            activationId: event.payload.purpose.activationId,
+            iteration: event.payload.purpose.iteration,
+          }
+        : {}),
     });
+
+  // Minimal dispatch gate for loop-owned turns: the authoritative ThreadLoop
+  // must still be active on the same activation, and the turn must carry the
+  // activation's current dispatched iteration count. A stale loop turn is
+  // dropped and its queued promotion rows for that activation are retired.
+  const verifyLoopTurnAuthority = Effect.fnUntraced(function* (input: {
+    readonly threadId: ThreadId;
+    readonly purpose: ThreadTurnPurpose;
+    readonly createdAt: string;
+  }) {
+    const thread = yield* resolveThread(input.threadId);
+    const loop = thread?.loop ?? null;
+    const authorized =
+      thread !== undefined &&
+      thread.deletedAt === null &&
+      thread.archivedAt === null &&
+      loop?.active === true &&
+      input.purpose.activationId === loop.activationId &&
+      input.purpose.iteration === loop.iteration;
+    if (authorized) {
+      return true;
+    }
+    yield* queuedTurnPromotions
+      .cancelByActivation({
+        threadId: input.threadId,
+        activationId: input.purpose.activationId,
+        updatedAt: input.createdAt,
+      })
+      .pipe(Effect.ignore);
+    return false;
+  });
 
   const hasQueuedTurnStart = (threadId: ThreadId, messageId: string) =>
     queuedTurnPromotions.hasPendingMessage({ threadId, messageId });
@@ -1081,6 +1119,9 @@ const make = Effect.gen(function* () {
     readonly runtimeMode?: RuntimeMode;
     readonly interactionMode?: "default" | "plan";
     readonly dispatchMode?: "queue" | "steer";
+    // Re-verified immediately before the external provider call: authority can
+    // be lost between preflight and dispatch (off/toggle/reconfigure racing a
+    // slow session start). Returning false aborts without starting a turn.
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
@@ -1864,6 +1905,21 @@ const make = Effect.gen(function* () {
         return;
       }
 
+      const purpose = event.payload.purpose;
+      if (purpose?.kind === "loop-iteration") {
+        const authorized = yield* verifyLoopTurnAuthority({
+          threadId: event.payload.threadId,
+          purpose,
+          createdAt: event.payload.createdAt,
+        });
+        if (!authorized) {
+          if (isPendingQueuedDispatch) {
+            yield* clearPendingQueuedDispatch;
+          }
+          return;
+        }
+      }
+
       const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
       if (!message || message.role !== "user") {
         yield* appendProviderFailureActivity({
@@ -2106,6 +2162,18 @@ const make = Effect.gen(function* () {
           );
         }
         const nextQueuedTurn = sourceEvent.payload;
+        if (nextQueuedTurn.purpose?.kind === "loop-iteration") {
+          const authorized = yield* verifyLoopTurnAuthority({
+            threadId,
+            purpose: nextQueuedTurn.purpose,
+            createdAt: new Date().toISOString(),
+          });
+          if (!authorized) {
+            // The cancellation retired the promotion row; the claim must not
+            // be released back into the queue.
+            return;
+          }
+        }
         pendingQueuedDispatchBySessionThread.set(sessionThreadId, {
           queuedThreadId: threadId,
           messageId: nextQueuedTurn.messageId,
@@ -2135,6 +2203,7 @@ const make = Effect.gen(function* () {
           ...(nextQueuedTurn.sourceProposedPlan !== undefined
             ? { sourceProposedPlan: nextQueuedTurn.sourceProposedPlan }
             : {}),
+          ...(nextQueuedTurn.purpose !== undefined ? { purpose: nextQueuedTurn.purpose } : {}),
           createdAt: nextQueuedTurn.createdAt,
         });
         const promoted = yield* queuedTurnPromotions.markPromoted({
@@ -2931,6 +3000,15 @@ const make = Effect.gen(function* () {
         }
         case "thread.turn-queued":
           yield* processTurnQueued(event);
+          return;
+        case "thread.loop-off":
+          // Retire queued loop-owned turns for the stopped activation so they
+          // never promote into provider turns after the loop turned off.
+          yield* queuedTurnPromotions.cancelByActivation({
+            threadId: event.payload.threadId,
+            activationId: event.payload.loop.activationId,
+            updatedAt: event.occurredAt,
+          });
           return;
         case "thread.turn-start-requested":
           yield* processTurnStartRequested(event);

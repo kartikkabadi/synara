@@ -10,6 +10,7 @@ export type ProviderIntentEvent = Extract<
       | "thread.session-set"
       | "thread.runtime-mode-set"
       | "thread.turn-queued"
+      | "thread.loop-off"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
       | "thread.task-stop-requested"
@@ -29,6 +30,7 @@ const PROVIDER_INTENT_EVENT_TYPES = new Set<ProviderIntentEvent["type"]>([
   "thread.session-set",
   "thread.runtime-mode-set",
   "thread.turn-queued",
+  "thread.loop-off",
   "thread.turn-start-requested",
   "thread.turn-interrupt-requested",
   "thread.task-stop-requested",
@@ -55,7 +57,8 @@ export const isProviderSideEffectIntent = (event: ProviderIntentEvent): boolean 
   event.type !== "thread.created" &&
   event.type !== "thread.deleted" &&
   event.type !== "thread.session-set" &&
-  event.type !== "thread.turn-queued";
+  event.type !== "thread.turn-queued" &&
+  event.type !== "thread.loop-off";
 
 export const isClaimedProviderIntent = (event: ProviderIntentEvent): boolean =>
   isReplaySafeClaimedProviderIntent(event) || isProviderSideEffectIntent(event);
