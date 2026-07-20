@@ -322,6 +322,9 @@ export function deriveMessagesTimelineRows(input: {
   const durationStartByMessageId = computeMessageDurationStart(timelineMessages);
   const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(timelineMessages);
   const purposeByTurnId = new Map<string, ThreadTurnPurpose>();
+  // Live loop-owned user messages arrive before a turn id exists, so track the
+  // most recent user message's loop purpose positionally as a fallback.
+  let precedingLoopPurpose: ThreadTurnPurpose | null = null;
   let pendingWorkGroup: Extract<MessagesTimelineRow, { kind: "work" }> | null = null;
 
   const groupedEntriesEqual = (
@@ -415,12 +418,11 @@ export function deriveMessagesTimelineRows(input: {
     } else {
       flushPendingWorkGroup();
     }
-    if (
-      message.role === "user" &&
-      message.turnId != null &&
-      message.purpose?.kind === "loop-iteration"
-    ) {
-      purposeByTurnId.set(message.turnId, message.purpose);
+    if (message.role === "user") {
+      precedingLoopPurpose = message.purpose?.kind === "loop-iteration" ? message.purpose : null;
+      if (message.turnId != null && message.purpose?.kind === "loop-iteration") {
+        purposeByTurnId.set(message.turnId, message.purpose);
+      }
     }
 
     const assistantTurnStillInProgress =
@@ -449,7 +451,9 @@ export function deriveMessagesTimelineRows(input: {
         message.role === "user" ? input.revertTurnCountByUserMessageId.get(message.id) : undefined,
       ...(message.role === "assistant"
         ? (() => {
-            const purpose = message.turnId != null ? purposeByTurnId.get(message.turnId) : null;
+            const purpose =
+              (message.turnId != null ? purposeByTurnId.get(message.turnId) : null) ??
+              precedingLoopPurpose;
             return purpose?.kind === "loop-iteration" ? { loopIteration: purpose.iteration } : {};
           })()
         : {}),
