@@ -3,15 +3,27 @@
 // Layer: Desktop island (pure logic, no Electron imports)
 
 import type { IslandNotchInfo, IslandWindowState } from "@synara/contracts";
+import {
+  DEFAULT_NOTCH_WIDTH,
+  ISLAND_EXPANDED_SIZE,
+  islandStateSize,
+  type IslandSize,
+} from "@synara/shared/islandGeometry";
+
+export {
+  DEFAULT_NOTCH_WIDTH,
+  ISLAND_EXPANDED_SIZE,
+  ISLAND_FLOATING_COLLAPSED_SIZE,
+  ISLAND_HOVER_HEIGHT,
+  islandCollapsedSize,
+  islandHoverSize,
+  islandStateSize,
+  type IslandSize,
+} from "@synara/shared/islandGeometry";
 
 export interface IslandRect {
   x: number;
   y: number;
-  width: number;
-  height: number;
-}
-
-export interface IslandSize {
   width: number;
   height: number;
 }
@@ -25,14 +37,6 @@ export interface IslandDisplayMetrics {
 // versus ~24–25pt without a notch. 30 splits the two populations safely.
 export const NOTCH_TOP_INSET_THRESHOLD = 30;
 
-// Electron cannot measure the physical notch width without native code, so the
-// island uses the common MacBook Pro housing width; side extensions keep the
-// status glyphs clear of the camera housing either way.
-export const DEFAULT_NOTCH_WIDTH = 180;
-
-export const ISLAND_EXPANDED_SIZE: IslandSize = { width: 560, height: 320 };
-export const ISLAND_FLOATING_COLLAPSED_SIZE: IslandSize = { width: 180, height: 32 };
-export const ISLAND_HOVER_HEIGHT = 104;
 export const ISLAND_FLOATING_TOP_MARGIN = 6;
 
 export function detectNotch(
@@ -43,25 +47,6 @@ export function detectNotch(
   const topInset = metrics.workArea.y - metrics.bounds.y;
   if (topInset < NOTCH_TOP_INSET_THRESHOLD) return null;
   return { width: DEFAULT_NOTCH_WIDTH, height: topInset };
-}
-
-export function islandCollapsedSize(notch: IslandNotchInfo | null): IslandSize {
-  if (!notch) return ISLAND_FLOATING_COLLAPSED_SIZE;
-  return { width: notch.width + 60, height: notch.height };
-}
-
-export function islandHoverSize(notch: IslandNotchInfo | null): IslandSize {
-  const width = Math.max((notch?.width ?? DEFAULT_NOTCH_WIDTH) + 200, 420);
-  return { width, height: ISLAND_HOVER_HEIGHT };
-}
-
-export function islandStateSize(
-  state: IslandWindowState,
-  notch: IslandNotchInfo | null,
-): IslandSize {
-  if (state === "expanded") return ISLAND_EXPANDED_SIZE;
-  if (state === "hover") return islandHoverSize(notch);
-  return islandCollapsedSize(notch);
 }
 
 // Top-center anchor: flush with the screen top in notch mode (the pill reads

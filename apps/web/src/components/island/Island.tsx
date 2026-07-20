@@ -13,6 +13,7 @@ import {
   type OrchestrationThreadShell,
   type ProviderKind,
 } from "@synara/contracts";
+import { islandStateSize } from "@synara/shared/islandGeometry";
 
 import { ensureNativeApi } from "~/nativeApi";
 import {
@@ -27,20 +28,10 @@ import { cn } from "~/lib/utils";
 const AUTO_POP_MS = 4_000;
 const EXPANDED_IDLE_COLLAPSE_MS = 8_000;
 
-// Mirrors apps/desktop/src/island/islandGeometry.ts: the window is pre-sized to
-// the expanded bounds and only this inner container animates.
-const EXPANDED_SIZE = { width: 560, height: 320 };
-const HOVER_HEIGHT = 104;
-const FLOATING_COLLAPSED_SIZE = { width: 180, height: 32 };
-
+// The window is pre-sized to the expanded bounds (except Linux) and only this
+// inner container animates, using the same sizing as the Electron window.
 function innerSize(state: IslandWindowState, context: IslandDisplayContext | null) {
-  const notch = context?.notch ?? null;
-  if (state === "expanded") return EXPANDED_SIZE;
-  if (state === "hover") {
-    return { width: Math.max((notch?.width ?? 180) + 200, 420), height: HOVER_HEIGHT };
-  }
-  if (notch) return { width: notch.width + 60, height: notch.height };
-  return FLOATING_COLLAPSED_SIZE;
+  return islandStateSize(state, context?.notch ?? null);
 }
 
 const STATUS_DOT_CLASS: Record<IslandSessionStatus, string> = {
@@ -144,14 +135,6 @@ export function Island() {
     // Linux has no click-through forwarding, so the window itself resizes.
     void window.islandBridge?.setState(state);
   }, []);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") applyState("collapsed");
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [applyState]);
 
   const onPointerEnter = useCallback(() => {
     void window.islandBridge?.setIgnoreMouse(false);
