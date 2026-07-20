@@ -1292,4 +1292,74 @@ describe("deriveMessagesTimelineRows", () => {
 
     expect(messageRow(rows, "loop-assistant")?.loopIteration).toBe(3);
   });
+
+  it("labels loop-owned assistant messages positionally before the turn ID is bound", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [
+        {
+          id: "entry-loop-user",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:00Z",
+          message: {
+            id: MessageId.makeUnsafe("loop-user"),
+            role: "user",
+            text: "fix tests",
+            turnId: null,
+            purpose: {
+              kind: "loop-iteration",
+              activationId: "activation-1",
+              iteration: 2,
+            },
+            createdAt: "2026-01-01T00:00:00Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "entry-loop-assistant",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:05Z",
+          message: {
+            id: MessageId.makeUnsafe("loop-assistant"),
+            role: "assistant",
+            text: "Done",
+            turnId: TurnId.makeUnsafe("t-loop"),
+            createdAt: "2026-01-01T00:00:05Z",
+            completedAt: "2026-01-01T00:00:05Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "entry-manual-user",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:10Z",
+          message: {
+            id: MessageId.makeUnsafe("manual-user"),
+            role: "user",
+            text: "one-off question",
+            turnId: null,
+            createdAt: "2026-01-01T00:00:10Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "entry-manual-assistant",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:15Z",
+          message: {
+            id: MessageId.makeUnsafe("manual-assistant"),
+            role: "assistant",
+            text: "Answer",
+            turnId: TurnId.makeUnsafe("t-manual"),
+            createdAt: "2026-01-01T00:00:15Z",
+            completedAt: "2026-01-01T00:00:15Z",
+            streaming: false,
+          },
+        },
+      ],
+    });
+
+    expect(messageRow(rows, "loop-assistant")?.loopIteration).toBe(2);
+    expect(messageRow(rows, "manual-assistant")?.loopIteration).toBeUndefined();
+  });
 });
