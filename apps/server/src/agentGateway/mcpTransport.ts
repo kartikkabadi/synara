@@ -150,10 +150,16 @@ export function makeAgentGatewayMcpTransport(input: {
           ),
         };
       }
-      const callerWriteAuthority =
-        callerThread.value.latestTurn?.state === "running"
-          ? input.credentials.bindWriteAuthority(token, callerThread.value.latestTurn.turnId)
-          : null;
+      const session = callerThread.value.session;
+      const latestTurn = callerThread.value.latestTurn;
+      const isActiveConcreteTurn =
+        latestTurn?.state === "running" &&
+        latestTurn.turnId !== null &&
+        session?.status === "running" &&
+        session.activeTurnId === latestTurn.turnId;
+      const callerWriteAuthority = isActiveConcreteTurn
+        ? input.credentials.bindWriteAuthority(token, latestTurn.turnId)
+        : null;
       const assertCallerTurnActive = () =>
         Effect.gen(function* () {
           if (callerWriteAuthority === null) {
