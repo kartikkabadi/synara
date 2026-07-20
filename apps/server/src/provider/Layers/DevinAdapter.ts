@@ -1845,11 +1845,13 @@ function makeProviderAdapter(
             const { models: discoveredModels } = extractDevinModelsFromConfigOptions(configOptions);
 
             if (discoveredModels.length === 0) {
-              return yield* new ProviderAdapterRequestError({
-                provider: PROVIDER,
-                method: "model/list",
-                detail: "Devin ACP model discovery found no models in config options.",
-              });
+              // A live ACP session that starts and exposes no model catalog is a
+              // legacy/no-catalog runtime; fall back to the static snapshot.
+              return {
+                models: DEVIN_FALLBACK_MODELS,
+                source: "devin.fallback",
+                cached: true,
+              } as ProviderListModelsResult;
             }
 
             return {
@@ -1884,13 +1886,6 @@ function makeProviderAdapter(
                   discovered.models,
                 ),
               ),
-            ),
-            Effect.catch(() =>
-              Effect.succeed({
-                models: DEVIN_FALLBACK_MODELS,
-                source: "devin.fallback",
-                cached: true,
-              } as ProviderListModelsResult),
             ),
           );
 

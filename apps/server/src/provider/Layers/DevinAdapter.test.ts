@@ -692,15 +692,23 @@ describe("DevinAdapterLive", () => {
     ),
   );
 
-  it.effect("falls back to the static catalog when no session is live and discovery fails", () =>
+  it.effect("propagates a typed error when cold discovery fails", () =>
     Effect.gen(function* () {
       const adapter = yield* DevinAdapter;
 
-      const result = yield* adapter.listModels!({ provider: "devin" });
+      const result = yield* adapter.listModels!({ provider: "devin" }).pipe(
+        Effect.match({
+          onSuccess: (value) => ({ ok: true as const, value }),
+          onFailure: (error) => ({ ok: false as const, error }),
+        }),
+      );
 
-      assert.strictEqual(result.source, "devin.fallback");
-      assert.strictEqual(result.cached, true);
-      assert.deepStrictEqual(result.models, DEVIN_FALLBACK_MODELS);
+      assert.strictEqual(result.ok, false);
+      assert.ok(
+        result.error instanceof ProviderAdapterRequestError &&
+          result.error.message.includes("Discovery failed"),
+        `expected discovery error, got ${String(result.error)}`,
+      );
     }).pipe(
       Effect.provide(
         makeDevinAdapterLive({
@@ -813,14 +821,22 @@ describe("DevinAdapterLive", () => {
     );
   });
 
-  it.effect("falls back to static catalog on mock runtime failure", () =>
+  it.effect("propagates a typed error when the mock runtime fails", () =>
     Effect.gen(function* () {
       const adapter = yield* DevinAdapter;
-      const result = yield* adapter.listModels!({ provider: "devin" });
+      const result = yield* adapter.listModels!({ provider: "devin" }).pipe(
+        Effect.match({
+          onSuccess: (value) => ({ ok: true as const, value }),
+          onFailure: (error) => ({ ok: false as const, error }),
+        }),
+      );
 
-      assert.strictEqual(result.source, "devin.fallback");
-      assert.strictEqual(result.cached, true);
-      assert.deepStrictEqual(result.models, DEVIN_FALLBACK_MODELS);
+      assert.strictEqual(result.ok, false);
+      assert.ok(
+        result.error instanceof ProviderAdapterRequestError &&
+          result.error.message.includes("Mock runtime failure"),
+        `expected runtime failure error, got ${String(result.error)}`,
+      );
     }).pipe(
       Effect.provide(
         makeDevinAdapterLive({
