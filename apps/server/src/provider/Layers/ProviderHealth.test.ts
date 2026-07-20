@@ -30,12 +30,14 @@ import {
   makeCheckClaudeProviderStatus,
   makeCheckCodexProviderStatus,
   makeCheckCursorProviderStatus,
+  makeCheckDevinProviderStatus,
   makeCheckGrokProviderStatus,
   makeCheckKiloProviderStatus,
   makeCheckOpenCodeProviderStatus,
   makeProviderHealthLive,
   parseAuthStatusFromOutput,
   parseClaudeAuthStatusFromOutput,
+  parseDevinAuthStatusFromOutput,
   PACKAGE_MANAGED_PROVIDER_UPDATES,
   providerStatusesEqual,
   ProviderHealthLive,
@@ -2309,5 +2311,222 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
       assert.strictEqual(parsed.status, "warning");
       assert.strictEqual(parsed.authStatus, "unknown");
     });
+  });
+
+  // ── parseDevinAuthStatusFromOutput tests ──────────────────────────
+
+  describe("parseDevinAuthStatusFromOutput", () => {
+    it("JSON with auth=true is authenticated", () => {
+      const parsed = parseDevinAuthStatusFromOutput({
+        stdout: '{"auth":true}\n',
+        stderr: "",
+        code: 0,
+      });
+      assert.strictEqual(parsed.status, "ready");
+      assert.strictEqual(parsed.authStatus, "authenticated");
+    });
+
+    it("JSON with auth=false and no API key is unauthenticated", () => {
+      const parsed = parseDevinAuthStatusFromOutput({
+        stdout: '{"auth":false}\n',
+        stderr: "",
+        code: 0,
+      });
+      assert.strictEqual(parsed.status, "error");
+      assert.strictEqual(parsed.authStatus, "unauthenticated");
+    });
+
+    it("JSON with auth=false and API key env falls back to API key authentication", () => {
+      const parsed = parseDevinAuthStatusFromOutput(
+        { stdout: '{"auth":false}\n', stderr: "", code: 0 },
+        { hasApiKeyEnv: true },
+      );
+      assert.strictEqual(parsed.status, "ready");
+      assert.strictEqual(parsed.authStatus, "authenticated");
+      assert.match(parsed.message ?? "", /WINDSURF_API_KEY/);
+    });
+
+    it("JSON without auth marker and no API key is unknown", () => {
+      const parsed = parseDevinAuthStatusFromOutput({
+        stdout: '{"ok":true}\n',
+        stderr: "",
+        code: 0,
+      });
+      assert.strictEqual(parsed.status, "warning");
+      assert.strictEqual(parsed.authStatus, "unknown");
+    });
+
+    it("non-JSON zero exit and no API key defaults to unknown", () => {
+      const parsed = parseDevinAuthStatusFromOutput({
+        stdout: "some status output\n",
+        stderr: "",
+        code: 0,
+      });
+      assert.strictEqual(parsed.status, "warning");
+      assert.strictEqual(parsed.authStatus, "unknown");
+    });
+
+    it("non-JSON zero exit with API key env falls back to API key authentication", () => {
+      const parsed = parseDevinAuthStatusFromOutput(
+        { stdout: "some status output\n", stderr: "", code: 0 },
+        { hasApiKeyEnv: true },
+      );
+      assert.strictEqual(parsed.status, "ready");
+      assert.strictEqual(parsed.authStatus, "authenticated");
+    });
+
+    it("non-JSON unauthenticated keyword is unauthenticated", () => {
+      const parsed = parseDevinAuthStatusFromOutput({
+        stdout: "",
+        stderr: "not logged in\nrun `devin auth login`",
+        code: 1,
+      });
+      assert.strictEqual(parsed.status, "error");
+      assert.strictEqual(parsed.authStatus, "unauthenticated");
+    });
+  });
+
+  // ── checkDevinProviderStatus tests ────────────────────────────────
+
+  describe("checkDevinProviderStatus", () => {
+    function withoutDevinApiKeyEnv<R, E, A>(effect: Effect.Effect<A, E, R>) {
+      const previousWindSurf = process.env.WINDSURF_API_KEY;
+      const previousLowercase = process.env.windsurf_api_key;
+      return Effect.gen(function* () {
+        delete process.env.WINDSURF_API_KEY;
+        delete process.env.windsurf_api_key;
+        return yield* effect;
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (previousWindSurf === undefined) {
+              delete process.env.WINDSURF_API_KEY;
+            } else {
+              process.env.WINDSURF_API_KEY = previousWindSurf;
+            }
+            if (previousLowercase === undefined) {
+              delete process.env.windsurf_api_key;
+            } else {
+              process.env.windsurf_api_key = previousLowercase;
+            }
+          }),
+        ),
+      );
+    }
+
+    function withDevinApiKeyEnv<R, E, A>(effect: Effect.Effect<A, E, R>) {
+      const previousWindSurf = process.env.WINDSURF_API_KEY;
+      const previousLowercase = process.env.windsurf_api_key;
+      return Effect.gen(function* () {
+        process.env.WINDSURF_API_KEY = "test-windsurf-api-key";
+        delete process.env.windsurf_api_key;
+        return yield* effect;
+      }).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (previousWindSurf === undefined) {
+              delete process.env.WINDSURF_API_KEY;
+            } else {
+              process.env.WINDSURF_API_KEY = previousWindSurf;
+            }
+            if (previousLowercase === undefined) {
+              delete process.env.windsurf_api_key;
+            } else {
+              process.env.windsurf_api_key = previousLowercase;
+            }
+          }),
+        ),
+      );
+    }
+
+    it.effect("returns ready when devin is installed and JSON auth is true", () =>
+      withoutDevinApiKeyEnv(
+        Effect.gen(function* () {
+          const status = yield* makeCheckDevinProviderStatus();
+          assert.strictEqual(status.provider, "devin");
+          assert.strictEqual(status.status, "ready");
+          assert.strictEqual(status.available, true);
+          assert.strictEqual(status.authStatus, "authenticated");
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "devin 1.2.0\n", stderr: "", code: 0 };
+              if (joined === "auth status")
+                return { stdout: '{"auth":true}\n', stderr: "", code: 0 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      ),
+    );
+
+    it.effect(
+      "returns warning with unknown auth when devin auth status has no marker and no API key",
+      () =>
+        withoutDevinApiKeyEnv(
+          Effect.gen(function* () {
+            const status = yield* makeCheckDevinProviderStatus();
+            assert.strictEqual(status.provider, "devin");
+            assert.strictEqual(status.status, "warning");
+            assert.strictEqual(status.available, true);
+            assert.strictEqual(status.authStatus, "unknown");
+          }).pipe(
+            Effect.provide(
+              mockSpawnerLayer((args) => {
+                const joined = args.join(" ");
+                if (joined === "--version") return { stdout: "devin 1.2.0\n", stderr: "", code: 0 };
+                if (joined === "auth status") return { stdout: "ok\n", stderr: "", code: 0 };
+                throw new Error(`Unexpected args: ${joined}`);
+              }),
+            ),
+          ),
+        ),
+    );
+
+    it.effect("returns ready using API key when auth status is not explicitly true", () =>
+      withDevinApiKeyEnv(
+        Effect.gen(function* () {
+          const status = yield* makeCheckDevinProviderStatus();
+          assert.strictEqual(status.provider, "devin");
+          assert.strictEqual(status.status, "ready");
+          assert.strictEqual(status.available, true);
+          assert.strictEqual(status.authStatus, "authenticated");
+          assert.match(status.message ?? "", /WINDSURF_API_KEY/);
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "devin 1.2.0\n", stderr: "", code: 0 };
+              if (joined === "auth status") return { stdout: "ok\n", stderr: "", code: 0 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      ),
+    );
+
+    it.effect("includes version advisory when devin CLI is below the recommended minimum", () =>
+      withoutDevinApiKeyEnv(
+        Effect.gen(function* () {
+          const status = yield* makeCheckDevinProviderStatus();
+          assert.strictEqual(status.provider, "devin");
+          assert.strictEqual(status.status, "ready");
+          assert.strictEqual(status.authStatus, "authenticated");
+          assert.match(status.message ?? "", /below the recommended minimum/);
+          assert.match(status.message ?? "", /0\.9\.0/);
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "devin 0.9.0\n", stderr: "", code: 0 };
+              if (joined === "auth status")
+                return { stdout: '{"auth":true}\n', stderr: "", code: 0 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      ),
+    );
   });
 });

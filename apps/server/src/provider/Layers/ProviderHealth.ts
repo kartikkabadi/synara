@@ -1961,7 +1961,18 @@ export function parseDevinAuthStatusFromOutput(
     };
   }
   if (result.code === 0) {
-    return { status: "ready", authStatus: "authenticated" };
+    // A zero exit code without an explicit auth marker only means the CLI ran.
+    // If an API key is configured we can attempt the ACP flow; otherwise stay
+    // conservative and report unknown so the UI doesn't advertise a logged-in
+    // state we have not actually verified.
+    if (options?.hasApiKeyEnv) {
+      return DEVIN_API_KEY_AUTHENTICATED_STATUS;
+    }
+    return {
+      status: "warning",
+      authStatus: "unknown",
+      message: "Could not verify Devin authentication status.",
+    };
   }
 
   if (options?.hasApiKeyEnv) {
