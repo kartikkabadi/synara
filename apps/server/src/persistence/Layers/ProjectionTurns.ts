@@ -114,8 +114,14 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
       `,
   });
 
+  const PendingStartDbRow = ProjectionPendingTurnStart.mapFields(
+    Struct.assign({
+      purpose: Schema.NullOr(Schema.fromJsonString(ThreadTurnPurpose)),
+    }),
+  );
+
   const insertPendingProjectionTurn = SqlSchema.void({
-    Request: ProjectionPendingTurnStart,
+    Request: PendingStartDbRow,
     execute: (row) =>
       sql`
         INSERT INTO projection_turns (
@@ -154,12 +160,6 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
         )
       `,
   });
-
-  const PendingStartDbRow = ProjectionPendingTurnStart.mapFields(
-    Struct.assign({
-      purpose: Schema.NullOr(Schema.fromJsonString(ThreadTurnPurpose)),
-    }),
-  );
 
   const getPendingProjectionTurn = SqlSchema.findOneOption({
     Request: GetProjectionPendingTurnStartInput,
@@ -346,7 +346,9 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
     sql
       .withTransaction(
         clearPendingProjectionTurnsByThread({ threadId: row.threadId }).pipe(
-          Effect.flatMap(() => insertPendingProjectionTurn(row)),
+          Effect.flatMap(() =>
+            insertPendingProjectionTurn({ ...row, purpose: row.purpose ?? null }),
+          ),
         ),
       )
       .pipe(
