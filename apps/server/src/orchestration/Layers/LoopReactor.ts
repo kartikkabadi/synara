@@ -13,6 +13,7 @@ import {
 import { Effect, Layer, Option, Stream } from "effect";
 
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+import { buildLoopContinuationThreadView, decideLoopContinuation } from "../loopDecision.ts";
 import { ProjectionThreadLoopRepository } from "../../persistence/Services/ProjectionThreadLoop.ts";
 import {
   OrchestrationEngineService,
@@ -43,13 +44,26 @@ function makeLoopContinueCommandId(
 
 function dispatchLoopContinue(options: {
   orchestrationEngine: OrchestrationEngineShape;
-  threadId: OrchestrationThread["id"];
+  thread: OrchestrationThreadShell;
   loop: ThreadLoop;
   createdAt: string;
 }): Effect.Effect<void, never> {
-  const { orchestrationEngine, threadId, loop, createdAt } = options;
+  const { orchestrationEngine, thread, loop, createdAt } = options;
+  const threadId = thread.id;
 
   if (!loop.active) {
+    return Effect.void;
+  }
+
+  // Pre-evaluate the pure policy against the same shell state. A wait outcome
+  // must not reach the engine: a command that produces no events is rejected
+  // with a durable receipt, burning this deterministic commandId.
+  const decision = decideLoopContinuation({
+    loop,
+    nowMs: Date.parse(createdAt) || Date.now(),
+    thread: buildLoopContinuationThreadView(thread),
+  });
+  if (decision.type === "wait") {
     return Effect.void;
   }
 
@@ -86,7 +100,12 @@ const makeLoopReactor = Effect.gen(function* () {
       }
       const loop = threadOption.value.loop;
       if (loop?.active === true) {
-        yield* dispatchLoopContinue({ orchestrationEngine, threadId, loop, createdAt });
+        yield* dispatchLoopContinue({
+          orchestrationEngine,
+          thread: threadOption.value,
+          loop,
+          createdAt,
+        });
       }
     });
 
@@ -100,7 +119,7 @@ const makeLoopReactor = Effect.gen(function* () {
       if (thread.loop?.active === true) {
         yield* dispatchLoopContinue({
           orchestrationEngine,
-          threadId: thread.id,
+          thread,
           loop: thread.loop,
           createdAt: now,
         });
