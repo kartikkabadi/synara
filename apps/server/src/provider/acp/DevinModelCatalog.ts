@@ -103,13 +103,40 @@ function inferUpstreamProvider(
   return undefined;
 }
 
+type SlugSegment =
+  | { readonly type: "token"; readonly value: string; readonly start: number; readonly end: number }
+  | { readonly type: "sep"; readonly value: string; readonly start: number; readonly end: number };
+
+function splitSlugSegments(slug: string): ReadonlyArray<SlugSegment> {
+  const segments: SlugSegment[] = [];
+  const regex = /([^-_]+)|([-_]+)/g;
+  let match;
+  while ((match = regex.exec(slug)) !== null) {
+    if (match[1] !== undefined) {
+      segments.push({
+        type: "token",
+        value: match[1],
+        start: match.index,
+        end: regex.lastIndex,
+      });
+    } else {
+      segments.push({
+        type: "sep",
+        value: match[2] ?? "",
+        start: match.index,
+        end: regex.lastIndex,
+      });
+    }
+  }
+  return segments;
+}
+
 export function parseDevinModelSlug(slug: string, displayName: string): ParsedDevinSlug | null {
   const trimmedSlug = slug.trim();
   if (!trimmedSlug) return null;
   if (MODE_VALUES.has(trimmedSlug)) return null;
 
   const isModelPrefix = trimmedSlug.startsWith("MODEL_");
-  const sep = isModelPrefix ? "_" : "-";
   const trimmedDisplayName = displayName.trim();
   const slugEchoed =
     trimmedDisplayName.length > 0 && trimmedDisplayName.toLowerCase() === trimmedSlug.toLowerCase();
@@ -118,27 +145,54 @@ export function parseDevinModelSlug(slug: string, displayName: string): ParsedDe
     : trimmedDisplayName;
   const hadDisplayOverride = slugEchoed && isModelPrefix;
 
-  const parts = trimmedSlug.split(sep);
+  const segments = splitSlugSegments(trimmedSlug);
+  const tokens = segments.filter((s): s is Extract<SlugSegment, { type: "token" }> => s.type === "token");
+
   let effort: string | null = null;
   let fast = false;
   let thinking = false;
   let contextWindow: string | null = null;
-  while (parts.length > 1) {
-    const last = parts[parts.length - 1];
-    if (!last || !SLUG_VARIANT_TOKENS.has(last.toLowerCase())) break;
-    const token = last.toLowerCase();
-    if (EFFORT_TOKENS.has(token) && effort === null) {
-      effort = token;
-    } else if (FAST_TOKENS.has(token) && !fast) {
-      fast = true;
-    } else if (token === "thinking" && !thinking) {
-      thinking = true;
-    } else if (token === "1m" && contextWindow === null) {
-      contextWindow = "1m";
-    }
-    parts.pop();
+
+  // Walk from the end and consume contiguous variant tokens. The separator
+  // immediately before the first consumed variant token marks the boundary
+  // between the base slug and the variant suffix; real Devin slugs can mix
+  // '-' and '_' (e.g. claude-opus-4-8-high_fast or MODEL_SWE_1_7_FAST).
+  let firstVariantTokenIndex = -1;
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const token = tokens[i]!;
+    if (!SLUG_VARIANT_TOKENS.has(token.value.toLowerCase())) break;
+    firstVariantTokenIndex = i;
   }
-  const baseSlug = parts.join(sep);
+
+  let baseSlug: string;
+  if (firstVariantTokenIndex === -1) {
+    baseSlug = trimmedSlug;
+  } else {
+    // Find the separator that precedes the first variant token; base ends there.
+    const firstVariantToken = tokens[firstVariantTokenIndex]!;
+    let boundary = firstVariantToken.start;
+    for (const seg of segments) {
+      if (seg.type === "sep" && seg.end === firstVariantToken.start) {
+        boundary = seg.start;
+        break;
+      }
+    }
+    baseSlug = trimmedSlug.slice(0, boundary);
+
+    // Apply variant tokens in original (left-to-right) order.
+    for (let i = firstVariantTokenIndex; i < tokens.length; i++) {
+      const token = tokens[i]!.value.toLowerCase();
+      if (EFFORT_TOKENS.has(token) && effort === null) {
+        effort = token;
+      } else if (FAST_TOKENS.has(token) && !fast) {
+        fast = true;
+      } else if (token === "thinking" && !thinking) {
+        thinking = true;
+      } else if (token === "1m" && contextWindow === null) {
+        contextWindow = "1m";
+      }
+    }
+  }
 
   const trimmedName = normalizedName.trim();
   let baseName: string | undefined;
@@ -146,13 +200,13 @@ export function parseDevinModelSlug(slug: string, displayName: string): ParsedDe
     if (hadDisplayOverride) {
       baseName = trimmedName;
     } else {
-      const tokens = trimmedName.split(/\s+/);
-      while (tokens.length > 0) {
-        const last = tokens[tokens.length - 1];
+      const nameTokens = trimmedName.split(/\s+/);
+      while (nameTokens.length > 0) {
+        const last = nameTokens[nameTokens.length - 1];
         if (!last || !DISPLAY_VARIANT_WORDS.has(last.toLowerCase())) break;
-        tokens.pop();
+        nameTokens.pop();
       }
-      const stripped = tokens.join(" ").trim();
+      const stripped = nameTokens.join(" ").trim();
       if (stripped && stripped !== trimmedSlug) {
         baseName = stripped;
       }
@@ -378,28 +432,34 @@ export function buildDevinVariantMatrix(
   return matrix;
 }
 
+export class DevinModelIncompatibilityError {
+  readonly _tag = "DevinModelIncompatibilityError" as const;
+  constructor(
+    readonly baseSlug: string,
+    readonly requestedOptions: {
+      reasoningEffort: string | null;
+      fastMode: boolean;
+      thinking: boolean;
+      contextWindow: string | null;
+    },
+  ) {}
+}
+
 export function resolveDevinModelSlug(
   model: string,
   options:
     | { reasoningEffort?: string; fastMode?: boolean; thinking?: boolean; contextWindow?: string }
     | undefined,
   matrix: ReadonlyMap<string, DevinBaseModel>,
-): string | null {
+): string | DevinModelIncompatibilityError {
   const base = matrix.get(model);
+  // Unknown base slugs are passed through so future/custom models are not rejected.
   if (!base) return model;
 
-  const hasOptions =
-    options !== undefined &&
-    (options.reasoningEffort !== undefined ||
-      options.fastMode !== undefined ||
-      options.thinking !== undefined ||
-      options.contextWindow !== undefined);
-  if (!hasOptions) return base.defaultVariant.slug;
-
-  const targetEffort = options.reasoningEffort ?? base.defaultVariant.effort;
-  const targetFast = options.fastMode ?? base.defaultVariant.fast;
-  const targetThinking = options.thinking ?? base.defaultVariant.thinking;
-  const rawContext = options.contextWindow ?? base.defaultVariant.contextWindow;
+  const targetEffort = options?.reasoningEffort ?? base.defaultVariant.effort;
+  const targetFast = options?.fastMode ?? base.defaultVariant.fast;
+  const targetThinking = options?.thinking ?? base.defaultVariant.thinking;
+  const rawContext = options?.contextWindow ?? base.defaultVariant.contextWindow;
   const targetContext = rawContext === DEFAULT_DEVIN_CONTEXT_WINDOW_LABEL ? null : rawContext;
 
   const exact = base.variants.find(
@@ -411,10 +471,10 @@ export function resolveDevinModelSlug(
   );
   if (exact) return exact.slug;
 
-  const effortOnly = base.variants.find(
-    (v) => v.effort === targetEffort && !v.fast && !v.thinking && v.contextWindow === null,
-  );
-  if (effortOnly) return effortOnly.slug;
-
-  return base.defaultVariant.slug;
+  return new DevinModelIncompatibilityError(base.baseSlug, {
+    reasoningEffort: targetEffort,
+    fastMode: targetFast,
+    thinking: targetThinking,
+    contextWindow: targetContext,
+  });
 }

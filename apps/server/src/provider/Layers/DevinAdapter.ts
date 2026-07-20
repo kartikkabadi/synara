@@ -87,6 +87,7 @@ import {
   DEVIN_FALLBACK_MODELS,
   buildDevinVariantMatrix,
   normalizeDevinModelDisplayName,
+  DevinModelIncompatibilityError,
   normalizeDevinModelSlug,
   resolveDevinModelSlug,
   type DevinBaseModel,
@@ -264,6 +265,7 @@ function clearActiveTurn(ctx: DevinSessionContext, turnId: TurnId): boolean {
   ctx.activePromptFiber = undefined;
   ctx.activeTurnFailedToolDetail = undefined;
   ctx.lastTurnActivityAt = undefined;
+  ctx.toolCallMetaById.clear();
   return true;
 }
 
@@ -271,6 +273,8 @@ function clearActiveTurn(ctx: DevinSessionContext, turnId: TurnId): boolean {
 function eventTurnId(ctx: DevinSessionContext): TurnId | undefined {
   return ctx.activeTurnId ?? ctx.lastEventTurnId;
 }
+
+const MAX_TOOL_CALL_META_PER_TURN = 1000;
 
 type DevinToolCallMeta = {
   readonly title?: string;
@@ -317,6 +321,19 @@ function mergeDevinToolCallMeta(
     ...(kind !== undefined ? { kind } : {}),
     ...(rawInput !== undefined ? { rawInput } : {}),
   };
+}
+
+function setDevinToolCallMeta(
+  ctx: DevinSessionContext,
+  toolCallId: string,
+  meta: DevinToolCallMeta,
+): void {
+  ctx.toolCallMetaById.set(toolCallId, meta);
+  while (ctx.toolCallMetaById.size > MAX_TOOL_CALL_META_PER_TURN) {
+    const oldest = ctx.toolCallMetaById.keys().next().value;
+    if (oldest === undefined) break;
+    ctx.toolCallMetaById.delete(oldest);
+  }
 }
 
 /** Enrich sparse permission toolCall fields with previously seen tool_call updates. */
@@ -703,7 +720,8 @@ function makeProviderAdapter(
                 if (ctx && enrichedParams.toolCall?.toolCallId) {
                   const toolCallId = enrichedParams.toolCall.toolCallId.trim();
                   if (toolCallId) {
-                    ctx.toolCallMetaById.set(
+                    setDevinToolCallMeta(
+                      ctx,
                       toolCallId,
                       mergeDevinToolCallMeta(
                         ctx.toolCallMetaById.get(toolCallId),
@@ -950,9 +968,10 @@ function makeProviderAdapter(
             input.modelSelection?.provider === PROVIDER
               ? normalizeDevinModelSlug(input.modelSelection.model)
               : "";
-          // Resolve base + variant options to a full slug.
-          const selectedModel = requestedModel
-            ? (resolveDevinModelSlug(
+          // Resolve base + variant options to a full slug. Unknown base slugs are
+          // passed through; a known base with incompatible options fails early.
+          const resolvedModel = requestedModel
+            ? resolveDevinModelSlug(
                 requestedModel,
                 input.modelSelection?.options as
                   | {
@@ -963,8 +982,16 @@ function makeProviderAdapter(
                     }
                   | undefined,
                 sessionVariantMatrix,
-              ) ?? requestedModel)
+              )
             : "";
+          if (resolvedModel instanceof DevinModelIncompatibilityError) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "startSession",
+              issue: `Devin model '${resolvedModel.baseSlug}' does not support the requested option combination (${JSON.stringify(resolvedModel.requestedOptions)}).`,
+            });
+          }
+          const selectedModel = resolvedModel;
           yield* applyDevinModeSelection({
             runtime: acp,
             threadId: input.threadId,
@@ -1085,7 +1112,8 @@ function makeProviderAdapter(
                     }
                     const toolCallId = event.toolCall.toolCallId.trim();
                     if (toolCallId) {
-                      ctx.toolCallMetaById.set(
+                      setDevinToolCallMeta(
+                        ctx,
                         toolCallId,
                         mergeDevinToolCallMeta(
                           ctx.toolCallMetaById.get(toolCallId),
@@ -1189,32 +1217,36 @@ function makeProviderAdapter(
             yield* stopSessionInternal(ctx, "error");
           }).pipe(Effect.forkIn(sessionScope));
 
-          yield* publish({
-            type: "session.started",
-            ...(yield* makeEventStamp()),
-            provider: PROVIDER,
-            threadId: input.threadId,
-            payload: { resume: started.initializeResult },
-          });
-          yield* publish({
-            type: "session.state.changed",
-            ...(yield* makeEventStamp()),
-            provider: PROVIDER,
-            threadId: input.threadId,
-            payload: { state: "ready", reason: "Devin ACP session ready" },
-          });
-          yield* publish({
-            type: "thread.started",
-            ...(yield* makeEventStamp()),
-            provider: PROVIDER,
-            threadId: input.threadId,
-            payload: { providerThreadId: started.sessionId },
-          });
-
-          // Transfer ownership to the sessions map only after all startup probes
-          // succeed, so a probe failure doesn't leave an orphaned session.
+          // Register the session before publishing lifecycle events so subscribers
+          // that immediately query the adapter see a consistent session state.
           sessions.set(input.threadId, ctx);
           sessionScopeTransferred = true;
+
+          yield* Effect.gen(function* () {
+            yield* publish({
+              type: "session.started",
+              ...(yield* makeEventStamp()),
+              provider: PROVIDER,
+              threadId: input.threadId,
+              payload: { resume: started.initializeResult },
+            });
+            yield* publish({
+              type: "session.state.changed",
+              ...(yield* makeEventStamp()),
+              provider: PROVIDER,
+              threadId: input.threadId,
+              payload: { state: "ready", reason: "Devin ACP session ready" },
+            });
+            yield* publish({
+              type: "thread.started",
+              ...(yield* makeEventStamp()),
+              provider: PROVIDER,
+              threadId: input.threadId,
+              payload: { providerThreadId: started.sessionId },
+            });
+          }).pipe(
+            Effect.onError(() => stopSessionInternal(ctx, "error")),
+          );
 
           return session;
         }).pipe(Effect.scoped),
@@ -1287,8 +1319,10 @@ function makeProviderAdapter(
             input.modelSelection?.provider === PROVIDER
               ? normalizeDevinModelSlug(input.modelSelection.model)
               : "";
-          const turnModel = requestedModel
-            ? (resolveDevinModelSlug(
+          // Resolve base + variant options to a full slug. Unknown base slugs are
+          // passed through; a known base with incompatible options fails early.
+          const resolvedModel = requestedModel
+            ? resolveDevinModelSlug(
                 requestedModel,
                 input.modelSelection?.options as
                   | {
@@ -1299,8 +1333,16 @@ function makeProviderAdapter(
                     }
                   | undefined,
                 ctx.variantMatrix ?? new Map(),
-              ) ?? requestedModel)
+              )
             : "";
+          if (resolvedModel instanceof DevinModelIncompatibilityError) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "sendTurn",
+              issue: `Devin model '${resolvedModel.baseSlug}' does not support the requested option combination (${JSON.stringify(resolvedModel.requestedOptions)}).`,
+            });
+          }
+          const turnModel = resolvedModel;
           const model = turnModel || ctx.session.model;
           const interactionMode: ProviderInteractionMode =
             input.interactionMode === "plan" ? "plan" : "default";

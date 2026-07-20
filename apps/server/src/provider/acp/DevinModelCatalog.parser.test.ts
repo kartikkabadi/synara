@@ -374,6 +374,32 @@ describe("parseDevinModelSlug", () => {
     });
   });
 
+  it("parses mixed '-' and '_' variant separators", () => {
+    expect(parseDevinModelSlug("claude-opus-4-8-high_fast", "Claude Opus 4.8 High Fast")).toEqual({
+      baseSlug: "claude-opus-4-8",
+      baseName: "Claude Opus 4.8",
+      effort: "high",
+      fast: true,
+      thinking: false,
+      contextWindow: null,
+      upstreamProviderId: "anthropic",
+      upstreamProviderName: "Anthropic",
+    });
+  });
+
+  it("parses MODEL_* slugs with '_' variant suffixes", () => {
+    expect(parseDevinModelSlug("MODEL_SWE_1_7_FAST", "MODEL_SWE_1_7_FAST")).toEqual({
+      baseSlug: "MODEL_SWE_1_7",
+      baseName: "SWE 1.7",
+      effort: null,
+      fast: true,
+      thinking: false,
+      contextWindow: null,
+      upstreamProviderId: "devin",
+      upstreamProviderName: "Devin",
+    });
+  });
+
   // Edge: empty/invalid input
   it("returns null for empty slug", () => {
     expect(parseDevinModelSlug("", "")).toBeNull();

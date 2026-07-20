@@ -2,6 +2,7 @@ import { describe, it, assert } from "@effect/vitest";
 import { MODEL_OPTIONS_BY_PROVIDER } from "@synara/contracts";
 import {
   DEVIN_FALLBACK_MODELS,
+  DevinModelIncompatibilityError,
   normalizeDevinModelSlug,
   buildDevinVariantMatrix,
   resolveDevinModelSlug,
@@ -206,11 +207,10 @@ describe("resolveDevinModelSlug", () => {
     );
   });
 
-  it("falls back to default when fast-only target has no exact match", () => {
-    assert.strictEqual(
-      resolveDevinModelSlug("claude-opus-4-8", { fastMode: true }, matrix),
-      "claude-opus-4-8-medium",
-    );
+  it("returns incompatibility when fast-only target has no exact match", () => {
+    const result = resolveDevinModelSlug("claude-opus-4-8", { fastMode: true }, matrix);
+    assert.ok(result instanceof DevinModelIncompatibilityError);
+    assert.strictEqual((result as DevinModelIncompatibilityError).baseSlug, "claude-opus-4-8");
   });
 
   it("resolves thinking+context to exact variant slug", () => {
