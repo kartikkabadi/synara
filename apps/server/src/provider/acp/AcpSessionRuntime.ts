@@ -159,6 +159,14 @@ export interface AcpSessionRuntimeOptions {
    *   authenticate once, and retry the same setup operation once.
    */
   readonly authPolicy?: "always" | "on-demand";
+  /**
+   * MCP servers to attach to the session. Invoked after `initialize` so the
+   * builder can pick a transport based on the agent's advertised
+   * `mcpCapabilities` (e.g. HTTP vs stdio for the Synara agent gateway).
+   */
+  readonly buildMcpServers?: (
+    initializeResult: EffectAcpSchema.InitializeResponse,
+  ) => ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly authenticateMeta?: Record<string, unknown>;
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
@@ -241,6 +249,8 @@ export interface AcpSessionRuntimeShape {
     handler: AcpHandler<A, void>,
   ) => Effect.Effect<void>;
   readonly start: () => Effect.Effect<AcpSessionRuntimeStartResult, EffectAcpErrors.AcpError>;
+  /** Completes when the owned ACP process exits, regardless of its exit status. */
+  readonly awaitExit: Effect.Effect<void>;
   readonly getEvents: () => Stream.Stream<AcpParsedSessionEvent, never>;
   // Monotonic count of parsed session/update events enqueued for the
   // getEvents() consumer. Adapters snapshot it and wait until their own
@@ -307,6 +317,9 @@ interface AcpOwnedChildProcess {
   readonly pid: number;
   readonly exitCode: Effect.Effect<unknown, unknown>;
 }
+
+export const awaitAcpChildExit = (child: AcpOwnedChildProcess): Effect.Effect<void> =>
+  child.exitCode.pipe(Effect.exit, Effect.asVoid);
 
 /**
  * Bridges Effect's child-process exit signal into Synara's process-tree proof. This is deliberately
@@ -1079,6 +1092,8 @@ const makeAcpSessionRuntime = (
       // path only retries session setup once.
       const authenticatedRef = yield* Ref.make(false);
 
+      const mcpServers = options.buildMcpServers?.(initializeResult) ?? [];
+
       const runAuthenticate = Effect.gen(function* () {
         const authMethodId =
           options.resolveAuthMethodId !== undefined
@@ -1120,7 +1135,7 @@ const makeAcpSessionRuntime = (
           const resumePayload = {
             sessionId: options.resumeSessionId,
             cwd: options.cwd,
-            mcpServers: [],
+            mcpServers,
           } satisfies EffectAcpSchema.ResumeSessionRequest;
           const supportsResume =
             initializeResult.agentCapabilities?.sessionCapabilities?.resume != null;
@@ -1142,7 +1157,7 @@ const makeAcpSessionRuntime = (
                 const loadPayload = {
                   sessionId: options.resumeSessionId,
                   cwd: options.cwd,
-                  mcpServers: [],
+                  mcpServers,
                 } satisfies EffectAcpSchema.LoadSessionRequest;
                 return runLoggedRequest(
                   "session/load",
@@ -1150,15 +1165,19 @@ const makeAcpSessionRuntime = (
                   acp.agent.loadSession(loadPayload),
                 );
               })();
+          // Resume/load failure is terminal. Retrying as session/new would create a second
+          // conversation and make delivery outcome ambiguous.
           sessionId = options.resumeSessionId;
           sessionSetupResult = resumed;
           resumedExistingSession = true;
           sessionSetupMethod = supportsResume ? "resume" : "load";
         } else {
+          // Fresh session: accept updates from before session/new so any early
+          // agent output emitted while the request is in flight is buffered.
           acceptingSessionUpdates = true;
           const createPayload = {
             cwd: options.cwd,
-            mcpServers: [],
+            mcpServers,
           } satisfies EffectAcpSchema.NewSessionRequest;
           const created = yield* runLoggedRequest(
             "session/new",
@@ -1214,6 +1233,10 @@ const makeAcpSessionRuntime = (
       yield* Ref.update(configOptionsRef, (current) =>
         sessionConfigOptionsFromSetup(sessionSetupResult, current),
       );
+      // Fresh sessions accept session/update while session/new is in flight, and
+      // those events are already in the queue; resetting the merge/segment state
+      // they created would orphan their continuations (new segment ids, unmerged
+      // tool updates). Only the resumed replay-dropping path starts clean.
       if (resumedExistingSession) {
         yield* Ref.set(toolCallsRef, new Map());
         yield* Ref.set(assistantSegmentRef, { nextSegmentIndex: 0 });
@@ -1276,6 +1299,7 @@ const makeAcpSessionRuntime = (
       handleExtRequest: acp.handleExtRequest,
       handleExtNotification: acp.handleExtNotification,
       start: () => start,
+      awaitExit: awaitAcpChildExit(child),
       getEvents: () => {
         // Attaching a consumer opens the session/update gate: from here on the
         // queue is drained, so accepting notifications can no longer grow it
