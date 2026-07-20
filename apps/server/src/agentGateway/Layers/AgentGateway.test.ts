@@ -99,7 +99,18 @@ function makeThreadShell(
     updatedAt: NOW,
     archivedAt: null,
     handoff: null,
-    session: null,
+    session:
+      id === "thread-parent"
+        ? {
+            threadId: ThreadId.makeUnsafe(id),
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "approval-required",
+            activeTurnId: TurnId.makeUnsafe("turn-parent-active"),
+            lastError: null,
+            updatedAt: NOW,
+          }
+        : null,
     ...overrides,
   };
 }
