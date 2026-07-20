@@ -1,4 +1,8 @@
-import { ApprovalRequestId, CommandId, type OrchestrationEvent } from "@synara/contracts";
+import {
+  ApprovalRequestId,
+  CommandId,
+  type OrchestrationEvent,
+} from "@synara/contracts";
 import {
   addPinnedMessage,
   removePinnedMessage,
@@ -35,6 +39,7 @@ import {
   type ProjectionThreadProposedPlanRepositoryShape,
   ProjectionThreadProposedPlanRepository,
 } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
+import { ProjectionThreadLoopRepository } from "../../persistence/Services/ProjectionThreadLoop.ts";
 import { ProjectionThreadSessionRepository } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import {
   type ProjectionTurn,
@@ -52,6 +57,7 @@ import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers
 import { ProjectionThreadMessageRepositoryLive } from "../../persistence/Layers/ProjectionThreadMessages.ts";
 import { ProjectionThreadProposedPlanRepositoryLive } from "../../persistence/Layers/ProjectionThreadProposedPlans.ts";
 import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/ProjectionThreadSessions.ts";
+import { ProjectionThreadLoopRepositoryLive } from "../../persistence/Layers/ProjectionThreadLoop.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
 import { ManagedAttachmentRepositoryLive } from "../../persistence/Layers/ManagedAttachments.ts";
@@ -90,6 +96,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   threadProposedPlans: "projection.thread-proposed-plans",
   threadActivities: "projection.thread-activities",
   threadSessions: "projection.thread-sessions",
+  threadLoop: "projection.thread-loop",
   threadTurns: "projection.thread-turns",
   checkpoints: "projection.checkpoints",
   // Preserve the established cursor identity. Migration 062 resets it so the
@@ -167,6 +174,7 @@ const THREAD_ACTIVITY_PROJECTION_EVENT_TYPES = new Set<OrchestrationEvent["type"
 ]);
 
 const THREAD_TURN_PROJECTION_EVENT_TYPES = new Set<OrchestrationEvent["type"]>([
+  "thread.turn-queued",
   "thread.turn-start-requested",
   "thread.session-set",
   "thread.turn-diff-completed",
@@ -467,6 +475,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
   const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
   const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
   const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
+  const projectionThreadLoopRepository = yield* ProjectionThreadLoopRepository;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const projectionPendingInteractionRepository = yield* ProjectionPendingInteractionRepository;
 
@@ -758,6 +767,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             updatedAt: event.payload.updatedAt,
           }));
 
+        case "thread.turn-queued":
         case "thread.turn-start-requested": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
@@ -1032,6 +1042,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
               : {}),
             isStreaming: event.payload.streaming,
             source: event.payload.source,
+            ...(event.payload.purpose != null ? { purpose: event.payload.purpose } : {}),
             sequence: Option.isSome(existingMessage)
               ? (existingMessage.value.sequence ?? event.sequence)
               : event.sequence,
@@ -1255,18 +1266,39 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
       }
     });
 
+  const applyThreadLoopProjection: ProjectorDefinition["apply"] = (event) =>
+    Effect.gen(function* () {
+      switch (event.type) {
+        case "thread.loop-set":
+        case "thread.loop-off":
+        case "thread.loop-continued": {
+          yield* projectionThreadLoopRepository.upsert({
+            threadId: event.payload.threadId,
+            loop: event.payload.loop,
+            updatedAt: event.occurredAt,
+          });
+          return;
+        }
+
+        default:
+          return;
+      }
+    });
+
   const applyThreadTurnsProjection: ProjectorDefinition["apply"] = (
     event,
     _attachmentSideEffects,
   ) =>
     Effect.gen(function* () {
       switch (event.type) {
+        case "thread.turn-queued":
         case "thread.turn-start-requested": {
           yield* projectionTurnRepository.replacePendingTurnStart({
             threadId: event.payload.threadId,
             messageId: event.payload.messageId,
             sourceProposedPlanThreadId: event.payload.sourceProposedPlan?.threadId ?? null,
             sourceProposedPlanId: event.payload.sourceProposedPlan?.planId ?? null,
+            purpose: event.payload.purpose ?? undefined,
             requestedAt: event.payload.createdAt,
           });
           return;
@@ -1284,18 +1316,19 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
               const openTurns = (yield* projectionTurnRepository.listByThreadId({
                 threadId: event.payload.threadId,
               }))
-                .filter(
-                  (
-                    row,
-                  ): row is ProjectionTurn & {
-                    turnId: Exclude<ProjectionTurn["turnId"], null>;
-                  } => row.turnId !== null && row.completedAt === null,
-                )
-                .toSorted(
-                  (left, right) =>
+                .filter((row) => row.checkpointTurnCount === null && row.completedAt === null)
+                .toSorted((left, right) => {
+                  // Prefer the concrete running turn over a queued pending-start
+                  // placeholder so a terminal session finalizes the in-flight turn,
+                  // not a later-queued manual message.
+                  const leftConcrete = left.turnId !== null ? 1 : 0;
+                  const rightConcrete = right.turnId !== null ? 1 : 0;
+                  return (
+                    rightConcrete - leftConcrete ||
                     right.requestedAt.localeCompare(left.requestedAt) ||
-                    right.turnId.localeCompare(left.turnId),
-                );
+                    (right.turnId ?? "").localeCompare(left.turnId ?? "")
+                  );
+                });
               const turnToFinalize =
                 (turnId === null ? undefined : openTurns.find((row) => row.turnId === turnId)) ??
                 openTurns.at(0);
@@ -1309,6 +1342,21 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
                   startedAt: turnToFinalize.startedAt ?? event.payload.session.updatedAt,
                   requestedAt: turnToFinalize.requestedAt ?? event.payload.session.updatedAt,
                   completedAt: event.payload.session.updatedAt,
+                });
+              }
+
+              // A terminal session that never reached running leaves a stale
+              // pending-start placeholder behind; clear it so restart-reconciled
+              // threads are not blocked forever. Do not clear on `ready` because
+              // a session can report ready before it begins a turn that still
+              // has a pending-start row.
+              if (
+                event.payload.session.status === "error" ||
+                event.payload.session.status === "interrupted" ||
+                event.payload.session.status === "stopped"
+              ) {
+                yield* projectionTurnRepository.deletePendingTurnStartByThreadId({
+                  threadId: event.payload.threadId,
                 });
               }
             }
@@ -1343,6 +1391,9 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
                 (Option.isSome(pendingTurnStart)
                   ? pendingTurnStart.value.sourceProposedPlanId
                   : null),
+              purpose:
+                existingTurn.value.purpose ??
+                (Option.isSome(pendingTurnStart) ? pendingTurnStart.value.purpose : undefined),
               startedAt:
                 existingTurn.value.startedAt ?? event.payload.session.updatedAt ?? event.occurredAt,
               requestedAt:
@@ -1364,6 +1415,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
               sourceProposedPlanId: Option.isSome(pendingTurnStart)
                 ? pendingTurnStart.value.sourceProposedPlanId
                 : null,
+              purpose: Option.isSome(pendingTurnStart) ? pendingTurnStart.value.purpose : undefined,
               assistantMessageId: null,
               state: "running",
               requestedAt: Option.isSome(pendingTurnStart)
@@ -1377,6 +1429,25 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
               checkpointStatus: null,
               checkpointFiles: [],
             });
+          }
+
+          const messageIdToBind = Option.match(pendingTurnStart, {
+            onSome: (pending) => pending.messageId,
+            onNone: () =>
+              Option.isSome(existingTurn) ? existingTurn.value.pendingMessageId : null,
+          });
+          if (messageIdToBind !== null) {
+            const existingMessage =
+              yield* projectionThreadMessageRepository.getByThreadAndMessageId({
+                threadId: event.payload.threadId,
+                messageId: messageIdToBind,
+              });
+            if (Option.isSome(existingMessage) && existingMessage.value.turnId === null) {
+              yield* projectionThreadMessageRepository.upsert({
+                ...existingMessage.value,
+                turnId,
+              });
+            }
           }
 
           yield* projectionTurnRepository.deletePendingTurnStartByThreadId({
@@ -1420,6 +1491,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             pendingMessageId: null,
             sourceProposedPlanThreadId: null,
             sourceProposedPlanId: null,
+            purpose: event.payload.purpose,
             assistantMessageId: event.payload.messageId,
             state: "running",
             requestedAt: event.payload.createdAt,
@@ -1547,6 +1619,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
                     messageId: turn.pendingMessageId,
                     sourceProposedPlanThreadId: turn.sourceProposedPlanThreadId,
                     sourceProposedPlanId: turn.sourceProposedPlanId,
+                    purpose: turn.purpose ?? undefined,
                     requestedAt: turn.requestedAt,
                   })
               : projectionTurnRepository.upsertByTurnId({
@@ -1816,6 +1889,15 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
       shouldApply: (event) =>
         event.type === "thread.turn-start-requested" || event.type === "thread.session-set",
       apply: applyThreadSessionsProjection,
+    },
+    {
+      name: ORCHESTRATION_PROJECTOR_NAMES.threadLoop,
+      phase: "hot",
+      shouldApply: (event) =>
+        event.type === "thread.loop-set" ||
+        event.type === "thread.loop-off" ||
+        event.type === "thread.loop-continued",
+      apply: applyThreadLoopProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.threadTurns,
@@ -2233,6 +2315,7 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),
   Layer.provideMerge(ProjectionThreadActivityRepositoryLive),
   Layer.provideMerge(ProjectionThreadSessionRepositoryLive),
+  Layer.provideMerge(ProjectionThreadLoopRepositoryLive),
   Layer.provideMerge(ProjectionTurnRepositoryLive),
   Layer.provideMerge(ProjectionPendingInteractionRepositoryLive),
   Layer.provideMerge(ProjectionStateRepositoryLive),

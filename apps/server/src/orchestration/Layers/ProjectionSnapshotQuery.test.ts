@@ -396,6 +396,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           hasPendingApprovals: true,
           hasPendingUserInput: true,
           hasActionableProposedPlan: true,
+          hasPendingTurnStart: false,
+          pendingTurnStart: null,
           latestTurn: {
             turnId: asTurnId("turn-1"),
             state: "completed",
@@ -413,6 +415,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           archivedAt: null,
           deletedAt: null,
           handoff: null,
+          loop: null,
           messages: [
             {
               id: asMessageId("message-0"),
@@ -1553,10 +1556,13 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           hasPendingApprovals: true,
           hasPendingUserInput: true,
           hasActionableProposedPlan: true,
+          hasPendingTurnStart: false,
           createdAt: "2026-03-03T00:00:02.000Z",
           updatedAt: "2026-03-03T00:00:03.000Z",
           archivedAt: null,
+          deletedAt: null,
           handoff: null,
+          loop: null,
           session: {
             threadId: ThreadId.makeUnsafe("thread-shell"),
             status: "ready",
