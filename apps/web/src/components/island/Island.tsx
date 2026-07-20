@@ -132,8 +132,6 @@ export function Island() {
 
   const applyState = useCallback((state: IslandWindowState) => {
     setUiState(state);
-    // Linux has no click-through forwarding, so the window itself resizes.
-    void window.islandBridge?.setState(state);
   }, []);
 
   const onPointerEnter = useCallback(() => {
@@ -152,6 +150,14 @@ export function Island() {
   }, []);
 
   const effectiveState: IslandWindowState = uiState === "collapsed" && popped ? "hover" : uiState;
+
+  // Every displayed state change (click, shortcut, idle collapse, auto-pop) is
+  // mirrored to the main process: on Linux there is no click-through
+  // forwarding, so the window itself must resize to the displayed state.
+  useEffect(() => {
+    void window.islandBridge?.setState(effectiveState);
+  }, [effectiveState]);
+
   const size = innerSize(effectiveState, context);
   const isNotch = context?.notch != null;
 
