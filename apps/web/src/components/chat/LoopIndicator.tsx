@@ -32,7 +32,7 @@ function formatRemainingTime(seconds: number): string {
   return `${Math.ceil(seconds / 86400)}d`;
 }
 
-function formatStopReason(reason: NonNullable<ThreadLoop["lastStopReason"]>): string {
+export function formatStopReason(reason: NonNullable<ThreadLoop["lastStopReason"]>): string {
   switch (reason) {
     case "budget_iterations":
     case "budget_duration":

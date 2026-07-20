@@ -10716,6 +10716,7 @@ export default function ChatView({
                     hasMessages={timelineEntries.length > 0}
                     isWorking={isWorking}
                     worktreeSetup={activeWorktreeSetup}
+                    loop={activeThread.loop ?? null}
                     activeTurnInProgress={activeTurnInProgress}
                     activeTurnStartedAt={activeWorkStartedAt}
                     listRef={legendListRef}

@@ -7,6 +7,7 @@ import {
   type MessageId,
   type ProviderMentionReference,
   ThreadId,
+  type ThreadLoop,
   type ThreadMarker,
   type TurnId,
 } from "@synara/contracts";
@@ -55,6 +56,7 @@ import {
   PinIcon,
   RefreshCwIcon,
   SteerIcon,
+  StopIcon,
   Undo2Icon,
   WorktreeIcon,
 } from "~/lib/icons";
@@ -62,6 +64,7 @@ import { pinActionLabel } from "~/lib/pin";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { CrossTaskOriginLabel, type CrossTaskOrigin } from "./CrossTaskOriginLabel";
+import { formatStopReason } from "./LoopIndicator";
 import { SynaraThreadCreationCard } from "./SynaraThreadCreationCard";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
@@ -332,6 +335,8 @@ interface MessagesTimelineProps {
   activeTurnStartedAt: string | null;
   /** Transient "New worktree" setup progress; rendered as an ephemeral step card at the tail. */
   worktreeSetup?: WorktreeSetupSnapshot | null;
+  /** Thread `/loop` projection; drives the durable loop-end transcript record. */
+  loop?: ThreadLoop | null;
   followLiveOutput?: boolean;
   emptyStateContent?: ReactNode;
   listRef?: RefObject<LegendListRef | null>;
@@ -400,6 +405,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   activeTurnInProgress,
   activeTurnStartedAt,
   worktreeSetup = null,
+  loop = null,
   followLiveOutput = false,
   listRef,
   controllerRef,
@@ -546,6 +552,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         activeTurnStartedAt,
         turnDiffSummaryByAssistantMessageId,
         revertTurnCountByUserMessageId,
+        loop,
       }),
     [
       timelineEntries,
@@ -556,6 +563,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeTurnStartedAt,
       turnDiffSummaryByAssistantMessageId,
       revertTurnCountByUserMessageId,
+      loop,
     ],
   );
   const rows = useStableRows(rawRows);
@@ -1808,6 +1816,21 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             <WorktreeSetupCard steps={row.steps} />
           </div>
         </DisclosureRegion>
+      )}
+
+      {row.kind === "loop-end" && (
+        <div className="flex items-center justify-center gap-2 py-3">
+          <Badge variant={row.loop.lastStopReason === "consecutive_errors" ? "error" : "secondary"}>
+            <StopIcon />
+            Loop ended
+          </Badge>
+          <span className="truncate text-[11px] text-muted-foreground">
+            {formatStopReason(row.loop.lastStopReason!)}
+            {row.loop.iteration > 0
+              ? ` · ${row.loop.iteration} ${pluralize(row.loop.iteration, "iteration")}`
+              : ""}
+          </span>
+        </div>
       )}
     </div>
   );
