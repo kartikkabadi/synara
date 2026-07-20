@@ -193,7 +193,8 @@ function syncDesktopTheme(theme: ThemeMode) {
   }
 
   const bridge = window.desktopBridge;
-  if (!bridge || lastDesktopTheme === theme) {
+  // Auxiliary desktop windows (e.g. the island overlay) expose a reduced bridge.
+  if (!bridge || typeof bridge.setTheme !== "function" || lastDesktopTheme === theme) {
     return;
   }
 
