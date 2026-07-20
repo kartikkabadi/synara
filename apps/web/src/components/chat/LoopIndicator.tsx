@@ -198,8 +198,8 @@ function deriveLoopViewState(loop: ThreadLoop, thread: Thread | undefined): Loop
     const reason = loop.lastStopReason!;
     const detail =
       loop.iteration > 0
-        ? `${formatStopReason(reason)} · ${loop.iteration} ${loop.iteration === 1 ? "iteration" : "iterations"}`
-        : formatStopReason(reason);
+        ? `\u00A0· ${formatStopReason(reason)} · ${loop.iteration} ${loop.iteration === 1 ? "iteration" : "iterations"}`
+        : `\u00A0· ${formatStopReason(reason)}`;
     return {
       icon: <StopIcon />,
       badgeVariant: reason === "consecutive_errors" ? "error" : "secondary",
