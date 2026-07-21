@@ -10,9 +10,20 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { ThreadId } from "@synara/contracts";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import {
+  AuthStorage,
+  DEFAULT_COMPACTION_SETTINGS,
+  ModelRegistry,
+  shouldCompact,
+} from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { describe, expect, it } from "vitest";
+import { Effect, Fiber, Layer, Stream } from "effect";
+import { describe, expect, it, vi } from "vitest";
+
+import { ServerConfig } from "../../config.ts";
+import { PiAdapter } from "../Services/PiAdapter.ts";
 import {
   getPiDiscoverableModels,
   getPiSupportedThinkingOptions,
@@ -20,8 +31,98 @@ import {
   makePiBashProcessSupervisor,
   makePiRuntimeEventBase,
   makePiUserInputOptions,
+  makePiAdapterLive,
   PLAIN_PI_EXTENSION_THEME,
 } from "./PiAdapter";
+
+const piSdkTestHooks = vi.hoisted(() => ({
+  current: undefined as
+    | undefined
+    | {
+        readonly agentDir: string;
+        readonly sessionManager: unknown;
+        readonly runtime: unknown;
+      },
+}));
+
+vi.mock(import("@earendil-works/pi-coding-agent"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    getAgentDir: () => piSdkTestHooks.current?.agentDir ?? actual.getAgentDir(),
+    getShellConfig: () =>
+      piSdkTestHooks.current
+        ? ({ shell: "/bin/sh", args: ["-c"] } as ReturnType<typeof actual.getShellConfig>)
+        : actual.getShellConfig(),
+    SessionManager: new Proxy(actual.SessionManager, {
+      get(target, prop, receiver) {
+        if (prop === "create" && piSdkTestHooks.current) {
+          return () => piSdkTestHooks.current?.sessionManager;
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }),
+    createAgentSessionRuntime: (async (factory, options) =>
+      piSdkTestHooks.current
+        ? piSdkTestHooks.current.runtime
+        : actual.createAgentSessionRuntime(
+            factory,
+            options,
+          )) as typeof actual.createAgentSessionRuntime,
+  };
+});
+
+function makeFakePiSessionRuntime() {
+  const compactCalls: Array<string> = [];
+  let handler: ((event: unknown) => void) | undefined;
+  const sessionManager = {
+    getSessionFile: () => "/tmp/pi-session.jsonl",
+    getCwd: () => process.cwd(),
+    getLeafId: () => undefined,
+  };
+  const session = {
+    sessionId: "pi-session-1",
+    sessionFile: undefined,
+    sessionManager,
+    model: undefined,
+    subscribe: (next: (event: unknown) => void) => {
+      handler = next;
+      return () => {
+        handler = undefined;
+      };
+    },
+    bindExtensions: async () => {},
+    resourceLoader: { getExtensions: () => ({ extensions: [] }) },
+    getSessionStats: () => ({
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      contextUsage: undefined,
+    }),
+    compact: async () => {
+      compactCalls.push("compact");
+    },
+    agent: { state: { errorMessage: undefined } },
+  };
+  const runtime = {
+    session,
+    dispose: async () => {},
+    services: {
+      modelRegistry: { find: () => undefined, getAll: () => [], getAvailable: () => [] },
+    },
+  };
+  return {
+    runtime,
+    sessionManager,
+    compactCalls,
+    emit: (event: unknown) => handler?.(event),
+  };
+}
+
+function makePiAdapterTestLayer() {
+  return makePiAdapterLive().pipe(
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "pi-adapter-test-" })),
+    Layer.provideMerge(NodeServices.layer),
+  );
+}
 
 describe("Pi native Synara gateway tools", () => {
   it("uses canonical MCP schemas and keeps same-cwd thread tokens distinct", async () => {
@@ -313,5 +414,162 @@ describe("Pi extension UI helpers", () => {
     expect(PLAIN_PI_EXTENSION_THEME.fg("accent", "ready")).toBe("ready");
     expect(PLAIN_PI_EXTENSION_THEME.bold("done")).toBe("done");
     expect(PLAIN_PI_EXTENSION_THEME.getThinkingBorderColor("medium")("thinking")).toBe("thinking");
+  });
+});
+
+describe("Pi compaction behavior", () => {
+  it("compacts Pi threads through the runtime session compact()", async () => {
+    const agentDir = mkdtempSync(path.join(tmpdir(), "synara-pi-compact-"));
+    const fake = makeFakePiSessionRuntime();
+    piSdkTestHooks.current = {
+      agentDir,
+      sessionManager: fake.sessionManager,
+      runtime: fake.runtime,
+    };
+
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const adapter = yield* PiAdapter;
+          yield* adapter.startSession({
+            provider: "pi",
+            threadId: ThreadId.makeUnsafe("thread-pi-compact"),
+            runtimeMode: "full-access",
+          });
+          const compactThread = adapter.compactThread;
+          if (!compactThread) {
+            throw new Error("Pi adapter is expected to support compactThread");
+          }
+          yield* compactThread(ThreadId.makeUnsafe("thread-pi-compact"));
+        }).pipe(Effect.provide(makePiAdapterTestLayer())),
+      );
+
+      expect(fake.compactCalls).toEqual(["compact"]);
+    } finally {
+      piSdkTestHooks.current = undefined;
+      rmSync(agentDir, { recursive: true, force: true });
+    }
+  });
+
+  it("maps compaction_start/compaction_end SDK events to context_compaction items", async () => {
+    const agentDir = mkdtempSync(path.join(tmpdir(), "synara-pi-compact-events-"));
+    const fake = makeFakePiSessionRuntime();
+    piSdkTestHooks.current = {
+      agentDir,
+      sessionManager: fake.sessionManager,
+      runtime: fake.runtime,
+    };
+
+    try {
+      const events = await Effect.runPromise(
+        Effect.gen(function* () {
+          const adapter = yield* PiAdapter;
+          const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 4)).pipe(
+            Effect.forkChild,
+          );
+
+          yield* adapter.startSession({
+            provider: "pi",
+            threadId: ThreadId.makeUnsafe("thread-pi-compaction-events"),
+            runtimeMode: "full-access",
+          });
+
+          fake.emit({ type: "compaction_start" });
+          fake.emit({ type: "compaction_end", aborted: false, willRetry: false });
+
+          return Array.from(yield* Fiber.join(eventsFiber));
+        }).pipe(Effect.provide(makePiAdapterTestLayer())),
+      );
+
+      expect(events.map((event) => event.type)).toEqual([
+        "session.started",
+        "thread.started",
+        "item.updated",
+        "item.completed",
+      ]);
+      expect(events[2]).toMatchObject({
+        type: "item.updated",
+        payload: {
+          itemType: "context_compaction",
+          status: "inProgress",
+          title: "Compacting context",
+        },
+      });
+      expect(events[3]).toMatchObject({
+        type: "item.completed",
+        payload: {
+          itemType: "context_compaction",
+          status: "completed",
+          title: "Context compacted",
+          data: { type: "compaction_end", aborted: false, willRetry: false },
+        },
+      });
+    } finally {
+      piSdkTestHooks.current = undefined;
+      rmSync(agentDir, { recursive: true, force: true });
+    }
+  });
+
+  it("marks aborted compaction_end events as failed context_compaction items", async () => {
+    const agentDir = mkdtempSync(path.join(tmpdir(), "synara-pi-compact-abort-"));
+    const fake = makeFakePiSessionRuntime();
+    piSdkTestHooks.current = {
+      agentDir,
+      sessionManager: fake.sessionManager,
+      runtime: fake.runtime,
+    };
+
+    try {
+      const events = await Effect.runPromise(
+        Effect.gen(function* () {
+          const adapter = yield* PiAdapter;
+          const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 3)).pipe(
+            Effect.forkChild,
+          );
+
+          yield* adapter.startSession({
+            provider: "pi",
+            threadId: ThreadId.makeUnsafe("thread-pi-compaction-abort"),
+            runtimeMode: "full-access",
+          });
+
+          fake.emit({ type: "compaction_end", aborted: true });
+
+          return Array.from(yield* Fiber.join(eventsFiber));
+        }).pipe(Effect.provide(makePiAdapterTestLayer())),
+      );
+
+      expect(events[2]).toMatchObject({
+        type: "item.completed",
+        payload: {
+          itemType: "context_compaction",
+          status: "failed",
+        },
+      });
+    } finally {
+      piSdkTestHooks.current = undefined;
+      rmSync(agentDir, { recursive: true, force: true });
+    }
+  });
+
+  it("auto-compaction triggers once context tokens exceed the window minus the reserve", () => {
+    expect(DEFAULT_COMPACTION_SETTINGS).toMatchObject({
+      enabled: true,
+      reserveTokens: 16_384,
+    });
+
+    const contextWindow = 200_000;
+    expect(shouldCompact(contextWindow - 16_384, contextWindow, DEFAULT_COMPACTION_SETTINGS)).toBe(
+      false,
+    );
+    expect(
+      shouldCompact(contextWindow - 16_384 + 1, contextWindow, DEFAULT_COMPACTION_SETTINGS),
+    ).toBe(true);
+    expect(
+      shouldCompact(contextWindow, contextWindow, {
+        ...DEFAULT_COMPACTION_SETTINGS,
+        enabled: false,
+      }),
+    ).toBe(false);
   });
 });

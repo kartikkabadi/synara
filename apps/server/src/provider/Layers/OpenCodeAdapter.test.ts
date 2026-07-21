@@ -448,6 +448,35 @@ describe("normalizeOpenCodeTokenUsage", () => {
       lastUsedTokens: 200,
     });
   });
+
+  it("distinguishes context occupancy from cumulative processed tokens", () => {
+    const tokens = {
+      input: 100_000,
+      output: 40_000,
+      reasoning: 10_000,
+      cache: {
+        read: 45_000,
+        write: 5_000,
+      },
+    };
+
+    // With a known context limit, usedTokens reports context occupancy (clamped
+    // to the window) while totalProcessedTokens keeps the cumulative count.
+    expect(normalizeOpenCodeTokenUsage(tokens, 128_000)).toMatchObject({
+      usedTokens: 128_000,
+      totalProcessedTokens: 200_000,
+      maxTokens: 128_000,
+    });
+
+    // Without a context limit, occupancy falls back to the cumulative processed
+    // total and no maxTokens is reported.
+    const withoutLimit = normalizeOpenCodeTokenUsage(tokens);
+    expect(withoutLimit).toMatchObject({
+      usedTokens: 200_000,
+      totalProcessedTokens: 200_000,
+    });
+    expect(withoutLimit).not.toHaveProperty("maxTokens");
+  });
 });
 
 describe("OpenCodeAdapter runtime lifecycle", () => {
@@ -3443,5 +3472,232 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
       "item.completed",
       "turn.completed",
     ]);
+  });
+
+  it("summarizes through the current provider/model selection on manual compaction", async () => {
+    const eventQueue = createSubscribedEventQueue();
+    const runtime = createMockOpenCodeRuntime();
+    const summarizeCalls: Array<Record<string, unknown>> = [];
+    const client = runtime.runtime.createOpenCodeSdkClient({
+      baseUrl: "http://127.0.0.1:4099",
+      directory: process.cwd(),
+    }) as unknown as {
+      event: {
+        subscribe: () => Promise<{ stream: AsyncIterable<unknown> }>;
+      };
+      session: {
+        summarize: (input: Record<string, unknown>) => Promise<unknown>;
+      };
+    };
+    client.event.subscribe = async () => ({ stream: eventQueue.stream });
+    client.session.summarize = async (input) => {
+      summarizeCalls.push(input);
+      return { data: null };
+    };
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const adapter = yield* OpenCodeAdapter;
+
+        yield* adapter.startSession({
+          provider: "opencode",
+          threadId: asThreadId("thread-manual-compaction"),
+          runtimeMode: "full-access",
+        });
+
+        yield* adapter.sendTurn({
+          threadId: asThreadId("thread-manual-compaction"),
+          input: "hello",
+          attachments: [],
+          modelSelection: {
+            provider: "opencode",
+            model: "openai/gpt-5.4",
+          },
+        });
+
+        const compactThread = adapter.compactThread;
+        if (!compactThread) {
+          throw new Error("OpenCode adapter is expected to support compactThread");
+        }
+        yield* compactThread(asThreadId("thread-manual-compaction"));
+        eventQueue.close();
+      }).pipe(
+        Effect.provide(
+          makeOpenCodeAdapterLive({ runtime: runtime.runtime }).pipe(
+            Layer.provideMerge(
+              ServerConfig.layerTest(process.cwd(), { prefix: "opencode-adapter-test-" }),
+            ),
+            Layer.provideMerge(NodeServices.layer),
+          ),
+        ),
+      ),
+    );
+
+    expect(summarizeCalls).toEqual([
+      {
+        sessionID: "opencode-session-1",
+        providerID: "openai",
+        modelID: "gpt-5.4",
+      },
+    ]);
+  });
+
+  it("fails manual compaction when no model has been selected", async () => {
+    const eventQueue = createSubscribedEventQueue();
+    const runtime = createMockOpenCodeRuntime();
+    const client = runtime.runtime.createOpenCodeSdkClient({
+      baseUrl: "http://127.0.0.1:4099",
+      directory: process.cwd(),
+    }) as unknown as {
+      event: {
+        subscribe: () => Promise<{ stream: AsyncIterable<unknown> }>;
+      };
+    };
+    client.event.subscribe = async () => ({ stream: eventQueue.stream });
+
+    const exit = await Effect.runPromise(
+      Effect.gen(function* () {
+        const adapter = yield* OpenCodeAdapter;
+
+        yield* adapter.startSession({
+          provider: "opencode",
+          threadId: asThreadId("thread-compaction-no-model"),
+          runtimeMode: "full-access",
+        });
+
+        const compactThread = adapter.compactThread;
+        if (!compactThread) {
+          throw new Error("OpenCode adapter is expected to support compactThread");
+        }
+        const compactExit = yield* Effect.exit(
+          compactThread(asThreadId("thread-compaction-no-model")),
+        );
+        eventQueue.close();
+        return compactExit;
+      }).pipe(
+        Effect.provide(
+          makeOpenCodeAdapterLive({ runtime: runtime.runtime }).pipe(
+            Layer.provideMerge(
+              ServerConfig.layerTest(process.cwd(), { prefix: "opencode-adapter-test-" }),
+            ),
+            Layer.provideMerge(NodeServices.layer),
+          ),
+        ),
+      ),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(JSON.stringify(exit)).toContain(
+      "compaction requires a current 'provider/model' selection",
+    );
+  });
+
+  it("maps OpenCode compaction parts and session.compacted to runtime events", async () => {
+    const eventQueue = createSubscribedEventQueue();
+    const runtime = createMockOpenCodeRuntime();
+    const client = runtime.runtime.createOpenCodeSdkClient({
+      baseUrl: "http://127.0.0.1:4099",
+      directory: process.cwd(),
+    }) as unknown as {
+      event: {
+        subscribe: () => Promise<{ stream: AsyncIterable<unknown> }>;
+      };
+    };
+    client.event.subscribe = async () => ({ stream: eventQueue.stream });
+
+    const events = await Effect.runPromise(
+      Effect.gen(function* () {
+        const adapter = yield* OpenCodeAdapter;
+        const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 5)).pipe(
+          Effect.forkChild,
+        );
+
+        yield* adapter.startSession({
+          provider: "opencode",
+          threadId: asThreadId("thread-compaction-events"),
+          runtimeMode: "full-access",
+        });
+
+        yield* adapter.sendTurn({
+          threadId: asThreadId("thread-compaction-events"),
+          input: "hello",
+          attachments: [],
+          modelSelection: {
+            provider: "opencode",
+            model: "openai/gpt-5.4",
+          },
+        });
+
+        eventQueue.push({
+          type: "message.updated",
+          properties: {
+            sessionID: "opencode-session-1",
+            info: {
+              id: "assistant-message-compaction",
+              role: "assistant",
+            },
+          },
+        });
+        eventQueue.push({
+          type: "message.part.updated",
+          properties: {
+            sessionID: "opencode-session-1",
+            part: {
+              id: "part-compaction",
+              messageID: "assistant-message-compaction",
+              type: "compaction",
+              auto: true,
+              overflow: true,
+            },
+          },
+        });
+        eventQueue.push({
+          type: "session.compacted",
+          properties: {
+            sessionID: "opencode-session-1",
+          },
+        });
+
+        const runtimeEvents = Array.from(yield* Fiber.join(eventsFiber));
+        eventQueue.close();
+        return runtimeEvents;
+      }).pipe(
+        Effect.provide(
+          makeOpenCodeAdapterLive({ runtime: runtime.runtime }).pipe(
+            Layer.provideMerge(
+              ServerConfig.layerTest(process.cwd(), { prefix: "opencode-adapter-test-" }),
+            ),
+            Layer.provideMerge(NodeServices.layer),
+          ),
+        ),
+      ),
+    );
+
+    expect(events.map((event) => event.type)).toEqual([
+      "session.started",
+      "thread.started",
+      "turn.started",
+      "item.updated",
+      "thread.state.changed",
+    ]);
+    expect(events[3]).toMatchObject({
+      type: "item.updated",
+      payload: {
+        itemType: "context_compaction",
+        status: "inProgress",
+        detail: "Compacting context after provider context overflow",
+        data: {
+          auto: true,
+          overflow: true,
+        },
+      },
+    });
+    expect(events[4]).toMatchObject({
+      type: "thread.state.changed",
+      payload: {
+        state: "compacted",
+        detail: { source: "opencode" },
+      },
+    });
   });
 });
