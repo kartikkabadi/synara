@@ -1,26 +1,24 @@
 import type { ThreadLoop } from "@synara/contracts";
+import {
+  LOOP_FIXTURE_ACTIVATION_ID,
+  makeLoop as makeLoopFixture,
+} from "@synara/shared/loopTestFixtures";
 import { describe, expect, it } from "vitest";
 
 import { decideLoopContinuation, type LoopContinuationThreadView } from "./loopDecision";
 
 const NOW = new Date("2026-07-19T12:00:00.000Z").getTime();
-const ACTIVATION_ID = "test-activation";
+const ACTIVATION_ID = LOOP_FIXTURE_ACTIVATION_ID;
 
 function makeLoop(overrides: Partial<ThreadLoop> = {}): ThreadLoop {
-  return {
-    active: true,
+  return makeLoopFixture({
     prompt: "fix the tests",
     iteration: 0,
     maxIterations: null,
-    endsAt: null,
-    hardCap: 100,
-    consecutiveErrors: 0,
-    lastStopReason: null,
-    activationId: ACTIVATION_ID,
     createdAt: "2026-07-19T11:00:00.000Z",
     updatedAt: "2026-07-19T11:00:00.000Z",
     ...overrides,
-  };
+  });
 }
 
 function makeThread(
@@ -67,82 +65,76 @@ describe("decideLoopContinuation", () => {
     });
   });
 
-  it("waits when the loop is inactive", () => {
+  it.each<[string, Partial<ThreadLoop>, Partial<LoopContinuationThreadView>, string]>([
+    ["the loop is inactive", { active: false }, {}, "loop_inactive"],
+    ["the prompt is missing", { prompt: "" }, {}, "missing_prompt"],
+    [
+      "a turn is in flight",
+      { iteration: 1 },
+      {
+        sessionActiveTurnId: "turn-1",
+        latestTurnState: "running",
+        latestTurnPurpose: { kind: "loop-iteration", activationId: ACTIVATION_ID, iteration: 1 },
+      },
+      "turn_in_flight",
+    ],
+    [
+      "the latest turn is still running without an active session turn",
+      {},
+      { latestTurnState: "running" },
+      "turn_in_flight",
+    ],
+    [
+      "a stale-activation turn is still running",
+      {},
+      {
+        latestTurnState: "running",
+        latestTurnPurpose: {
+          kind: "loop-iteration",
+          activationId: "stale-activation",
+          iteration: 1,
+        },
+      },
+      "turn_in_flight",
+    ],
+    ["a turn start is queued", {}, { hasQueuedTurnStart: true }, "turn_start_pending"],
+    ["approval is pending", {}, { hasPendingApproval: true }, "approval_pending"],
+    ["user input is pending", {}, { hasPendingUserInput: true }, "user_input_pending"],
+    ["plan mode is active", {}, { interactionMode: "plan" }, "plan_mode"],
+    ["the session is starting", {}, { sessionStatus: "starting" }, "session_unavailable"],
+    ["the session is running", {}, { sessionStatus: "running" }, "session_unavailable"],
+    ["the session is stopping", {}, { sessionStatus: "stopping" }, "session_unavailable"],
+  ])("waits when %s", (_name, loopOverrides, threadOverrides, why) => {
     const result = decideLoopContinuation({
-      loop: makeLoop({ active: false }),
+      loop: makeLoop(loopOverrides),
       nowMs: NOW,
-      thread: makeThread(),
+      thread: makeThread(threadOverrides),
     });
-    expect(result).toEqual({
-      type: "wait",
-      why: "loop_inactive",
-      nextConsecutiveErrors: 0,
-    });
+    expect(result).toEqual({ type: "wait", why, nextConsecutiveErrors: 0 });
   });
 
-  it("waits when the prompt is missing", () => {
+  it.each<[string, Partial<ThreadLoop>, Partial<LoopContinuationThreadView>, string]>([
+    ["the thread is deleted", {}, { deletedAt: "2026-07-19T11:00:00.000Z" }, "thread_deleted"],
+    ["the thread is archived", {}, { archivedAt: "2026-07-19T11:00:00.000Z" }, "thread_archived"],
+    [
+      "the thread is not top-level",
+      {},
+      { parentThreadId: "thread-parent-1" },
+      "thread_unrunnable",
+    ],
+    [
+      "the duration budget has expired",
+      { endsAt: "2026-07-19T11:59:59.000Z" },
+      {},
+      "budget_duration",
+    ],
+  ])("turns off when %s", (_name, loopOverrides, threadOverrides, reason) => {
     const result = decideLoopContinuation({
-      loop: makeLoop({ prompt: "" }),
+      loop: makeLoop(loopOverrides),
       nowMs: NOW,
-      thread: makeThread(),
+      thread: makeThread(threadOverrides),
     });
-    expect(result).toEqual({
-      type: "wait",
-      why: "missing_prompt",
-      nextConsecutiveErrors: 0,
-    });
-  });
-
-  it("turns off when the thread is deleted", () => {
-    const result = decideLoopContinuation({
-      loop: makeLoop(),
-      nowMs: NOW,
-      thread: makeThread({ deletedAt: "2026-07-19T11:00:00.000Z" }),
-    });
-    expect(result).toEqual({
-      type: "off",
-      reason: "thread_deleted",
-      nextConsecutiveErrors: 0,
-    });
-  });
-
-  it("turns off when the thread is archived", () => {
-    const result = decideLoopContinuation({
-      loop: makeLoop(),
-      nowMs: NOW,
-      thread: makeThread({ archivedAt: "2026-07-19T11:00:00.000Z" }),
-    });
-    expect(result).toEqual({
-      type: "off",
-      reason: "thread_archived",
-      nextConsecutiveErrors: 0,
-    });
-  });
-
-  it("turns off when the thread is not top-level", () => {
-    const result = decideLoopContinuation({
-      loop: makeLoop(),
-      nowMs: NOW,
-      thread: makeThread({ parentThreadId: "thread-parent-1" }),
-    });
-    expect(result).toEqual({
-      type: "off",
-      reason: "thread_unrunnable",
-      nextConsecutiveErrors: 0,
-    });
-  });
-
-  it("turns off when the duration budget has expired", () => {
-    const result = decideLoopContinuation({
-      loop: makeLoop({ endsAt: "2026-07-19T11:59:59.000Z" }),
-      nowMs: NOW,
-      thread: makeThread(),
-    });
-    expect(result).toEqual({
-      type: "off",
-      reason: "budget_duration",
-      nextConsecutiveErrors: 0,
-    });
+    expect(result).toEqual({ type: "off", reason, nextConsecutiveErrors: 0 });
   });
 
   it("turns off on duration expiry even while blocked on approval or user input", () => {
@@ -183,103 +175,6 @@ describe("decideLoopContinuation", () => {
       reason: "hard_cap",
       nextConsecutiveErrors: 0,
     });
-  });
-
-  it("waits when a turn is in flight", () => {
-    const result = decideLoopContinuation({
-      loop: makeLoop({ iteration: 1 }),
-      nowMs: NOW,
-      thread: makeThread({
-        sessionActiveTurnId: "turn-1",
-        latestTurnState: "running",
-        latestTurnPurpose: { kind: "loop-iteration", activationId: ACTIVATION_ID, iteration: 1 },
-      }),
-    });
-    expect(result).toEqual({
-      type: "wait",
-      why: "turn_in_flight",
-      nextConsecutiveErrors: 0,
-    });
-  });
-
-  it("waits when the latest turn is still running without an active session turn", () => {
-    const result = decideLoopContinuation({
-      loop: makeLoop(),
-      nowMs: NOW,
-      thread: makeThread({ latestTurnState: "running" }),
-    });
-    expect(result).toEqual({
-      type: "wait",
-      why: "turn_in_flight",
-      nextConsecutiveErrors: 0,
-    });
-  });
-
-  it("waits when a turn start is queued", () => {
-    const result = decideLoopContinuation({
-      loop: makeLoop(),
-      nowMs: NOW,
-      thread: makeThread({ hasQueuedTurnStart: true }),
-    });
-    expect(result).toEqual({
-      type: "wait",
-      why: "turn_start_pending",
-      nextConsecutiveErrors: 0,
-    });
-  });
-
-  it("waits when approval is pending", () => {
-    const result = decideLoopContinuation({
-      loop: makeLoop(),
-      nowMs: NOW,
-      thread: makeThread({ hasPendingApproval: true }),
-    });
-    expect(result).toEqual({
-      type: "wait",
-      why: "approval_pending",
-      nextConsecutiveErrors: 0,
-    });
-  });
-
-  it("waits when user input is pending", () => {
-    const result = decideLoopContinuation({
-      loop: makeLoop(),
-      nowMs: NOW,
-      thread: makeThread({ hasPendingUserInput: true }),
-    });
-    expect(result).toEqual({
-      type: "wait",
-      why: "user_input_pending",
-      nextConsecutiveErrors: 0,
-    });
-  });
-
-  it("waits in plan mode", () => {
-    const result = decideLoopContinuation({
-      loop: makeLoop(),
-      nowMs: NOW,
-      thread: makeThread({ interactionMode: "plan" }),
-    });
-    expect(result).toEqual({
-      type: "wait",
-      why: "plan_mode",
-      nextConsecutiveErrors: 0,
-    });
-  });
-
-  it("waits when the session is starting, running, or stopping", () => {
-    for (const status of ["starting", "running", "stopping"] as const) {
-      const result = decideLoopContinuation({
-        loop: makeLoop(),
-        nowMs: NOW,
-        thread: makeThread({ sessionStatus: status }),
-      });
-      expect(result).toEqual({
-        type: "wait",
-        why: "session_unavailable",
-        nextConsecutiveErrors: 0,
-      });
-    }
   });
 
   it("continues from a terminal error or stopped provider session", () => {
@@ -420,23 +315,4 @@ describe("decideLoopContinuation", () => {
     });
   });
 
-  it("blocks on a stale-activation running turn", () => {
-    const result = decideLoopContinuation({
-      loop: makeLoop(),
-      nowMs: NOW,
-      thread: makeThread({
-        latestTurnState: "running",
-        latestTurnPurpose: {
-          kind: "loop-iteration",
-          activationId: "stale-activation",
-          iteration: 1,
-        },
-      }),
-    });
-    expect(result).toEqual({
-      type: "wait",
-      why: "turn_in_flight",
-      nextConsecutiveErrors: 0,
-    });
-  });
 });
