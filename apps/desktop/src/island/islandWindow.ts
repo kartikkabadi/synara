@@ -64,6 +64,7 @@ export class IslandWindowManager {
   #cursorPoll: ReturnType<typeof setInterval> | null = null;
   #cursorInteractive = false;
   #cursorExitAt: number | null = null;
+  #ownsShortcut = false;
 
   constructor(options: IslandWindowManagerOptions) {
     this.#options = options;
@@ -162,7 +163,10 @@ export class IslandWindowManager {
   }
 
   destroy(): void {
-    globalShortcut.unregister(ISLAND_GLOBAL_SHORTCUT);
+    if (this.#ownsShortcut) {
+      globalShortcut.unregister(ISLAND_GLOBAL_SHORTCUT);
+      this.#ownsShortcut = false;
+    }
     this.#detachDisplayListeners?.();
     this.#detachDisplayListeners = null;
     this.#stopCursorPoll();
@@ -256,9 +260,11 @@ export class IslandWindowManager {
   }
 
   #registerShortcut(): void {
-    if (globalShortcut.isRegistered(ISLAND_GLOBAL_SHORTCUT)) return;
+    if (this.#ownsShortcut || globalShortcut.isRegistered(ISLAND_GLOBAL_SHORTCUT)) return;
     try {
-      globalShortcut.register(ISLAND_GLOBAL_SHORTCUT, () => this.toggleExpanded());
+      this.#ownsShortcut = globalShortcut.register(ISLAND_GLOBAL_SHORTCUT, () =>
+        this.toggleExpanded(),
+      );
     } catch {
       // Shortcut registration can fail (e.g. Wayland); the pill stays clickable.
     }
