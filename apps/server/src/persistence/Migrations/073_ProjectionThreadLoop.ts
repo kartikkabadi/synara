@@ -11,9 +11,4 @@ export default Effect.gen(function* () {
       updated_at TEXT NOT NULL
     )
   `;
-
-  yield* sql`
-    CREATE INDEX IF NOT EXISTS idx_projection_thread_loop_updated_at
-    ON projection_thread_loop(updated_at)
-  `;
 });

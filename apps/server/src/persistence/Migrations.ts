@@ -92,6 +92,7 @@ import Migration0073 from "./Migrations/073_ProjectionThreadLoop.ts";
 import Migration0074 from "./Migrations/074_ProjectionThreadMessagePurpose.ts";
 import Migration0075 from "./Migrations/075_ProjectionTurnPurpose.ts";
 import Migration0076 from "./Migrations/076_QueuedTurnPromotionLoopIdentity.ts";
+import Migration0077 from "./Migrations/077_DropProjectionThreadLoopUpdatedAtIndex.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -183,6 +184,7 @@ export const migrationEntries = [
   [74, "ProjectionThreadMessagePurpose", Migration0074],
   [75, "ProjectionTurnPurpose", Migration0075],
   [76, "QueuedTurnPromotionLoopIdentity", Migration0076],
+  [77, "DropProjectionThreadLoopUpdatedAtIndex", Migration0077],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>
