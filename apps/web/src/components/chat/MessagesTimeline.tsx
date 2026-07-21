@@ -1828,13 +1828,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         </DisclosureRegion>
       )}
 
-      {row.kind === "loop-start" && (
-        <div className="flex items-center justify-center gap-1.5 py-2 text-[11px] text-muted-foreground/70">
-          <LoopIcon className="size-3" aria-hidden />
-          <span className="truncate">{row.label}</span>
-        </div>
-      )}
-
       {row.kind === "loop-end" && <LoopCompletionRecord loop={row.loop} />}
     </div>
   );

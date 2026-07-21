@@ -99,12 +99,6 @@ export type MessagesTimelineRow =
       open: boolean;
     }
   | {
-      // Divider marking where a `/loop` activation began in the transcript.
-      kind: "loop-start";
-      id: string;
-      label: string;
-    }
-  | {
       // Durable transcript record left behind when a `/loop` turns off. Derived
       // purely from the thread's loop projection (never a fake message), so it
       // disappears if a new loop activates.
@@ -348,7 +342,6 @@ export function deriveMessagesTimelineRows(input: {
   const durationStartByMessageId = computeMessageDurationStart(timelineMessages);
   const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(timelineMessages);
   const purposeByTurnId = new Map<string, ThreadTurnPurpose>();
-  const seenLoopActivationIds = new Set<string>();
   let pendingWorkGroup: Extract<MessagesTimelineRow, { kind: "work" }> | null = null;
 
   const groupedEntriesEqual = (
@@ -442,18 +435,12 @@ export function deriveMessagesTimelineRows(input: {
     } else {
       flushPendingWorkGroup();
     }
-    if (message.role === "user" && message.purpose?.kind === "loop-iteration") {
-      if (message.turnId != null) {
-        purposeByTurnId.set(message.turnId, message.purpose);
-      }
-      if (!seenLoopActivationIds.has(message.purpose.activationId)) {
-        seenLoopActivationIds.add(message.purpose.activationId);
-        nextRows.push({
-          kind: "loop-start",
-          id: `loop-start:${message.purpose.activationId}`,
-          label: "Loop started",
-        });
-      }
+    if (
+      message.role === "user" &&
+      message.purpose?.kind === "loop-iteration" &&
+      message.turnId != null
+    ) {
+      purposeByTurnId.set(message.turnId, message.purpose);
     }
 
     const assistantTurnStillInProgress =
@@ -973,9 +960,6 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
     case "proposed-plan":
       return a.proposedPlan === (b as typeof a).proposedPlan;
-
-    case "loop-start":
-      return a.label === (b as typeof a).label;
 
     case "loop-end": {
       const bl = (b as typeof a).loop;

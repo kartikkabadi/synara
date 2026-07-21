@@ -65,9 +65,9 @@ describe("decideLoopContinuation", () => {
     });
   });
 
-  it.each<[string, Partial<ThreadLoop>, Partial<LoopContinuationThreadView>, string]>([
-    ["the loop is inactive", { active: false }, {}, "loop_inactive"],
-    ["the prompt is missing", { prompt: "" }, {}, "missing_prompt"],
+  it.each<[string, Partial<ThreadLoop>, Partial<LoopContinuationThreadView>]>([
+    ["the loop is inactive", { active: false }, {}],
+    ["the prompt is missing", { prompt: "" }, {}],
     [
       "a turn is in flight",
       { iteration: 1 },
@@ -76,13 +76,11 @@ describe("decideLoopContinuation", () => {
         latestTurnState: "running",
         latestTurnPurpose: { kind: "loop-iteration", activationId: ACTIVATION_ID, iteration: 1 },
       },
-      "turn_in_flight",
     ],
     [
       "the latest turn is still running without an active session turn",
       {},
       { latestTurnState: "running" },
-      "turn_in_flight",
     ],
     [
       "a stale-activation turn is still running",
@@ -95,22 +93,21 @@ describe("decideLoopContinuation", () => {
           iteration: 1,
         },
       },
-      "turn_in_flight",
     ],
-    ["a turn start is queued", {}, { hasQueuedTurnStart: true }, "turn_start_pending"],
-    ["approval is pending", {}, { hasPendingApproval: true }, "approval_pending"],
-    ["user input is pending", {}, { hasPendingUserInput: true }, "user_input_pending"],
-    ["plan mode is active", {}, { interactionMode: "plan" }, "plan_mode"],
-    ["the session is starting", {}, { sessionStatus: "starting" }, "session_unavailable"],
-    ["the session is running", {}, { sessionStatus: "running" }, "session_unavailable"],
-    ["the session is stopping", {}, { sessionStatus: "stopping" }, "session_unavailable"],
-  ])("waits when %s", (_name, loopOverrides, threadOverrides, why) => {
+    ["a turn start is queued", {}, { hasQueuedTurnStart: true }],
+    ["approval is pending", {}, { hasPendingApproval: true }],
+    ["user input is pending", {}, { hasPendingUserInput: true }],
+    ["plan mode is active", {}, { interactionMode: "plan" }],
+    ["the session is starting", {}, { sessionStatus: "starting" }],
+    ["the session is running", {}, { sessionStatus: "running" }],
+    ["the session is stopping", {}, { sessionStatus: "stopping" }],
+  ])("waits when %s", (_name, loopOverrides, threadOverrides) => {
     const result = decideLoopContinuation({
       loop: makeLoop(loopOverrides),
       nowMs: NOW,
       thread: makeThread(threadOverrides),
     });
-    expect(result).toEqual({ type: "wait", why, nextConsecutiveErrors: 0 });
+    expect(result).toEqual({ type: "wait" });
   });
 
   it.each<[string, Partial<ThreadLoop>, Partial<LoopContinuationThreadView>, string]>([
@@ -309,7 +306,7 @@ describe("decideLoopContinuation", () => {
     });
   });
 
-  it("carries derived error accounting into a blocked wait without persisting it", () => {
+  it("waits without persisting error accounting while blocked", () => {
     const result = decideLoopContinuation({
       loop: makeLoop({ iteration: 1, consecutiveErrors: 1 }),
       nowMs: NOW,
@@ -318,10 +315,6 @@ describe("decideLoopContinuation", () => {
         hasQueuedTurnStart: true,
       }),
     });
-    expect(result).toEqual({
-      type: "wait",
-      why: "turn_start_pending",
-      nextConsecutiveErrors: 2,
-    });
+    expect(result).toEqual({ type: "wait" });
   });
 });
