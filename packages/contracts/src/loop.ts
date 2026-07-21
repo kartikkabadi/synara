@@ -1,8 +1,17 @@
 import { Schema } from "effect";
 
-import { IsoDateTime, NonNegativeInt, PositiveInt, TrimmedString } from "./baseSchemas";
+import {
+  IsoDateTime,
+  NonNegativeInt,
+  PositiveInt,
+  TrimmedNonEmptyString,
+  TrimmedString,
+} from "./baseSchemas";
 
 export const LOOP_DEFAULT_HARD_CAP = 100;
+// Safe default count budget applied when a loop is armed without an explicit
+// count or duration budget (bare `/loop`, budget-less `thread.loop.set`).
+export const LOOP_DEFAULT_ARMED_MAX_ITERATIONS = 5;
 // Issue #49 final locked caps: explicit count budgets are 1..100 and are
 // also capped by the default hard cap (100) so the two limits never diverge.
 export const LOOP_MAX_COUNT_BUDGET = 100;
@@ -32,10 +41,15 @@ export const LoopPrompt = TrimmedString.check(Schema.isNonEmpty())
   .check(Schema.isPattern(/^[^/]/));
 export type LoopPrompt = typeof LoopPrompt.Type;
 
+// Stable identity for one loop activation. Branded so it cannot be confused
+// with CommandId/TurnId even though it is derived from a command id.
+export const LoopActivationId = TrimmedNonEmptyString.pipe(Schema.brand("LoopActivationId"));
+export type LoopActivationId = typeof LoopActivationId.Type;
+
 // Server-assigned marker on loop-owned turns. Never client-supplied.
 export const ThreadTurnPurpose = Schema.Struct({
   kind: Schema.Literal("loop-iteration"),
-  activationId: Schema.String,
+  activationId: LoopActivationId,
   iteration: PositiveInt,
 });
 export type ThreadTurnPurpose = typeof ThreadTurnPurpose.Type;
@@ -67,7 +81,7 @@ export const ThreadLoop = Schema.Struct({
   // Stable identity for this loop activation; used to scope settlement and
   // continuation command IDs so a reconfigured loop does not inherit stale
   // terminal events from a previous activation.
-  activationId: Schema.String,
+  activationId: LoopActivationId,
 
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
