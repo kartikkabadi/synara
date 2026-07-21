@@ -262,6 +262,20 @@
   box-shadow: inset 2px 0 0 hsl(var(--island-hue, 205) 80% 60% / 0.5);
 }
 
+/* Status text shares the orb's state hue tokens (lightened for legibility on
+   the dark glass). */
+.island-status-text-working {
+  color: hsl(195 90% 70%);
+}
+
+.island-status-text-needs-approval {
+  color: hsl(38 95% 66%);
+}
+
+.island-status-text-done {
+  color: hsl(150 80% 62%);
+}
+
 /* ---- Orb lamp -------------------------------------------------------- */
 
 /* State palette: dim cool blue idle, multi-hue working, warm amber attention,
@@ -273,39 +287,95 @@
   position: relative;
   border-radius: 9999px;
   flex-shrink: 0;
-  --orb-hi: hsl(var(--island-hue, 220) 90% 75%);
-  --orb-mid: hsl(var(--island-hue, 220) 85% 55%);
-  --orb-lo: hsl(var(--island-hue, 220) 80% 35%);
+  /* State hue tokens — the single source for core, bloom, rim sweep, and (via
+     --island-hue on the surface) the interior wash and exterior glow. */
+  --orb-state: hsl(225 95% 68%);
+  --state-hue-mid: var(--orb-state);
+  --state-hue-bright: color-mix(in oklab, var(--orb-state) 65%, white);
 }
 
-/* All painted layers live on a 2× canvas scaled back down, so the tiny
-   pill-size orb renders its gradients at double resolution (no banding or
-   pixelated rim at close zoom). */
-.island-orb-canvas {
+.island-orb[data-orb-state="idle"] {
+  --orb-state: hsl(225 95% 68%);
+}
+
+.island-orb[data-orb-state="working"] {
+  --orb-state: hsl(195 90% 60%);
+}
+
+.island-orb[data-orb-state="looping"] {
+  --orb-state: hsl(265 90% 65%);
+}
+
+.island-orb[data-orb-state="needs-approval"] {
+  --orb-state: hsl(38 95% 60%);
+}
+
+.island-orb[data-orb-state="done"] {
+  --orb-state: hsl(150 80% 55%);
+}
+
+.island-orb[data-orb-state="error"] {
+  --orb-state: hsl(3 85% 60%);
+}
+
+/* Layer 1 — bloom: a blurred halo behind the core, breathing .4→.65. */
+.island-orb::before {
+  content: "";
   position: absolute;
-  inset: -50%;
-  transform: scale(0.5);
+  inset: 0;
   border-radius: 9999px;
+  transform: scale(1.4);
+  filter: blur(6px);
+  opacity: 0.55;
+  background: radial-gradient(
+    circle at 35% 30%,
+    rgba(255, 255, 255, 0.6),
+    var(--state-hue-mid) 45%,
+    transparent 72%
+  );
+  animation: island-orb-bloom-breathe 2.8s ease-in-out infinite;
 }
 
+/* Layer 2 — core: hot-white highlight melting into the state hue, with a slow
+   ±8° hue drift so the lamp never reads as a static dot. */
 .island-orb-core {
   position: absolute;
   inset: 0;
   border-radius: 9999px;
-  background: radial-gradient(circle at 35% 30%, var(--orb-hi), var(--orb-mid) 55%, var(--orb-lo));
+  background: radial-gradient(
+    circle at 35% 30%,
+    rgba(255, 255, 255, 0.95),
+    var(--state-hue-mid) 45%,
+    transparent 72%
+  );
+  animation: island-orb-hue 7s ease-in-out infinite;
 }
 
-/* Specular highlight: the "sphere" cue the flat core lacks at small sizes. */
-.island-orb-spec {
+/* Layer 3 — rim: a bright arc sweeping a 1.5px ring around the orb. */
+@property --orb-sweep {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.island-orb::after {
+  content: "";
   position: absolute;
   inset: 0;
   border-radius: 9999px;
-  background: radial-gradient(
-    circle at 32% 26%,
-    rgba(255, 255, 255, 0.9),
-    rgba(255, 255, 255, 0.25) 22%,
-    transparent 40%
+  padding: 1.5px;
+  background: conic-gradient(
+    from var(--orb-sweep, 0deg),
+    transparent 0 70%,
+    var(--state-hue-bright) 85%,
+    transparent 100%
   );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: island-orb-sweep 2.4s linear infinite;
 }
 
 /* Soft seat so the orb reads as mounted in the pill, not pasted on; kept
@@ -317,91 +387,10 @@
   flex-shrink: 0;
 }
 
-.island-orb-sheen {
-  position: absolute;
-  inset: 0;
-  border-radius: 9999px;
-  overflow: hidden;
-}
+/* State motion: only transform/opacity/filter animate (composited layers). */
 
-/* Multi-hue rim sweep: identical first/last stops close the conic loop (no
-   seam wedge), and the blur melts the stops into a continuous shimmer. */
-.island-orb-sheen::before {
-  content: "";
-  position: absolute;
-  inset: -25%;
-  background: conic-gradient(from 0deg, #56e0ff, #7b6bff 33%, #ff7ad9 66%, #56e0ff 100%);
-  filter: blur(5px);
-  opacity: 0.7;
-  animation: island-orb-spin 6s linear infinite;
-  animation-play-state: paused;
-}
-
-.island-orb-bloom {
-  position: absolute;
-  inset: -35%;
-  border-radius: 9999px;
-  background: radial-gradient(circle at 35% 30%, var(--orb-hi), var(--orb-mid) 55%, var(--orb-lo));
-  filter: blur(8px);
-  opacity: 0.8;
-}
-
-/* State motion: only transform/opacity animate (composited layers). */
-
-/* Idle: a dim cool-blue ember (#5b8cff family) with a soft glow and a gentle
-   2.4s breathing cycle, so the collapsed pill always shows a living orb. */
 .island-orb[data-orb-state="idle"] {
   animation: island-orb-idle-breathe 2.4s ease-in-out infinite;
-}
-
-.island-orb[data-orb-state="idle"] .island-orb-core {
-  background: radial-gradient(circle at 35% 30%, #a8c2ff, #5b8cff 55%, #2a4a99);
-}
-
-.island-orb[data-orb-state="idle"] .island-orb-bloom {
-  background: radial-gradient(circle at 35% 30%, #a8c2ff, #5b8cff 55%, #2a4a99);
-  opacity: 0.5;
-}
-
-.island-orb[data-orb-state="idle"] .island-orb-spec {
-  opacity: 0.8;
-}
-
-/* A paused sheen renders as a static wedge, so only spinning states show it. */
-.island-orb .island-orb-sheen {
-  opacity: 0;
-}
-
-.island-orb[data-orb-state="working"] .island-orb-sheen,
-.island-orb[data-orb-state="looping"] .island-orb-sheen {
-  opacity: 1;
-}
-
-/* Working: cyan→violet→pink multi-hue core under the spinning rim sweep. */
-.island-orb[data-orb-state="working"] .island-orb-core {
-  background: radial-gradient(circle at 35% 30%, #9ceaff, #56b8ff 45%, #7b6bff 75%, #3a2d8f);
-}
-
-.island-orb[data-orb-state="working"] .island-orb-bloom {
-  background: radial-gradient(circle at 35% 30%, #9ceaff, #56b8ff 45%, #7b6bff 75%, #3a2d8f);
-}
-
-/* Attention: warm amber. */
-.island-orb[data-orb-state="needs-approval"] .island-orb-core {
-  background: radial-gradient(circle at 35% 30%, #ffd9a0, #ffb454 55%, #9a5c14);
-}
-
-.island-orb[data-orb-state="needs-approval"] .island-orb-bloom {
-  background: radial-gradient(circle at 35% 30%, #ffd9a0, #ffb454 55%, #9a5c14);
-}
-
-/* Error: red. */
-.island-orb[data-orb-state="error"] .island-orb-core {
-  background: radial-gradient(circle at 35% 30%, #ffb0ab, #ff5f57 55%, #8f1d18);
-}
-
-.island-orb[data-orb-state="error"] .island-orb-bloom {
-  background: radial-gradient(circle at 35% 30%, #ffb0ab, #ff5f57 55%, #8f1d18);
 }
 
 /* Active states scale the whole orb 1.15x (composited transform) so a state
@@ -414,23 +403,33 @@
   transform: scale(1.15);
 }
 
-.island-orb[data-orb-state="working"] .island-orb-sheen::before {
-  animation-duration: 3s;
-  animation-play-state: running;
-}
-
-.island-orb[data-orb-state="looping"] .island-orb-sheen::before {
-  animation-duration: 3s;
-  animation-play-state: running;
-}
-
 .island-orb[data-orb-state="needs-approval"] {
   animation: island-orb-pulse 2.4s ease-in-out infinite;
 }
 
-@keyframes island-orb-spin {
+@keyframes island-orb-sweep {
   to {
-    transform: rotate(360deg);
+    --orb-sweep: 360deg;
+  }
+}
+
+@keyframes island-orb-bloom-breathe {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.65;
+  }
+}
+
+@keyframes island-orb-hue {
+  0%,
+  100% {
+    filter: hue-rotate(-8deg);
+  }
+  50% {
+    filter: hue-rotate(8deg);
   }
 }
 
@@ -477,7 +476,9 @@
   }
 
   .island-orb,
-  .island-orb-sheen::before {
+  .island-orb::before,
+  .island-orb::after,
+  .island-orb-core {
     animation: none !important;
   }
 

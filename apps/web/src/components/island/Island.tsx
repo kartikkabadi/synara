@@ -88,10 +88,12 @@ function innerSize(
   return islandStateSize(state, context?.notch ?? null, sessionCount);
 }
 
+// Token-based status text colors so text matches the orb's state hues exactly
+// (see island.css "Orb lamp" state hue tokens).
 const STATUS_TEXT_CLASS: Record<IslandSessionStatus, string> = {
-  working: "text-cyan-300",
-  "needs-approval": "text-amber-300",
-  done: "text-emerald-300",
+  working: "island-status-text-working",
+  "needs-approval": "island-status-text-needs-approval",
+  done: "island-status-text-done",
 };
 
 const STATUS_LABEL: Record<IslandSessionStatus, string> = {
@@ -346,7 +348,7 @@ export function Island() {
         aria-label="Expand agent sessions island"
       >
         <span className="island-orb-seat">
-          <IslandOrb state={orbState} size={12} />
+          <IslandOrb state={orbState} size={16} />
         </span>
         {sessions.length > 0 ? (
           <span className="text-[13px] font-semibold tabular-nums text-white/90">
@@ -368,7 +370,7 @@ export function Island() {
             {headline ? (
               <>
                 <div className="flex items-center gap-2.5">
-                  <IslandOrb state={headline.status} size={15} />
+                  <IslandOrb state={headline.status} size={16} />
                   <span className="min-w-0 flex-1 truncate text-sm font-medium text-white/90">
                     {headline.title}
                   </span>
@@ -387,7 +389,7 @@ export function Island() {
               </>
             ) : (
               <div className="flex items-center gap-2.5">
-                <IslandOrb state="idle" size={15} />
+                <IslandOrb state="idle" size={16} />
                 <span className="text-xs text-white/50">No active sessions</span>
               </div>
             )}
@@ -431,7 +433,7 @@ export function Island() {
                     style={{ animationDelay: `${150 + index * 30}ms` }}
                     className="island-row island-enter-row group flex h-11 w-full items-center gap-2.5 rounded-lg px-2.5 text-left hover:bg-white/6"
                   >
-                    <IslandOrb state={session.status} size={16} />
+                    <IslandOrb state={session.status} size={20} />
                     <span className="min-w-0 flex-1 truncate font-mono text-[13px] font-bold text-white/90">
                       {session.title}
                     </span>

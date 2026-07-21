@@ -2,7 +2,7 @@
 // Purpose: CSS-built "liquid glass" orb lamp whose hue and motion encode agent state.
 // Layer: Web island UI
 // Why: The orb is the island's only living element ("ember glass"); pure CSS,
-//      no canvas/WebGL, only transform/opacity animate.
+//      no canvas/WebGL, only transform/opacity/filter animate.
 
 import type { CSSProperties } from "react";
 
@@ -10,12 +10,13 @@ import type { IslandSessionStatus } from "~/lib/islandSessionTracker";
 
 export type IslandOrbState = IslandSessionStatus | "looping" | "idle" | "error";
 
-// One dominant hue at a time, from Synara's own state palette.
+// One dominant hue at a time, from Synara's own state palette. The same hue
+// number drives the surface glow / interior wash via --island-hue.
 const ORB_HUE: Record<IslandOrbState, number> = {
-  idle: 224,
-  working: 205,
+  idle: 225,
+  working: 195,
   looping: 265,
-  "needs-approval": 36,
+  "needs-approval": 38,
   done: 150,
   error: 3,
 };
@@ -30,11 +31,14 @@ export function orbHue(state: IslandOrbState): number {
 
 export interface IslandOrbProps {
   state: IslandOrbState;
-  /** Diameter in px: 18 in the collapsed pill, 15 in rows, 28 as the empty-state hero. */
+  /** Diameter in px: 16 in the collapsed pill, 20 in rows, 32 as the empty-state hero. */
   size?: number;
 }
 
-export function IslandOrb({ state, size = 18 }: IslandOrbProps) {
+// Three stacked layers: bloom (::before, blurred halo breathing behind), core
+// (child, hot-white center over the state hue), rim (::after, a 1.5px conic
+// sweep ring). See island.css "Orb lamp".
+export function IslandOrb({ state, size = 16 }: IslandOrbProps) {
   const style = {
     width: size,
     height: size,
@@ -42,13 +46,7 @@ export function IslandOrb({ state, size = 18 }: IslandOrbProps) {
   } as CSSProperties;
   return (
     <span aria-hidden className="island-orb" data-orb-state={state} style={style}>
-      {/* 2× canvas scaled down: gradients rasterize at double resolution. */}
-      <span className="island-orb-canvas">
-        <span className="island-orb-bloom" />
-        <span className="island-orb-core" />
-        <span className="island-orb-spec" />
-        <span className="island-orb-sheen" />
-      </span>
+      <span className="island-orb-core" />
     </span>
   );
 }
