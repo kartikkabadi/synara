@@ -11,8 +11,11 @@ import {
 import { buildPromptThreadTitleFallback } from "@synara/shared/chatThreads";
 import { type LoopBudget, type LoopParseErrorReason } from "@synara/shared/loop";
 import {
+  LOOP_DEFAULT_BUDGET_CHOICE,
   interpretLoopInvocation,
+  loopBudgetChoiceFromParsed,
   type LoopBudgetChoice,
+  type LoopSetupNote,
 } from "../components/chat/useLoopComposerMode";
 import { deriveAssociatedWorktreeMetadata } from "@synara/shared/threadWorkspace";
 import { useCallback, useEffect, useState } from "react";
@@ -55,7 +58,7 @@ function wasPromptReplacementApplied(result: number | false): boolean {
   return result !== false;
 }
 
-function formatLoopParseError(reason: LoopParseErrorReason): string {
+export function formatLoopParseError(reason: LoopParseErrorReason): string {
   switch (reason) {
     case "missing_budget":
       return "Add a budget first, e.g. `/loop 10 fix the tests` or `/loop 30m`.";
@@ -72,6 +75,54 @@ function formatLoopParseError(reason: LoopParseErrorReason): string {
   }
 }
 
+export type LoopSetupOptions = {
+  budget: LoopBudgetChoice;
+  objective: string;
+  note: LoopSetupNote | null;
+};
+
+// Selecting Loop from the command menu: active loop opens Edit Loop mode (it
+// never stops the running loop); inactive selection opens guided setup.
+export function resolveLoopMenuSelection(
+  loopActive: boolean,
+): { kind: "edit" } | { kind: "setup"; options: LoopSetupOptions } {
+  return loopActive
+    ? { kind: "edit" }
+    : {
+        kind: "setup",
+        options: { budget: LOOP_DEFAULT_BUDGET_CHOICE, objective: "", note: null },
+      };
+}
+
+// Parse errors stay recoverable: the toast carries a Configure Loop action
+// that reopens guided setup with the typed objective prefilled.
+export function buildLoopParseErrorToast(
+  trimmed: string,
+  reason: LoopParseErrorReason,
+  openLoopSetup: (options: LoopSetupOptions) => void,
+): {
+  type: "warning";
+  title: string;
+  description: string;
+  actionProps: { children: string; onClick: () => void };
+} {
+  const args = trimmed
+    .trimStart()
+    .replace(/^\/loop/i, "")
+    .trim();
+  return {
+    type: "warning",
+    title: "Invalid /loop command",
+    description: formatLoopParseError(reason),
+    actionProps: {
+      children: "Configure Loop",
+      onClick: () => {
+        openLoopSetup({ budget: LOOP_DEFAULT_BUDGET_CHOICE, objective: args, note: null });
+      },
+    },
+  };
+}
+
 export function useComposerSlashCommands(input: {
   activeProject: Project | undefined;
   activeThread: Thread | undefined;
@@ -85,7 +136,7 @@ export function useComposerSlashCommands(input: {
   fastModeEnabled: boolean;
   providerNativeCommands: readonly ProviderNativeCommandDescriptor[];
   providerCommandDiscoveryCwd: string | null;
-  hasComposerAttachments: boolean;
+  hasUnsupportedLoopContext: boolean;
   selectedProvider: ProviderKind;
   currentProviderModelOptions: ProviderModelOptions[ProviderKind] | undefined;
   selectedModelSelection: ModelSelection;
@@ -93,11 +144,7 @@ export function useComposerSlashCommands(input: {
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
   threadId: ThreadId;
-  openLoopSetup: (options: {
-    budget: LoopBudgetChoice;
-    objective: string;
-    note: "choose-budget" | "invalid-budget" | null;
-  }) => void;
+  openLoopSetup: (options: LoopSetupOptions) => void;
   openLoopEdit: () => void;
   ensureLoopThreadReady: (titleSeed: string) => Promise<boolean>;
   syncServerShellSnapshot: (snapshot: OrchestrationShellSnapshot) => void;
@@ -144,7 +191,7 @@ export function useComposerSlashCommands(input: {
     fastModeEnabled,
     providerNativeCommands,
     providerCommandDiscoveryCwd,
-    hasComposerAttachments,
+    hasUnsupportedLoopContext,
     selectedProvider,
     currentProviderModelOptions,
     selectedModelSelection,
@@ -668,17 +715,19 @@ export function useComposerSlashCommands(input: {
 
   // Power-user fast path: `/loop 5 fix the tests` starts immediately after
   // validation, reusing new-chat thread promotion via ensureLoopThreadReady.
+  // Direct starts enforce the same text-only contract as guided setup: any
+  // unsupported context routes into setup with the objective prefilled.
   const startLoopDirect = useCallback(
     async (trimmed: string, budget: LoopBudget, prompt: string) => {
       const api = readNativeApi();
       if (!api) {
         return;
       }
-      if (hasComposerAttachments) {
-        toastManager.add({
-          type: "warning",
-          title: "Loop is unavailable",
-          description: "Remove attachments before starting or reconfiguring a loop.",
+      if (hasUnsupportedLoopContext) {
+        openLoopSetup({
+          budget: loopBudgetChoiceFromParsed(budget),
+          objective: prompt,
+          note: "unsupported-context",
         });
         return;
       }
@@ -714,7 +763,8 @@ export function useComposerSlashCommands(input: {
     [
       editorActions,
       ensureLoopThreadReady,
-      hasComposerAttachments,
+      hasUnsupportedLoopContext,
+      openLoopSetup,
       syncServerShellSnapshot,
       threadId,
     ],
@@ -747,11 +797,7 @@ export function useComposerSlashCommands(input: {
         case "not-loop":
           return;
         case "reject":
-          toastManager.add({
-            type: "warning",
-            title: "Invalid /loop command",
-            description: formatLoopParseError(interpretation.reason),
-          });
+          toastManager.add(buildLoopParseErrorToast(trimmed, interpretation.reason, openLoopSetup));
           return;
         case "toggle-off":
           await toggleActiveLoop(trimmed);
@@ -1062,16 +1108,11 @@ export function useComposerSlashCommands(input: {
         const applied = clearSlashCommandFromComposer();
         if (wasPromptReplacementApplied(applied)) {
           editorActions.setComposerHighlightedItemId(null);
-          // Selecting Loop while a loop is active opens Edit Loop mode; it
-          // never stops the running loop. Inactive selection opens setup.
-          if (activeThread?.loop?.active === true) {
+          const selection = resolveLoopMenuSelection(activeThread?.loop?.active === true);
+          if (selection.kind === "edit") {
             openLoopEdit();
           } else {
-            openLoopSetup({
-              budget: { kind: "count", turns: 5 },
-              objective: "",
-              note: null,
-            });
+            openLoopSetup(selection.options);
           }
         }
         return;

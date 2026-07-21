@@ -1147,7 +1147,6 @@ export default function ChatView({
   );
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
   const durablyPersistedComposerImageIds = composerDraft.persistedAttachments;
-  const hasComposerAttachments = effectiveComposerAttachmentCount(composerDraft) > 0;
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
   const setComposerDraftPromptHistorySavedDraft = useComposerDraftStore(
     (store) => store.setPromptHistorySavedDraft,
@@ -9141,7 +9140,7 @@ export default function ChatView({
     fastModeEnabled,
     providerNativeCommands,
     providerCommandDiscoveryCwd: composerSkillCwd,
-    hasComposerAttachments,
+    hasUnsupportedLoopContext: loopUnsupportedContext,
     selectedProvider,
     currentProviderModelOptions,
     selectedModelSelection,
@@ -10229,7 +10228,8 @@ export default function ChatView({
                     mode={loopComposer.mode}
                     isDispatching={loopComposer.isDispatching}
                     isLoopTurnRunning={hasLiveTurn}
-                    inlineError={loopComposer.inlineError}
+                    note={loopComposer.note}
+                    error={loopComposer.error}
                     isUnsupportedContext={loopComposer.isUnsupportedContext}
                     onBudgetChange={loopComposer.setBudget}
                   />

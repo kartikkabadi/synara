@@ -58,7 +58,7 @@ function humanizeProviderCommandName(command: string): string {
     .join(" ");
 }
 
-function commandMenuTitle(
+export function commandMenuTitle(
   item: Extract<ComposerCommandItem, { type: "slash-command" | "provider-native-command" }>,
   isLoopActive: boolean,
 ): string {
@@ -419,7 +419,7 @@ const COMPOSER_COMMAND_ITEM_GLYPH_CLASSNAME = "size-3.5";
 // Reuse the app's existing icon components for each concept so the command menu
 // stays coherent with how plan/fork/review/model/etc. appear everywhere else.
 // Don't introduce bespoke glyphs here — map to the shared `~/lib/icons` exports.
-const SLASH_COMMAND_ICONS: Record<string, LucideIcon> = {
+export const SLASH_COMMAND_ICONS: Record<string, LucideIcon> = {
   clear: EraserIcon,
   compact: Minimize2,
   model: BrainIcon,
