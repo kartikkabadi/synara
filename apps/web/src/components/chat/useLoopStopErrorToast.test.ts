@@ -54,11 +54,8 @@ vi.mock("react", () => ({
   useRef: reactHarness.useRef,
 }));
 
-import {
-  getLoopStopErrorToastCopy,
-  shouldToastLoopStop,
-  useLoopStopErrorToast,
-} from "./useLoopStopErrorToast";
+import { shouldToastLoopStop, useLoopStopErrorToast } from "./useLoopStopErrorToast";
+import { formatLoopStopReasonShort } from "./loopPresentation";
 
 function makeLoop(overrides: Partial<ThreadLoop>): ThreadLoop {
   return {
@@ -76,26 +73,6 @@ function makeLoop(overrides: Partial<ThreadLoop>): ThreadLoop {
     ...overrides,
   } as ThreadLoop;
 }
-
-describe("getLoopStopErrorToastCopy", () => {
-  it("returns copy only for exceptional stop reasons", () => {
-    expect(getLoopStopErrorToastCopy("consecutive_errors")).toEqual({
-      title: "Loop stopped after repeated errors",
-      description: "Review the latest error before restarting.",
-    });
-    expect(getLoopStopErrorToastCopy("prompt_invalid")).not.toBeNull();
-    expect(getLoopStopErrorToastCopy("thread_unrunnable")).not.toBeNull();
-  });
-
-  it("stays quiet for routine lifecycle stops", () => {
-    expect(getLoopStopErrorToastCopy("budget_iterations")).toBeNull();
-    expect(getLoopStopErrorToastCopy("budget_duration")).toBeNull();
-    expect(getLoopStopErrorToastCopy("user_stop")).toBeNull();
-    expect(getLoopStopErrorToastCopy("toggled_off")).toBeNull();
-    expect(getLoopStopErrorToastCopy("hard_cap")).toBeNull();
-    expect(getLoopStopErrorToastCopy("replaced_by_manual_policy")).toBeNull();
-  });
-});
 
 describe("shouldToastLoopStop", () => {
   const stopped = makeLoop({ active: false, lastStopReason: "consecutive_errors" });
@@ -153,7 +130,7 @@ describe("useLoopStopErrorToast", () => {
       render(threadId, makeLoop({ active: false, lastStopReason: reason }), addToast);
       expect(addToast).toHaveBeenCalledTimes(1);
       expect(addToast).toHaveBeenCalledWith({
-        ...getLoopStopErrorToastCopy(reason),
+        ...formatLoopStopReasonShort(reason),
         threadId,
       });
     },
