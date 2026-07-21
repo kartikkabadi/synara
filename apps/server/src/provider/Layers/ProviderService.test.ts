@@ -2477,7 +2477,82 @@ routing.layer("ProviderServiceLive routing", (it) => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }).pipe(Effect.provide(NodeServices.layer)),
   );
+
+  it.effect(
+    "routes compactThread through the owning adapter and persists a stopped compaction binding",
+    () =>
+      Effect.gen(function* () {
+        const provider = yield* ProviderService;
+        const runtimeRepository = yield* ProviderSessionRuntimeRepository;
+        const threadId = asThreadId("thread-compact-route");
+
+        yield* provider.startSession(threadId, {
+          provider: "codex",
+          threadId,
+          cwd: "/tmp/project-compact",
+          runtimeMode: "full-access",
+        });
+        routing.codex.compactThread.mockClear();
+
+        yield* provider.compactThread({ threadId });
+
+        assert.deepEqual(routing.codex.compactThread.mock.calls, [[threadId]]);
+
+        const runtime = yield* runtimeRepository.getByThreadId({ threadId });
+        assert.equal(Option.isSome(runtime), true);
+        if (Option.isSome(runtime)) {
+          const runtimePayload = asRuntimePayloadRecord(runtime.value.runtimePayload);
+          assert.equal(runtime.value.status, "stopped");
+          assert.equal(runtimePayload.activeTurnId, null);
+          assert.equal(runtimePayload.lastRuntimeEvent, "provider.compactThread");
+        }
+      }),
+  );
 });
+
+it.effect("ProviderServiceLive rejects compactThread when the adapter lacks compaction support", () =>
+  Effect.gen(function* () {
+    const codex = makeFakeCodexAdapter();
+    const { compactThread: _omittedCompactThread, ...adapterWithoutCompaction } = codex.adapter;
+    const registry: typeof ProviderAdapterRegistry.Service = {
+      getByProvider: (provider) =>
+        provider === "codex"
+          ? Effect.succeed(adapterWithoutCompaction)
+          : Effect.fail(new ProviderUnsupportedError({ provider })),
+      listProviders: () => Effect.succeed(["codex"]),
+    };
+    const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+      Layer.provide(SqlitePersistenceMemory),
+    );
+    const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
+    const providerLayer = makeProviderServiceLive().pipe(
+      Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
+      Layer.provide(directoryLayer),
+      Layer.provide(AnalyticsService.layerTest),
+    );
+
+    yield* Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-compact-unsupported");
+      yield* provider.startSession(threadId, {
+        provider: "codex",
+        threadId,
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+
+      const failure = yield* Effect.result(provider.compactThread({ threadId }));
+      assertFailure(
+        failure,
+        new ProviderValidationError({
+          operation: "ProviderService.compactThread",
+          issue: "Context compaction is unavailable for provider 'codex'.",
+        }),
+      );
+      assert.equal(codex.compactThread.mock.calls.length, 0);
+    }).pipe(Effect.provide(providerLayer));
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
 
 restartRollbackRouting.layer("ProviderServiceLive restart-based rollback", (it) => {
   it.effect("requires the source lifecycle generation for modern ACP interactions", () =>
@@ -3479,6 +3554,71 @@ idleCleanup.layer("ProviderServiceLive idle cleanup", (it) => {
     }),
   );
 
+  it.effect("reschedules idle cleanup when compact work fails after displacing an idle timer", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const runtimeRepository = yield* ProviderSessionRuntimeRepository;
+      const threadId = asThreadId("thread-idle-compact-failure");
+
+      yield* provider.startSession(threadId, {
+        provider: "codex",
+        threadId,
+        runtimeMode: "full-access",
+      });
+      idleCleanup.codex.updateSession(threadId, withoutResumeCursor);
+      yield* idleCleanup.codex.waitForRuntimeSubscribers();
+      idleCleanup.codex.emit({
+        type: "turn.completed",
+        eventId: asEventId("runtime-idle-before-compact-failure"),
+        provider: "codex",
+        createdAt: "2026-02-27T00:04:00.000Z",
+        threadId,
+        payload: { state: "completed" },
+      });
+
+      yield* waitUntilEffect(
+        () =>
+          runtimeRepository.getByThreadId({ threadId }).pipe(
+            Effect.map((runtime) => {
+              if (Option.isNone(runtime)) {
+                return false;
+              }
+              const payload = runtime.value.runtimePayload;
+              return (
+                payload !== null &&
+                typeof payload === "object" &&
+                !Array.isArray(payload) &&
+                (payload as Record<string, unknown>).lastRuntimeEvent === "turn.completed"
+              );
+            }),
+          ),
+        500,
+        20,
+        "runtime completion persistence",
+      );
+
+      idleCleanup.codex.stopSession.mockClear();
+      idleCleanup.codex.compactThread.mockImplementationOnce(() =>
+        Effect.fail(
+          new ProviderAdapterSessionNotFoundError({
+            provider: "codex",
+            threadId,
+          }),
+        ),
+      );
+      const failure = yield* Effect.result(provider.compactThread({ threadId }));
+      assert.equal(failure._tag, "Failure");
+
+      yield* waitUntil(
+        () => idleCleanup.codex.stopSession.mock.calls.length > 0,
+        500,
+        20,
+        "idle runtime stop after failed compact",
+      );
+      assert.deepEqual(idleCleanup.codex.stopSession.mock.calls[0]?.[0], threadId);
+    }),
+  );
+
   it.effect("schedules idle cleanup for closed thread state changes", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService;
@@ -3837,6 +3977,24 @@ validation.layer("ProviderServiceLive validation", (it) => {
       }
       assert.equal(failure.failure.operation, "ProviderService.startSession");
       assert.equal(failure.failure.issue.includes("invalid-provider"), true);
+    }),
+  );
+
+  it.effect("rejects compactThread payloads that fail input decoding", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+
+      const failure = yield* Effect.result(provider.compactThread({} as never));
+
+      assert.equal(failure._tag, "Failure");
+      if (failure._tag !== "Failure") {
+        return;
+      }
+      assert.equal(failure.failure._tag, "ProviderValidationError");
+      if (failure.failure._tag !== "ProviderValidationError") {
+        return;
+      }
+      assert.equal(failure.failure.operation, "ProviderService.compactThread");
     }),
   );
 
