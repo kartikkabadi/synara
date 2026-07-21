@@ -11,7 +11,6 @@ import {
   useRef,
   useState,
   type AnimationEvent as ReactAnimationEvent,
-  type CSSProperties,
 } from "react";
 import {
   PROVIDER_DISPLAY_NAMES,
@@ -37,11 +36,17 @@ import {
 import { XIcon } from "~/lib/icons";
 import { cn, isMacPlatform } from "~/lib/utils";
 
-import { IslandOrb, orbHue, orbStateForStatus } from "./IslandOrb";
+import { IslandOrb, orbStateForStatus } from "./IslandOrb";
 import "./island.css";
 
 const AUTO_POP_MS = 4_000;
-const EXPANDED_IDLE_COLLAPSE_MS = 8_000;
+const EXPANDED_IDLE_COLLAPSE_MS = 13_000;
+// Pointer must dwell before the hover state opens, so a quick pass-through
+// never flashes the preview.
+export const HOVER_OPEN_DELAY_MS = 120;
+// Pointer leaving hover doesn't collapse until this grace elapses, so a brief
+// exit + re-enter keeps the preview open.
+export const HOVER_EXIT_GRACE_MS = 150;
 // Fallback unmount for the leaving layer: the layer normally unmounts on its
 // leave animation's end event; this timer only catches a missing event (e.g.
 // the tab losing rendering). Longer than any morph so it never cuts early.
@@ -87,8 +92,8 @@ function prefersReducedMotion(): boolean {
   return reducedMotionQuery.matches;
 }
 
-// The window is pre-sized to the expanded bounds (except Linux) and only this
-// inner container animates, using the same sizing as the Electron window.
+// The window is pre-sized to the expanded bounds and only this inner container
+// animates, using the same sizing as the Electron window.
 function innerSize(
   state: IslandWindowState,
   context: IslandDisplayContext | null,
@@ -98,16 +103,8 @@ function innerSize(
   return islandStateSize(state, islandShellMode(notch), notch, sessionCount);
 }
 
-// Token-based status text colors so text matches the orb's state hues exactly
-// (see island.css "Orb lamp" state hue tokens).
-const STATUS_TEXT_CLASS: Record<IslandSessionStatus, string> = {
-  working: "island-status-text-working",
-  "needs-approval": "island-status-text-needs-approval",
-  done: "island-status-text-done",
-};
-
 const STATUS_LABEL: Record<IslandSessionStatus, string> = {
-  working: "Working",
+  working: "Working…",
   "needs-approval": "Needs approval",
   done: "Done",
 };
@@ -132,19 +129,12 @@ function providerLabel(provider: string): string {
   return PROVIDER_DISPLAY_NAMES[provider as ProviderKind] ?? provider;
 }
 
-// e.g. "+2 more working · 1 done" under the hover headline row.
-function summarizeRest(rest: readonly IslandSession[]): string | null {
-  if (rest.length === 0) return null;
-  const counts = new Map<IslandSessionStatus, number>();
-  for (const session of rest) counts.set(session.status, (counts.get(session.status) ?? 0) + 1);
-  const parts: string[] = [];
-  for (const status of ["needs-approval", "working", "done"] as const) {
-    const count = counts.get(status);
-    if (!count) continue;
-    const label = STATUS_LABEL[status].toLowerCase();
-    parts.push(parts.length === 0 ? `+${count} more ${label}` : `${count} ${label}`);
-  }
-  return parts.join(" · ");
+// data-island-platform value: contract platform names → renderer attribute.
+function platformAttribute(context: IslandDisplayContext | null): string {
+  const platform = context?.platform ?? "other";
+  if (platform === "macos") return "darwin";
+  if (platform === "windows") return "win32";
+  return platform;
 }
 
 export function Island() {
@@ -155,7 +145,8 @@ export function Island() {
   const sessionsRef = useRef<readonly IslandSession[]>([]);
   const popTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const hoverOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverExitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -164,7 +155,7 @@ export function Island() {
   }, []);
 
   // Mock rows go through the same priority sort as live sessions so the
-  // headline, row order, and surface glow hue never disagree.
+  // headline and row order never disagree.
   const sessions = useMemo(
     () =>
       USE_MOCK_SESSIONS ? sortIslandSessions(MOCK_SESSIONS) : deriveIslandSessions(threads, nowMs),
@@ -185,6 +176,8 @@ export function Island() {
     return () => {
       if (popTimerRef.current) clearTimeout(popTimerRef.current);
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      if (hoverOpenTimerRef.current) clearTimeout(hoverOpenTimerRef.current);
+      if (hoverExitTimerRef.current) clearTimeout(hoverExitTimerRef.current);
     };
   }, []);
 
@@ -206,11 +199,9 @@ export function Island() {
     };
   }, []);
 
-  // Auto-pop on needs-approval / turn-completed transitions, with a bigger
-  // spring overshoot plus a one-shot brightness flash on the surface. The
-  // resize itself keeps the 220ms ease-out transition — it is a status
-  // animation, not a disclosure toggle, so disclosureMotion.ts does not apply
-  // (see .plans/island-siri-orb-v2.md §2.4).
+  // Auto-pop on needs-approval / turn-completed transitions: the island enters
+  // the hover preview for AUTO_POP_MS, then returns to collapsed. The geometry
+  // morph is the only motion.
   useEffect(() => {
     const transition = findPopTransition(sessionsRef.current, sessions);
     sessionsRef.current = sessions;
@@ -218,19 +209,9 @@ export function Island() {
     setPopped(true);
     if (popTimerRef.current) clearTimeout(popTimerRef.current);
     popTimerRef.current = setTimeout(() => setPopped(false), AUTO_POP_MS);
-    if (!prefersReducedMotion()) {
-      surfaceRef.current?.animate(
-        { transform: ["scale(1)", "scale(1.035)", "scale(1)"] },
-        { duration: 280, easing: "cubic-bezier(0.34,1.56,0.64,1)" },
-      );
-      surfaceRef.current?.animate(
-        { filter: ["brightness(1)", "brightness(1.25)", "brightness(1)"] },
-        { duration: 500, easing: "ease-out" },
-      );
-    }
   }, [sessions]);
 
-  // Expanded panel collapses after a period without pointer activity.
+  // Expanded panel collapses after a period without pointer/key activity.
   const armIdleTimer = useCallback(() => {
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     idleTimerRef.current = setTimeout(() => setUiState("collapsed"), EXPANDED_IDLE_COLLAPSE_MS);
@@ -239,6 +220,20 @@ export function Island() {
   useEffect(() => {
     if (uiState === "expanded") armIdleTimer();
     else if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+  }, [uiState, armIdleTimer]);
+
+  // Escape closes the expanded panel; any key inside it resets the idle timer.
+  useEffect(() => {
+    if (uiState !== "expanded") return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setUiState("collapsed");
+        return;
+      }
+      armIdleTimer();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, [uiState, armIdleTimer]);
 
   // Global shortcut toggles arrive from the main process as requests; the
@@ -251,30 +246,69 @@ export function Island() {
     });
   }, []);
 
-  const applyState = useCallback((state: IslandWindowState) => {
-    setUiState(state);
+  const clearHoverTimers = useCallback(() => {
+    if (hoverOpenTimerRef.current) clearTimeout(hoverOpenTimerRef.current);
+    hoverOpenTimerRef.current = null;
+    if (hoverExitTimerRef.current) clearTimeout(hoverExitTimerRef.current);
+    hoverExitTimerRef.current = null;
   }, []);
+
+  const applyState = useCallback(
+    (state: IslandWindowState) => {
+      clearHoverTimers();
+      setUiState(state);
+    },
+    [clearHoverTimers],
+  );
 
   const onPointerEnter = useCallback(() => {
     void window.islandBridge?.setIgnoreMouse(false);
-    setUiState((current) => (current === "expanded" ? current : "hover"));
-    if (uiState === "expanded") armIdleTimer();
+    if (hoverExitTimerRef.current) {
+      clearTimeout(hoverExitTimerRef.current);
+      hoverExitTimerRef.current = null;
+    }
+    if (uiState === "expanded") {
+      armIdleTimer();
+      return;
+    }
+    if (uiState === "hover" || hoverOpenTimerRef.current) return;
+    hoverOpenTimerRef.current = setTimeout(() => {
+      hoverOpenTimerRef.current = null;
+      setUiState((current) => (current === "collapsed" ? "hover" : current));
+    }, HOVER_OPEN_DELAY_MS);
   }, [uiState, armIdleTimer]);
 
+  // Pointer leave collapses the hover preview only (after the exit grace);
+  // the expanded panel closes exclusively via close button, shortcut, row
+  // activation, or the inactivity timeout.
   const onPointerLeave = useCallback(() => {
     void window.islandBridge?.setIgnoreMouse(true);
-    applyState("collapsed");
-  }, [applyState]);
+    if (hoverOpenTimerRef.current) {
+      clearTimeout(hoverOpenTimerRef.current);
+      hoverOpenTimerRef.current = null;
+    }
+    if (uiState !== "hover" && !popped) return;
+    if (hoverExitTimerRef.current) clearTimeout(hoverExitTimerRef.current);
+    hoverExitTimerRef.current = setTimeout(() => {
+      hoverExitTimerRef.current = null;
+      setPopped(false);
+      setUiState((current) => (current === "hover" ? "collapsed" : current));
+    }, HOVER_EXIT_GRACE_MS);
+  }, [uiState, popped]);
 
-  const focusThread = useCallback((threadId: string) => {
-    void window.islandBridge?.focusThread(threadId);
-  }, []);
+  const focusThread = useCallback(
+    (threadId: string) => {
+      void window.islandBridge?.focusThread(threadId);
+      applyState("collapsed");
+    },
+    [applyState],
+  );
 
   const effectiveState: IslandWindowState = uiState === "collapsed" && popped ? "hover" : uiState;
 
   // Cross-fade content swap: both layers stay mounted during the morph. The
   // incoming content renders immediately (with its delayed enter keyframes)
-  // while the outgoing content lingers as a fading overlay for CONTENT_LEAVE_MS.
+  // while the outgoing content lingers as a fading overlay.
   const [renderedState, setRenderedState] = useState<IslandWindowState>(effectiveState);
   const [leavingState, setLeavingState] = useState<IslandWindowState | null>(null);
   // Ref-held timer: setRenderedState re-runs this effect immediately, and an
@@ -293,8 +327,7 @@ export function Island() {
     leaveTimerRef.current = setTimeout(() => setLeavingState(null), CONTENT_LEAVE_FALLBACK_MS);
   }, [effectiveState, renderedState]);
 
-  // Unmount the leaving layer the moment its fade finishes — a lingering
-  // opacity-0 layer with blurred orb blooms leaves ghost smears otherwise.
+  // Unmount the leaving layer the moment its fade finishes.
   const onLeaveAnimationEnd = useCallback((event: ReactAnimationEvent) => {
     if (event.animationName !== "island-leave") return;
     if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
@@ -306,20 +339,6 @@ export function Island() {
     };
   }, []);
 
-  // Every displayed state change gets the spring overshoot alongside the
-  // surface morph, so the island always feels alive, not just on pops.
-  const previousStateRef = useRef<IslandWindowState | null>(null);
-  useEffect(() => {
-    const previous = previousStateRef.current;
-    previousStateRef.current = effectiveState;
-    if (previous === null || previous === effectiveState) return;
-    if (prefersReducedMotion()) return;
-    surfaceRef.current?.animate(
-      { transform: ["scale(1)", "scale(1.02)", "scale(1)"] },
-      { duration: 340, easing: "cubic-bezier(0.34,1.56,0.64,1)" },
-    );
-  }, [effectiveState]);
-
   // Every displayed state change (click, shortcut, idle collapse, auto-pop) is
   // mirrored to the main process: on Linux there is no click-through
   // forwarding, so the window itself must resize to the displayed state.
@@ -329,38 +348,26 @@ export function Island() {
   }, [effectiveState, sessionCount]);
 
   const size = innerSize(effectiveState, context, sessionCount);
-  const isNotch = context?.notch != null;
-  // Surface glow/wash hue follows what the surface is actually showing: the
-  // hover headline / top expanded row, falling back to the aggregate.
+  const shell = islandShellMode(context?.notch ?? null);
   const orbState = orbStateForStatus(sessions[0]?.status ?? aggregate);
-  const glowing = aggregate === "working" || aggregate === "needs-approval";
   const headline = sessions[0] ?? null;
-  const restSummary = summarizeRest(sessions.slice(1));
 
   return (
     <div className="pointer-events-none relative h-screen w-screen overflow-hidden bg-transparent">
+      <div aria-live="polite" className="sr-only">
+        {popped && headline ? `${headline.title}: ${STATUS_LABEL[headline.status]}` : ""}
+      </div>
       <div
-        ref={surfaceRef}
+        data-island-shell={shell}
+        data-island-platform={platformAttribute(context)}
         data-island-state={effectiveState}
         data-island-status={orbState}
         data-island-empty={sessionCount === 0}
         onPointerEnter={onPointerEnter}
         onPointerLeave={onPointerLeave}
-        style={
-          {
-            width: size.width,
-            height: size.height,
-            "--island-hue": orbHue(orbState),
-          } as CSSProperties
-        }
-        className={cn(
-          "island-surface pointer-events-auto flex flex-col overflow-hidden text-white",
-          isNotch && "island-surface-notch",
-          glowing && (isNotch ? "island-surface-glow-notch" : "island-surface-glow"),
-          aggregate === "done" && !isNotch && "island-surface-glow-done",
-        )}
+        style={{ width: size.width, height: size.height }}
+        className="island-surface pointer-events-auto flex flex-col overflow-hidden text-white"
       >
-        <div className="island-state-wash pointer-events-none absolute inset-0" />
         {renderIslandContent(renderedState, false)}
         {leavingState !== null && leavingState !== renderedState ? (
           <div
@@ -394,17 +401,18 @@ export function Island() {
               // remounted leaving copy would hide it (delayed `both` fill) and
               // leave the capsule blank mid-morph.
               leaving ? "island-leave" : "island-enter-body",
-              "flex h-full w-full items-center justify-center text-xs font-medium tracking-wide text-white/80",
-              sessions.length > 0 ? "gap-2 pl-2.5 pr-3" : "px-3",
+              "island-pill flex h-full w-full items-center justify-center gap-2 px-3",
             )}
-            aria-label="Expand agent sessions island"
+            aria-label={
+              sessionCount > 0
+                ? `${sessionCount} agent ${sessionCount === 1 ? "session" : "sessions"}, ${STATUS_LABEL[orbState as IslandSessionStatus] ?? "idle"}`
+                : "No agent sessions"
+            }
           >
-            <span className="island-orb-seat">
-              <IslandOrb state={orbState} size={16} />
-            </span>
-            {sessions.length > 0 ? (
-              <span className="text-[13px] font-semibold tabular-nums text-white/90">
-                {sessions.length}
+            <IslandOrb state={orbState} />
+            {sessionCount > 0 ? (
+              <span className="text-[13px] font-medium tabular-nums text-white/[0.92]">
+                {sessionCount}
               </span>
             ) : null}
           </button>
@@ -418,33 +426,30 @@ export function Island() {
         onClick={() => applyState("expanded")}
         className={cn(
           leaving ? "island-leave" : "island-enter-body",
-          // Slightly heavier top padding optically centers the two-line block
-          // (the headline's cap height sits low in its line box).
-          "flex h-full w-full flex-col items-stretch justify-center gap-1.5 px-5 pb-[9px] pt-[15px] text-left",
+          "flex h-full w-full flex-col items-stretch justify-center gap-1 px-5 text-left",
         )}
         aria-label="Expand agent sessions island"
       >
         {headline ? (
           <>
             <div className="flex items-center gap-2.5">
-              <IslandOrb state={headline.status} size={16} />
-              <span className="min-w-0 flex-1 truncate font-mono text-sm font-medium text-white/90">
+              <IslandOrb state={headline.status} />
+              <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-white/[0.92]">
                 {headline.title}
               </span>
-              <span
-                className={cn("shrink-0 text-xs font-medium", STATUS_TEXT_CLASS[headline.status])}
-              >
+              <span className="shrink-0 text-[11px] text-white/60">
                 {STATUS_LABEL[headline.status]}
               </span>
             </div>
-            {restSummary ? (
-              <div className="pl-[26px] text-xs text-white/50">{restSummary}</div>
-            ) : null}
+            <div className="pl-[19px] text-[11px] text-white/40">
+              {providerLabel(headline.provider)} ·{" "}
+              {islandRelativeTime(headline.lastActivityAt, nowMs)}
+            </div>
           </>
         ) : (
           <div className="flex items-center gap-2.5">
-            <IslandOrb state="idle" size={16} />
-            <span className="text-xs text-white/50">No active sessions</span>
+            <IslandOrb state="idle" />
+            <span className="text-[11px] text-white/60">No active sessions</span>
           </div>
         )}
       </button>
@@ -454,76 +459,60 @@ export function Island() {
         className={cn("relative flex h-full flex-col", leaving && "island-leave")}
         onPointerMove={armIdleTimer}
       >
-        <div className="island-panel-vignette pointer-events-none absolute inset-0" />
         <div
           className={cn(
             !leaving && "island-enter-header",
             "flex items-center justify-between border-b border-white/6 px-4 py-2.5",
           )}
         >
-          <span className="text-xs font-medium text-white/60">Sessions</span>
-          <div className="flex items-center gap-2">
-            <span className="island-chip px-1.5 py-0.5 text-[10px] text-white/50">
-              {shortcutHint(context)}
-            </span>
+          <span className="text-[13px] font-medium text-white/[0.92]">Sessions</span>
+          <div className="flex items-center gap-2.5">
+            <span className="text-[11px] text-white/40">{shortcutHint(context)}</span>
             <button
               type="button"
               onClick={() => applyState("collapsed")}
-              className="island-chip p-1 text-white/50 hover:bg-white/10 hover:text-white/80"
-              aria-label="Collapse island"
+              className="island-close rounded p-1 text-white/40 hover:text-white/[0.92]"
+              aria-label="Close"
             >
               <XIcon className="size-3.5" />
             </button>
           </div>
         </div>
-        <div className={cn(!leaving && "island-enter-body", "flex-1 overflow-y-auto px-2 pb-2")}>
+        <div
+          className={cn(
+            !leaving && "island-enter-body",
+            "island-list flex-1 overflow-y-auto px-2 pb-2",
+          )}
+        >
           {sessions.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-2.5 px-2">
-              <IslandOrb state="idle" size={32} />
-              <span className="text-sm font-medium text-white/70">No active sessions</span>
-              <span className="text-xs text-white/35">Agent sessions will appear here</span>
+            <div className="flex h-full items-center justify-center">
+              <span className="text-[11px] text-white/60">No active sessions</span>
             </div>
           ) : (
-            sessions.map((session, index) => (
+            sessions.map((session) => (
               <button
                 key={session.threadId}
                 type="button"
                 onClick={() => focusThread(session.threadId)}
-                style={
-                  {
-                    ...(leaving ? {} : { animationDelay: `${150 + index * 30}ms` }),
-                    // Hover edge uses the row's own state hue, not the surface's.
-                    "--island-hue": orbHue(orbStateForStatus(session.status)),
-                  } as CSSProperties
-                }
                 className={cn(
                   !leaving && "island-enter-row",
-                  "island-row group flex h-11 w-full items-center gap-2.5 rounded-lg px-2.5 text-left hover:bg-white/6",
+                  "island-row flex min-h-11 w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left",
                 )}
               >
-                <IslandOrb state={session.status} size={20} />
-                <span className="min-w-0 flex-1 truncate font-mono text-[13px] font-bold text-white/90">
-                  {session.title}
-                </span>
-                <span
-                  className={cn(
-                    "island-chip shrink-0 px-1.5 py-0.5 text-[10px]",
-                    STATUS_TEXT_CLASS[session.status],
-                  )}
-                >
-                  {providerLabel(session.provider)} ·{" "}
-                  {islandRelativeTime(session.lastActivityAt, nowMs)}
-                </span>
-                <span
-                  className={cn(
-                    "w-20 shrink-0 text-right text-[10px] font-medium group-hover:hidden",
-                    STATUS_TEXT_CLASS[session.status],
-                  )}
-                >
-                  {STATUS_LABEL[session.status]}
-                </span>
-                <span className="hidden w-20 shrink-0 text-right text-[10px] font-medium text-white/70 group-hover:inline">
-                  Open
+                <IslandOrb state={session.status} />
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-white/[0.92]">
+                      {session.title}
+                    </span>
+                    <span className="shrink-0 text-[11px] text-white/60">
+                      {STATUS_LABEL[session.status]}
+                    </span>
+                  </span>
+                  <span className="text-[11px] text-white/40">
+                    {providerLabel(session.provider)} ·{" "}
+                    {islandRelativeTime(session.lastActivityAt, nowMs)}
+                  </span>
                 </span>
               </button>
             ))
