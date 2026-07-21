@@ -118,8 +118,12 @@ export function decideLoopContinuation(input: {
   if (thread.parentThreadId !== null) {
     return { type: "off", reason: "thread_unrunnable", ...unchanged };
   }
-  if (loop.endsAt !== null && nowMs >= Date.parse(loop.endsAt)) {
-    return { type: "off", reason: "budget_duration", ...unchanged };
+  if (loop.endsAt !== null) {
+    const endsAtMs = Date.parse(loop.endsAt);
+    // Fail closed: an unparseable endsAt must expire immediately, not never.
+    if (!Number.isFinite(endsAtMs) || nowMs >= endsAtMs) {
+      return { type: "off", reason: "budget_duration", ...unchanged };
+    }
   }
   if (loop.iteration >= effectiveCap(loop)) {
     return { type: "off", reason: chooseStopReason(loop), ...unchanged };
@@ -142,6 +146,12 @@ export function decideLoopContinuation(input: {
     if (thread.latestTurnState === "completed") {
       nextConsecutiveErrors = 0;
     } else if (thread.latestTurnState === "error") {
+      // Interrupted settlements deliberately do not count: user interrupts
+      // turn the loop off in the decider before this policy sees them, and
+      // non-user interruptions (crash-restart reconciliation, provider aborts)
+      // are infrastructure events, not model failures — counting them could
+      // wrongly kill healthy loops across restarts. They neither increment
+      // nor reset the consecutive-error counter.
       nextConsecutiveErrors = loop.consecutiveErrors + 1;
       if (nextConsecutiveErrors >= LOOP_DEFAULT_CONSECUTIVE_ERROR_THRESHOLD) {
         return { type: "off", reason: "consecutive_errors", nextConsecutiveErrors };
