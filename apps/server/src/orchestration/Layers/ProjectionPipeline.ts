@@ -1132,7 +1132,8 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
       switch (event.type) {
         case "thread.loop-set":
         case "thread.loop-off":
-        case "thread.loop-continued": {
+        case "thread.loop-continued":
+        case "thread.loop-wait-noted": {
           yield* projectionThreadLoopRepository.upsert({
             threadId: event.payload.threadId,
             loop: event.payload.loop,
@@ -1762,7 +1763,8 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
       shouldApply: (event) =>
         event.type === "thread.loop-set" ||
         event.type === "thread.loop-off" ||
-        event.type === "thread.loop-continued",
+        event.type === "thread.loop-continued" ||
+        event.type === "thread.loop-wait-noted",
       apply: applyThreadLoopProjection,
     },
     {

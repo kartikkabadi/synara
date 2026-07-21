@@ -45,6 +45,7 @@ import {
   ThreadLoopContinuedPayload,
   ThreadLoopOffPayload,
   ThreadLoopSetPayload,
+  ThreadLoopWaitNotedPayload,
   ThreadRuntimeModeSetPayload,
   ThreadUnarchivedPayload,
   ThreadRevertedPayload,
@@ -1248,6 +1249,17 @@ export function projectEvent(
 
     case "thread.loop-continued":
       return decodeForEvent(ThreadLoopContinuedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            loop: payload.loop,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.loop-wait-noted":
+      return decodeForEvent(ThreadLoopWaitNotedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => ({
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {

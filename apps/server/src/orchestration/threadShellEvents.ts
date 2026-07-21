@@ -40,6 +40,7 @@ const OTHER_THREAD_SHELL_EVENT_TYPES = new Set<OrchestrationEvent["type"]>([
   "thread.loop-set",
   "thread.loop-off",
   "thread.loop-continued",
+  "thread.loop-wait-noted",
 ]);
 
 export function shouldApplyThreadsProjection(event: OrchestrationEvent): boolean {

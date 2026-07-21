@@ -21,6 +21,7 @@ import {
   ThreadLoopContinuedPayload as ContractsThreadLoopContinuedPayloadSchema,
   ThreadLoopOffPayload as ContractsThreadLoopOffPayloadSchema,
   ThreadLoopSetPayload as ContractsThreadLoopSetPayloadSchema,
+  ThreadLoopWaitNotedPayload as ContractsThreadLoopWaitNotedPayloadSchema,
   ThreadProposedPlanUpsertedPayload as ContractsThreadProposedPlanUpsertedPayloadSchema,
   ThreadSessionSetPayload as ContractsThreadSessionSetPayloadSchema,
   ThreadTurnDiffCompletedPayload as ContractsThreadTurnDiffCompletedPayloadSchema,
@@ -61,6 +62,7 @@ export const MessageSentPayloadSchema = ContractsThreadMessageSentPayloadSchema;
 export const ThreadLoopContinuedPayload = ContractsThreadLoopContinuedPayloadSchema;
 export const ThreadLoopOffPayload = ContractsThreadLoopOffPayloadSchema;
 export const ThreadLoopSetPayload = ContractsThreadLoopSetPayloadSchema;
+export const ThreadLoopWaitNotedPayload = ContractsThreadLoopWaitNotedPayloadSchema;
 export const ThreadProposedPlanUpsertedPayload = ContractsThreadProposedPlanUpsertedPayloadSchema;
 export const ThreadSessionSetPayload = ContractsThreadSessionSetPayloadSchema;
 export const ThreadTurnDiffCompletedPayload = ContractsThreadTurnDiffCompletedPayloadSchema;
