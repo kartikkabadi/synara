@@ -11,7 +11,7 @@ import {
   TurnId,
   type AutomationCreateInput,
   type AutomationRun,
-  type GitCreateWorktreeInput,
+  type GitCreateDetachedWorktreeInput,
   type GitRemoveWorktreeInput,
   type OrchestrationCommand,
   type OrchestrationProjectShell,
@@ -20,11 +20,7 @@ import {
 import { Duration, Effect, Layer, Option, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
-import {
-  GitCore,
-  type GitCoreShape,
-  type GitDeleteBranchInput,
-} from "../../git/Services/GitCore.ts";
+import { GitCore, type GitCoreShape } from "../../git/Services/GitCore.ts";
 import { TextGeneration, type TextGenerationShape } from "../../git/Services/TextGeneration.ts";
 import { OrchestrationCommandInternalError } from "../../orchestration/Errors.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
@@ -58,15 +54,15 @@ const project: OrchestrationProjectShell = {
 };
 
 const dispatchedCommands: OrchestrationCommand[] = [];
-const createdWorktrees: GitCreateWorktreeInput[] = [];
+const createdWorktrees: GitCreateDetachedWorktreeInput[] = [];
 const removedWorktrees: GitRemoveWorktreeInput[] = [];
-const deletedBranches: GitDeleteBranchInput[] = [];
 type CompletionEvaluationInputForTest = Parameters<
   TextGenerationShape["evaluateAutomationCompletion"]
 >[0];
 let gitMode: "nonRepo" | "worktree" = "nonRepo";
 let gitStatusHook: ((cwd: string) => Effect.Effect<void>) | null = null;
-let createWorktreeHook: ((input: GitCreateWorktreeInput) => Effect.Effect<void>) | null = null;
+let createWorktreeHook: ((input: GitCreateDetachedWorktreeInput) => Effect.Effect<void>) | null =
+  null;
 // Configurable thread shell returned by the ProjectionSnapshotQuery mock; reconcile
 // tests set it to drive the run's latest-turn outcome.
 let threadShell: Option.Option<OrchestrationThreadShell> = Option.none();
@@ -97,7 +93,6 @@ function resetHarness() {
   dispatchedCommands.length = 0;
   createdWorktrees.length = 0;
   removedWorktrees.length = 0;
-  deletedBranches.length = 0;
   gitMode = "nonRepo";
   gitStatusHook = null;
   createWorktreeHook = null;
@@ -358,6 +353,7 @@ const orchestrationEngine = {
   getReadModel: () =>
     Effect.succeed({
       snapshotSequence: 0,
+      spaces: [],
       projects: [],
       threads: [],
       updatedAt: now,
@@ -365,6 +361,7 @@ const orchestrationEngine = {
   refreshCommandReadModel: () =>
     Effect.succeed({
       snapshotSequence: 0,
+      spaces: [],
       projects: [],
       threads: [],
       updatedAt: now,
@@ -388,6 +385,7 @@ const orchestrationEngine = {
   repairState: () =>
     Effect.succeed({
       snapshotSequence: 0,
+      spaces: [],
       projects: [],
       threads: [],
       updatedAt: now,
@@ -399,6 +397,7 @@ const projectionSnapshotQuery = {
   getCommandReadModel: () =>
     Effect.succeed({
       snapshotSequence: 0,
+      spaces: [],
       projects: [],
       threads: [],
       updatedAt: now,
@@ -406,6 +405,7 @@ const projectionSnapshotQuery = {
   getSnapshot: () =>
     Effect.succeed({
       snapshotSequence: 0,
+      spaces: [],
       projects: [],
       threads: [],
       updatedAt: now,
@@ -415,12 +415,14 @@ const projectionSnapshotQuery = {
   getShellSnapshot: () =>
     Effect.succeed({
       snapshotSequence: 0,
+      spaces: [],
       projects: [project],
       threads: [],
       updatedAt: now,
     }),
   getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.some(project as never)),
   getProjectShellById: () => Effect.succeed(Option.some(project)),
+  getSpaceShellById: () => Effect.succeed(Option.none()),
   getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
   getThreadCheckpointContext: () => Effect.succeed(Option.none()),
   getFullThreadDiffContext: () => Effect.succeed(Option.none()),
@@ -476,7 +478,7 @@ const gitCore = {
         cwd,
       };
     }),
-  createWorktree: (input: GitCreateWorktreeInput) =>
+  createDetachedWorktree: (input: GitCreateDetachedWorktreeInput) =>
     Effect.gen(function* () {
       createdWorktrees.push(input);
       if (createWorktreeHook) {
@@ -485,17 +487,14 @@ const gitCore = {
       return {
         worktree: {
           path: "/tmp/automation-worktree",
-          branch: input.newBranch ?? input.branch,
+          ref: "0123456789abcdef0123456789abcdef01234567",
+          branch: null,
         },
       };
     }),
   removeWorktree: (input: GitRemoveWorktreeInput) =>
     Effect.sync(() => {
       removedWorktrees.push(input);
-    }),
-  deleteBranch: (input: GitDeleteBranchInput) =>
-    Effect.sync(() => {
-      deletedBranches.push(input);
     }),
 } as unknown as GitCoreShape;
 
@@ -577,7 +576,7 @@ layer("AutomationService", (it) => {
     }),
   );
 
-  it.effect("creates a named worktree for worktree-mode automations", () =>
+  it.effect("creates a detached worktree for worktree-mode automations", () =>
     Effect.gen(function* () {
       resetHarness();
       gitMode = "worktree";
@@ -590,18 +589,20 @@ layer("AutomationService", (it) => {
       assert.strictEqual(createdWorktrees.length, 1);
       const createdWorktree = createdWorktrees[0];
       assert.ok(createdWorktree);
-      const createdWorktreeBranch = createdWorktree.newBranch;
-      if (!createdWorktreeBranch) {
-        assert.fail("Expected automation worktree branch.");
-      }
-      assert.match(createdWorktreeBranch, /^automation\/nightly-maintenance\//);
+      assert.strictEqual(createdWorktree.ref, "HEAD");
+      assert.strictEqual(createdWorktree.copyChangesFrom, project.workspaceRoot);
       assert.strictEqual(threadCreate?.type, "thread.create");
       if (threadCreate?.type !== "thread.create") {
         assert.fail("Expected thread.create command.");
       }
       assert.strictEqual(threadCreate.envMode, "worktree");
       assert.strictEqual(threadCreate.worktreePath, "/tmp/automation-worktree");
-      assert.strictEqual(threadCreate.associatedWorktreeBranch, createdWorktreeBranch);
+      assert.strictEqual(threadCreate.branch, null);
+      assert.strictEqual(threadCreate.associatedWorktreeBranch, null);
+      assert.strictEqual(
+        threadCreate.associatedWorktreeRef,
+        "0123456789abcdef0123456789abcdef01234567",
+      );
     }),
   );
 
@@ -617,23 +618,10 @@ layer("AutomationService", (it) => {
 
       assert.match(error.message, /Failed to create automation thread/);
       assert.strictEqual(createdWorktrees.length, 1);
-      const createdWorktree = createdWorktrees[0];
-      assert.ok(createdWorktree);
-      const createdWorktreeBranch = createdWorktree.newBranch;
-      if (!createdWorktreeBranch) {
-        assert.fail("Expected automation worktree branch.");
-      }
       assert.deepStrictEqual(removedWorktrees, [
         {
           cwd: project.workspaceRoot,
           path: "/tmp/automation-worktree",
-          force: true,
-        },
-      ]);
-      assert.deepStrictEqual(deletedBranches, [
-        {
-          cwd: project.workspaceRoot,
-          branch: createdWorktreeBranch,
           force: true,
         },
       ]);
@@ -685,23 +673,10 @@ layer("AutomationService", (it) => {
       });
 
       assert.strictEqual(createdWorktrees.length, 1);
-      const createdWorktree = createdWorktrees[0];
-      assert.ok(createdWorktree);
-      const createdWorktreeBranch = createdWorktree.newBranch;
-      if (!createdWorktreeBranch) {
-        assert.fail("Expected automation worktree branch.");
-      }
       assert.deepStrictEqual(removedWorktrees, [
         {
           cwd: project.workspaceRoot,
           path: "/tmp/automation-worktree",
-          force: true,
-        },
-      ]);
-      assert.deepStrictEqual(deletedBranches, [
-        {
-          cwd: project.workspaceRoot,
-          branch: createdWorktreeBranch,
           force: true,
         },
       ]);
@@ -729,7 +704,6 @@ layer("AutomationService", (it) => {
       assert.match(error.message, /Failed to start automation turn/);
       assert.strictEqual(createdWorktrees.length, 1);
       assert.strictEqual(removedWorktrees.length, 0);
-      assert.strictEqual(deletedBranches.length, 0);
       assert.strictEqual(dispatchedCommands[0]?.type, "thread.create");
     }),
   );

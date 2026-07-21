@@ -1024,17 +1024,9 @@ function EventRouter() {
       const removals = [...subscribedThreadIds].filter((threadId) => !nextThreadIds.has(threadId));
       const additions = [...nextThreadIds].filter((threadId) => !subscribedThreadIds.has(threadId));
 
-      // Start new detail snapshots first so route changes can paint from the hot thread cache.
-      for (const threadId of additions) {
-        beginThreadSubscription(threadId);
-        subscribedThreadIds.add(threadId);
-      }
-      await Promise.all(
-        additions.map((threadId) =>
-          api.orchestration.subscribeThread({ threadId }).catch(() => undefined),
-        ),
-      );
-
+      // Release dropped leases before subscribing additions: the server enforces a
+      // per-client thread-stream budget, and subscribing while a stale lease still
+      // holds its slot gets the new thread's stream rejected at admission.
       for (const threadId of removals) {
         threadSnapshotSequenceById.delete(threadId);
         pendingThreadEventsById.delete(threadId);
@@ -1045,6 +1037,16 @@ function EventRouter() {
       await Promise.all(
         removals.map((threadId) =>
           api.orchestration.unsubscribeThread({ threadId }).catch(() => undefined),
+        ),
+      );
+
+      for (const threadId of additions) {
+        beginThreadSubscription(threadId);
+        subscribedThreadIds.add(threadId);
+      }
+      await Promise.all(
+        additions.map((threadId) =>
+          api.orchestration.subscribeThread({ threadId }).catch(() => undefined),
         ),
       );
     };
@@ -1068,6 +1070,7 @@ function EventRouter() {
       // Desktop can briefly hydrate from an empty startup stream before the
       // projection reader is fully ready. Let the later non-empty shell query win.
       return (
+        (currentState.spaces.length === 0 && snapshot.spaces.length > 0) ||
         (currentState.projects.length === 0 && snapshot.projects.length > 0) ||
         ((currentState.threadIds?.length ?? 0) === 0 && snapshot.threads.length > 0)
       );
