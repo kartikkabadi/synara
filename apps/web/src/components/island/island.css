@@ -32,7 +32,9 @@
     height var(--island-morph-ms) cubic-bezier(0.32, 0.72, 0, 1),
     border-radius var(--island-morph-ms) cubic-bezier(0.32, 0.72, 0, 1);
   border-radius: 16px;
-  background: rgba(10, 10, 12, 0.94);
+  /* Near-opaque: without backdrop blur any real translucency lets bright
+     content behind the window bleed through and tint the surface. */
+  background: rgba(10, 10, 12, 0.98);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.3),
