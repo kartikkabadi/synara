@@ -307,11 +307,13 @@ interface ReactorScenario {
   restore: () => Promise<void>;
   advance: (millis: number) => Promise<void>;
   commands: () => Promise<OrchestrationCommand[]>;
-  commandsOfType: (type: OrchestrationCommand["type"]) => Promise<OrchestrationCommand[]>;
-  expectLastDispatched: (
-    type: OrchestrationCommand["type"],
+  commandsOfType: <T extends OrchestrationCommand["type"]>(
+    type: T,
+  ) => Promise<Extract<OrchestrationCommand, { type: T }>[]>;
+  expectLastDispatched: <T extends OrchestrationCommand["type"]>(
+    type: T,
     match: Record<string, unknown>,
-  ) => Promise<void>;
+  ) => Promise<Extract<OrchestrationCommand, { type: T }>>;
 }
 
 async function withReactor(
@@ -350,14 +352,20 @@ async function withReactor(
     restore: () => runtime.runPromise(reactor.restoreActiveLoops).then(() => undefined),
     advance: (millis) => runtime.runPromise(Effect.scoped(TestClock.adjust(`${millis} millis`))),
     commands: () => runtime.runPromise(Ref.get(dispatchLog)).then((commands) => [...commands]),
-    commandsOfType: async (type) => {
+    commandsOfType: async <T extends OrchestrationCommand["type"]>(type: T) => {
       const commands = await runtime.runPromise(Ref.get(dispatchLog));
-      return commands.filter((command) => command.type === type);
+      return commands.filter(
+        (command): command is Extract<OrchestrationCommand, { type: T }> => command.type === type,
+      );
     },
-    expectLastDispatched: async (type, match) => {
+    expectLastDispatched: async <T extends OrchestrationCommand["type"]>(
+      type: T,
+      match: Record<string, unknown>,
+    ) => {
       const commands = await scenario.commandsOfType(type);
       expect(commands.length).toBeGreaterThan(0);
       expect(commands[commands.length - 1]).toMatchObject(match);
+      return commands[commands.length - 1]!;
     },
   };
   try {
@@ -375,12 +383,14 @@ describe("LoopReactor", () => {
     await withReactor(thread, async ({ offer, advance, expectLastDispatched }) => {
       await offer(makeLoopSetEvent(loop));
       await advance(50);
-      await expectLastDispatched("thread.loop.continue", {
+      const command = await expectLastDispatched("thread.loop.continue", {
         threadId: thread.id,
-        commandId: `loop-continue:${thread.id}:${loop.updatedAt}:${loop.iteration}`,
         expectedUpdatedAt: loop.updatedAt,
         expectedActivationId: loop.activationId,
       });
+      expect(command.commandId).toBe(
+        `loop-continue:${thread.id}:${loop.updatedAt}:${loop.iteration}:${command.createdAt}`,
+      );
     });
   });
 
@@ -404,11 +414,13 @@ describe("LoopReactor", () => {
         makeSessionSetEvent({ session: makeSession({ status: "ready", activeTurnId: null }) }),
       );
       await advance(50);
-      await expectLastDispatched("thread.loop.continue", {
+      const command = await expectLastDispatched("thread.loop.continue", {
         threadId: thread.id,
-        commandId: `loop-continue:${thread.id}:${loop.updatedAt}:${loop.iteration}`,
         expectedUpdatedAt: loop.updatedAt,
       });
+      expect(command.commandId).toBe(
+        `loop-continue:${thread.id}:${loop.updatedAt}:${loop.iteration}:${command.createdAt}`,
+      );
     });
   });
 
@@ -473,12 +485,15 @@ describe("LoopReactor", () => {
       async ({ restore, commandsOfType }) => {
         await restore();
         const loopContinues = await commandsOfType("thread.loop.continue");
-        expect(loopContinues[0]).toBeDefined();
-        expect(loopContinues[0]).toMatchObject({
-          commandId: `loop-continue:${thread.id}:${loop.updatedAt}:${loop.iteration}`,
+        expect(loopContinues).toHaveLength(1);
+        const command = loopContinues[0]!;
+        expect(command).toMatchObject({
           expectedUpdatedAt: loop.updatedAt,
           expectedActivationId: loop.activationId,
         });
+        expect(command.commandId).toBe(
+          `loop-continue:${thread.id}:${loop.updatedAt}:${loop.iteration}:${command.createdAt}`,
+        );
       },
       { start: false },
     );
@@ -547,15 +562,19 @@ describe("LoopReactor", () => {
 
       await advance(300);
       const loopContinues = await commandsOfType("thread.loop.continue");
-      // The expiry timer issues a second dispatch carrying the same deterministic
-      // commandId, which the engine's receipt dedupe collapses.
+      // The expiry timer issues a fresh dispatch at endsAt; the commandId now
+      // includes the trigger timestamp. The decider turns the loop off because
+      // the duration budget has been reached.
       expect(loopContinues).toHaveLength(2);
-      expect(loopContinues[1]).toMatchObject({
+      const command = loopContinues[1]!;
+      expect(command).toMatchObject({
         threadId: thread.id,
         expectedUpdatedAt: loop.updatedAt,
         expectedActivationId: loop.activationId,
-        commandId: loopContinues[0]?.commandId,
       });
+      expect(command.commandId).toBe(
+        `loop-continue:${thread.id}:${loop.updatedAt}:${loop.iteration}:${command.createdAt}`,
+      );
     });
   });
 
@@ -579,17 +598,20 @@ describe("LoopReactor", () => {
       await restore();
 
       // Restore dispatches once immediately (the decider settles the wait), then
-      // the timer fires a second dispatch with the same deterministic commandId.
+      // the timer fires a second dispatch at endsAt with a fresh commandId.
       expect(await commandsOfType("thread.loop.continue")).toHaveLength(1);
 
       await advance(300);
       const loopContinues = await commandsOfType("thread.loop.continue");
       expect(loopContinues).toHaveLength(2);
-      expect(loopContinues[1]).toMatchObject({
+      const command = loopContinues[1]!;
+      expect(command).toMatchObject({
         threadId: thread.id,
         expectedActivationId: loop.activationId,
-        commandId: loopContinues[0]?.commandId,
       });
+      expect(command.commandId).toBe(
+        `loop-continue:${thread.id}:${loop.updatedAt}:${loop.iteration}:${command.createdAt}`,
+      );
     });
   });
 
