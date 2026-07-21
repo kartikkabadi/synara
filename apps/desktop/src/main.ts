@@ -3247,8 +3247,7 @@ function registerIpcHandlers(): void {
     // BrowserWindow and be loaded from the app's own entry URL, which excludes
     // embedded browser-tab WebContentsViews and OAuth popup windows.
     isTrustedAppSender: (sender) =>
-      BrowserWindow.fromWebContents(sender) !== null &&
-      sender.getURL().startsWith(appEntryBaseUrl()),
+      BrowserWindow.fromWebContents(sender) !== null && isTrustedAppUrl(sender.getURL()),
     getEnabled: isIslandEnabled,
     setEnabled: setIslandEnabled,
     focusThread: (threadId) => {
@@ -3269,6 +3268,22 @@ function registerIpcHandlers(): void {
 
 function appEntryBaseUrl(): string {
   return isDevelopment ? (process.env.VITE_DEV_SERVER_URL as string) : desktopIdentity.entryUrl;
+}
+
+// Origin comparison rather than a raw string prefix: prefix matching breaks
+// when the dev-server URL is unset and can over-match sibling paths. file://
+// URLs have an opaque "null" origin, so those compare protocol + pathname.
+function isTrustedAppUrl(rawUrl: string): boolean {
+  let base: URL;
+  let candidate: URL;
+  try {
+    base = new URL(appEntryBaseUrl());
+    candidate = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  if (base.origin !== "null") return candidate.origin === base.origin;
+  return candidate.protocol === base.protocol && candidate.pathname === base.pathname;
 }
 
 function islandEntryUrl(): string {
