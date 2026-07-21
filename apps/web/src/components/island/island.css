@@ -251,6 +251,9 @@
 /* State palette: dim cool blue idle, multi-hue working, warm amber attention,
    red error, green done. */
 .island-orb {
+  /* Spans are inline by default, which ignores the width/height the component
+     sets — block keeps the orb at its real diameter. */
+  display: block;
   position: relative;
   border-radius: 9999px;
   flex-shrink: 0;
