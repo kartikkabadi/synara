@@ -78,9 +78,7 @@ export interface DeriveLoopComposerPlaceholderInput {
 
 // Composer placeholder priority: approval → pending progress → loop setup →
 // plan follow-up → active loop → subagent → live turn → disconnected → default.
-export function deriveLoopComposerPlaceholder(
-  input: DeriveLoopComposerPlaceholderInput,
-): string {
+export function deriveLoopComposerPlaceholder(input: DeriveLoopComposerPlaceholderInput): string {
   if (input.isApprovalState) return "Resolve this approval request to continue";
   if (input.pendingProgressQuestion !== null) {
     return input.pendingProgressQuestion === "free-form"
