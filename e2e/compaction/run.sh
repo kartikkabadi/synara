@@ -45,7 +45,6 @@ CLI_BIN_DIR="${SYNARA_E2E_CLI_BIN_DIR:-$HOME/clis/node_modules/.bin}"
 if [[ -d "$CLI_BIN_DIR" ]]; then
   export PATH="$CLI_BIN_DIR:$PATH"
 fi
-
 # Dependencies.
 if [[ ! -d "$REPO_ROOT/node_modules" ]]; then
   echo "==> bun install (repo root)"

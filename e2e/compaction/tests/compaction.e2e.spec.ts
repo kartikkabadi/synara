@@ -106,8 +106,6 @@ function longContextPrompt(): string {
 
 async function openWorkspace(page: Page): Promise<void> {
   await page.goto("/");
-  // The New Chat composer exposes a "Work in a project" combobox whose dialog
-  // lists top-level folders in $HOME.
   const projectPicker = page.getByRole("combobox").filter({ hasText: /work in a project/i });
   await projectPicker.waitFor({ timeout: 30_000 });
   await projectPicker.click();
@@ -117,58 +115,50 @@ async function openWorkspace(page: Page): Promise<void> {
 }
 
 async function selectProvider(page: Page, spec: ProviderSpec): Promise<void> {
-  // The composer renders either a standalone provider/model picker (tagged
-  // data-testid="provider-model-picker") or a combined model+effort picker
-  // (aria-label "Change model and reasoning").
-  const standaloneTrigger = page.locator("[data-testid='provider-model-picker']");
-  const combinedTrigger = page.getByRole("button", { name: "Change model and reasoning" });
-  const trigger =
-    (await standaloneTrigger.count()) > 0 ? standaloneTrigger.first() : combinedTrigger.first();
-  await trigger.click();
-  const menu = page.getByRole("menu").first();
-  await menu.waitFor({ timeout: 15_000 });
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(500);
 
-  // An available provider renders as a submenu trigger
-  // ([data-slot='menu-sub-trigger'], role=menuitem) whose visible text is the
-  // provider name; an unavailable one renders as a disabled plain menu item
-  // with a status suffix ("Unavailable"/"Sign in"/"Checking"/"Coming soon").
+  const modelTrigger = page.locator("button").filter({ hasText: "GPT-5.5" }).first();
+  const triggerCount = await modelTrigger.count();
+  if (triggerCount === 0) {
+    throw new Error("Model picker trigger not found");
+  }
+  await modelTrigger.click();
+
+  const modelPickerMenu = page.getByRole("menu").first();
+  await modelPickerMenu.waitFor({ timeout: 15_000 });
+
+  const modelSubTrigger = page.locator("[data-slot='model-picker-submenu-trigger']");
+  if ((await modelSubTrigger.count()) > 0) {
+    await modelSubTrigger.click();
+    await page.waitForTimeout(500);
+  }
+
   const providerItem = page
     .locator("[data-slot='menu-sub-trigger']")
     .filter({ hasText: spec.label });
   try {
-    // Give live provider status a moment to resolve ("Checking" renders a
-    // disabled item until the server health check completes).
-    await providerItem.first().waitFor({ timeout: 10_000 });
+    await providerItem.first().waitFor({ timeout: 15_000 });
   } catch {
-    // Combined picker nests the provider list behind the current-model
-    // submenu trigger; open it and retry.
-    await page.locator("[data-slot='menu-sub-trigger']").last().click();
-    try {
-      await providerItem.first().waitFor({ timeout: 15_000 });
-    } catch (error) {
-      const disabledRow = page
-        .locator("[data-slot='menu-item']")
-        .filter({ hasText: spec.label })
-        .first();
-      if (await disabledRow.isVisible().catch(() => false)) {
-        const rowText = (await disabledRow.textContent()) ?? "";
-        throw new Error(
-          `provider "${spec.label}" is listed but not selectable (row reads "${rowText.trim()}") — likely unavailable on the server`,
-        );
-      }
-      throw error;
+    const disabledRow = page
+      .locator("[data-slot='menu-item']")
+      .filter({ hasText: spec.label })
+      .first();
+    if (await disabledRow.isVisible().catch(() => false)) {
+      const rowText = (await disabledRow.textContent()) ?? "";
+      throw new Error(
+        `provider "${spec.label}" is listed but not selectable (row reads "${rowText.trim()}") — likely unavailable on the server`,
+      );
     }
+    throw new Error(`provider "${spec.label}" not found in the provider picker`);
   }
   await providerItem.first().click();
 
-  // Selecting a provider only opens its model submenu; committing the switch
-  // requires picking a model (menuitemradio) from that submenu. Large catalogs
-  // render a search box; filtering by slug matches models whose display names
-  // drop the slug punctuation.
   const search = page.getByRole("searchbox", { name: /search models/i });
   if (spec.preferModel && (await search.isVisible().catch(() => false))) {
     await search.fill(spec.preferModel);
   }
+
   const modelItems = page.getByRole("menuitemradio");
   await modelItems.first().waitFor({ timeout: 30_000 });
   const preferred = spec.preferModel
@@ -176,9 +166,7 @@ async function selectProvider(page: Page, spec: ProviderSpec): Promise<void> {
     : modelItems;
   const target = (await preferred.count()) > 0 ? preferred.first() : modelItems.first();
   await target.click();
-  await menu.waitFor({ state: "hidden", timeout: 15_000 }).catch(async () => {
-    await page.keyboard.press("Escape");
-  });
+  await page.keyboard.press("Escape").catch(() => {});
 }
 
 function composer(page: Page) {
