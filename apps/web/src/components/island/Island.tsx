@@ -261,8 +261,12 @@ export function Island() {
   // while the outgoing content lingers as a fading overlay for CONTENT_LEAVE_MS.
   const [renderedState, setRenderedState] = useState<IslandWindowState>(effectiveState);
   const [leavingState, setLeavingState] = useState<IslandWindowState | null>(null);
+  // Ref-held timer: setRenderedState re-runs this effect immediately, and an
+  // effect-scoped cleanup would cancel the unmount of the leaving layer.
+  const leaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (effectiveState === renderedState) return;
+    if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
     if (prefersReducedMotion()) {
       setRenderedState(effectiveState);
       setLeavingState(null);
@@ -270,9 +274,13 @@ export function Island() {
     }
     setLeavingState(renderedState);
     setRenderedState(effectiveState);
-    const timer = setTimeout(() => setLeavingState(null), CONTENT_LEAVE_MS);
-    return () => clearTimeout(timer);
+    leaveTimerRef.current = setTimeout(() => setLeavingState(null), CONTENT_LEAVE_MS);
   }, [effectiveState, renderedState]);
+  useEffect(() => {
+    return () => {
+      if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
+    };
+  }, []);
 
   // Every displayed state change gets the spring overshoot alongside the
   // surface morph, so the island always feels alive, not just on pops.
