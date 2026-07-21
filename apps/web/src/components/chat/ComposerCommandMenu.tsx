@@ -90,7 +90,7 @@ export function commandMenuTitle(
     case "loop":
       // Selecting the entry never unexpectedly stops a running loop: active
       // selection opens Edit Loop mode instead of toggling.
-      return isLoopActive ? "Edit Loop" : "Loop";
+      return isLoopActive ? "Edit loop" : "Loop";
     default:
       return humanizeProviderCommandName(item.command);
   }

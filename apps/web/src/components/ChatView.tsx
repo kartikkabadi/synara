@@ -4233,7 +4233,7 @@ export default function ChatView({
     } catch (error) {
       toastManager.add({
         type: "error",
-        title: "Could not stop loop",
+        title: "Could not stop Loop",
         description:
           error instanceof Error ? error.message : "An error occurred while stopping the loop.",
       });
@@ -4275,7 +4275,7 @@ export default function ChatView({
     } catch (error) {
       toastManager.add({
         type: "error",
-        title: "Could not stop loop",
+        title: "Could not stop Loop",
         description:
           error instanceof Error ? error.message : "An error occurred while stopping the loop.",
       });
