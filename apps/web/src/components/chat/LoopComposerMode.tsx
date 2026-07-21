@@ -26,8 +26,8 @@ import {
   LOOP_UNSUPPORTED_CONTEXT_MESSAGE,
   formatLoopBudgetChoiceLabel,
   type LoopBudgetChoice,
-  type LoopComposerMode as LoopComposerModeState,
-} from "./useLoopComposerMode";
+} from "~/lib/loop";
+import { type LoopComposerMode as LoopComposerModeState } from "./useLoopComposerMode";
 import { ComposerPickerMenuPopup } from "./ComposerPickerMenuPopup";
 
 function formatDurationPreset(seconds: number): string {

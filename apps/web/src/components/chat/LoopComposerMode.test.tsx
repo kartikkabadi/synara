@@ -13,7 +13,7 @@ import {
   LOOP_BUDGET_DURATION_MIN_ERROR,
   LOOP_CHOOSE_BUDGET_NOTE,
   LOOP_UNSUPPORTED_CONTEXT_MESSAGE,
-} from "./useLoopComposerMode";
+} from "~/lib/loop";
 
 describe("LoopComposerModeHeader", () => {
   const baseProps = {

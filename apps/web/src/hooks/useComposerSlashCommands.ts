@@ -16,7 +16,7 @@ import {
   loopBudgetChoiceFromParsed,
   type LoopBudgetChoice,
   type LoopSetupNote,
-} from "../components/chat/useLoopComposerMode";
+} from "~/lib/loop";
 import { deriveAssociatedWorktreeMetadata } from "@synara/shared/threadWorkspace";
 import { useCallback, useEffect, useState } from "react";
 import { newCommandId, newMessageId, newThreadId } from "../lib/utils";
