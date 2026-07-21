@@ -12,6 +12,7 @@ import {
   LOOP_BUDGET_DURATION_ERROR,
   LOOP_CHOOSE_BUDGET_NOTE,
   LOOP_UNSUPPORTED_CONTEXT_MESSAGE,
+  validateLoopBudgetChoice,
 } from "./useLoopComposerMode";
 
 describe("LoopComposerModeHeader", () => {
@@ -87,24 +88,35 @@ describe("loopBudgetRadioValue", () => {
 });
 
 describe("LoopBudgetPicker", () => {
-  it("shows the count validation message for invalid turns", () => {
+  // Budget validation renders through the header error prop, not the picker.
+  it("surfaces the count validation message through the header", () => {
+    const budget = { kind: "count", turns: 0 } as const;
     const markup = renderToStaticMarkup(
-      <LoopBudgetPicker
-        budget={{ kind: "count", turns: 0 }}
-        disabled={false}
-        onChange={() => {}}
+      <LoopComposerModeHeader
+        mode={{ kind: "create", budget, sourceDraft: "" }}
+        isDispatching={false}
+        isLoopTurnRunning={false}
+        isUnsupportedContext={false}
+        onBudgetChange={() => {}}
+        note={null}
+        error={validateLoopBudgetChoice(budget)}
       />,
     );
     expect(markup).toContain(LOOP_BUDGET_COUNT_ERROR);
     expect(markup).toContain('role="alert"');
   });
 
-  it("shows the duration validation message for invalid durations", () => {
+  it("surfaces the duration validation message through the header", () => {
+    const budget = { kind: "duration", seconds: 25 * 3600 } as const;
     const markup = renderToStaticMarkup(
-      <LoopBudgetPicker
-        budget={{ kind: "duration", seconds: 25 * 3600 }}
-        disabled={false}
-        onChange={() => {}}
+      <LoopComposerModeHeader
+        mode={{ kind: "create", budget, sourceDraft: "" }}
+        isDispatching={false}
+        isLoopTurnRunning={false}
+        isUnsupportedContext={false}
+        onBudgetChange={() => {}}
+        note={null}
+        error={validateLoopBudgetChoice(budget)}
       />,
     );
     expect(markup).toContain(LOOP_BUDGET_DURATION_ERROR);
