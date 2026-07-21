@@ -42,6 +42,7 @@ const PROVIDERS: readonly ProviderSpec[] = [
     envKeys: ["OPENCODE_API_KEY", "OPENCODE_GO_API_KEY"],
     manualCompact: true,
     compactionSupported: true,
+    preferModel: "deepseek-v4-flash-free",
   },
   {
     id: "kilo",
@@ -116,6 +117,7 @@ async function openWorkspace(page: Page): Promise<void> {
 }
 
 async function selectProvider(page: Page, spec: ProviderSpec): Promise<void> {
+<<<<<<< HEAD
   // The composer renders either a combined model+effort picker (aria-label
   // "Change model and reasoning") or a standalone provider/model picker whose
   // Base UI menu trigger carries data-slot="menu-trigger".
@@ -162,7 +164,13 @@ async function selectProvider(page: Page, spec: ProviderSpec): Promise<void> {
   await providerItem.first().click();
 
   // Selecting a provider only opens its model submenu; committing the switch
-  // requires picking a model (menuitemradio) from that submenu.
+  // requires picking a model (menuitemradio) from that submenu. Large catalogs
+  // render a search box; filtering by slug matches models whose display names
+  // drop the slug punctuation.
+  const search = page.getByRole("searchbox", { name: /search models/i });
+  if (spec.preferModel && (await search.isVisible().catch(() => false))) {
+    await search.fill(spec.preferModel);
+  }
   const modelItems = page.getByRole("menuitemradio");
   await modelItems.first().waitFor({ timeout: 30_000 });
   const preferred = spec.preferModel

@@ -33,7 +33,11 @@ for port in "$SERVER_PORT" "$WEB_PORT"; do
   fi
 done
 
-# OpenCode/Kilo accept OPENCODE_API_KEY; map the alternate name if only it is set.
+# OpenCode/Kilo accept OPENCODE_API_KEY; map the alternate names if only they
+# are set (newest key first).
+if [[ -z "${OPENCODE_API_KEY:-}" && -n "${NEW_OPENCODE_GO_API_KEY:-}" ]]; then
+  export OPENCODE_API_KEY="$NEW_OPENCODE_GO_API_KEY"
+fi
 if [[ -z "${OPENCODE_API_KEY:-}" && -n "${OPENCODE_GO_API_KEY:-}" ]]; then
   export OPENCODE_API_KEY="$OPENCODE_GO_API_KEY"
 fi
