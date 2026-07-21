@@ -44,79 +44,79 @@ function makeDeps(overrides: Partial<LoopSetupDispatchDeps> = {}): {
 }
 
 describe("interpretLoopInvocation", () => {
-  it("routes inactive bare /loop to guided setup with the 5-turn default", () => {
-    const result = interpretLoopInvocation("/loop", { loopActive: false });
-    expect(result).toEqual({
-      kind: "open-setup",
-      budget: { kind: "count", turns: 5 },
-      objective: "",
-      note: null,
-    });
-  });
-
-  it("routes /loop 10 to setup with a 10-turn budget", () => {
-    const result = interpretLoopInvocation("/loop 10", { loopActive: false });
-    expect(result).toEqual({
-      kind: "open-setup",
-      budget: { kind: "count", turns: 10 },
-      objective: "",
-      note: null,
-    });
-  });
-
-  it("routes /loop 30m to setup with a 30-minute budget", () => {
-    const result = interpretLoopInvocation("/loop 30m", { loopActive: false });
-    expect(result).toEqual({
-      kind: "open-setup",
-      budget: { kind: "duration", seconds: 30 * 60 },
-      objective: "",
-      note: null,
-    });
-  });
-
-  it("prefills the objective for a missing-budget prompt", () => {
-    const result = interpretLoopInvocation("/loop fix the tests", { loopActive: false });
-    expect(result).toEqual({
-      kind: "open-setup",
-      budget: LOOP_DEFAULT_BUDGET_CHOICE,
-      objective: "fix the tests",
-      note: "choose-budget",
-    });
-  });
-
-  it("starts immediately for a valid budget plus prompt", () => {
-    const result = interpretLoopInvocation("/loop 5 fix the tests", { loopActive: false });
-    expect(result).toEqual({
-      kind: "start-direct",
-      budget: { kind: "count", value: 5 },
-      prompt: "fix the tests",
-    });
+  it.each([
+    [
+      "inactive bare /loop opens setup with the 5-turn default",
+      "/loop",
+      { kind: "open-setup", budget: { kind: "count", turns: 5 }, objective: "", note: null },
+    ],
+    [
+      "/loop 10 opens setup with a 10-turn budget",
+      "/loop 10",
+      { kind: "open-setup", budget: { kind: "count", turns: 10 }, objective: "", note: null },
+    ],
+    [
+      "/loop 30m opens setup with a 30-minute budget",
+      "/loop 30m",
+      {
+        kind: "open-setup",
+        budget: { kind: "duration", seconds: 30 * 60 },
+        objective: "",
+        note: null,
+      },
+    ],
+    [
+      "missing budget prefills the objective with a choose-budget note",
+      "/loop fix the tests",
+      {
+        kind: "open-setup",
+        budget: LOOP_DEFAULT_BUDGET_CHOICE,
+        objective: "fix the tests",
+        note: "choose-budget",
+      },
+    ],
+    [
+      "valid budget plus prompt starts immediately",
+      "/loop 5 fix the tests",
+      { kind: "start-direct", budget: { kind: "count", value: 5 }, prompt: "fix the tests" },
+    ],
+    [
+      "malformed count keeps the invalid value with validation",
+      "/loop 0",
+      {
+        kind: "open-setup",
+        budget: { kind: "count", turns: 0 },
+        objective: "",
+        note: "invalid-budget",
+      },
+    ],
+    [
+      "over-cap count keeps the invalid value with validation",
+      "/loop 200 fix the tests",
+      {
+        kind: "open-setup",
+        budget: { kind: "count", turns: 200 },
+        objective: "fix the tests",
+        note: "invalid-budget",
+      },
+    ],
+    [
+      "over-cap duration keeps the invalid value with validation",
+      "/loop 25h ship it",
+      {
+        kind: "open-setup",
+        budget: { kind: "duration", seconds: 25 * 3600 },
+        objective: "ship it",
+        note: "invalid-budget",
+      },
+    ],
+  ])("%s", (_name, input, expected) => {
+    expect(interpretLoopInvocation(input, { loopActive: false })).toEqual(expected);
   });
 
   it("toggles off for active bare /loop", () => {
     expect(interpretLoopInvocation("/loop", { loopActive: true })).toEqual({
       kind: "toggle-off",
-    });
-  });
-
-  it("keeps the invalid budget value and opens setup with validation for a malformed budget", () => {
-    expect(interpretLoopInvocation("/loop 0", { loopActive: false })).toEqual({
-      kind: "open-setup",
-      budget: { kind: "count", turns: 0 },
-      objective: "",
-      note: "invalid-budget",
-    });
-    expect(interpretLoopInvocation("/loop 200 fix the tests", { loopActive: false })).toEqual({
-      kind: "open-setup",
-      budget: { kind: "count", turns: 200 },
-      objective: "fix the tests",
-      note: "invalid-budget",
-    });
-    expect(interpretLoopInvocation("/loop 25h ship it", { loopActive: false })).toEqual({
-      kind: "open-setup",
-      budget: { kind: "duration", seconds: 25 * 3600 },
-      objective: "ship it",
-      note: "invalid-budget",
     });
   });
 
