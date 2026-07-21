@@ -36,7 +36,10 @@ import { teardownChildProcessTree } from "../supervisedProcessTeardown.ts";
 
 const PROVIDER = "antigravity" as const;
 
-const antigravityCompaction: ProviderCompactionCapabilities = {
+// One-shot print-mode CLI (`agy --print`): no long-lived session, so no
+// compaction primitive exists to invoke. Synthetic Synara-side compaction is
+// design-gated — see docs/antigravity-compaction-design.md.
+export const antigravityCompaction: ProviderCompactionCapabilities = {
   manual: {
     mode: "unsupported",
     mechanism: "unsupported",

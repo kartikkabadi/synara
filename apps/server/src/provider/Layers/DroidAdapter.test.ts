@@ -1,10 +1,12 @@
-import { TurnId } from "@synara/contracts";
+import { TurnId, supportsThreadCompactionFromCompaction } from "@synara/contracts";
 import { describe, expect, it } from "vitest";
 import { SYNARA_HARNESS_POLICY_MARKER } from "../../agentGateway/harnessPolicy.ts";
 
 import {
+  droidCommandSignalsCompaction,
   isDroidNestedTaskToolCall,
   isRenderableDroidAssistantDelta,
+  resolveDroidCompactionCapabilities,
   resolveDroidSessionCwd,
   resolveDroidPermissionPolicy,
   scopeDroidRuntimeItemIdForTurn,
@@ -140,5 +142,30 @@ describe("DroidAdapter runtime event scoping", () => {
     expect(shouldIgnoreDroidInterrupt(oldTurnId, undefined)).toBe(true);
     expect(shouldIgnoreDroidInterrupt(newTurnId, newTurnId)).toBe(false);
     expect(shouldIgnoreDroidInterrupt(undefined, newTurnId)).toBe(false);
+  });
+});
+
+describe("Droid compaction capability probe", () => {
+  // Verified against droid 0.176.0: ACP rejects /compact ("The compress
+  // command is only available in the interactive TUI right now") and never
+  // advertises a compaction command, so the default branch is unsupported.
+  it("stays unsupported when ACP advertises no compaction command", () => {
+    const compaction = resolveDroidCompactionCapabilities([
+      { name: "review" },
+      { name: "settings" },
+    ]);
+    expect(compaction.manual.mode).toBe("unsupported");
+    expect(supportsThreadCompactionFromCompaction(compaction)).toBe(false);
+  });
+
+  it("flips to supported only when ACP advertises compact/compress", () => {
+    for (const name of ["compact", "/compress", " Compact "]) {
+      expect(droidCommandSignalsCompaction(name), name).toBe(true);
+      const compaction = resolveDroidCompactionCapabilities([{ name }]);
+      expect(compaction.manual.mode).toBe("session-rollover");
+      expect(compaction.manual.mechanism).toBe("control-command");
+      expect(supportsThreadCompactionFromCompaction(compaction)).toBe(true);
+    }
+    expect(droidCommandSignalsCompaction("compactor")).toBe(false);
   });
 });
