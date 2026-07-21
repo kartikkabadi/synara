@@ -7,6 +7,11 @@ import type { IslandWindowManager } from "./islandWindow";
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown;
 
+// Handlers only accept invocations whose event.sender is the island window's
+// own webContents, so the fake IPC main invokes with this shared sender and
+// the fake manager exposes it as `window.webContents`.
+const ISLAND_SENDER = { id: "island-web-contents" };
+
 function createFakeIpcMain() {
   const handlers = new Map<string, Handler>();
   const ipcMain = {
@@ -20,14 +25,25 @@ function createFakeIpcMain() {
   const invoke = (channel: string, ...args: unknown[]) => {
     const handler = handlers.get(channel);
     if (!handler) throw new Error(`no handler for ${channel}`);
-    return handler({}, ...args);
+    return handler({ sender: ISLAND_SENDER }, ...args);
   };
-  return { ipcMain, handlers, invoke };
+  const invokeAs = (sender: unknown, channel: string, ...args: unknown[]) => {
+    const handler = handlers.get(channel);
+    if (!handler) throw new Error(`no handler for ${channel}`);
+    return handler({ sender }, ...args);
+  };
+  return { ipcMain, handlers, invoke, invokeAs };
 }
 
-function createDelegate(manager: Partial<IslandWindowManager> | null = null) {
+function createDelegate(manager: Partial<IslandWindowManager> | null | undefined = undefined) {
+  const resolved =
+    manager === undefined
+      ? { window: { webContents: ISLAND_SENDER } }
+      : manager === null
+        ? null
+        : { window: { webContents: ISLAND_SENDER }, ...manager };
   return {
-    getManager: () => manager as IslandWindowManager | null,
+    getManager: () => resolved as IslandWindowManager | null,
     getEnabled: vi.fn(() => true),
     setEnabled: vi.fn((enabled: boolean) => enabled),
     focusThread: vi.fn(),
@@ -110,5 +126,22 @@ describe("registerIslandIpcHandlers", () => {
     registerIslandIpcHandlers(ipcMain, createDelegate(null));
     await expect(invoke(ISLAND_IPC_CHANNELS.getContext)).resolves.toBeUndefined();
     await expect(invoke(ISLAND_IPC_CHANNELS.setState, "hover")).resolves.toBeUndefined();
+  });
+
+  it("rejects invocations from a non-island sender", async () => {
+    const { ipcMain, invokeAs } = createFakeIpcMain();
+    const delegate = createDelegate();
+    registerIslandIpcHandlers(ipcMain, delegate);
+
+    const stranger = { id: "other-web-contents" };
+    await expect(invokeAs(stranger, ISLAND_IPC_CHANNELS.getContext)).resolves.toBeUndefined();
+    await expect(invokeAs(stranger, ISLAND_IPC_CHANNELS.getEnabled)).resolves.toBeUndefined();
+    await invokeAs(stranger, ISLAND_IPC_CHANNELS.focusThread, "thread-1");
+    await invokeAs(stranger, ISLAND_IPC_CHANNELS.stopLoop, "thread-1");
+    await invokeAs(stranger, ISLAND_IPC_CHANNELS.setEnabled, true);
+    expect(delegate.focusThread).not.toHaveBeenCalled();
+    expect(delegate.stopLoop).not.toHaveBeenCalled();
+    expect(delegate.getEnabled).not.toHaveBeenCalled();
+    expect(delegate.setEnabled).not.toHaveBeenCalled();
   });
 });
