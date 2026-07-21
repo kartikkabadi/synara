@@ -65,13 +65,19 @@ fi
 # Workspace the tests open via the project picker. The picker lists top-level
 # folders of $HOME (the isolated SYNARA_HOME's HOME stays the real one), so we
 # create/symlink a scratch repo at ~/<name>.
-WORKSPACE_NAME="synara-e2e-compaction-$$"
-WORKSPACE_LINK="$HOME/$WORKSPACE_NAME"
-if [[ -n "${SYNARA_E2E_WORKSPACE:-}" ]]; then
-  ln -s "$SYNARA_E2E_WORKSPACE" "$WORKSPACE_LINK"
+if [[ -n "${SYNARA_E2E_WORKSPACE_NAME:-}" ]]; then
+  # Caller names an existing picker entry directly; no scratch repo is created.
+  WORKSPACE_NAME="$SYNARA_E2E_WORKSPACE_NAME"
+  WORKSPACE_LINK=""
 else
-  mkdir -p "$WORKSPACE_LINK"
-  (cd "$WORKSPACE_LINK" && git init -q && echo "# scratch" > README.md && git add README.md && git -c user.email=e2e@synara.dev -c user.name=e2e commit -qm init)
+  WORKSPACE_NAME="synara-e2e-compaction-$$"
+  WORKSPACE_LINK="$HOME/$WORKSPACE_NAME"
+  if [[ -n "${SYNARA_E2E_WORKSPACE:-}" ]]; then
+    ln -s "$SYNARA_E2E_WORKSPACE" "$WORKSPACE_LINK"
+  else
+    mkdir -p "$WORKSPACE_LINK"
+    (cd "$WORKSPACE_LINK" && git init -q && echo "# scratch" > README.md && git add README.md && git -c user.email=e2e@synara.dev -c user.name=e2e commit -qm init)
+  fi
 fi
 
 mkdir -p "$SYNARA_HOME_DIR" "$ARTIFACT_DIR"
@@ -84,7 +90,7 @@ cleanup() {
   [[ -n "$WEB_PID" ]] && kill "$WEB_PID" 2>/dev/null || true
   [[ -n "$SERVER_PID" ]] && kill "$SERVER_PID" 2>/dev/null || true
   wait 2>/dev/null || true
-  rm -rf "$WORKSPACE_LINK" 2>/dev/null || true
+  [[ -n "$WORKSPACE_LINK" ]] && rm -rf "$WORKSPACE_LINK" 2>/dev/null || true
   mv "$SERVER_LOG" "$WEB_LOG" "$ARTIFACT_DIR/" 2>/dev/null || true
   [[ -d "$HERE/test-results" ]] && cp -R "$HERE/test-results" "$ARTIFACT_DIR/" 2>/dev/null || true
   if [[ -d "$SYNARA_HOME_DIR" ]]; then
