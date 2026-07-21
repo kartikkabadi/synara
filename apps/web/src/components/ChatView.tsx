@@ -451,7 +451,7 @@ import { LoopComposerModeCta, LoopComposerModeHeader } from "./chat/LoopComposer
 import { deriveLoopComposerPlaceholder, isLoopOwnedTurnRunning } from "./chat/loopPresentation";
 import { isUnsupportedLoopContext } from "~/lib/loop";
 import { useLoopComposerMode } from "./chat/useLoopComposerMode";
-import { useLoopStopErrorToast } from "./chat/useLoopStopErrorToast";
+import { useLoopActions } from "../hooks/useLoopActions";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerVoiceButton } from "./chat/ComposerVoiceButton";
 import { ComposerVoiceRecorderBar } from "./chat/ComposerVoiceRecorderBar";
@@ -4204,96 +4204,20 @@ export default function ChatView({
     });
   }, [activeThread, isServerThread]);
 
-  // Guards both stop controls so repeated clicks dispatch a single command.
-  const stopLoopDispatchInFlightRef = useRef(false);
-
-  // Stop after this turn: disable future iterations; the running turn finishes.
-  const handleStopLoopAfterTurn = useCallback(async () => {
-    const api = readNativeApi();
-    if (!api || !activeThread || activeThread.loop?.active !== true) {
-      return;
-    }
-    if (stopLoopDispatchInFlightRef.current) {
-      return;
-    }
-    stopLoopDispatchInFlightRef.current = true;
-    try {
-      await api.orchestration.dispatchCommand({
-        type: "thread.loop.off",
-        commandId: newCommandId(),
-        threadId: activeThread.id,
-        createdAt: new Date().toISOString(),
-      });
-      const snapshot = await api.orchestration.getShellSnapshot();
-      syncServerShellSnapshot(snapshot);
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Could not stop loop",
-        description:
-          error instanceof Error ? error.message : "An error occurred while stopping the loop.",
-      });
-    } finally {
-      stopLoopDispatchInFlightRef.current = false;
-    }
-  }, [activeThread, syncServerShellSnapshot]);
-
-  // Stop now: interrupt the running loop-owned turn (the decider atomically
-  // turns the loop off); fall back to a plain loop-off when no concrete turn exists.
-  const handleStopLoopNow = useCallback(async () => {
-    const api = readNativeApi();
-    const loop = activeThread?.loop;
-    if (!api || !activeThread || loop == null) {
-      return;
-    }
-    if (stopLoopDispatchInFlightRef.current) {
-      return;
-    }
-    stopLoopDispatchInFlightRef.current = true;
-    try {
-      if (isLoopOwnedTurnRunning(loop, activeThread.latestTurn)) {
-        await api.orchestration.dispatchCommand({
-          type: "thread.turn.interrupt",
-          commandId: newCommandId(),
-          threadId: activeThread.id,
-          createdAt: new Date().toISOString(),
-        });
-      } else if (loop.active) {
-        await api.orchestration.dispatchCommand({
-          type: "thread.loop.off",
-          commandId: newCommandId(),
-          threadId: activeThread.id,
-          createdAt: new Date().toISOString(),
-        });
-      }
-      const snapshot = await api.orchestration.getShellSnapshot();
-      syncServerShellSnapshot(snapshot);
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Could not stop loop",
-        description:
-          error instanceof Error ? error.message : "An error occurred while stopping the loop.",
-      });
-    } finally {
-      stopLoopDispatchInFlightRef.current = false;
-    }
-  }, [activeThread, syncServerShellSnapshot]);
-
-  // One error toast for exceptional loop auto-stops (repeated errors, invalid
-  // saved objective, unavailable thread); routine stops stay toast-free.
-  const addLoopStopErrorToast = useCallback(
-    (toast: { title: string; description: string; threadId: ThreadId | null }) => {
-      toastManager.add({
-        type: "error",
-        title: toast.title,
-        description: toast.description,
-        data: { threadId: toast.threadId },
-      });
-    },
-    [],
-  );
-  useLoopStopErrorToast(activeThreadId ?? null, activeThread?.loop ?? null, addLoopStopErrorToast);
+  const {
+    stopAfterTurn: handleStopLoopAfterTurn,
+    stopNow: handleStopLoopNow,
+    ensureLoopThreadReady,
+  } = useLoopActions({
+    threadId,
+    activeThread,
+    activeProject,
+    isServerThread,
+    selectedModelSelection,
+    runtimeMode,
+    interactionMode,
+    syncServerShellSnapshot,
+  });
 
   const {
     handoffBusy,
@@ -9079,56 +9003,6 @@ export default function ChatView({
     selectedMentionCount: composerMentions.length,
     assistantSelectionCount: composerAssistantSelections.length,
   });
-
-  // Promotes a local new-chat draft to a server thread before a loop can be
-  // set on it. Shared by direct `/loop 5 fix tests` starts and guided setup.
-  const ensureLoopThreadReady = useCallback(
-    async (titleSeed: string): Promise<boolean> => {
-      const api = readNativeApi();
-      if (!api || !activeProject || !activeThread) {
-        return false;
-      }
-      if (isServerThread) {
-        return true;
-      }
-      try {
-        const result = await promoteThreadCreate(
-          {
-            type: "thread.create",
-            commandId: newCommandId(),
-            threadId,
-            projectId: activeProject.id,
-            title: buildPromptThreadTitleFallback(titleSeed),
-            modelSelection: selectedModelSelection,
-            runtimeMode,
-            interactionMode,
-            envMode: activeThread.envMode ?? "local",
-            branch: activeThread.branch,
-            worktreePath: activeThread.worktreePath,
-            associatedWorktreePath: activeThread.associatedWorktreePath ?? null,
-            associatedWorktreeBranch: activeThread.associatedWorktreeBranch ?? null,
-            associatedWorktreeRef: activeThread.associatedWorktreeRef ?? null,
-            lastKnownPr: activeThread.lastKnownPr ?? null,
-            createdAt: new Date().toISOString(),
-          },
-          api,
-          { force: true },
-        );
-        return result !== "unavailable";
-      } catch {
-        return false;
-      }
-    },
-    [
-      activeProject,
-      activeThread,
-      interactionMode,
-      isServerThread,
-      runtimeMode,
-      selectedModelSelection,
-      threadId,
-    ],
-  );
 
   const loopComposer = useLoopComposerMode({
     threadId,
