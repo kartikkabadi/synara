@@ -28,7 +28,13 @@ import {
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas";
-import { LoopPrompt, LoopStopReason, ThreadLoop, ThreadTurnPurpose } from "./loop";
+import {
+  LoopActivationId,
+  LoopPrompt,
+  LoopStopReason,
+  ThreadLoop,
+  ThreadTurnPurpose,
+} from "./loop";
 
 export const ORCHESTRATION_WS_METHODS = {
   getSnapshot: "orchestration.getSnapshot",
@@ -1445,7 +1451,7 @@ const ThreadLoopSetCommand = Schema.Struct({
   durationSeconds: Schema.NullOr(PositiveInt),
   // Edit-save guard: when supplied, the command only applies while the loop
   // activation with this id is still active; otherwise it is rejected.
-  expectedActivationId: Schema.optional(Schema.String),
+  expectedActivationId: Schema.optional(LoopActivationId),
   createdAt: IsoDateTime,
 });
 
@@ -1480,7 +1486,7 @@ const ThreadLoopContinueCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   expectedUpdatedAt: Schema.optional(IsoDateTime),
-  expectedActivationId: Schema.optional(Schema.String),
+  expectedActivationId: Schema.optional(LoopActivationId),
   createdAt: IsoDateTime,
 });
 
@@ -1722,6 +1728,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.loop-set",
   "thread.loop-off",
   "thread.loop-continued",
+  "thread.loop-wait-noted",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -2119,6 +2126,14 @@ export const ThreadLoopContinuedPayload = Schema.Struct({
   loop: ThreadLoop,
 });
 
+// A `thread.loop.continue` that resolved to a wait. Carries the unchanged loop
+// with a bumped `updatedAt` so the next deterministic continuation commandId
+// rotates, without re-triggering LoopReactor the way `thread.loop-set` does.
+export const ThreadLoopWaitNotedPayload = Schema.Struct({
+  threadId: ThreadId,
+  loop: ThreadLoop,
+});
+
 export const OrchestrationEventMetadata = Schema.Struct({
   providerTurnId: Schema.optional(TrimmedNonEmptyString),
   providerItemId: Schema.optional(ProviderItemId),
@@ -2355,6 +2370,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.loop-continued"),
     payload: ThreadLoopContinuedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.loop-wait-noted"),
+    payload: ThreadLoopWaitNotedPayload,
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;
