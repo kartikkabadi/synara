@@ -19,6 +19,10 @@
   top: 0;
   left: 50%;
   translate: -50%;
+  /* Content cross-fade timings derive from the morph duration of the current
+     target state, so leave/enter track the geometry spring on open and the
+     quicker ease-in on close. */
+  --island-morph-ms: 180ms;
   /* Compositing hint keeps the flat top edge anti-aliased during morphs. */
   transform: translateZ(0);
   transition:
@@ -48,6 +52,7 @@
    the quick 180ms ease-in above. */
 .island-surface[data-island-state="hover"],
 .island-surface[data-island-state="expanded"] {
+  --island-morph-ms: 340ms;
   transition:
     width 340ms cubic-bezier(0.34, 1.2, 0.44, 1),
     height 340ms cubic-bezier(0.34, 1.2, 0.44, 1),
@@ -192,18 +197,17 @@
 /* ---- Content choreography -------------------------------------------- */
 
 /* Cross-fade swap: both layers stay mounted — the outgoing overlay fades over
-   the first ~40% of the 340ms morph while the incoming content fades/scales
-   in over the last ~60%, so the surface never renders empty. */
+   the first ~45% of the morph while the incoming content fades/scales in over
+   the last ~60%, overlapping slightly around the midpoint so no frame is
+   blank and no frame double-exposes both layers. */
 .island-leave {
-  animation: island-leave 150ms ease-out both;
+  animation: island-leave calc(var(--island-morph-ms, 180ms) * 0.45) linear both;
 }
 
-.island-enter-header {
-  animation: island-enter 200ms ease-out 120ms both;
-}
-
+.island-enter-header,
 .island-enter-body {
-  animation: island-enter 200ms ease-out 120ms both;
+  animation: island-enter calc(var(--island-morph-ms, 180ms) * 0.6) ease-out
+    calc(var(--island-morph-ms, 180ms) * 0.4) both;
 }
 
 /* Row choreography: each expanded row rises + scales in on a ~30ms stagger

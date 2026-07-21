@@ -4,7 +4,15 @@
 // Why: Runs in its own transparent BrowserWindow (see apps/desktop/src/island/), so it keeps its
 //      own WebSocket shell subscription instead of relying on the main app shell.
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type AnimationEvent as ReactAnimationEvent,
+  type CSSProperties,
+} from "react";
 import {
   PROVIDER_DISPLAY_NAMES,
   type IslandDisplayContext,
@@ -33,10 +41,10 @@ import "./island.css";
 
 const AUTO_POP_MS = 4_000;
 const EXPANDED_IDLE_COLLAPSE_MS = 8_000;
-// Cross-fade choreography: outgoing content stays mounted as an absolute
-// overlay fading over the first ~40% of the 340ms morph while the incoming
-// content enters during the last ~60% — the panel is never blank mid-morph.
-const CONTENT_LEAVE_MS = 150;
+// Fallback unmount for the leaving layer: the layer normally unmounts on its
+// leave animation's end event; this timer only catches a missing event (e.g.
+// the tab losing rendering). Longer than any morph so it never cuts early.
+const CONTENT_LEAVE_FALLBACK_MS = 600;
 // Drives done-session pruning and relative timestamps between shell events.
 const CLOCK_TICK_MS = 30_000;
 
@@ -274,8 +282,16 @@ export function Island() {
     }
     setLeavingState(renderedState);
     setRenderedState(effectiveState);
-    leaveTimerRef.current = setTimeout(() => setLeavingState(null), CONTENT_LEAVE_MS);
+    leaveTimerRef.current = setTimeout(() => setLeavingState(null), CONTENT_LEAVE_FALLBACK_MS);
   }, [effectiveState, renderedState]);
+
+  // Unmount the leaving layer the moment its fade finishes — a lingering
+  // opacity-0 layer with blurred orb blooms leaves ghost smears otherwise.
+  const onLeaveAnimationEnd = useCallback((event: ReactAnimationEvent) => {
+    if (event.animationName !== "island-leave") return;
+    if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
+    setLeavingState(null);
+  }, []);
   useEffect(() => {
     return () => {
       if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
@@ -336,7 +352,10 @@ export function Island() {
         <div className="island-state-wash pointer-events-none absolute inset-0" />
         {renderIslandContent(renderedState, false)}
         {leavingState !== null && leavingState !== renderedState ? (
-          <div className="pointer-events-none absolute inset-0 flex flex-col overflow-hidden">
+          <div
+            className="pointer-events-none absolute inset-0 flex flex-col overflow-hidden"
+            onAnimationEnd={onLeaveAnimationEnd}
+          >
             {renderIslandContent(leavingState, true)}
           </div>
         ) : null}
@@ -345,28 +364,40 @@ export function Island() {
   );
 
   function renderIslandContent(state: IslandWindowState, leaving: boolean) {
-    return state === "collapsed" ? (
-      <button
-        key={leaving ? "collapsed-leave" : "collapsed"}
-        type="button"
-        onClick={() => applyState("expanded")}
-        className={cn(
-          "island-enter-body flex h-full w-full items-center justify-center text-xs font-medium tracking-wide text-white/80",
-          sessions.length > 0 ? "gap-2 pl-2.5 pr-3" : "px-3",
-          leaving && "island-leave",
-        )}
-        aria-label="Expand agent sessions island"
-      >
-        <span className="island-orb-seat">
-          <IslandOrb state={orbState} size={16} />
-        </span>
-        {sessions.length > 0 ? (
-          <span className="text-[13px] font-semibold tabular-nums text-white/90">
-            {sessions.length}
-          </span>
-        ) : null}
-      </button>
-    ) : state === "hover" ? (
+    if (state === "collapsed") {
+      // Anchored to the pill's final top-center coordinates at its final size,
+      // so during a close morph the incoming collapsed content sits where the
+      // pill will land instead of floating mid-capsule.
+      const collapsedSize = innerSize("collapsed", context, sessionCount);
+      return (
+        <div
+          key={leaving ? "collapsed-leave" : "collapsed"}
+          className="absolute left-1/2 top-0 -translate-x-1/2"
+          style={{ width: collapsedSize.width, height: collapsedSize.height }}
+        >
+          <button
+            type="button"
+            onClick={() => applyState("expanded")}
+            className={cn(
+              "island-enter-body flex h-full w-full items-center justify-center text-xs font-medium tracking-wide text-white/80",
+              sessions.length > 0 ? "gap-2 pl-2.5 pr-3" : "px-3",
+              leaving && "island-leave",
+            )}
+            aria-label="Expand agent sessions island"
+          >
+            <span className="island-orb-seat">
+              <IslandOrb state={orbState} size={16} />
+            </span>
+            {sessions.length > 0 ? (
+              <span className="text-[13px] font-semibold tabular-nums text-white/90">
+                {sessions.length}
+              </span>
+            ) : null}
+          </button>
+        </div>
+      );
+    }
+    return state === "hover" ? (
       <button
         key={leaving ? "hover-leave" : "hover"}
         type="button"
