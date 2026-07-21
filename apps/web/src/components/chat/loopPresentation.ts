@@ -10,8 +10,6 @@ import type {
   ThreadLoop,
 } from "@synara/contracts";
 
-import type { ThreadSession } from "../../types";
-
 export type LoopSemanticColor = "running" | "waiting" | "neutral" | "error";
 
 export type LoopPresentationState =
@@ -30,7 +28,7 @@ export interface LoopProgress {
   kind: "count" | "duration" | "none";
   // Per-segment fill in [0, 1]. Empty for no-budget loops (no strip drawn).
   segments: number[];
-  // Authoritative text counter, e.g. "2 / 5", "18m left", "2 turns".
+  // Authoritative text counter, e.g. "2/5", "18m left", "2 turns".
   counterText: string;
   // Secondary line, e.g. "Safety limit 100" for no-budget loops.
   detailText: string | null;
@@ -55,7 +53,6 @@ export interface LoopPresentation {
 export interface DeriveLoopPresentationStateInput {
   loop: ThreadLoop | null | undefined;
   latestTurn: OrchestrationLatestTurn | null | undefined;
-  session: ThreadSession | null;
   interactionMode: ProviderInteractionMode;
   hasPendingApprovals: boolean;
   hasPendingUserInput: boolean;
@@ -138,13 +135,13 @@ export function deriveLoopProgress(loop: ThreadLoop, now: number): LoopProgress 
     return {
       kind: "count",
       segments,
-      counterText: `${iteration} / ${max}`,
+      counterText: `${iteration}/${max}`,
       detailText: null,
       tooltipText: null,
       ariaValueMin: 0,
       ariaValueMax: max,
       ariaValueNow: iteration,
-      ariaValueText: `${iteration} of ${max} loop turns started`,
+      ariaValueText: `Turn ${iteration} of ${max}`,
       tickIntervalMs: null,
     };
   }
@@ -183,32 +180,6 @@ export function deriveLoopProgress(loop: ThreadLoop, now: number): LoopProgress 
   };
 }
 
-const LOOP_START_LABEL_MAX_PROMPT_CHARS = 60;
-
-// Reconstructs the `/loop` invocation for the transcript start divider,
-// e.g. "Loop started · /loop 5 fix the tests". Long prompts are truncated.
-export function formatLoopStartLabel(loop: {
-  readonly prompt: string;
-  readonly maxIterations: number | null;
-  readonly endsAt: string | null;
-  readonly createdAt: string;
-}): string {
-  let budgetToken = "";
-  if (loop.maxIterations !== null) {
-    budgetToken = `${loop.maxIterations} `;
-  } else if (loop.endsAt !== null) {
-    const totalMs = new Date(loop.endsAt).getTime() - new Date(loop.createdAt).getTime();
-    budgetToken = `${Math.max(1, Math.round(totalMs / 60_000))}m `;
-  }
-  const prompt = loop.prompt.trim();
-  const truncatedPrompt =
-    prompt.length > LOOP_START_LABEL_MAX_PROMPT_CHARS
-      ? `${prompt.slice(0, LOOP_START_LABEL_MAX_PROMPT_CHARS).trimEnd()}…`
-      : prompt;
-  const invocation = `/loop ${budgetToken}${truncatedPrompt}`.trimEnd();
-  return `Loop started · ${invocation}`;
-}
-
 export interface LoopStopReasonCopy {
   // "Loop completed" for budget outcomes, "Loop stopped" otherwise.
   title: string;
@@ -226,8 +197,13 @@ export interface LoopStopReasonContext {
   readonly consecutiveErrors: number;
 }
 
-function configuredBudgetMinutes(loop: LoopStopReasonContext): number {
-  if (loop.endsAt === null) return 0;
+// Whole-minute duration budget derived from creation and end timestamps; null
+// for loops without a duration budget.
+export function loopDurationMinutes(loop: {
+  readonly endsAt: string | null;
+  readonly createdAt: string;
+}): number | null {
+  if (loop.endsAt === null) return null;
   const totalMs = new Date(loop.endsAt).getTime() - new Date(loop.createdAt).getTime();
   return Math.max(1, Math.round(totalMs / 60_000));
 }
@@ -248,7 +224,7 @@ export function formatLoopStopReason(
       return {
         title: "Loop completed",
         summary: "Ran until the time budget ended",
-        reason: `${configuredBudgetMinutes(loop)}-minute budget reached`,
+        reason: `${loopDurationMinutes(loop) ?? 0}-minute budget reached`,
       };
     case "hard_cap":
       return {
@@ -315,6 +291,32 @@ export function formatLoopStopReason(
   }
 }
 
+// Context-free stop copy for toasts and announcements. Returns null for
+// routine lifecycle stops that stay quiet (spec §14.2).
+export function formatLoopStopReasonShort(
+  reason: LoopStopReason,
+): { title: string; description: string } | null {
+  switch (reason) {
+    case "consecutive_errors":
+      return {
+        title: "Loop stopped after repeated errors",
+        description: "Review the latest error before restarting.",
+      };
+    case "prompt_invalid":
+      return {
+        title: "Loop stopped",
+        description: "The saved objective was invalid.",
+      };
+    case "thread_unrunnable":
+      return {
+        title: "Loop stopped",
+        description: "This thread is not available.",
+      };
+    default:
+      return null;
+  }
+}
+
 function stopReasonColor(reason: LoopStopReason): LoopSemanticColor {
   switch (reason) {
     case "consecutive_errors":
@@ -323,42 +325,6 @@ function stopReasonColor(reason: LoopStopReason): LoopSemanticColor {
       return "error";
     default:
       return "neutral";
-  }
-}
-
-export function getLoopAriaValueText(state: LoopPresentationState): string {
-  switch (state.kind) {
-    case "armed":
-      return "Loop ready. Add a prompt to start.";
-    case "starting":
-      return "Starting loop.";
-    case "running":
-      return `Loop running. Turn ${state.iteration}.`;
-    case "ready":
-      return "Loop on. Starting the next turn.";
-    case "waiting-approval":
-      return "Loop waiting for approval.";
-    case "waiting-input":
-      return "Loop waiting for your input.";
-    case "waiting-plan":
-      return "Loop waiting. Plan mode is active.";
-    case "ending":
-      return "Loop will stop after the current turn.";
-    case "stopping":
-      return "Stopping loop.";
-    case "ended": {
-      const copy = formatLoopStopReason(
-        state.reason,
-        { maxIterations: null, endsAt: null, createdAt: "", hardCap: 0, consecutiveErrors: 0 },
-        0,
-      );
-      // The duration reason line is dynamic (minutes) and reads poorly
-      // without loop data; fall back to its static summary.
-      const useSummary = copy.reason === null || state.reason === "budget_duration";
-      return useSummary ? `${copy.title}. ${copy.summary}.` : `${copy.title}. ${copy.reason}.`;
-    }
-    default:
-      return state satisfies never;
   }
 }
 
