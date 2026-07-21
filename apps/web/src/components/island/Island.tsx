@@ -30,6 +30,7 @@ import {
   deriveIslandSessions,
   findPopTransition,
   islandRelativeTime,
+  sortIslandSessions,
   type IslandSession,
   type IslandSessionStatus,
 } from "~/lib/islandSessionTracker";
@@ -161,8 +162,11 @@ export function Island() {
     return () => clearInterval(timer);
   }, []);
 
+  // Mock rows go through the same priority sort as live sessions so the
+  // headline, row order, and surface glow hue never disagree.
   const sessions = useMemo(
-    () => (USE_MOCK_SESSIONS ? MOCK_SESSIONS : deriveIslandSessions(threads, nowMs)),
+    () =>
+      USE_MOCK_SESSIONS ? sortIslandSessions(MOCK_SESSIONS) : deriveIslandSessions(threads, nowMs),
     [threads, nowMs],
   );
   const aggregate = aggregateIslandStatus(sessions);
@@ -322,7 +326,9 @@ export function Island() {
 
   const size = innerSize(effectiveState, context, sessionCount);
   const isNotch = context?.notch != null;
-  const orbState = orbStateForStatus(aggregate);
+  // Surface glow/wash hue follows what the surface is actually showing: the
+  // hover headline / top expanded row, falling back to the aggregate.
+  const orbState = orbStateForStatus(sessions[0]?.status ?? aggregate);
   const glowing = aggregate === "working" || aggregate === "needs-approval";
   const headline = sessions[0] ?? null;
   const restSummary = summarizeRest(sessions.slice(1));

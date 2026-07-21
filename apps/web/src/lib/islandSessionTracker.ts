@@ -66,6 +66,13 @@ export function deriveIslandSessions(
       lastActivityAt,
     });
   }
+  return sortIslandSessions(sessions);
+}
+
+// Priority order (needs-approval > working > done, then recency) is the single
+// ordering for rows, the hover headline, and the aggregate surface hue — the
+// glow always matches the top session shown.
+export function sortIslandSessions(sessions: readonly IslandSession[]): IslandSession[] {
   return sessions.toSorted(
     (left, right) =>
       STATUS_PRIORITY[left.status] - STATUS_PRIORITY[right.status] ||
