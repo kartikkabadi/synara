@@ -9,6 +9,9 @@ import path from "node:path";
 
 import type {
   ProviderApprovalDecision,
+  ProviderCompactionRequest,
+  ProviderCompactionResult,
+  ProviderComposerCapabilities,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
   ProviderSession,
@@ -218,7 +221,32 @@ function makeFakeCodexAdapter(
   );
 
   const compactThread = vi.fn(
-    (_threadId: ThreadId): Effect.Effect<void, ProviderAdapterError> => Effect.void,
+    (
+      _input: ProviderCompactionRequest,
+    ): Effect.Effect<ProviderCompactionResult, ProviderAdapterError> =>
+      Effect.succeed({ kind: "same-session" } as const),
+  );
+
+  const getComposerCapabilities = vi.fn(
+    (): Effect.Effect<ProviderComposerCapabilities, ProviderAdapterError> =>
+      Effect.succeed({
+        provider,
+        supportsSkillMentions: false,
+        supportsSkillDiscovery: false,
+        supportsNativeSlashCommandDiscovery: false,
+        supportsPluginMentions: false,
+        supportsPluginDiscovery: false,
+        supportsRuntimeModelList: false,
+        compaction: {
+          manual: {
+            mode: "same-session",
+            mechanism: "native-rpc",
+            supportsInstructions: false,
+          },
+          automatic: { mode: "none", statusVisibility: "none", triggerVisibility: "opaque" },
+          telemetry: { lifecycle: "none", contextUsage: "none" },
+        },
+      } satisfies ProviderComposerCapabilities),
   );
 
   const stopAll = vi.fn(
@@ -250,6 +278,7 @@ function makeFakeCodexAdapter(
     readThread,
     rollbackThread,
     compactThread,
+    getComposerCapabilities,
     stopAll,
     streamEvents: Stream.fromPubSub(runtimeEventPubSub),
   };
@@ -295,6 +324,7 @@ function makeFakeCodexAdapter(
     readThread,
     rollbackThread,
     compactThread,
+    getComposerCapabilities,
     stopAll,
   };
 }
@@ -3458,16 +3488,21 @@ idleCleanup.layer("ProviderServiceLive idle cleanup", (it) => {
       );
 
       idleCleanup.codex.stopSession.mockClear();
-      idleCleanup.codex.compactThread.mockImplementationOnce((inputThreadId) =>
+      idleCleanup.codex.compactThread.mockImplementationOnce((input) =>
         Effect.sync(() => {
-          idleCleanup.codex.updateSession(inputThreadId, (existing) => ({
+          idleCleanup.codex.updateSession(input.threadId, (existing) => ({
             ...existing,
             status: "running",
             activeTurnId: undefined,
           }));
+          return { kind: "same-session" } as const;
         }),
       );
-      yield* provider.compactThread({ threadId });
+      yield* provider.compactThread({
+        requestId: "compact-req-1",
+        threadId,
+        trigger: "manual",
+      });
 
       yield* waitUntil(
         () => idleCleanup.codex.stopSession.mock.calls.length > 0,
@@ -3837,6 +3872,138 @@ validation.layer("ProviderServiceLive validation", (it) => {
       }
       assert.equal(failure.failure.operation, "ProviderService.startSession");
       assert.equal(failure.failure.issue.includes("invalid-provider"), true);
+    }),
+  );
+
+  it.effect("passes the full compaction request through and returns the adapter result", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-compact-result");
+
+      yield* provider.startSession(threadId, {
+        provider: "codex",
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      validation.codex.compactThread.mockClear();
+      validation.codex.compactThread.mockImplementationOnce(() =>
+        Effect.succeed({
+          kind: "session-rollover",
+          resumeCursor: "cursor-after-rollover",
+          providerThreadId: "provider-thread-9",
+        } as const),
+      );
+
+      const request = {
+        requestId: "compact-req-rollover",
+        threadId,
+        trigger: "manual",
+      } as const;
+      const result = yield* provider.compactThread(request);
+
+      assert.deepEqual(result, {
+        kind: "session-rollover",
+        resumeCursor: "cursor-after-rollover",
+        providerThreadId: "provider-thread-9",
+      });
+      assert.deepEqual(validation.codex.compactThread.mock.calls[0]?.[0], request);
+
+      validation.codex.compactThread.mockImplementationOnce(() =>
+        Effect.succeed({ kind: "runtime-restart-required" } as const),
+      );
+      const restart = yield* provider.compactThread({
+        requestId: "compact-req-restart",
+        threadId,
+        trigger: "synara-auto",
+      });
+      assert.deepEqual(restart, { kind: "runtime-restart-required" });
+    }),
+  );
+
+  it.effect("rejects compaction instructions when the adapter does not support them", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-compact-instructions");
+
+      yield* provider.startSession(threadId, {
+        provider: "codex",
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      validation.codex.compactThread.mockClear();
+      const failure = yield* Effect.result(
+        provider.compactThread({
+          requestId: "compact-req-instr",
+          threadId,
+          trigger: "manual",
+          instructions: "Focus on the refactor",
+        }),
+      );
+
+      assert.equal(failure._tag, "Failure");
+      if (failure._tag !== "Failure") {
+        return;
+      }
+      assert.equal(failure.failure._tag, "ProviderValidationError");
+      if (failure.failure._tag !== "ProviderValidationError") {
+        return;
+      }
+      assert.equal(failure.failure.operation, "ProviderService.compactThread");
+      assert.equal(
+        failure.failure.issue.includes("does not support compaction instructions"),
+        true,
+      );
+      assert.equal(validation.codex.compactThread.mock.calls.length, 0);
+    }),
+  );
+
+  it.effect("passes instructions through when the adapter supports them", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-compact-instructions-ok");
+
+      yield* provider.startSession(threadId, {
+        provider: "codex",
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      validation.codex.compactThread.mockClear();
+      validation.codex.getComposerCapabilities.mockImplementationOnce(() =>
+        Effect.succeed({
+          provider: "codex",
+          supportsSkillMentions: false,
+          supportsSkillDiscovery: false,
+          supportsNativeSlashCommandDiscovery: false,
+          supportsPluginMentions: false,
+          supportsPluginDiscovery: false,
+          supportsRuntimeModelList: false,
+          compaction: {
+            manual: {
+              mode: "same-session",
+              mechanism: "control-command",
+              supportsInstructions: true,
+            },
+            automatic: { mode: "none", statusVisibility: "none", triggerVisibility: "opaque" },
+            telemetry: { lifecycle: "none", contextUsage: "none" },
+          },
+        } satisfies ProviderComposerCapabilities),
+      );
+
+      const result = yield* provider.compactThread({
+        requestId: "compact-req-instr-ok",
+        threadId,
+        trigger: "manual",
+        instructions: "Focus on the refactor",
+      });
+
+      assert.deepEqual(result, { kind: "same-session" });
+      assert.equal(
+        validation.codex.compactThread.mock.calls[0]?.[0]?.instructions,
+        "Focus on the refactor",
+      );
     }),
   );
 
