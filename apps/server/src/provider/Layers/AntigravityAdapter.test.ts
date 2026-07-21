@@ -2,9 +2,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { supportsThreadCompactionFromCompaction } from "@synara/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
+  antigravityCompaction,
   buildAntigravityHookConfig,
   antigravityPromptCommandLineIssue,
   hookScriptSource,
@@ -209,5 +211,18 @@ describe("Antigravity CLI integration helpers", () => {
         timeoutMs: 50,
       }),
     ).rejects.toThrow("Antigravity helper timed out after 50ms");
+  });
+});
+
+describe("Antigravity compaction capabilities", () => {
+  // Placeholder guard: `agy` (verified locally) is a one-shot print-mode CLI
+  // with no long-lived session, so compaction must stay unsupported until the
+  // synthetic-compaction design in docs/antigravity-compaction-design.md is
+  // approved and implemented.
+  it("asserts compaction is unsupported until the synthetic design is approved", () => {
+    expect(antigravityCompaction.manual.mode).toBe("unsupported");
+    expect(antigravityCompaction.manual.mechanism).toBe("unsupported");
+    expect(antigravityCompaction.manual.supportsInstructions).toBe(false);
+    expect(supportsThreadCompactionFromCompaction(antigravityCompaction)).toBe(false);
   });
 });
