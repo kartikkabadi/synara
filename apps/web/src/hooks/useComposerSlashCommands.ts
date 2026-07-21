@@ -61,13 +61,13 @@ function wasPromptReplacementApplied(result: number | false): boolean {
 export function formatLoopParseError(reason: LoopParseErrorReason): string {
   switch (reason) {
     case "missing_budget":
-      return "Add a budget first, e.g. `/loop 10 fix the tests` or `/loop 30m`.";
+      return "Add a budget first, e.g. /loop 10 fix the tests or /loop 30m.";
     case "invalid_budget":
-      return "That budget isn't valid. Use a count up to 100 (`/loop 10`) or a duration (`/loop 30m`, `/loop 2h`).";
+      return "That budget isn't valid. Use a count up to 100 (/loop 10) or a duration (/loop 30m, /loop 2h).";
     case "ambiguous_second_budget":
-      return "The prompt can't start with a second budget. Quote or reword it, e.g. `/loop 10 run 5 checks`.";
+      return "The prompt can't start with a second budget. Quote or reword it, e.g. /loop 10 run 5 checks.";
     case "prompt_starts_with_slash":
-      return "The loop prompt can't start with `/`. Try `/loop 10 fix the tests`.";
+      return "The loop prompt can't start with /. Try /loop 10 fix the tests.";
     case "prompt_too_long":
       return "That loop prompt is too long. Shorten it and try again.";
     default:
@@ -112,7 +112,7 @@ export function buildLoopParseErrorToast(
     .trim();
   return {
     type: "warning",
-    title: "Invalid /loop command",
+    title: "Invalid Loop budget",
     description: formatLoopParseError(reason),
     actionProps: {
       children: "Configure Loop",
@@ -705,8 +705,7 @@ export function useComposerSlashCommands(input: {
         toastManager.add({
           type: "error",
           title: "Could not stop loop",
-          description:
-            error instanceof Error ? error.message : "An error occurred while toggling the loop.",
+          description: "Couldn't stop the loop. Try again.",
         });
       }
     },
@@ -734,6 +733,11 @@ export function useComposerSlashCommands(input: {
 
       const ready = await ensureLoopThreadReady(prompt);
       if (!ready) {
+        toastManager.add({
+          type: "error",
+          title: "Could not start loop",
+          description: "The thread isn't ready yet. Your objective has been preserved.",
+        });
         return;
       }
 
@@ -756,7 +760,9 @@ export function useComposerSlashCommands(input: {
           type: "error",
           title: "Could not start loop",
           description:
-            error instanceof Error ? error.message : "An error occurred while starting the loop.",
+            error instanceof Error
+              ? `${error.message} Your objective has been preserved.`
+              : "An error occurred while starting the loop. Your objective has been preserved.",
         });
       }
     },
