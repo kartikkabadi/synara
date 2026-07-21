@@ -160,6 +160,17 @@
   }
 }
 
+/* ---- Expanded panel --------------------------------------------------- */
+
+.island-panel-vignette {
+  background: radial-gradient(120% 90% at 50% 0%, transparent 55%, rgba(0, 0, 0, 0.4));
+}
+
+/* Hovered rows get a faint state-hued left edge. */
+.island-row:hover {
+  box-shadow: inset 2px 0 0 hsl(var(--island-hue, 205) 80% 60% / 0.5);
+}
+
 /* ---- Orb lamp -------------------------------------------------------- */
 
 .island-orb {

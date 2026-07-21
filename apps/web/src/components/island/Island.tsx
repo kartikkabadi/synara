@@ -291,7 +291,7 @@ export function Island() {
             {headline ? (
               <>
                 <div className="flex items-center gap-2.5">
-                  <IslandOrb state={headline.status} size={14} />
+                  <IslandOrb state={headline.status} size={15} />
                   <span className="min-w-0 flex-1 truncate text-sm font-medium text-white/90">
                     {headline.title}
                   </span>
@@ -310,7 +310,7 @@ export function Island() {
               </>
             ) : (
               <div className="flex items-center gap-2.5">
-                <IslandOrb state="idle" size={14} />
+                <IslandOrb state="idle" size={15} />
                 <span className="text-xs text-white/50">No active sessions</span>
               </div>
             )}
@@ -318,13 +318,16 @@ export function Island() {
         ) : (
           <div
             key="expanded"
-            className="island-crossfade flex h-full flex-col"
+            className="island-crossfade relative flex h-full flex-col"
             onPointerMove={armIdleTimer}
           >
-            <div className="flex items-center justify-between px-4 py-2.5">
-              <span className="text-[11px] uppercase tracking-widest text-white/40">Sessions</span>
+            <div className="island-panel-vignette pointer-events-none absolute inset-0" />
+            <div className="flex items-center justify-between border-b border-white/6 px-4 py-2.5">
+              <span className="text-xs font-medium text-white/60">Sessions</span>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] text-white/25">{shortcutHint(context)}</span>
+                <span className="rounded border border-white/10 bg-white/5 px-1 text-[10px] text-white/40">
+                  {shortcutHint(context)}
+                </span>
                 <button
                   type="button"
                   onClick={() => applyState("collapsed")}
@@ -337,9 +340,10 @@ export function Island() {
             </div>
             <div className="flex-1 overflow-y-auto px-2 pb-2">
               {sessions.length === 0 ? (
-                <div className="flex flex-col items-center gap-3 px-2 py-8">
-                  <IslandOrb state="idle" />
-                  <span className="text-xs text-white/50">No active sessions</span>
+                <div className="flex h-full flex-col items-center justify-center gap-2 px-2">
+                  <IslandOrb state="idle" size={28} />
+                  <span className="text-sm text-white/60">No active sessions</span>
+                  <span className="text-xs text-white/35">New agent turns will appear here</span>
                 </div>
               ) : (
                 sessions.map((session) => (
@@ -347,10 +351,10 @@ export function Island() {
                     key={session.threadId}
                     type="button"
                     onClick={() => focusThread(session.threadId)}
-                    className="group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left hover:bg-white/5"
+                    className="island-row group flex h-11 w-full items-center gap-2.5 rounded-lg px-2.5 text-left hover:bg-white/6"
                   >
-                    <IslandOrb state={session.status} size={14} />
-                    <span className="min-w-0 flex-1 truncate text-sm text-white/90">
+                    <IslandOrb state={session.status} size={15} />
+                    <span className="min-w-0 flex-1 truncate text-[13px] text-white/90">
                       {session.title}
                     </span>
                     <span className="flex shrink-0 items-center gap-2 group-hover:hidden">
