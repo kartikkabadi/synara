@@ -100,7 +100,12 @@ export function islandStateBounds(
   platform?: NodeJS.Platform,
   sessionCount?: number,
 ): IslandRect {
-  return islandAnchoredBounds(islandStateSize(state, notch, sessionCount), metrics, notch, platform);
+  return islandAnchoredBounds(
+    islandStateSize(state, notch, sessionCount),
+    metrics,
+    notch,
+    platform,
+  );
 }
 
 // null means "use the platform default": on for macOS/Windows, off for Linux.
