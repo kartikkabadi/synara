@@ -5,7 +5,9 @@
         animation, not a disclosure toggle, so disclosureMotion.ts does not
         apply. */
 
-:root {
+/* Scoped to the island surface; the island route sets the html-level
+   color-scheme itself so this stylesheet never leaks document-wide. */
+[data-island-shell] {
   color-scheme: dark;
 }
 

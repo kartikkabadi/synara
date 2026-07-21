@@ -165,6 +165,7 @@ export function Island() {
 
   useEffect(() => {
     document.documentElement.style.background = "transparent";
+    document.documentElement.style.colorScheme = "dark";
     document.body.style.background = "transparent";
   }, []);
 
@@ -361,7 +362,6 @@ export function Island() {
         data-island-shell={shell}
         data-island-platform={platformAttribute(context)}
         data-island-state={effectiveState}
-        data-island-status={orbState}
         data-island-empty={sessionCount === 0}
         onPointerEnter={onPointerEnter}
         onPointerLeave={onPointerLeave}
