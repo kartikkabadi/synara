@@ -1,7 +1,10 @@
-import type { ProviderCompactionCapabilities } from "@synara/contracts";
+import type {
+  ProviderCompactionCapabilities,
+  ThreadCompactionRuntimeStatus,
+} from "@synara/contracts";
 import {
   type ContextWindowSnapshot,
-  deriveContextCompactionMeterCopy,
+  deriveContextCompactionStatusLine,
   deriveContextWindowMeterDisplay,
   formatContextWindowTokens,
   formatCostUsd,
@@ -11,11 +14,19 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 export function ContextWindowMeter(props: {
   usage: ContextWindowSnapshot;
   compaction?: ProviderCompactionCapabilities | null | undefined;
+  compactionRuntimeStatus?: ThreadCompactionRuntimeStatus | null | undefined;
   cumulativeCostUsd?: number | null | undefined;
   activeWindowLabel?: string | null | undefined;
   pendingWindowLabel?: string | null | undefined;
 }) {
-  const { usage, compaction, cumulativeCostUsd, activeWindowLabel, pendingWindowLabel } = props;
+  const {
+    usage,
+    compaction,
+    compactionRuntimeStatus,
+    cumulativeCostUsd,
+    activeWindowLabel,
+    pendingWindowLabel,
+  } = props;
   const display = deriveContextWindowMeterDisplay(usage);
   const radius = 6;
   const circumference = 2 * Math.PI * radius;
@@ -69,6 +80,7 @@ export function ContextWindowMeter(props: {
         <ContextWindowMeterDetails
           usage={usage}
           compaction={compaction}
+          compactionRuntimeStatus={compactionRuntimeStatus}
           cumulativeCostUsd={cumulativeCostUsd}
           activeWindowLabel={activeWindowLabel}
           pendingWindowLabel={pendingWindowLabel}
@@ -81,13 +93,24 @@ export function ContextWindowMeter(props: {
 export function ContextWindowMeterDetails(props: {
   usage: ContextWindowSnapshot;
   compaction?: ProviderCompactionCapabilities | null | undefined;
+  compactionRuntimeStatus?: ThreadCompactionRuntimeStatus | null | undefined;
   cumulativeCostUsd?: number | null | undefined;
   activeWindowLabel?: string | null | undefined;
   pendingWindowLabel?: string | null | undefined;
 }) {
-  const { usage, compaction, cumulativeCostUsd, activeWindowLabel, pendingWindowLabel } = props;
+  const {
+    usage,
+    compaction,
+    compactionRuntimeStatus,
+    cumulativeCostUsd,
+    activeWindowLabel,
+    pendingWindowLabel,
+  } = props;
   const display = deriveContextWindowMeterDisplay(usage);
-  const compactionCopy = deriveContextCompactionMeterCopy({ compaction });
+  const compactionStatusLine = deriveContextCompactionStatusLine({
+    compaction,
+    runtimeStatus: compactionRuntimeStatus,
+  });
   return (
     <div className="space-y-1.5 leading-tight">
       <div className="text-[11px] font-medium text-muted-foreground">Context window</div>
@@ -127,13 +150,16 @@ export function ContextWindowMeterDetails(props: {
           Total processed: {formatContextWindowTokens(usage.totalProcessedTokens ?? null)} tokens
         </div>
       ) : null}
-      {compactionCopy === "provider-auto" ? (
+      {compactionStatusLine?.kind === "provider-auto" ? (
         <div className="text-xs text-muted-foreground">
-          Automatically compacts its context when needed.
+          {compactionStatusLine.triggerLabel ?? "Automatically compacts its context when needed."}
         </div>
       ) : null}
-      {compactionCopy === "unavailable" ? (
-        <div className="text-xs text-muted-foreground">Context compaction is unavailable.</div>
+      {compactionStatusLine?.kind === "manual" ? (
+        <div className="text-xs text-muted-foreground">Compact now with /compact.</div>
+      ) : null}
+      {compactionStatusLine?.kind === "unavailable" ? (
+        <div className="text-xs text-muted-foreground">Compaction unavailable.</div>
       ) : null}
       {cumulativeCostUsd !== null && cumulativeCostUsd !== undefined ? (
         <div className="text-xs text-muted-foreground">

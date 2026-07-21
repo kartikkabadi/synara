@@ -367,6 +367,7 @@ import {
 import {
   deriveContextWindowSelectionStatus,
   deriveCumulativeCostUsd,
+  deriveLatestCompactionRuntimeStatus,
   deriveLatestContextWindowSnapshot,
   deriveSelectedContextWindowSnapshot,
 } from "../lib/contextWindow";
@@ -1695,6 +1696,10 @@ export default function ChatView({
   );
   const activeCumulativeCostUsd = useMemo(
     () => deriveCumulativeCostUsd(threadActivities),
+    [threadActivities],
+  );
+  const activeCompactionRuntimeStatus = useMemo(
+    () => deriveLatestCompactionRuntimeStatus(threadActivities),
     [threadActivities],
   );
   const activeRateLimitStatus = useMemo(
@@ -10236,6 +10241,7 @@ export default function ChatView({
                         <ContextWindowMeter
                           usage={runtimeUsageContextWindow}
                           compaction={providerComposerCapabilitiesQuery.data?.compaction ?? null}
+                          compactionRuntimeStatus={activeCompactionRuntimeStatus}
                           {...(activeCumulativeCostUsd != null
                             ? { cumulativeCostUsd: activeCumulativeCostUsd }
                             : {})}

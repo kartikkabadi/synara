@@ -1,11 +1,14 @@
 import type {
+  CompactionTrigger,
   ContextUsageSnapshot,
   CumulativeUsageSnapshot,
   LastTurnUsageSnapshot,
   OrchestrationThreadActivity,
   ProviderCompactionCapabilities,
+  ThreadCompactionRuntimeStatus,
   ThreadTokenUsageSnapshot,
 } from "@synara/contracts";
+import { THREAD_COMPACTION_RUNTIME_STATUS_ACTIVITY_KIND } from "@synara/contracts";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
@@ -450,6 +453,123 @@ export function formatCostUsd(value: number): string {
   if (value < 0.01) return `$${value.toFixed(4)}`;
   if (value < 0.1) return `$${value.toFixed(3)}`;
   return `$${value.toFixed(2)}`;
+}
+
+const COMPACTION_OWNERS = ["provider", "synara", "none"] as const;
+
+function asCompactionTrigger(value: unknown): CompactionTrigger | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  switch (record.kind) {
+    case "percent": {
+      const percent = asFiniteNumber(record.percent);
+      return percent !== null ? { kind: "percent", percent } : null;
+    }
+    case "remaining-tokens": {
+      const reserveTokens = asFiniteNumber(record.reserveTokens);
+      return reserveTokens !== null ? { kind: "remaining-tokens", reserveTokens } : null;
+    }
+    case "absolute-used-tokens": {
+      const usedTokens = asFiniteNumber(record.usedTokens);
+      return usedTokens !== null ? { kind: "absolute-used-tokens", usedTokens } : null;
+    }
+    case "opaque":
+      return { kind: "opaque" };
+    default:
+      return null;
+  }
+}
+
+function asCompactionRuntimeStatus(value: unknown): ThreadCompactionRuntimeStatus | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const owner = COMPACTION_OWNERS.find((entry) => entry === record.owner);
+  const manualAvailability = asRecord(record.manualAvailability);
+  const available = asBoolean(manualAvailability?.available);
+  if (!owner || available === null) {
+    return null;
+  }
+  const reason = typeof manualAvailability?.reason === "string" ? manualAvailability.reason : null;
+  const trigger = asCompactionTrigger(record.trigger);
+  return {
+    owner,
+    providerAutoEnabled: asBoolean(record.providerAutoEnabled),
+    manualAvailability: { available, ...(reason !== null ? { reason } : {}) },
+    ...(trigger !== null ? { trigger } : {}),
+  };
+}
+
+// Read the latest compaction runtime status projected by the server. The
+// status rides the durable activity log, so it survives reconnects.
+export function deriveLatestCompactionRuntimeStatus(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ThreadCompactionRuntimeStatus | null {
+  for (let index = activities.length - 1; index >= 0; index -= 1) {
+    const activity = activities[index];
+    if (!activity || activity.kind !== THREAD_COMPACTION_RUNTIME_STATUS_ACTIVITY_KIND) {
+      continue;
+    }
+    const status = asCompactionRuntimeStatus(activity.payload);
+    if (status !== null) {
+      return status;
+    }
+  }
+  return null;
+}
+
+export function formatCompactionTriggerLabel(
+  trigger: CompactionTrigger | null | undefined,
+): string | null {
+  switch (trigger?.kind) {
+    case "percent":
+      return `Auto-compacts at ${Math.round(trigger.percent)}%`;
+    case "remaining-tokens":
+      return `Keeps ${formatContextWindowTokens(trigger.reserveTokens)} tokens free`;
+    case "absolute-used-tokens":
+      return `Auto-compacts at ${formatContextWindowTokens(trigger.usedTokens)} tokens`;
+    default:
+      return null;
+  }
+}
+
+export type ContextCompactionStatusLine =
+  | { readonly kind: "provider-auto"; readonly triggerLabel: string | null }
+  | { readonly kind: "manual" }
+  | { readonly kind: "unavailable" }
+  | null;
+
+// Runtime-status-first meter status line: when the server projects a
+// ThreadCompactionRuntimeStatus it wins; otherwise fall back to the static
+// capability descriptor.
+export function deriveContextCompactionStatusLine(input: {
+  readonly compaction: ProviderCompactionCapabilities | null | undefined;
+  readonly runtimeStatus?: ThreadCompactionRuntimeStatus | null | undefined;
+}): ContextCompactionStatusLine {
+  const runtimeStatus = input.runtimeStatus ?? null;
+  if (runtimeStatus !== null) {
+    if (runtimeStatus.owner === "provider" || runtimeStatus.owner === "synara") {
+      return {
+        kind: "provider-auto",
+        triggerLabel: formatCompactionTriggerLabel(runtimeStatus.trigger),
+      };
+    }
+    return runtimeStatus.manualAvailability.available
+      ? { kind: "manual" }
+      : { kind: "unavailable" };
+  }
+  const capabilityCopy = deriveContextCompactionMeterCopy({ compaction: input.compaction });
+  if (capabilityCopy === "provider-auto") {
+    return { kind: "provider-auto", triggerLabel: null };
+  }
+  if (capabilityCopy === "unavailable") {
+    return { kind: "unavailable" };
+  }
+  const compaction = input.compaction;
+  return compaction && compaction.manual.mode !== "unsupported" ? { kind: "manual" } : null;
 }
 
 export type ContextCompactionMeterCopy = "provider-auto" | "unavailable" | null;
