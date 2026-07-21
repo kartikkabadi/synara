@@ -10,6 +10,7 @@
 import type {
   ProviderCompactionRequest,
   ProviderCompactionResult,
+  ProviderSetCompactionSettingsInput,
   ThreadId,
 } from "@synara/contracts";
 import { ServiceMap } from "effect";
@@ -37,6 +38,12 @@ export interface CompactionReactorShape {
 
   /** Read the current in-memory control state for a thread. */
   readonly getControlState: (threadId: ThreadId) => Effect.Effect<CompactionControlState>;
+
+  /**
+   * Update the thread's Synara-managed auto-compaction policy and republish
+   * the runtime status so clients see the new owner/trigger immediately.
+   */
+  readonly setThreadSettings: (input: ProviderSetCompactionSettingsInput) => Effect.Effect<void>;
 }
 
 export class CompactionReactor extends ServiceMap.Service<

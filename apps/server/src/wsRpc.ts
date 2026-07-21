@@ -1365,6 +1365,11 @@ const makeWsRpcHandlersLayer = () =>
           ),
         [WS_METHODS.providerCompactThread]: (input) =>
           rpcEffect(compactionReactor.request(input), "Failed to compact thread"),
+        [WS_METHODS.providerSetCompactionSettings]: (input) =>
+          rpcEffect(
+            compactionReactor.setThreadSettings(input),
+            "Failed to update compaction settings",
+          ),
         [WS_METHODS.providerListCommands]: (input) =>
           rpcEffect(providerDiscoveryService.listCommands(input), "Failed to list commands"),
         [WS_METHODS.providerListSkills]: (input) =>

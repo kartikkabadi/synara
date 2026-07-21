@@ -395,6 +395,16 @@ export const CompactionOperationSummary = Schema.Struct({
 });
 export type CompactionOperationSummary = typeof CompactionOperationSummary.Type;
 
+// Live control-state view of one thread's compaction pass, projected so the
+// client can show progress and failures without replaying lifecycle events.
+export const ThreadCompactionPhase = Schema.Struct({
+  status: Schema.Literals(["idle", "pending", "running", "uncertain", "suspended"]),
+  reason: Schema.optional(TrimmedNonEmptyStringSchema),
+  detail: Schema.optional(TrimmedNonEmptyStringSchema),
+  retryable: Schema.optional(Schema.Boolean),
+});
+export type ThreadCompactionPhase = typeof ThreadCompactionPhase.Type;
+
 // Per-thread runtime view of compaction: who owns it, whether manual
 // compaction is currently available, and what the last pass did.
 export const ThreadCompactionRuntimeStatus = Schema.Struct({
@@ -405,6 +415,7 @@ export const ThreadCompactionRuntimeStatus = Schema.Struct({
     reason: Schema.optional(TrimmedNonEmptyStringSchema),
   }),
   trigger: Schema.optional(CompactionTrigger),
+  phase: Schema.optional(ThreadCompactionPhase),
   lastCompaction: Schema.optional(CompactionOperationSummary),
 });
 export type ThreadCompactionRuntimeStatus = typeof ThreadCompactionRuntimeStatus.Type;
@@ -514,6 +525,21 @@ export const ThreadCompactionLifecycleEvent = Schema.Union([
   }),
 ]);
 export type ThreadCompactionLifecycleEvent = typeof ThreadCompactionLifecycleEvent.Type;
+
+// Per-thread Synara-managed auto-compaction policy: whether Synara should
+// compact on its own, at what trigger, and how long to wait between passes.
+export const ThreadCompactionSettings = Schema.Struct({
+  autoEnabled: Schema.Boolean,
+  trigger: Schema.optional(CompactionTrigger),
+  cooldownSeconds: Schema.optional(NonNegativeInt),
+});
+export type ThreadCompactionSettings = typeof ThreadCompactionSettings.Type;
+
+export const ProviderSetCompactionSettingsInput = Schema.Struct({
+  threadId: ThreadId,
+  settings: ThreadCompactionSettings,
+});
+export type ProviderSetCompactionSettingsInput = typeof ProviderSetCompactionSettingsInput.Type;
 
 // Thread-activity kind under which compaction runtime status snapshots are
 // projected to clients (payload: ThreadCompactionRuntimeStatus).

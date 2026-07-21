@@ -5,6 +5,7 @@ import type {
   LastTurnUsageSnapshot,
   OrchestrationThreadActivity,
   ProviderCompactionCapabilities,
+  ThreadCompactionPhase,
   ThreadCompactionRuntimeStatus,
   ThreadTokenUsageSnapshot,
 } from "@synara/contracts";
@@ -495,11 +496,35 @@ function asCompactionRuntimeStatus(value: unknown): ThreadCompactionRuntimeStatu
   }
   const reason = typeof manualAvailability?.reason === "string" ? manualAvailability.reason : null;
   const trigger = asCompactionTrigger(record.trigger);
+  const phase = asCompactionPhase(record.phase);
   return {
     owner,
     providerAutoEnabled: asBoolean(record.providerAutoEnabled),
     manualAvailability: { available, ...(reason !== null ? { reason } : {}) },
     ...(trigger !== null ? { trigger } : {}),
+    ...(phase !== null ? { phase } : {}),
+  };
+}
+
+const COMPACTION_PHASE_STATUSES = ["idle", "pending", "running", "uncertain", "suspended"] as const;
+
+function asCompactionPhase(value: unknown): ThreadCompactionPhase | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const status = COMPACTION_PHASE_STATUSES.find((entry) => entry === record.status);
+  if (!status) {
+    return null;
+  }
+  const reason = typeof record.reason === "string" ? record.reason : null;
+  const detail = typeof record.detail === "string" ? record.detail : null;
+  const retryable = asBoolean(record.retryable);
+  return {
+    status,
+    ...(reason !== null ? { reason } : {}),
+    ...(detail !== null ? { detail } : {}),
+    ...(retryable !== null ? { retryable } : {}),
   };
 }
 
@@ -537,7 +562,10 @@ export function formatCompactionTriggerLabel(
 }
 
 export type ContextCompactionStatusLine =
+  | { readonly kind: "in-progress" }
+  | { readonly kind: "error"; readonly reason: string; readonly retryable: boolean }
   | { readonly kind: "provider-auto"; readonly triggerLabel: string | null }
+  | { readonly kind: "synara-auto"; readonly triggerLabel: string | null }
   | { readonly kind: "manual" }
   | { readonly kind: "unavailable" }
   | null;
@@ -551,9 +579,26 @@ export function deriveContextCompactionStatusLine(input: {
 }): ContextCompactionStatusLine {
   const runtimeStatus = input.runtimeStatus ?? null;
   if (runtimeStatus !== null) {
-    if (runtimeStatus.owner === "provider" || runtimeStatus.owner === "synara") {
+    const phase = runtimeStatus.phase;
+    if (phase?.status === "pending" || phase?.status === "running") {
+      return { kind: "in-progress" };
+    }
+    if (phase?.status === "uncertain" || phase?.status === "suspended") {
+      return {
+        kind: "error",
+        reason: phase.detail ?? phase.reason ?? "Compaction failed",
+        retryable: phase.retryable ?? phase.status === "uncertain",
+      };
+    }
+    if (runtimeStatus.owner === "provider") {
       return {
         kind: "provider-auto",
+        triggerLabel: formatCompactionTriggerLabel(runtimeStatus.trigger),
+      };
+    }
+    if (runtimeStatus.owner === "synara") {
+      return {
+        kind: "synara-auto",
         triggerLabel: formatCompactionTriggerLabel(runtimeStatus.trigger),
       };
     }
