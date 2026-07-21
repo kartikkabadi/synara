@@ -82,7 +82,16 @@ describe("island sizes", () => {
 
   it("uses the floating hover size, widening for a wide notch housing", () => {
     expect(islandHoverSize("floating", null)).toEqual({ width: 372, height: 80 });
+    expect(islandHoverSize("floating", null, 2)).toEqual({ width: 372, height: 80 });
     expect(islandHoverSize("notch", { width: 300, height: 38 }).width).toBe(500);
+  });
+
+  it("shrinks the hover preview with zero sessions, except in notch mode", () => {
+    expect(islandHoverSize("floating", null, 0)).toEqual({ width: 272, height: 60 });
+    expect(islandHoverSize("notch", { width: 180, height: 38 }, 0)).toEqual({
+      width: 380,
+      height: 80,
+    });
   });
 });
 

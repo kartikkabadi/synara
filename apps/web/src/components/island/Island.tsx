@@ -447,7 +447,7 @@ export function Island() {
             </div>
           </>
         ) : (
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center justify-center gap-2.5">
             <IslandOrb state="idle" />
             <span className="text-[11px] text-white/60">No active sessions</span>
           </div>

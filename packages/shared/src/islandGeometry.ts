@@ -39,6 +39,9 @@ export const ISLAND_FLOATING_COLLAPSED_SIZE: IslandSize = { width: 120, height: 
 // With zero sessions the floating pill shrinks to just the status light.
 export const ISLAND_IDLE_COLLAPSED_SIZE: IslandSize = { width: 64, height: 30 };
 export const ISLAND_HOVER_SIZE: IslandSize = { width: 372, height: 80 };
+// With zero sessions the hover preview is a single line, so a compact panel
+// avoids a mostly-empty surface.
+export const ISLAND_HOVER_EMPTY_SIZE: IslandSize = { width: 272, height: 60 };
 
 const EXPANDED_ROW_HEIGHT = 44;
 const EXPANDED_CHROME_HEIGHT = 64;
@@ -56,13 +59,18 @@ export function islandCollapsedSize(
   return ISLAND_FLOATING_COLLAPSED_SIZE;
 }
 
-export function islandHoverSize(shell: IslandShellMode, notch: IslandNotchInfo | null): IslandSize {
+export function islandHoverSize(
+  shell: IslandShellMode,
+  notch: IslandNotchInfo | null,
+  sessionCount?: number,
+): IslandSize {
   if (shell === "notch" && notch) {
     return {
       width: Math.max(notch.width + 200, ISLAND_HOVER_SIZE.width),
       height: ISLAND_HOVER_SIZE.height,
     };
   }
+  if (sessionCount === 0) return ISLAND_HOVER_EMPTY_SIZE;
   return ISLAND_HOVER_SIZE;
 }
 
@@ -84,6 +92,6 @@ export function islandStateSize(
   sessionCount?: number,
 ): IslandSize {
   if (state === "expanded") return islandExpandedSize(sessionCount);
-  if (state === "hover") return islandHoverSize(shell, notch);
+  if (state === "hover") return islandHoverSize(shell, notch, sessionCount);
   return islandCollapsedSize(shell, notch, sessionCount);
 }
