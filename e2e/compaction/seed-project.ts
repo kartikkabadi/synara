@@ -12,6 +12,16 @@ if (!existsSync(dir)) {
   mkdirSync(dir, { recursive: true });
 }
 
+const workspaceRoot =
+  process.env.SYNARA_E2E_WORKSPACE_ROOT ||
+  (process.env.HOME && process.env.SYNARA_E2E_WORKSPACE_NAME
+    ? `${process.env.HOME}/${process.env.SYNARA_E2E_WORKSPACE_NAME}`
+    : "/home/ubuntu");
+
+if (workspaceRoot && !existsSync(workspaceRoot)) {
+  mkdirSync(workspaceRoot, { recursive: true });
+}
+
 const db = new Database(dbPath);
 
 db.run(`CREATE TABLE IF NOT EXISTS orchestration_events (
@@ -52,7 +62,7 @@ db.run(
       projectId,
       kind: "project",
       title: "Home",
-      workspaceRoot: "/home/ubuntu",
+      workspaceRoot,
       scripts: [],
       createdAt: now,
       updatedAt: now,

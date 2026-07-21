@@ -118,21 +118,12 @@ async function selectProvider(page: Page, spec: ProviderSpec): Promise<void> {
   await page.keyboard.press("Escape");
   await page.waitForTimeout(500);
 
-  const modelTrigger = page.locator("button").filter({ hasText: "GPT-5.5" }).first();
-  const triggerCount = await modelTrigger.count();
-  if (triggerCount === 0) {
-    throw new Error("Model picker trigger not found");
-  }
+  const modelTrigger = page.locator("[data-testid='provider-model-picker']").first();
+  await modelTrigger.waitFor({ state: "visible", timeout: 15_000 });
   await modelTrigger.click();
 
   const modelPickerMenu = page.getByRole("menu").first();
   await modelPickerMenu.waitFor({ timeout: 15_000 });
-
-  const modelSubTrigger = page.locator("[data-slot='model-picker-submenu-trigger']");
-  if ((await modelSubTrigger.count()) > 0) {
-    await modelSubTrigger.click();
-    await page.waitForTimeout(500);
-  }
 
   const providerItem = page
     .locator("[data-slot='menu-sub-trigger']")
