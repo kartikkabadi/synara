@@ -136,6 +136,88 @@ describe("Claude token arithmetic", () => {
       compactsAutomatically: true,
     });
   });
+
+  it("falls back to the reported window and reports native auto-compaction disabled", () => {
+    const usage = {
+      categories: [],
+      totalTokens: 120_000,
+      maxTokens: 200_000,
+      rawMaxTokens: 200_000,
+      percentage: 60,
+      gridRows: [],
+      model: "claude-sonnet-5",
+      memoryFiles: [],
+      mcpTools: [],
+      agents: [],
+      isAutoCompactEnabled: false,
+      apiUsage: {
+        input_tokens: 10_000,
+        output_tokens: 2_000,
+        cache_creation_input_tokens: 5_000,
+        cache_read_input_tokens: 105_000,
+      },
+    } as unknown as SDKControlGetContextUsageResponse;
+
+    expect(snapshotFromClaudeContextUsage(usage)).toEqual({
+      usedTokens: 120_000,
+      lastUsedTokens: 120_000,
+      maxTokens: 200_000,
+      usedPercent: 60,
+      inputTokens: 120_000,
+      lastInputTokens: 120_000,
+      cachedInputTokens: 105_000,
+      lastCachedInputTokens: 105_000,
+      outputTokens: 2_000,
+      lastOutputTokens: 2_000,
+      compactsAutomatically: false,
+    });
+  });
+
+  it("uses rawMaxTokens when both the threshold and maxTokens are unavailable", () => {
+    const usage = {
+      categories: [],
+      totalTokens: 50_000,
+      maxTokens: Number.NaN,
+      rawMaxTokens: 1_000_000,
+      percentage: 5,
+      gridRows: [],
+      model: "claude-sonnet-5",
+      memoryFiles: [],
+      mcpTools: [],
+      agents: [],
+      isAutoCompactEnabled: false,
+    } as unknown as SDKControlGetContextUsageResponse;
+
+    expect(snapshotFromClaudeContextUsage(usage)).toEqual({
+      usedTokens: 50_000,
+      lastUsedTokens: 50_000,
+      maxTokens: 1_000_000,
+      usedPercent: 5,
+      compactsAutomatically: false,
+    });
+  });
+
+  it("omits maxTokens entirely when no window information is available", () => {
+    const usage = {
+      categories: [],
+      totalTokens: 50_000,
+      maxTokens: Number.NaN,
+      rawMaxTokens: Number.NaN,
+      percentage: 0,
+      gridRows: [],
+      model: "claude-sonnet-5",
+      memoryFiles: [],
+      mcpTools: [],
+      agents: [],
+      isAutoCompactEnabled: true,
+    } as unknown as SDKControlGetContextUsageResponse;
+
+    expect(snapshotFromClaudeContextUsage(usage)).toEqual({
+      usedTokens: 50_000,
+      lastUsedTokens: 50_000,
+      compactsAutomatically: true,
+    });
+  });
 });
 
 describe("Claude context selection", () => {
@@ -241,6 +323,46 @@ describe("Claude context warning decisions", () => {
       : [];
 
     expect(actualKeys).toEqual(keys);
+  });
+
+  it("only warns strictly above 80% of the auto-compact budget", () => {
+    const atThreshold = decideClaudeContextUsageWarnings(
+      { input_tokens: 2, cache_read_input_tokens: 159_998 },
+      200_000,
+      new Set(),
+    );
+    expect(atThreshold).toBeUndefined();
+
+    const aboveThreshold = decideClaudeContextUsageWarnings(
+      { input_tokens: 2, cache_read_input_tokens: 159_999 },
+      200_000,
+      new Set(),
+    );
+    expect(aboveThreshold).toMatchObject({ first: { key: "near-window" } });
+    expect(aboveThreshold?.second).toBeUndefined();
+  });
+
+  it("falls back to the 200k default budget when none is known", () => {
+    const decisions = decideClaudeContextUsageWarnings(
+      { input_tokens: 2, cache_read_input_tokens: 170_000 },
+      undefined,
+      new Set(),
+    );
+    expect(decisions).toMatchObject({ first: { key: "near-window" } });
+  });
+
+  it("suppresses each warning key independently once emitted", () => {
+    const rawUsage = { input_tokens: 2, cache_read_input_tokens: 170_000 };
+    expect(decideClaudeContextUsageWarnings(rawUsage, 200_000, new Set(["near-window"]))).toBe(
+      undefined,
+    );
+    expect(
+      decideClaudeContextUsageWarnings(
+        { input_tokens: 60_000 },
+        200_000,
+        new Set(["uncached-ingestion"]),
+      ),
+    ).toBeUndefined();
   });
 
   it("defers the large-prompt warning until a later call after near-window is de-duplicated", () => {

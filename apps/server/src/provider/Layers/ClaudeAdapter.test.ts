@@ -7984,3 +7984,93 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
     );
   });
 });
+
+describe("Claude compaction characterization", () => {
+  it.effect("maps an explicit 200k auto-compact selection to tokens with native auto enabled", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+        modelSelection: {
+          provider: "claudeAgent",
+          model: "claude-opus-4-6",
+          options: {
+            autoCompactWindow: "200k",
+          },
+        },
+      });
+
+      const createInput = harness.getLastCreateQueryInput();
+      assert.equal(createInput?.options.model, "claude-opus-4-6");
+      const settings = createInput?.options.settings;
+      assert.ok(settings && typeof settings === "object");
+      assert.equal((settings as { autoCompactEnabled?: boolean }).autoCompactEnabled, true);
+      assert.equal(autoCompactWindowFromOptions(createInput?.options), 200_000);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("maps a compact_boundary SDK message to a compacted thread state change", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const stateChangedFiber = yield* Stream.filter(
+        adapter.streamEvents,
+        (event) => event.type === "thread.state.changed",
+      ).pipe(Stream.runHead, Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+      harness.query.emit({
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: {
+          trigger: "auto",
+          pre_tokens: 180_000,
+        },
+        session_id: "sdk-session-compact-boundary",
+        uuid: "system-compact-boundary",
+      } as unknown as SDKMessage);
+
+      const stateChanged = yield* Fiber.join(stateChangedFiber);
+      assert.equal(stateChanged._tag, "Some");
+      if (stateChanged._tag === "Some" && stateChanged.value.type === "thread.state.changed") {
+        assert.equal(stateChanged.value.payload.state, "compacted");
+        const detail = stateChanged.value.payload.detail as {
+          readonly subtype?: string;
+          readonly compact_metadata?: { readonly trigger?: string; readonly pre_tokens?: number };
+        };
+        assert.equal(detail?.subtype, "compact_boundary");
+        assert.equal(detail?.compact_metadata?.trigger, "auto");
+        assert.equal(detail?.compact_metadata?.pre_tokens, 180_000);
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("does not expose manual thread compaction", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      assert.isUndefined(adapter.compactThread);
+
+      assert.ok(adapter.getComposerCapabilities);
+      const capabilities = yield* adapter.getComposerCapabilities();
+      assert.equal(capabilities.provider, "claudeAgent");
+      assert.equal(capabilities.supportsThreadCompaction, false);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+});
