@@ -214,6 +214,16 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
       "Show an OS notification when a chat or managed terminal agent finishes or needs input while the app is in the background. alerts toast",
   },
 
+  {
+    id: "notifications:island",
+    section: "notifications",
+    title: "Dynamic Island overlay",
+    keywords:
+      "Show a compact always-on-top pill with live agent session status. island notch overlay hud pill floating status",
+    // Renders only in the desktop app, so no stable anchor in the browser.
+    target: null,
+  },
+
   // ── AppSnap ───────────────────────────────────────────────────────────────────
   {
     id: "appsnap:enable",
