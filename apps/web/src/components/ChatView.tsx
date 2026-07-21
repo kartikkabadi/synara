@@ -9465,7 +9465,7 @@ export default function ChatView({
     threadId,
     activeLoop: activeThread?.loop ?? null,
     hasUnsupportedContext: loopUnsupportedContext,
-    getObjective: () => promptRef.current,
+    objective: prompt,
     setObjective: setComposerPromptValue,
     clearObjective: clearComposerSlashDraft,
     focusEditor: scheduleComposerFocus,

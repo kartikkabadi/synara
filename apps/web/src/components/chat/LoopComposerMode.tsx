@@ -19,9 +19,9 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { ChevronDownIcon } from "~/lib/icons";
+import { LOOP_DEFAULT_HARD_CAP } from "@synara/contracts";
 import {
   LOOP_COUNT_PRESETS,
-  LOOP_DEFAULT_HARD_CAP,
   LOOP_DURATION_PRESETS_SECONDS,
   LOOP_UNSUPPORTED_CONTEXT_MESSAGE,
   formatLoopBudgetChoiceLabel,
@@ -42,7 +42,10 @@ type CustomEntry =
   | { kind: "count"; raw: string }
   | { kind: "duration"; raw: string; unit: "minutes" | "hours" };
 
-export function loopBudgetRadioValue(budget: LoopBudgetChoice, custom: CustomEntry): string {
+export function loopBudgetRadioValue(
+  budget: LoopBudgetChoice,
+  custom: CustomEntry,
+): string {
   if (custom.kind === "count") return "custom-count";
   if (custom.kind === "duration") return "custom-duration";
   if (budget.kind === "until-stopped") return "until-stopped";
@@ -51,7 +54,9 @@ export function loopBudgetRadioValue(budget: LoopBudgetChoice, custom: CustomEnt
       ? `count-${budget.turns}`
       : "custom-count";
   }
-  return (LOOP_DURATION_PRESETS_SECONDS as readonly number[]).includes(budget.seconds)
+  return (LOOP_DURATION_PRESETS_SECONDS as readonly number[]).includes(
+    budget.seconds,
+  )
     ? `duration-${budget.seconds}`
     : "custom-duration";
 }
@@ -66,7 +71,10 @@ export function LoopBudgetPicker(props: {
   const commitCustom = (entry: CustomEntry) => {
     if (entry.kind === "count") {
       const turns = Number(entry.raw);
-      props.onChange({ kind: "count", turns: Number.isFinite(turns) ? Math.trunc(turns) : 0 });
+      props.onChange({
+        kind: "count",
+        turns: Number.isFinite(turns) ? Math.trunc(turns) : 0,
+      });
     } else if (entry.kind === "duration") {
       const value = Number(entry.raw);
       const seconds = Number.isFinite(value)
@@ -142,7 +150,10 @@ export function LoopBudgetPicker(props: {
                 onClick={() => {
                   setCustom({
                     kind: "count",
-                    raw: props.budget.kind === "count" ? String(props.budget.turns) : "",
+                    raw:
+                      props.budget.kind === "count"
+                        ? String(props.budget.turns)
+                        : "",
                   });
                 }}
               >
@@ -170,7 +181,10 @@ export function LoopBudgetPicker(props: {
             value={custom.raw}
             autoFocus
             onChange={(event) => {
-              const next: CustomEntry = { kind: "count", raw: event.target.value };
+              const next: CustomEntry = {
+                kind: "count",
+                raw: event.target.value,
+              };
               setCustom(next);
               commitCustom(next);
             }}
@@ -234,7 +248,10 @@ export function LoopComposerModeHeader(props: {
     <DisclosureRegion open={open}>
       <div className="flex min-h-9 items-center justify-between gap-2 border-border/60 border-b px-3 py-1.5">
         <span className="flex items-center gap-1.5 text-[12px] font-medium text-foreground/80">
-          <LoopIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
+          <LoopIcon
+            className="size-3.5 text-muted-foreground"
+            aria-hidden="true"
+          />
           {isEdit ? "Edit loop" : "Loop"}
         </span>
         <LoopBudgetPicker
@@ -257,7 +274,9 @@ export function LoopComposerModeHeader(props: {
           {props.error}
         </p>
       ) : props.note ? (
-        <p className="px-3 pt-1.5 text-[11px] text-muted-foreground">{props.note}</p>
+        <p className="px-3 pt-1.5 text-[11px] text-muted-foreground">
+          {props.note}
+        </p>
       ) : null}
     </DisclosureRegion>
   );
@@ -320,5 +339,9 @@ export function LoopComposerMode(props: {
 }
 
 export function LoopComposerModeCancelHint() {
-  return <p className="pt-1 text-center text-[10.5px] text-muted-foreground/50">Esc to cancel</p>;
+  return (
+    <p className="pt-1 text-center text-[10.5px] text-muted-foreground/50">
+      Esc to cancel
+    </p>
+  );
 }
