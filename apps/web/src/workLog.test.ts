@@ -2464,7 +2464,7 @@ describe("deriveWorkLogEntries context window handling", () => {
           id: "compaction-progress-1",
           createdAt: "2026-02-23T00:00:00.000Z",
           kind: "context-compaction",
-          summary: "Compacting conversation...",
+          summary: "Compacting context…",
           tone: "info",
         }),
         makeActivity({
@@ -2496,7 +2496,7 @@ describe("deriveWorkLogEntries context window handling", () => {
           id: "b-compaction-progress",
           createdAt: "2026-02-23T00:00:00.000Z",
           kind: "context-compaction",
-          summary: "Compacting conversation...",
+          summary: "Compacting context…",
           tone: "info",
         }),
       ],
@@ -2521,7 +2521,7 @@ describe("deriveWorkLogEntries context window handling", () => {
           id: "compaction-progress-2",
           createdAt: "2026-02-23T00:00:01.000Z",
           kind: "context-compaction",
-          summary: "Compacting conversation...",
+          summary: "Compacting context…",
           tone: "info",
         }),
       ],
@@ -2530,7 +2530,7 @@ describe("deriveWorkLogEntries context window handling", () => {
 
     expect(entries).toHaveLength(2);
     expect(entries[0]?.label).toBe("Context compacted");
-    expect(entries[1]?.label).toBe("Compacting conversation...");
+    expect(entries[1]?.label).toBe("Compacting context…");
   });
 });
 

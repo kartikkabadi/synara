@@ -263,7 +263,10 @@ function shouldKeepActivityForWorkLog(
   visibleTurnIds: ReadonlySet<TurnId | string> | undefined,
 ): boolean {
   // Thread-level compaction progress has no provider turn id but should stay visible.
-  if (activity.kind === "context-compaction" && activity.turnId === null) {
+  if (
+    (activity.kind === "context-compaction" || activity.kind.startsWith("thread.compaction-")) &&
+    activity.turnId === null
+  ) {
     return true;
   }
 
@@ -411,6 +414,10 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     ...(toolCallId ? { toolCallId } : {}),
     ...(toolStatus ? { toolStatus } : {}),
   };
+  const compactionLifecycleLabel = COMPACTION_LIFECYCLE_LABELS[activity.kind];
+  if (compactionLifecycleLabel !== undefined) {
+    entry.label = compactionLifecycleLabel;
+  }
   const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
   if (payload && typeof payload.detail === "string" && payload.detail.length > 0) {
@@ -753,11 +760,26 @@ function mergeRuntimeWarningEntries(
   };
 }
 
-// Ingestion emits compaction progress ("Compacting conversation...") and its
+// Ingestion emits compaction progress ("Compacting context…") and its
 // terminal row ("Context compacted" / "... failed" / "... manually") as separate
 // activities; fold the terminal row into the in-progress one so the work log
 // shows a single resolving compaction entry instead of a stale spinner row.
-const CONTEXT_COMPACTION_PROGRESS_LABEL = "Compacting conversation...";
+const CONTEXT_COMPACTION_PROGRESS_LABEL = "Compacting context\u2026";
+
+// Durable activity logs may still carry the pre-rename progress copy.
+const CONTEXT_COMPACTION_PROGRESS_LABELS: ReadonlySet<string> = new Set([
+  CONTEXT_COMPACTION_PROGRESS_LABEL,
+  "Compacting conversation...",
+]);
+
+// Canonical compaction lifecycle events render with fixed timeline copy
+// regardless of the summary the emitter attached.
+const COMPACTION_LIFECYCLE_LABELS: Record<string, string> = {
+  "thread.compaction-started": CONTEXT_COMPACTION_PROGRESS_LABEL,
+  "thread.compaction-completed": "Context compacted",
+  "thread.compaction-failed": "Compaction failed",
+  "thread.compaction-suspended": "Compaction suspended",
+};
 
 function shouldCollapseContextCompactionEntries(
   previous: DerivedWorkLogEntry,
@@ -774,7 +796,7 @@ function shouldCollapseContextCompactionEntries(
   }
   // Only merge into a row that is still in progress; a terminal row belongs to
   // an earlier compaction and must not swallow the next one's progress row.
-  return previous.label === CONTEXT_COMPACTION_PROGRESS_LABEL;
+  return CONTEXT_COMPACTION_PROGRESS_LABELS.has(previous.label);
 }
 
 function shouldCollapseToolLifecycleEntries(
@@ -1643,7 +1665,7 @@ function compareActivitiesByOrder(
 }
 
 function contextCompactionOrderRank(summary: string): number {
-  return summary === CONTEXT_COMPACTION_PROGRESS_LABEL ? 0 : 1;
+  return CONTEXT_COMPACTION_PROGRESS_LABELS.has(summary) ? 0 : 1;
 }
 
 function compareActivityLifecycleRank(kind: string): number {

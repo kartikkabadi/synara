@@ -1061,7 +1061,7 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-compacting",
               createdAt: "2026-03-17T19:12:28.000Z",
-              label: "Compacting conversation...",
+              label: "Compacting context…",
               tone: "info",
             },
           },
@@ -1082,9 +1082,49 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Compacting conversation...");
+    expect(markup).toContain("Compacting context…");
     expect(markup).toContain("Working for");
     expect(markup).not.toContain("h-px flex-1 bg-border");
+  });
+
+  it("renders a failed compaction entry", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        hasMessages
+        isWorking={false}
+        activeTurnInProgress={false}
+        activeTurnStartedAt={null}
+        timelineEntries={[
+          {
+            id: "entry-compaction-failed",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-compaction-failed",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Compaction failed",
+              tone: "error",
+            },
+          },
+        ]}
+        turnDiffSummaryByAssistantMessageId={new Map()}
+        nowIso="2026-03-17T19:12:30.000Z"
+        expandedWorkGroups={{}}
+        onToggleWorkGroup={() => {}}
+        onOpenTurnDiff={() => {}}
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        markdownCwd={undefined}
+        resolvedTheme="light"
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+      />,
+    );
+
+    expect(markup).toContain("Compaction failed");
   });
 
   it("folds work log summaries above the next assistant message footer", async () => {
