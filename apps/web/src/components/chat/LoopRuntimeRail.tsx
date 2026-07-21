@@ -269,7 +269,12 @@ export function LoopRuntimeRail({
     <div className={cn("flex min-h-10 items-center gap-2.5 px-4 py-1.5", className)}>
       <Tooltip>
         <TooltipTrigger render={<span className="flex min-w-0 items-center gap-2.5" />}>
-          <LoopIcon aria-hidden className={iconClassName(color, spinning)} />
+          <LoopIcon
+            aria-hidden
+            className={iconClassName(color, spinning)}
+            data-spinning={spinning || undefined}
+            data-testid="loop-rail-icon"
+          />
           {/* Only the status copy lives in the live region so screen readers are
               not re-announced by progress ticks or control swaps. */}
           <span

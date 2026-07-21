@@ -38,6 +38,7 @@ export function LoopProgressSegments({ segments, color, className }: LoopProgres
           // Position is the identity of a segment; the list never reorders.
           // oxlint-disable-next-line no-array-index-key
           key={index}
+          data-testid="loop-progress-segment"
           className={cn(
             "h-1 flex-1 rounded-full transition-[background-color,opacity] duration-200 motion-reduce:transition-none",
             fill > 0 ? filledSegmentClassName(color) : "bg-muted/60",
