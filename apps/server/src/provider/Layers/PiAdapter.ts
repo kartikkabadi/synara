@@ -23,7 +23,9 @@ import {
   ApprovalRequestId,
   type ChatAttachment,
   EventId,
+  type ProviderCompactionCapabilities,
   type ProviderComposerCapabilities,
+  supportsThreadCompactionFromCompaction,
   type ProviderListCommandsResult,
   type ProviderListModelsResult,
   type ProviderListSkillsResult,
@@ -2689,6 +2691,27 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           }),
       });
 
+    // Manual compaction is `context.runtime.session.compact()`; automatic
+    // compaction triggers when `contextTokens > contextWindow - reserveTokens`
+    // (default reserve 16384), so the trigger is derived from reported usage.
+    const piCompaction: ProviderCompactionCapabilities = {
+      manual: {
+        mode: "same-session",
+        mechanism: "native-sdk",
+        supportsInstructions: false,
+      },
+      automatic: {
+        mode: "native",
+        enabledByDefault: true,
+        statusVisibility: "partial",
+        triggerVisibility: "derived",
+      },
+      telemetry: {
+        lifecycle: "native",
+        contextUsage: "exact",
+      },
+    };
+
     const getComposerCapabilities: NonNullable<PiAdapterShape["getComposerCapabilities"]> = () =>
       Effect.succeed({
         provider: PROVIDER,
@@ -2698,7 +2721,8 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         supportsPluginMentions: false,
         supportsPluginDiscovery: false,
         supportsRuntimeModelList: true,
-        supportsThreadCompaction: true,
+        compaction: piCompaction,
+        supportsThreadCompaction: supportsThreadCompactionFromCompaction(piCompaction),
         supportsThreadImport: false,
       } satisfies ProviderComposerCapabilities);
 

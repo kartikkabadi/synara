@@ -8,7 +8,9 @@ import {
   GROK_REASONING_EFFORT_OPTIONS,
   type GrokModelOptions,
   EventId,
+  type ProviderCompactionCapabilities,
   type ProviderComposerCapabilities,
+  supportsThreadCompactionFromCompaction,
   type ProviderApprovalDecision,
   type ProviderInteractionMode,
   type ProviderListModelsResult,
@@ -984,6 +986,8 @@ export function makeGrokAdapter(
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientInfo: { name: "Synara", version: "0.0.0" },
+            // Grok natively auto-compacts, so its usage snapshots may claim it.
+            usageCompactsAutomatically: true,
             ...(agentGatewayCredentials
               ? {
                   buildMcpServers: (initializeResult) =>
@@ -1917,6 +1921,26 @@ export function makeGrokAdapter(
         return ctx !== undefined && !ctx.stopped;
       });
 
+    // Manual compaction runs through the ACP `/compact` slash command (with the
+    // `x.ai/compact_conversation` extension) and accepts optional instructions.
+    const grokCompaction: ProviderCompactionCapabilities = {
+      manual: {
+        mode: "same-session",
+        mechanism: "control-command",
+        supportsInstructions: true,
+      },
+      automatic: {
+        mode: "native",
+        enabledByDefault: true,
+        statusVisibility: "partial",
+        triggerVisibility: "derived",
+      },
+      telemetry: {
+        lifecycle: "native",
+        contextUsage: "provider-estimated",
+      },
+    };
+
     const getComposerCapabilities: NonNullable<GrokAdapterShape["getComposerCapabilities"]> = () =>
       Effect.succeed({
         provider: PROVIDER,
@@ -1926,7 +1950,8 @@ export function makeGrokAdapter(
         supportsPluginMentions: false,
         supportsPluginDiscovery: false,
         supportsRuntimeModelList: true,
-        supportsThreadCompaction: true,
+        compaction: grokCompaction,
+        supportsThreadCompaction: supportsThreadCompactionFromCompaction(grokCompaction),
         supportsThreadImport: false,
       } satisfies ProviderComposerCapabilities);
 

@@ -7,7 +7,9 @@ import path from "node:path";
 import {
   type AntigravityModelOptions,
   EventId,
+  type ProviderCompactionCapabilities,
   type ProviderComposerCapabilities,
+  supportsThreadCompactionFromCompaction,
   type ProviderListModelsResult,
   type ProviderRuntimeEvent,
   type ProviderSession,
@@ -33,6 +35,23 @@ import { appendFileAttachmentsPromptBlock } from "../attachmentProjection.ts";
 import { teardownChildProcessTree } from "../supervisedProcessTeardown.ts";
 
 const PROVIDER = "antigravity" as const;
+
+const antigravityCompaction: ProviderCompactionCapabilities = {
+  manual: {
+    mode: "unsupported",
+    mechanism: "unsupported",
+    supportsInstructions: false,
+  },
+  automatic: {
+    mode: "unknown",
+    statusVisibility: "none",
+    triggerVisibility: "opaque",
+  },
+  telemetry: {
+    lifecycle: "none",
+    contextUsage: "none",
+  },
+};
 const DEFAULT_MODEL = "Gemini 3.5 Flash";
 const PRINT_TIMEOUT = "30m";
 const POLL_INTERVAL_MS = 75;
@@ -1108,7 +1127,9 @@ const makeAntigravityAdapter = Effect.gen(function* () {
         supportsPluginMentions: false,
         supportsPluginDiscovery: false,
         supportsRuntimeModelList: true,
-        supportsThreadCompaction: false,
+        // One-shot print-mode CLI: no verified compaction primitive at all.
+        compaction: antigravityCompaction,
+        supportsThreadCompaction: supportsThreadCompactionFromCompaction(antigravityCompaction),
         supportsThreadImport: false,
       } satisfies ProviderComposerCapabilities),
     get streamEvents() {

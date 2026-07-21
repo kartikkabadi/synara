@@ -6,7 +6,9 @@
 import {
   ApprovalRequestId,
   EventId,
+  type ProviderCompactionCapabilities,
   type ProviderComposerCapabilities,
+  supportsThreadCompactionFromCompaction,
   type ProviderApprovalDecision,
   type ProviderInteractionMode,
   type ProviderListCommandsResult,
@@ -800,6 +802,9 @@ export function makeDroidAdapter(
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientCapabilities: { elicitation: { form: {} } },
             clientInfo: { name: "Synara", version: "0.0.0" },
+            // Factory ACP exposes no observable compaction lifecycle, so usage
+            // snapshots must not claim automatic compaction.
+            usageCompactsAutomatically: false,
             ...(agentGatewayCredentials
               ? {
                   buildMcpServers: (initializeResult: EffectAcpSchema.InitializeResponse) =>
@@ -1929,6 +1934,26 @@ export function makeDroidAdapter(
         return ctx !== undefined && !ctx.stopped;
       });
 
+    // Droid's TUI has /compact and /compress, but Factory ACP exposes no
+    // compaction RPC (those TUI paths imply session-rollover semantics). Native
+    // automatic compaction is assumed but not observable over ACP.
+    const droidCompaction: ProviderCompactionCapabilities = {
+      manual: {
+        mode: "unsupported",
+        mechanism: "unsupported",
+        supportsInstructions: false,
+      },
+      automatic: {
+        mode: "native",
+        statusVisibility: "none",
+        triggerVisibility: "opaque",
+      },
+      telemetry: {
+        lifecycle: "none",
+        contextUsage: "provider-estimated",
+      },
+    };
+
     const getComposerCapabilities: NonNullable<DroidAdapterShape["getComposerCapabilities"]> = () =>
       Effect.succeed({
         provider: PROVIDER,
@@ -1938,9 +1963,8 @@ export function makeDroidAdapter(
         supportsPluginMentions: true,
         supportsPluginDiscovery: true,
         supportsRuntimeModelList: true,
-        // Droid's TUI has /compact, but ACP currently exposes no compaction RPC
-        // and treats that text as an ordinary model prompt.
-        supportsThreadCompaction: false,
+        compaction: droidCompaction,
+        supportsThreadCompaction: supportsThreadCompactionFromCompaction(droidCompaction),
         supportsThreadImport: true,
       } satisfies ProviderComposerCapabilities);
 

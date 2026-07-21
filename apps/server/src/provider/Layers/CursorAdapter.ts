@@ -9,7 +9,9 @@ import {
   ApprovalRequestId,
   type CursorModelOptions,
   EventId,
+  type ProviderCompactionCapabilities,
   type ProviderComposerCapabilities,
+  supportsThreadCompactionFromCompaction,
   type ProviderApprovalDecision,
   type ProviderInteractionMode,
   type ProviderListModelsResult,
@@ -626,6 +628,9 @@ export function makeCursorAdapter(
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientInfo: { name: "Synara", version: "0.0.0" },
+            // Cursor's ACP surface gives no evidence of automatic compaction,
+            // so usage snapshots must not claim it.
+            usageCompactsAutomatically: false,
             ...(agentGatewayCredentials
               ? {
                   buildMcpServers: (initializeResult) =>
@@ -1355,6 +1360,26 @@ export function makeCursorAdapter(
         return c !== undefined && !c.stopped;
       });
 
+    // Cursor documents `/compress` in the interactive CLI, but Synara drives
+    // `cursor-agent acp`, where no manual compaction path is proven. Native
+    // automatic compaction is assumed but not observable over ACP.
+    const cursorCompaction: ProviderCompactionCapabilities = {
+      manual: {
+        mode: "unsupported",
+        mechanism: "unsupported",
+        supportsInstructions: false,
+      },
+      automatic: {
+        mode: "native",
+        statusVisibility: "none",
+        triggerVisibility: "opaque",
+      },
+      telemetry: {
+        lifecycle: "none",
+        contextUsage: "provider-estimated",
+      },
+    };
+
     const getComposerCapabilities: NonNullable<
       CursorAdapterShape["getComposerCapabilities"]
     > = () =>
@@ -1366,7 +1391,8 @@ export function makeCursorAdapter(
         supportsPluginMentions: false,
         supportsPluginDiscovery: false,
         supportsRuntimeModelList: true,
-        supportsThreadCompaction: false,
+        compaction: cursorCompaction,
+        supportsThreadCompaction: supportsThreadCompactionFromCompaction(cursorCompaction),
         supportsThreadImport: true,
       } satisfies ProviderComposerCapabilities);
 
