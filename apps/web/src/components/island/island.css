@@ -10,37 +10,48 @@
 /* One surface, one morph: the window is pre-sized, so every state change is
    just this element animating width/height/border-radius from a fixed
    top-center anchor — the pill itself grows downward. `translate` (not
-   transform) keeps centering intact under the WAAPI scale springs. */
+   transform) keeps centering intact under the WAAPI scale springs.
+
+   Open uses a longer settling curve, close a quick ease-in; the selectors
+   below override per state. */
 .island-surface {
   position: absolute;
   top: 0;
   left: 50%;
   translate: -50%;
+  /* Compositing hint keeps the flat top edge anti-aliased during morphs. */
+  transform: translateZ(0);
   transition:
-    width 260ms cubic-bezier(0.32, 0.72, 0, 1),
-    height 260ms cubic-bezier(0.32, 0.72, 0, 1),
-    border-radius 260ms cubic-bezier(0.32, 0.72, 0, 1);
-  /* Floating: top-flush bottom-rounded, with a small top radius so the flat
-     top edge anti-aliases instead of reading as a raw slab. */
-  border-radius: 10px 10px 14px 14px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 30%),
-    linear-gradient(180deg, #26262a 0%, #101013 100%);
-  /* Dark keyline so the silhouette holds on light desktops. */
+    width 180ms ease-in,
+    height 180ms ease-in,
+    border-radius 180ms ease-in;
+  /* Top-flush slab: square top corners fuse with the screen edge, only the
+     bottom corners round. */
+  border-radius: 0 0 14px 14px;
+  background: linear-gradient(180deg, #17181b, #0b0c0e 55%, #070809);
   border: 1px solid rgba(0, 0, 0, 0.9);
+  border-top: none;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.14),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.6),
-    inset 0 0 24px rgba(0, 0, 0, 0.35),
-    0 1px 2px rgba(0, 0, 0, 0.5),
-    0 8px 24px rgba(0, 0, 0, 0.28);
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset 0 -20px 30px rgba(0, 0, 0, 0.45),
+    0 8px 24px rgba(0, 0, 0, 0.35),
+    0 2px 6px rgba(0, 0, 0, 0.25);
   /* No backdrop-filter: Chromium cannot blur content behind a transparent
      BrowserWindow, so it would be dead weight. The layered gradients above
      carry the glass look on their own. */
 }
 
+.island-surface[data-island-state="hover"],
 .island-surface[data-island-state="expanded"] {
-  border-radius: 10px 10px 18px 18px;
+  transition:
+    width 340ms cubic-bezier(0.32, 0.72, 0, 1),
+    height 340ms cubic-bezier(0.32, 0.72, 0, 1),
+    border-radius 340ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.island-surface[data-island-state="expanded"] {
+  border-radius: 0 0 18px 18px;
 }
 
 /* Noise overlay kills 8-bit banding on the long body gradient. */
@@ -50,28 +61,20 @@
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  opacity: 0.015;
+  opacity: 0.025;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='128' height='128' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* Notch mode: the top edge must fuse with the physical bezel — hard 0 top
-   corners, no top rim light, body top stop at pure black, and the ambient
-   shadow pushed downward-only so nothing halos the camera housing. */
+/* Notch mode: the top edge must fuse with the physical bezel — body top stop
+   at pure black and the ambient shadow pushed downward-only so nothing halos
+   the camera housing. */
 .island-surface-notch {
-  border-radius: 0 0 14px 14px;
-  border-top: none;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 30%),
-    linear-gradient(180deg, #000 0%, #101013 100%);
+  background: linear-gradient(180deg, #000, #0b0c0e 55%, #070809);
   box-shadow:
-    inset 0 -1px 0 rgba(0, 0, 0, 0.6),
-    inset 0 0 24px rgba(0, 0, 0, 0.35),
-    0 1px 2px rgba(0, 0, 0, 0.5),
-    0 10px 24px -6px rgba(0, 0, 0, 0.35);
-}
-
-.island-surface-notch[data-island-state="expanded"] {
-  border-radius: 0 0 18px 18px;
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset 0 -20px 30px rgba(0, 0, 0, 0.45),
+    0 10px 24px -6px rgba(0, 0, 0, 0.35),
+    0 2px 6px rgba(0, 0, 0, 0.25);
 }
 
 /* State-hued ambient glow while any session is active. In notch mode the glow
@@ -79,20 +82,19 @@
    the physical camera housing. */
 .island-surface-glow {
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.14),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.6),
-    inset 0 0 24px rgba(0, 0, 0, 0.35),
-    0 1px 2px rgba(0, 0, 0, 0.5),
-    0 8px 24px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset 0 -20px 30px rgba(0, 0, 0, 0.45),
+    0 8px 24px rgba(0, 0, 0, 0.35),
+    0 2px 6px rgba(0, 0, 0, 0.25),
     0 0 20px hsl(var(--island-hue, 205) 85% 60% / 0.35),
     0 0 48px hsl(var(--island-hue, 205) 85% 55% / 0.18);
 }
 
 .island-surface-glow-notch {
   box-shadow:
-    inset 0 -1px 0 rgba(0, 0, 0, 0.6),
-    inset 0 0 24px rgba(0, 0, 0, 0.35),
-    0 1px 2px rgba(0, 0, 0, 0.5),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset 0 -20px 30px rgba(0, 0, 0, 0.45),
     0 10px 24px -6px rgba(0, 0, 0, 0.35),
     0 12px 24px -8px hsl(var(--island-hue, 205) 80% 60% / 0.4),
     0 24px 48px -12px hsl(var(--island-hue, 205) 80% 55% / 0.2);
@@ -106,21 +108,21 @@
 @keyframes island-glow-fade {
   from {
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.14),
-      inset 0 -1px 0 rgba(0, 0, 0, 0.6),
-      inset 0 0 24px rgba(0, 0, 0, 0.35),
-      0 1px 2px rgba(0, 0, 0, 0.5),
-      0 8px 24px rgba(0, 0, 0, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+      inset 0 -20px 30px rgba(0, 0, 0, 0.45),
+      0 8px 24px rgba(0, 0, 0, 0.35),
+      0 2px 6px rgba(0, 0, 0, 0.25),
       0 0 20px hsl(var(--island-hue, 205) 85% 60% / 0.35),
       0 0 48px hsl(var(--island-hue, 205) 85% 55% / 0.18);
   }
   to {
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.14),
-      inset 0 -1px 0 rgba(0, 0, 0, 0.6),
-      inset 0 0 24px rgba(0, 0, 0, 0.35),
-      0 1px 2px rgba(0, 0, 0, 0.5),
-      0 8px 24px rgba(0, 0, 0, 0.28),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+      inset 0 -20px 30px rgba(0, 0, 0, 0.45),
+      0 8px 24px rgba(0, 0, 0, 0.35),
+      0 2px 6px rgba(0, 0, 0, 0.25),
       0 0 20px hsl(var(--island-hue, 205) 85% 60% / 0),
       0 0 48px hsl(var(--island-hue, 205) 85% 55% / 0);
   }
@@ -176,19 +178,19 @@
 
 /* ---- Content choreography -------------------------------------------- */
 
-/* Two-phase swap: outgoing content fades over the first ~35% of the surface
-   morph; incoming content enters after a ~25% delay, header and body settling
-   from slightly different offsets so the panel reads as unfurling. */
+/* Cross-fade swap: outgoing content fades over the first ~35% of the surface
+   morph while the incoming content waits out a matching 120ms delay, then
+   rises translateY(6px)→0 — the panel is never blank mid-morph. */
 .island-leave {
-  animation: island-leave 90ms ease-out both;
+  animation: island-leave 120ms ease-out both;
 }
 
 .island-enter-header {
-  animation: island-enter-h 170ms ease-out 65ms both;
+  animation: island-enter 180ms ease-out 120ms both;
 }
 
 .island-enter-body {
-  animation: island-enter-b 170ms ease-out 65ms both;
+  animation: island-enter 180ms ease-out 120ms both;
 }
 
 @keyframes island-leave {
@@ -197,17 +199,10 @@
   }
 }
 
-@keyframes island-enter-h {
+@keyframes island-enter {
   from {
     opacity: 0;
-    transform: translateY(-4px);
-  }
-}
-
-@keyframes island-enter-b {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
+    transform: translateY(6px);
   }
 }
 
@@ -217,6 +212,35 @@
   background: radial-gradient(120% 90% at 50% 0%, transparent 55%, rgba(0, 0, 0, 0.4));
 }
 
+/* Glass icon-button chrome for the header chip + close button. */
+.island-chip {
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.04));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* 1px dithered separator between expanded rows. */
+.island-row + .island-row {
+  position: relative;
+}
+
+.island-row + .island-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 10px;
+  right: 10px;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.07) 20%,
+    rgba(255, 255, 255, 0.07) 80%,
+    transparent
+  );
+}
+
 /* Hovered rows get a faint state-hued left edge. */
 .island-row:hover {
   box-shadow: inset 2px 0 0 hsl(var(--island-hue, 205) 80% 60% / 0.5);
@@ -224,22 +248,32 @@
 
 /* ---- Orb lamp -------------------------------------------------------- */
 
+/* State palette: dim cool blue idle, multi-hue working, warm amber attention,
+   red error, green done. */
 .island-orb {
   position: relative;
   border-radius: 9999px;
   flex-shrink: 0;
+  --orb-hi: hsl(var(--island-hue, 220) 90% 75%);
+  --orb-mid: hsl(var(--island-hue, 220) 85% 55%);
+  --orb-lo: hsl(var(--island-hue, 220) 80% 35%);
+}
+
+/* All painted layers live on a 2× canvas scaled back down, so the tiny
+   pill-size orb renders its gradients at double resolution (no banding or
+   pixelated rim at close zoom). */
+.island-orb-canvas {
+  position: absolute;
+  inset: -50%;
+  transform: scale(0.5);
+  border-radius: 9999px;
 }
 
 .island-orb-core {
   position: absolute;
   inset: 0;
   border-radius: 9999px;
-  background: radial-gradient(
-    circle at 35% 30%,
-    hsl(var(--island-hue, 205) 90% 75%),
-    hsl(var(--island-hue, 205) 85% 55%) 55%,
-    hsl(var(--island-hue, 205) 80% 35%)
-  );
+  background: radial-gradient(circle at 35% 30%, var(--orb-hi), var(--orb-mid) 55%, var(--orb-lo));
 }
 
 /* Specular highlight: the "sphere" cue the flat core lacks at small sizes. */
@@ -255,12 +289,12 @@
   );
 }
 
-/* Recessed socket so the orb reads as mounted in the pill, not pasted on. */
+/* Soft seat so the orb reads as mounted in the pill, not pasted on; kept
+   translucent so the orb's own bloom stays visible. */
 .island-orb-seat {
   padding: 3px;
   border-radius: 9999px;
-  background: rgba(0, 0, 0, 0.4);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.25);
   flex-shrink: 0;
 }
 
@@ -271,19 +305,15 @@
   overflow: hidden;
 }
 
+/* Multi-hue rim sweep: identical first/last stops close the conic loop (no
+   seam wedge), and the blur melts the stops into a continuous shimmer. */
 .island-orb-sheen::before {
   content: "";
   position: absolute;
   inset: -25%;
-  background: conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    rgba(255, 255, 255, 0.5) 60deg,
-    transparent 140deg,
-    rgba(255, 255, 255, 0.12) 220deg,
-    transparent 300deg,
-    /* Explicit closed loop — same value as the 0deg stop, so no seam. */ transparent 360deg
-  );
+  background: conic-gradient(from 0deg, #56e0ff, #7b6bff 33%, #ff7ad9 66%, #56e0ff 100%);
+  filter: blur(5px);
+  opacity: 0.7;
   animation: island-orb-spin 6s linear infinite;
   animation-play-state: paused;
 }
@@ -292,35 +322,26 @@
   position: absolute;
   inset: -35%;
   border-radius: 9999px;
-  background: radial-gradient(
-    circle at 35% 30%,
-    hsl(var(--island-hue, 205) 90% 75%),
-    hsl(var(--island-hue, 205) 85% 55%) 55%,
-    hsl(var(--island-hue, 205) 80% 35%)
-  );
+  background: radial-gradient(circle at 35% 30%, var(--orb-hi), var(--orb-mid) 55%, var(--orb-lo));
   filter: blur(8px);
   opacity: 0.8;
 }
 
 /* State motion: only transform/opacity animate (composited layers). */
 
-/* Idle is a dim blue-slate ember with a specular and faint bloom, so the
-   sphere still reads at the 64×30 pill size — a lamp, not a gray dot. */
+/* Idle: a dim cool-blue ember (#5b8cff family) with a soft glow and a gentle
+   2.4s breathing cycle, so the collapsed pill always shows a living orb. */
 .island-orb[data-orb-state="idle"] {
-  opacity: 1;
+  animation: island-orb-idle-breathe 2.4s ease-in-out infinite;
 }
 
 .island-orb[data-orb-state="idle"] .island-orb-core {
-  background: radial-gradient(
-    circle at 35% 30%,
-    hsl(218 45% 66%),
-    hsl(220 35% 38%) 55%,
-    hsl(224 30% 18%)
-  );
+  background: radial-gradient(circle at 35% 30%, #a8c2ff, #5b8cff 55%, #2a4a99);
 }
 
 .island-orb[data-orb-state="idle"] .island-orb-bloom {
-  opacity: 0.3;
+  background: radial-gradient(circle at 35% 30%, #a8c2ff, #5b8cff 55%, #2a4a99);
+  opacity: 0.5;
 }
 
 .island-orb[data-orb-state="idle"] .island-orb-spec {
@@ -337,6 +358,33 @@
   opacity: 1;
 }
 
+/* Working: cyan→violet→pink multi-hue core under the spinning rim sweep. */
+.island-orb[data-orb-state="working"] .island-orb-core {
+  background: radial-gradient(circle at 35% 30%, #9ceaff, #56b8ff 45%, #7b6bff 75%, #3a2d8f);
+}
+
+.island-orb[data-orb-state="working"] .island-orb-bloom {
+  background: radial-gradient(circle at 35% 30%, #9ceaff, #56b8ff 45%, #7b6bff 75%, #3a2d8f);
+}
+
+/* Attention: warm amber. */
+.island-orb[data-orb-state="needs-approval"] .island-orb-core {
+  background: radial-gradient(circle at 35% 30%, #ffd9a0, #ffb454 55%, #9a5c14);
+}
+
+.island-orb[data-orb-state="needs-approval"] .island-orb-bloom {
+  background: radial-gradient(circle at 35% 30%, #ffd9a0, #ffb454 55%, #9a5c14);
+}
+
+/* Error: red. */
+.island-orb[data-orb-state="error"] .island-orb-core {
+  background: radial-gradient(circle at 35% 30%, #ffb0ab, #ff5f57 55%, #8f1d18);
+}
+
+.island-orb[data-orb-state="error"] .island-orb-bloom {
+  background: radial-gradient(circle at 35% 30%, #ffb0ab, #ff5f57 55%, #8f1d18);
+}
+
 /* Active states scale the whole orb 1.15x (composited transform) so a state
    change is visible from across the room. */
 .island-orb[data-orb-state="working"] {
@@ -348,6 +396,7 @@
 }
 
 .island-orb[data-orb-state="working"] .island-orb-sheen::before {
+  animation-duration: 3s;
   animation-play-state: running;
 }
 
@@ -363,6 +412,16 @@
 @keyframes island-orb-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes island-orb-idle-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
   }
 }
 

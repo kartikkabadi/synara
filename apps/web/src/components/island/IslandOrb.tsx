@@ -8,15 +8,16 @@ import type { CSSProperties } from "react";
 
 import type { IslandSessionStatus } from "~/lib/islandSessionTracker";
 
-export type IslandOrbState = IslandSessionStatus | "looping" | "idle";
+export type IslandOrbState = IslandSessionStatus | "looping" | "idle" | "error";
 
 // One dominant hue at a time, from Synara's own state palette.
 const ORB_HUE: Record<IslandOrbState, number> = {
-  idle: 220,
+  idle: 224,
   working: 205,
   looping: 265,
-  "needs-approval": 40,
+  "needs-approval": 36,
   done: 150,
+  error: 3,
 };
 
 export function orbStateForStatus(status: IslandSessionStatus | null): IslandOrbState {
@@ -41,10 +42,13 @@ export function IslandOrb({ state, size = 18 }: IslandOrbProps) {
   } as CSSProperties;
   return (
     <span aria-hidden className="island-orb" data-orb-state={state} style={style}>
-      <span className="island-orb-bloom" />
-      <span className="island-orb-core" />
-      <span className="island-orb-spec" />
-      <span className="island-orb-sheen" />
+      {/* 2× canvas scaled down: gradients rasterize at double resolution. */}
+      <span className="island-orb-canvas">
+        <span className="island-orb-bloom" />
+        <span className="island-orb-core" />
+        <span className="island-orb-spec" />
+        <span className="island-orb-sheen" />
+      </span>
     </span>
   );
 }

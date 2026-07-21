@@ -96,10 +96,10 @@ describe("island anchoring", () => {
     expect(islandWindowBounds(notchedDisplay, wideNotch).width).toBe(620 + 60 + 96);
   });
 
-  it("floats below the work area top without a notch", () => {
+  it("sits flush with the work area top without a notch", () => {
     expect(islandWindowBounds(plainDisplay, null)).toEqual({
       x: 632,
-      y: 31,
+      y: 25,
       width: 656,
       height: 376,
     });
@@ -108,7 +108,7 @@ describe("island anchoring", () => {
   it("anchors to displays with non-zero origins", () => {
     const bounds = islandWindowBounds(secondaryDisplay, null);
     expect(bounds.x).toBe(1920 + (1920 - 656) / 2);
-    expect(bounds.y).toBe(-175 + 6);
+    expect(bounds.y).toBe(-175);
   });
 
   it("pads past a possible notch when the macOS menu bar auto-hides", () => {
@@ -118,23 +118,23 @@ describe("island anchoring", () => {
     };
     expect(detectNotch("darwin", autoHideDisplay)).toBeNull();
     expect(islandWindowBounds(autoHideDisplay, null, "darwin").y).toBe(
-      DARWIN_HIDDEN_MENU_BAR_TOP_INSET + 6,
+      DARWIN_HIDDEN_MENU_BAR_TOP_INSET,
     );
     // Non-darwin platforms keep the plain work-area anchor.
-    expect(islandWindowBounds(autoHideDisplay, null, "win32").y).toBe(6);
+    expect(islandWindowBounds(autoHideDisplay, null, "win32").y).toBe(0);
   });
 
   it("centers the surface rect at the window top per state", () => {
     expect(islandSurfaceRect("collapsed", windowsDisplay, null)).toEqual({
       x: (2560 - 180) / 2,
-      y: 6,
+      y: 0,
       width: 180,
       height: 32,
     });
     expect(islandSurfaceRect("hover", windowsDisplay, null)).toMatchObject({
       width: 420,
       height: 104,
-      y: 6,
+      y: 0,
     });
     expect(islandSurfaceRect("expanded", windowsDisplay, null)).toMatchObject({
       width: 560,

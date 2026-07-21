@@ -43,7 +43,7 @@ export interface IslandDisplayMetrics {
 // versus ~24–25pt without a notch. 30 splits the two populations safely.
 export const NOTCH_TOP_INSET_THRESHOLD = 30;
 
-export const ISLAND_FLOATING_TOP_MARGIN = 6;
+export const ISLAND_FLOATING_TOP_MARGIN = 0;
 
 // With "Automatically hide and show the menu bar" the work area reaches the
 // screen top, so the notch heuristic is blind. Fall back to the notched
@@ -70,7 +70,8 @@ function islandFloatingTop(metrics: IslandDisplayMetrics, platform?: NodeJS.Plat
 }
 
 // Top-center anchor: flush with the screen top in notch mode (the pill reads
-// as a camera-housing extension), 6px below the work area top elsewhere.
+// as a camera-housing extension), flush with the work-area top elsewhere so
+// the square-top surface fuses with the display edge.
 function islandAnchoredBounds(
   size: IslandSize,
   metrics: IslandDisplayMetrics,
