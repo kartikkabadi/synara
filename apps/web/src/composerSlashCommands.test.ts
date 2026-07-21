@@ -272,6 +272,24 @@ describe("composerSlashCommands", () => {
     expect(shouldHideProviderNativeCommandFromComposerMenu("antigravity", "automation")).toBe(true);
   });
 
+  it("offers /compact only when compaction is available for the thread", () => {
+    const baseInput = {
+      provider: "codex" as const,
+      supportsFastSlashCommand: false,
+      canOfferReviewCommand: true,
+      canOfferForkCommand: true,
+      canOfferSideCommand: true,
+      canOfferExportCommand: true,
+    };
+
+    expect(
+      getAvailableComposerSlashCommands({ ...baseInput, canOfferCompactCommand: true }),
+    ).toContain("compact");
+    expect(
+      getAvailableComposerSlashCommands({ ...baseInput, canOfferCompactCommand: false }),
+    ).not.toContain("compact");
+  });
+
   it("keeps Feedback Synara ahead of provider-native /feedback", () => {
     const availableCommands = getAvailableComposerSlashCommands({
       provider: "claudeAgent",

@@ -3,13 +3,14 @@
 //          stale-catalog preservation, and initial-vs-background pending (#103).
 // Layer: Web data fetching tests
 
-import type { NativeApi } from "@synara/contracts";
+import type { NativeApi, ProviderComposerCapabilities } from "@synara/contracts";
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   isInitialModelDiscoveryPending,
   providerModelsQueryOptions,
+  supportsThreadCompaction,
 } from "./providerDiscoveryReactQuery";
 import * as nativeApi from "../nativeApi";
 
@@ -22,6 +23,29 @@ function mockListModels(listModels: ReturnType<typeof vi.fn>) {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe("supportsThreadCompaction", () => {
+  const baseCapabilities: ProviderComposerCapabilities = {
+    provider: "claudeAgent",
+    supportsSkillMentions: false,
+    supportsSkillDiscovery: false,
+    supportsNativeSlashCommandDiscovery: false,
+    supportsPluginMentions: false,
+    supportsPluginDiscovery: false,
+    supportsRuntimeModelList: false,
+  };
+
+  it("requires an explicit supportsThreadCompaction capability", () => {
+    expect(supportsThreadCompaction(undefined)).toBe(false);
+    expect(supportsThreadCompaction(baseCapabilities)).toBe(false);
+    expect(
+      supportsThreadCompaction({ ...baseCapabilities, supportsThreadCompaction: false }),
+    ).toBe(false);
+    expect(supportsThreadCompaction({ ...baseCapabilities, supportsThreadCompaction: true })).toBe(
+      true,
+    );
+  });
 });
 
 describe("isInitialModelDiscoveryPending", () => {
