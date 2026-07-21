@@ -327,6 +327,16 @@
   opacity: 0.8;
 }
 
+/* A paused sheen renders as a static wedge, so only spinning states show it. */
+.island-orb .island-orb-sheen {
+  opacity: 0;
+}
+
+.island-orb[data-orb-state="working"] .island-orb-sheen,
+.island-orb[data-orb-state="looping"] .island-orb-sheen {
+  opacity: 1;
+}
+
 /* Active states scale the whole orb 1.15x (composited transform) so a state
    change is visible from across the room. */
 .island-orb[data-orb-state="working"] {
