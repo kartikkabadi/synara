@@ -4,9 +4,8 @@
 // The outer composer shell stays unchanged; this renders inside the existing surface
 // and receives the existing editor as a slot rather than duplicating composer controls.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { LoopIcon } from "~/lib/icons";
-import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { DisclosureRegion } from "../ui/DisclosureRegion";
 import {
@@ -19,6 +18,7 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { ChevronDownIcon } from "~/lib/icons";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { LOOP_DEFAULT_HARD_CAP } from "@synara/contracts";
 import {
   LOOP_COUNT_PRESETS,
@@ -63,6 +63,7 @@ export function LoopBudgetPicker(props: {
 }) {
   const [custom, setCustom] = useState<CustomEntry>({ kind: "none" });
 
+  // Commits happen on Enter/blur only so half-typed values never dispatch.
   const commitCustom = (entry: CustomEntry) => {
     if (entry.kind === "count") {
       const turns = Number(entry.raw);
@@ -79,6 +80,14 @@ export function LoopBudgetPicker(props: {
     }
   };
 
+  const radioValue = loopBudgetRadioValue(props.budget, custom);
+  const triggerLabel =
+    custom.kind !== "none" && custom.raw.trim().length === 0
+      ? custom.kind === "count"
+        ? "Custom turns…"
+        : "Custom duration…"
+      : formatLoopBudgetChoiceLabel(props.budget);
+
   return (
     <div className="flex flex-col items-end gap-1">
       <Menu>
@@ -93,13 +102,13 @@ export function LoopBudgetPicker(props: {
             />
           }
         >
-          {formatLoopBudgetChoiceLabel(props.budget)}
+          {triggerLabel}
           <ChevronDownIcon className="size-3" />
         </MenuTrigger>
         <ComposerPickerMenuPopup align="end" side="bottom">
           <MenuGroup>
             <MenuGroupLabel>Stop after</MenuGroupLabel>
-            <MenuRadioGroup value={loopBudgetRadioValue(props.budget, custom)}>
+            <MenuRadioGroup value={radioValue}>
               {LOOP_COUNT_PRESETS.map((turns) => (
                 <MenuRadioItem
                   key={`count-${turns}`}
@@ -141,6 +150,7 @@ export function LoopBudgetPicker(props: {
                 </span>
               </MenuRadioItem>
               <MenuRadioItem
+                closeOnClick={false}
                 value="custom-count"
                 onClick={() => {
                   setCustom({
@@ -152,6 +162,7 @@ export function LoopBudgetPicker(props: {
                 Custom turns…
               </MenuRadioItem>
               <MenuRadioItem
+                closeOnClick={false}
                 value="custom-duration"
                 onClick={() => {
                   setCustom({ kind: "duration", raw: "", unit: "minutes" });
@@ -161,61 +172,84 @@ export function LoopBudgetPicker(props: {
               </MenuRadioItem>
             </MenuRadioGroup>
           </MenuGroup>
+          {radioValue === "custom-count" || radioValue === "custom-duration" ? (
+            <>
+              <MenuSeparator />
+              {/* stopPropagation keeps menu typeahead from stealing keystrokes. */}
+              <div
+                className="flex items-center gap-1.5 px-2 py-1.5 text-[11px] text-muted-foreground"
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") event.stopPropagation();
+                  if (event.key === "Enter") {
+                    commitCustom(custom);
+                  }
+                }}
+              >
+                {radioValue === "custom-count" ? (
+                  <label className="flex items-center gap-1.5">
+                    Turns:
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={custom.kind === "count" ? custom.raw : ""}
+                      autoFocus
+                      onChange={(event) => {
+                        setCustom({ kind: "count", raw: event.target.value });
+                      }}
+                      onBlur={() => commitCustom(custom)}
+                      className="h-6 w-16 rounded border border-border bg-transparent px-1.5 text-foreground"
+                    />
+                  </label>
+                ) : (
+                  <label className="flex items-center gap-1.5">
+                    Duration:
+                    <input
+                      type="number"
+                      min={1}
+                      value={custom.kind === "duration" ? custom.raw : ""}
+                      autoFocus
+                      onChange={(event) => {
+                        setCustom((previous) => ({
+                          kind: "duration",
+                          raw: event.target.value,
+                          unit: previous.kind === "duration" ? previous.unit : "minutes",
+                        }));
+                      }}
+                      onBlur={() => commitCustom(custom)}
+                      className="h-6 w-16 rounded border border-border bg-transparent px-1.5 text-foreground"
+                    />
+                  </label>
+                )}
+                {radioValue === "custom-duration" ? (
+                  <Select
+                    value={custom.kind === "duration" ? custom.unit : "minutes"}
+                    onValueChange={(unit) => {
+                      setCustom((previous) => {
+                        const next: CustomEntry = {
+                          kind: "duration",
+                          raw: previous.kind === "duration" ? previous.raw : "",
+                          unit: unit === "hours" ? "hours" : "minutes",
+                        };
+                        commitCustom(next);
+                        return next;
+                      });
+                    }}
+                  >
+                    <SelectTrigger aria-label="Duration unit" className="h-6 px-1.5 text-[11px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectPopup>
+                      <SelectItem value="minutes">minutes</SelectItem>
+                      <SelectItem value="hours">hours</SelectItem>
+                    </SelectPopup>
+                  </Select>
+                ) : null}
+              </div>
+            </>
+          ) : null}
         </ComposerPickerMenuPopup>
       </Menu>
-      {custom.kind === "count" ? (
-        <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          Turns:
-          <input
-            type="number"
-            min={1}
-            max={100}
-            value={custom.raw}
-            autoFocus
-            onChange={(event) => {
-              const next: CustomEntry = {
-                kind: "count",
-                raw: event.target.value,
-              };
-              setCustom(next);
-              commitCustom(next);
-            }}
-            className="h-6 w-16 rounded border border-border bg-transparent px-1.5 text-foreground"
-          />
-        </label>
-      ) : null}
-      {custom.kind === "duration" ? (
-        <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          Duration:
-          <input
-            type="number"
-            min={1}
-            value={custom.raw}
-            autoFocus
-            onChange={(event) => {
-              const next: CustomEntry = { ...custom, raw: event.target.value };
-              setCustom(next);
-              commitCustom(next);
-            }}
-            className="h-6 w-16 rounded border border-border bg-transparent px-1.5 text-foreground"
-          />
-          <select
-            value={custom.unit}
-            onChange={(event) => {
-              const next: CustomEntry = {
-                ...custom,
-                unit: event.target.value === "hours" ? "hours" : "minutes",
-              };
-              setCustom(next);
-              commitCustom(next);
-            }}
-            className="h-6 rounded border border-border bg-transparent px-1 text-foreground"
-          >
-            <option value="minutes">minutes</option>
-            <option value="hours">hours</option>
-          </select>
-        </label>
-      ) : null}
     </div>
   );
 }
@@ -238,7 +272,7 @@ export function LoopComposerModeHeader(props: {
   }, []);
   return (
     <DisclosureRegion open={open}>
-      <div className="flex min-h-9 items-center justify-between gap-2 border-border/60 border-b px-3 py-1.5">
+      <div className="flex min-h-[38px] items-center justify-between gap-2 border-border/60 border-b px-3 py-1.5">
         <span className="flex items-center gap-1.5 text-[12px] font-medium text-foreground/80">
           <LoopIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
           {isEdit ? "Edit loop" : "Loop"}
@@ -250,20 +284,20 @@ export function LoopComposerModeHeader(props: {
         />
       </div>
       {isEdit && props.isLoopTurnRunning ? (
-        <p className="px-3 pt-1.5 text-[11px] text-muted-foreground/70">
+        <p className="px-3 py-1.5 text-[11px] text-muted-foreground/70">
           Changes apply after the current turn.
         </p>
       ) : null}
       {props.isUnsupportedContext ? (
-        <p className="px-3 pt-1.5 text-[11px] text-warning" role="alert">
+        <p className="px-3 pt-1.5 pb-1 text-[11px] text-warning" role="alert">
           {LOOP_UNSUPPORTED_CONTEXT_MESSAGE}
         </p>
       ) : props.error ? (
-        <p className="px-3 pt-1.5 text-[11px] text-destructive" role="alert">
+        <p className="px-3 pt-1.5 pb-1 text-[11px] text-destructive" role="alert">
           {props.error}
         </p>
       ) : props.note ? (
-        <p className="px-3 pt-1.5 text-[11px] text-muted-foreground">{props.note}</p>
+        <p className="px-3 pt-1.5 pb-1 text-[11px] text-muted-foreground">{props.note}</p>
       ) : null}
     </DisclosureRegion>
   );
@@ -282,7 +316,9 @@ export function LoopComposerModeCta(props: {
       disabled={props.startDisabled}
     >
       {props.isDispatching
-        ? "Starting loop…"
+        ? props.mode.kind === "edit"
+          ? "Saving…"
+          : "Starting loop…"
         : props.mode.kind === "edit"
           ? "Save changes"
           : "Start loop"}
@@ -290,41 +326,4 @@ export function LoopComposerModeCta(props: {
   );
 }
 
-/**
- * Guided Loop setup / Edit Loop composer mode (sections 4 and 6).
- *
- * Renders the Loop header (icon + budget picker), inline validation, the
- * existing editor slot with an expanded objective area, and the `Esc to
- * cancel` hint. Footer controls stay owned by the composer; the send CTA is
- * swapped via `LoopComposerModeCta`.
- */
-export function LoopComposerMode(props: {
-  mode: Exclude<LoopComposerModeState, { kind: "closed" }>;
-  isDispatching: boolean;
-  isLoopTurnRunning: boolean;
-  note: string | null;
-  error: string | null;
-  isUnsupportedContext: boolean;
-  onBudgetChange: (budget: LoopBudgetChoice) => void;
-  editorSlot: ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={cn("flex flex-col", props.className)}>
-      <LoopComposerModeHeader
-        mode={props.mode}
-        isDispatching={props.isDispatching}
-        isLoopTurnRunning={props.isLoopTurnRunning}
-        note={props.note}
-        error={props.error}
-        isUnsupportedContext={props.isUnsupportedContext}
-        onBudgetChange={props.onBudgetChange}
-      />
-      <div className="min-h-[112px]">{props.editorSlot}</div>
-    </div>
-  );
-}
 
-export function LoopComposerModeCancelHint() {
-  return <p className="pt-1 text-center text-[10.5px] text-muted-foreground/50">Esc to cancel</p>;
-}
