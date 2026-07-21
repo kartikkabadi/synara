@@ -2594,9 +2594,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         );
       }
 
-      const activeTurnId =
-        thread.session?.status === "running" ? thread.session.activeTurnId : null;
-
       const baseLoop: ThreadLoop = thread.loop ?? {
         active: false,
         prompt: "",
@@ -2633,24 +2630,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           loop,
         },
       };
-
-      if (activeTurnId != null && isLoopOwnedTurn(thread, activeTurnId)) {
-        const interruptEvent: Omit<OrchestrationEvent, "sequence"> = {
-          ...withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt: command.createdAt,
-            commandId: command.commandId,
-          }),
-          type: "thread.turn-interrupt-requested",
-          payload: {
-            threadId: command.threadId,
-            turnId: activeTurnId,
-            createdAt: command.createdAt,
-          },
-        };
-        return [loopOffEvent, interruptEvent];
-      }
 
       return loopOffEvent;
     }
