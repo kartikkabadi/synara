@@ -5,6 +5,7 @@ import {
   ProviderCompactionRequest,
   ProviderCompactionResult,
   ProviderRuntimeEvent,
+  ThreadCompactionRuntimeStatus,
   type ProviderRuntimeEventType,
 } from "./providerRuntime";
 
@@ -297,5 +298,49 @@ describe("ProviderCompactionResult", () => {
 
   it("requires a resume cursor for session rollover", () => {
     expect(() => decodeResult({ kind: "session-rollover" })).toThrow();
+  });
+});
+
+describe("ThreadCompactionRuntimeStatus", () => {
+  const decodeStatus = Schema.decodeUnknownSync(ThreadCompactionRuntimeStatus);
+
+  it("decodes a provider-owned status with trigger and last compaction", () => {
+    const status = decodeStatus({
+      owner: "provider",
+      providerAutoEnabled: true,
+      manualAvailability: { available: true },
+      trigger: { kind: "percent", percent: 85 },
+      lastCompaction: {
+        requestId: "req-1",
+        owner: "provider",
+        trigger: "provider-auto",
+        result: "completed",
+        sessionEffect: "same-session",
+        completedAt: "2026-03-23T00:00:00.000Z",
+      },
+    });
+    expect(status.owner).toBe("provider");
+    expect(status.trigger).toEqual({ kind: "percent", percent: 85 });
+    expect(status.lastCompaction?.result).toBe("completed");
+  });
+
+  it("decodes an unavailable status with a null auto flag", () => {
+    const status = decodeStatus({
+      owner: "none",
+      providerAutoEnabled: null,
+      manualAvailability: { available: false, reason: "Unsupported" },
+    });
+    expect(status.providerAutoEnabled).toBeNull();
+    expect(status.manualAvailability.reason).toBe("Unsupported");
+  });
+
+  it("rejects an unknown owner", () => {
+    expect(() =>
+      decodeStatus({
+        owner: "someone",
+        providerAutoEnabled: null,
+        manualAvailability: { available: false },
+      }),
+    ).toThrow();
   });
 });
