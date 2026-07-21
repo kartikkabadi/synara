@@ -434,6 +434,7 @@ export interface IslandBridge {
   setIgnoreMouse: (ignore: boolean) => Promise<void>;
   setState: (state: IslandWindowState) => Promise<void>;
   focusThread: (threadId: string) => Promise<void>;
+  stopLoop: (threadId: string) => Promise<void>;
   onStateChanged: (listener: (state: IslandWindowState) => void) => () => void;
 }
 

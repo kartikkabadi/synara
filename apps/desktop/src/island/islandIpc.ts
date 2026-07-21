@@ -15,6 +15,7 @@ export interface IslandIpcDelegate {
   getEnabled: () => boolean;
   setEnabled: (enabled: boolean) => boolean;
   focusThread: (threadId: string) => void;
+  stopLoop: (threadId: string) => void;
 }
 
 export function registerIslandIpcHandlers(ipcMain: IpcMain, delegate: IslandIpcDelegate): void {
@@ -37,6 +38,13 @@ export function registerIslandIpcHandlers(ipcMain: IpcMain, delegate: IslandIpcD
   ipcMain.handle(ISLAND_IPC_CHANNELS.focusThread, async (_event, threadId: unknown) => {
     if (typeof threadId === "string" && threadId.trim().length > 0) {
       delegate.focusThread(threadId.trim());
+    }
+  });
+
+  ipcMain.removeHandler(ISLAND_IPC_CHANNELS.stopLoop);
+  ipcMain.handle(ISLAND_IPC_CHANNELS.stopLoop, async (_event, threadId: unknown) => {
+    if (typeof threadId === "string" && threadId.trim().length > 0) {
+      delegate.stopLoop(threadId.trim());
     }
   });
 

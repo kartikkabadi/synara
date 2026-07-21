@@ -47,6 +47,7 @@ export const DESKTOP_IPC_CHANNELS = {
     setIgnoreMouse: "desktop:island-set-ignore-mouse",
     setState: "desktop:island-set-state",
     focusThread: "desktop:island-focus-thread",
+    stopLoop: "desktop:island-stop-loop",
     getEnabled: "desktop:island-get-enabled",
     setEnabled: "desktop:island-set-enabled",
     stateChanged: "desktop:island-state-changed",

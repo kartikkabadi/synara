@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld("islandBridge", {
   setIgnoreMouse: (ignore) => ipcRenderer.invoke(IPC.island.setIgnoreMouse, ignore),
   setState: (state) => ipcRenderer.invoke(IPC.island.setState, state),
   focusThread: (threadId) => ipcRenderer.invoke(IPC.island.focusThread, threadId),
+  stopLoop: (threadId) => ipcRenderer.invoke(IPC.island.stopLoop, threadId),
   onStateChanged: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
       if (state !== "collapsed" && state !== "hover" && state !== "expanded") return;

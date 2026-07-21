@@ -31,6 +31,7 @@ function createDelegate(manager: Partial<IslandWindowManager> | null = null) {
     getEnabled: vi.fn(() => true),
     setEnabled: vi.fn((enabled: boolean) => enabled),
     focusThread: vi.fn(),
+    stopLoop: vi.fn(),
   } satisfies IslandIpcDelegate;
 }
 
@@ -43,6 +44,7 @@ describe("registerIslandIpcHandlers", () => {
       ISLAND_IPC_CHANNELS.setIgnoreMouse,
       ISLAND_IPC_CHANNELS.setState,
       ISLAND_IPC_CHANNELS.focusThread,
+      ISLAND_IPC_CHANNELS.stopLoop,
       ISLAND_IPC_CHANNELS.getEnabled,
       ISLAND_IPC_CHANNELS.setEnabled,
     ]) {
@@ -61,6 +63,19 @@ describe("registerIslandIpcHandlers", () => {
     await invoke(ISLAND_IPC_CHANNELS.focusThread, "");
     await invoke(ISLAND_IPC_CHANNELS.focusThread, 42);
     expect(delegate.focusThread).toHaveBeenCalledTimes(1);
+  });
+
+  it("forwards trimmed stop-loop requests and drops invalid ones", async () => {
+    const { ipcMain, invoke } = createFakeIpcMain();
+    const delegate = createDelegate();
+    registerIslandIpcHandlers(ipcMain, delegate);
+
+    await invoke(ISLAND_IPC_CHANNELS.stopLoop, " thread-1 ");
+    expect(delegate.stopLoop).toHaveBeenCalledWith("thread-1");
+
+    await invoke(ISLAND_IPC_CHANNELS.stopLoop, "");
+    await invoke(ISLAND_IPC_CHANNELS.stopLoop, 42);
+    expect(delegate.stopLoop).toHaveBeenCalledTimes(1);
   });
 
   it("validates window states and ignore-mouse payloads before touching the manager", async () => {

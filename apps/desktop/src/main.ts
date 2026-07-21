@@ -3251,6 +3251,10 @@ function registerIpcHandlers(): void {
       // defers the send until the renderer has finished loading.
       dispatchMenuAction(`notification-open-thread:${threadId}`);
     },
+    stopLoop: (_threadId) => {
+      // TODO(loop): route to the thread.loop.toggle dispatch path once the
+      // /loop contracts (devin/loop-phase-1) are available on this branch.
+    },
   });
   registerDesktopVoiceTranscriptionHandler();
   startBrowserPerformanceLogging();
