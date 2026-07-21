@@ -700,7 +700,7 @@ export function useComposerSlashCommands(input: {
         });
         const snapshot = await api.orchestration.getShellSnapshot();
         syncServerShellSnapshot(snapshot);
-      } catch (error) {
+      } catch {
         editorActions.setComposerPromptValue(trimmed);
         toastManager.add({
           type: "error",

@@ -9165,7 +9165,8 @@ export default function ChatView({
     }
   }, [isComposerApprovalState, loopComposerReset]);
   const isLoopOwnedTurnActive =
-    activeThread?.loop != null && isLoopOwnedTurnRunning(activeThread.loop, activeThread.latestTurn);
+    activeThread?.loop != null &&
+    isLoopOwnedTurnRunning(activeThread.loop, activeThread.latestTurn);
 
   const {
     handleForkTargetSelection,
