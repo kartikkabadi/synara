@@ -33,9 +33,10 @@ import "./island.css";
 
 const AUTO_POP_MS = 4_000;
 const EXPANDED_IDLE_COLLAPSE_MS = 8_000;
-// Outgoing content fades over the first ~35% of the 260ms surface morph, then
-// the incoming content mounts and enters on its own 65ms-delayed keyframes.
-const CONTENT_LEAVE_MS = 90;
+// Cross-fade choreography: outgoing content fades for CONTENT_LEAVE_MS while
+// the incoming content waits out a matching 120ms enter delay, then rises
+// translateY(6px)→0 — the panel is never blank mid-morph.
+const CONTENT_LEAVE_MS = 120;
 // Drives done-session pruning and relative timestamps between shell events.
 const CLOCK_TICK_MS = 30_000;
 
@@ -246,7 +247,7 @@ export function Island() {
     if (prefersReducedMotion()) return;
     surfaceRef.current?.animate(
       { transform: ["scale(1)", "scale(1.02)", "scale(1)"] },
-      { duration: 260, easing: "cubic-bezier(0.34,1.56,0.64,1)" },
+      { duration: 340, easing: "cubic-bezier(0.34,1.56,0.64,1)" },
     );
   }, [effectiveState]);
 
