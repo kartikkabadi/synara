@@ -2,7 +2,7 @@
 // Purpose: Derives island session rows and aggregate status from orchestration shell threads.
 // Layer: Web island logic (pure)
 
-import type { OrchestrationThreadShell } from "@synara/contracts";
+import type { OrchestrationShellStreamItem, OrchestrationThreadShell } from "@synara/contracts";
 
 export type IslandSessionStatus = "working" | "needs-approval" | "done";
 
@@ -96,17 +96,75 @@ export function islandRelativeTime(lastActivityAt: string, nowMs: number): strin
   return `${Math.floor(hours / 24)}d`;
 }
 
+export interface ShellThreadStore {
+  handleStreamItem(item: OrchestrationShellStreamItem): boolean;
+  applySnapshot(threads: readonly OrchestrationThreadShell[]): boolean;
+  threads(): OrchestrationThreadShell[];
+}
+
+// Thread map fed by the shell stream. Events that arrive between
+// subscribeShell() and the getShellSnapshot() response are buffered and
+// replayed on top of the snapshot so none are lost; a snapshot arriving on the
+// stream itself supersedes a pending fetched snapshot.
+export function createShellThreadStore(): ShellThreadStore {
+  const threadsById = new Map<string, OrchestrationThreadShell>();
+  let snapshotReady = false;
+  let buffered: OrchestrationShellStreamItem[] = [];
+
+  const applyEvent = (item: OrchestrationShellStreamItem): boolean => {
+    if (item.kind === "thread-upserted") {
+      threadsById.set(item.thread.id, item.thread);
+      return true;
+    }
+    if (item.kind === "thread-removed") return threadsById.delete(item.threadId);
+    return false;
+  };
+
+  return {
+    handleStreamItem(item) {
+      if (item.kind === "snapshot") {
+        snapshotReady = true;
+        buffered = [];
+        threadsById.clear();
+        for (const thread of item.snapshot.threads) threadsById.set(thread.id, thread);
+        return true;
+      }
+      if (!snapshotReady) {
+        buffered.push(item);
+        return false;
+      }
+      return applyEvent(item);
+    },
+    applySnapshot(threads) {
+      if (snapshotReady) return false;
+      snapshotReady = true;
+      threadsById.clear();
+      for (const thread of threads) threadsById.set(thread.id, thread);
+      const replay = buffered;
+      buffered = [];
+      for (const item of replay) applyEvent(item);
+      return true;
+    },
+    threads: () => [...threadsById.values()],
+  };
+}
+
 // Detects transitions that should auto-pop the island: a session newly needing
 // approval or a working session finishing its turn.
 export function findPopTransition(
   previous: readonly IslandSession[],
   next: readonly IslandSession[],
 ): "needs-approval" | "turn-completed" | null {
+  // Sessions with no previous entry (e.g. the initial snapshot) never pop.
   const previousByThread = new Map(previous.map((session) => [session.threadId, session.status]));
   let completed = false;
   for (const session of next) {
     const before = previousByThread.get(session.threadId);
-    if (session.status === "needs-approval" && before !== "needs-approval") {
+    if (
+      session.status === "needs-approval" &&
+      before !== undefined &&
+      before !== "needs-approval"
+    ) {
       return "needs-approval";
     }
     if (session.status === "done" && before !== undefined && before !== "done") {

@@ -4,6 +4,7 @@ import type { OrchestrationThreadShell } from "@synara/contracts";
 import {
   aggregateIslandStatus,
   classifyIslandStatus,
+  createShellThreadStore,
   deriveIslandSessions,
   findPopTransition,
   ISLAND_DONE_RETENTION_MS,
@@ -165,6 +166,55 @@ describe("findPopTransition", () => {
     ).toBeNull();
     // A session that appears already-done (e.g. initial snapshot) must not pop.
     expect(findPopTransition([], [makeSession({ status: "done" })])).toBeNull();
+  });
+
+  it("does not pop for needs-approval sessions with no previous entry", () => {
+    expect(findPopTransition([], [makeSession({ status: "needs-approval" })])).toBeNull();
+  });
+});
+
+describe("createShellThreadStore", () => {
+  it("replays events buffered between subscribe and the snapshot response", () => {
+    const store = createShellThreadStore();
+    const early = makeThread({ id: "early" });
+    expect(store.handleStreamItem({ kind: "thread-upserted", sequence: 1, thread: early })).toBe(
+      false,
+    );
+    expect(store.threads()).toEqual([]);
+    expect(store.applySnapshot([makeThread({ id: "snapshot" })])).toBe(true);
+    expect(store.threads().map((thread) => thread.id)).toEqual(["snapshot", "early"]);
+  });
+
+  it("drops buffered removals of snapshot threads on replay", () => {
+    const store = createShellThreadStore();
+    store.handleStreamItem({ kind: "thread-removed", sequence: 1, threadId: "gone" });
+    store.applySnapshot([makeThread({ id: "gone" }), makeThread({ id: "kept" })]);
+    expect(store.threads().map((thread) => thread.id)).toEqual(["kept"]);
+  });
+
+  it("ignores a fetched snapshot that arrives after a streamed snapshot", () => {
+    const store = createShellThreadStore();
+    expect(
+      store.handleStreamItem({
+        kind: "snapshot",
+        snapshot: { sequence: 2, threads: [makeThread({ id: "streamed" })] },
+      } as Parameters<typeof store.handleStreamItem>[0]),
+    ).toBe(true);
+    expect(store.applySnapshot([makeThread({ id: "stale" })])).toBe(false);
+    expect(store.threads().map((thread) => thread.id)).toEqual(["streamed"]);
+  });
+
+  it("applies events directly once the snapshot has landed", () => {
+    const store = createShellThreadStore();
+    store.applySnapshot([]);
+    expect(
+      store.handleStreamItem({ kind: "thread-upserted", sequence: 1, thread: makeThread() }),
+    ).toBe(true);
+    expect(store.threads()).toHaveLength(1);
+    expect(
+      store.handleStreamItem({ kind: "thread-removed", sequence: 2, threadId: "thread-1" }),
+    ).toBe(true);
+    expect(store.threads()).toEqual([]);
   });
 });
 
