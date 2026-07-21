@@ -440,18 +440,21 @@ describe("AcpRuntimeModel", () => {
   });
 
   it("projects ACP usage updates into context-window snapshots", () => {
-    const result = parseSessionUpdateEvent({
-      sessionId: "session-1",
-      update: {
-        sessionUpdate: "usage_update",
-        size: 1_000_000,
-        used: 42_000,
-        cost: {
-          amount: 0.2,
-          currency: "USD",
+    const result = parseSessionUpdateEvent(
+      {
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "usage_update",
+          size: 1_000_000,
+          used: 42_000,
+          cost: {
+            amount: 0.2,
+            currency: "USD",
+          },
         },
-      },
-    } satisfies EffectAcpSchema.SessionNotification);
+      } satisfies EffectAcpSchema.SessionNotification,
+      { usageCompactsAutomatically: true },
+    );
 
     expect(result.events).toEqual([
       {
@@ -480,6 +483,41 @@ describe("AcpRuntimeModel", () => {
         },
       },
     ]);
+  });
+
+  it("omits the automatic-compaction claim from usage snapshots unless the caller supplies it", () => {
+    const notification = {
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "usage_update",
+        size: 1_000_000,
+        used: 42_000,
+      },
+    } satisfies EffectAcpSchema.SessionNotification;
+
+    const withoutClaim = parseSessionUpdateEvent(notification);
+    expect(withoutClaim.events[0]).toMatchObject({
+      _tag: "UsageUpdated",
+      usage: {
+        usedTokens: 42_000,
+        usedPercent: 4.2,
+        maxTokens: 1_000_000,
+      },
+    });
+    expect(
+      withoutClaim.events[0]?._tag === "UsageUpdated"
+        ? withoutClaim.events[0].usage.compactsAutomatically
+        : undefined,
+    ).toBeUndefined();
+
+    const withFalseClaim = parseSessionUpdateEvent(notification, {
+      usageCompactsAutomatically: false,
+    });
+    expect(
+      withFalseClaim.events[0]?._tag === "UsageUpdated"
+        ? withFalseClaim.events[0].usage.compactsAutomatically
+        : undefined,
+    ).toBe(false);
   });
 
   it("keeps permission request parsing compatible with loose extension payloads", () => {

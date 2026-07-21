@@ -126,6 +126,12 @@ export interface AcpSessionRuntimeOptions {
     initializeResult: EffectAcpSchema.InitializeResponse,
   ) => ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly authenticateMeta?: Record<string, unknown>;
+  /**
+   * Whether usage snapshots from this provider's `usage_update` notifications
+   * may truthfully claim the provider compacts its context automatically.
+   * Omit when there is no evidence of observable automatic compaction.
+   */
+  readonly usageCompactsAutomatically?: boolean;
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
     readonly logIncoming?: boolean;
@@ -842,6 +848,7 @@ const makeAcpSessionRuntime = (
               assistantSegmentRef,
               runtimeInstanceId,
               params: notification,
+              usageCompactsAutomatically: options.usageCompactsAutomatically,
             }),
           ),
         );
@@ -1364,6 +1371,7 @@ const handleSessionUpdate = ({
   assistantSegmentRef,
   runtimeInstanceId,
   params,
+  usageCompactsAutomatically,
 }: {
   readonly offer: (event: AcpParsedSessionEvent) => Effect.Effect<void>;
   readonly modeStateRef: Ref.Ref<AcpSessionModeState | undefined>;
@@ -1371,9 +1379,10 @@ const handleSessionUpdate = ({
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
   readonly runtimeInstanceId: string;
   readonly params: EffectAcpSchema.SessionNotification;
+  readonly usageCompactsAutomatically?: boolean | undefined;
 }): Effect.Effect<void> =>
   Effect.gen(function* () {
-    const parsed = parseSessionUpdateEvent(params);
+    const parsed = parseSessionUpdateEvent(params, { usageCompactsAutomatically });
     if (parsed.modeId) {
       yield* Ref.update(modeStateRef, (current) =>
         current === undefined ? current : updateModeState(current, parsed.modeId!),
