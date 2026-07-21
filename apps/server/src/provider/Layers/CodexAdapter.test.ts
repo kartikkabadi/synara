@@ -1468,6 +1468,98 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       assert.equal(firstEvent.value.payload.status, "inProgress");
     }),
   );
+
+  it.effect("maps thread/compacted notifications to compacted thread state changes", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      lifecycleManager.emit("event", {
+        id: asEventId("evt-codex-thread-compacted"),
+        kind: "notification",
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        createdAt: new Date().toISOString(),
+        method: "thread/compacted",
+        payload: {
+          threadId: "thread-1",
+        },
+      } satisfies ProviderEvent);
+
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+      assert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some") {
+        return;
+      }
+      assert.equal(firstEvent.value.type, "thread.state.changed");
+      if (firstEvent.value.type !== "thread.state.changed") {
+        return;
+      }
+      assert.equal(firstEvent.value.payload.state, "compacted");
+      assert.deepEqual(firstEvent.value.payload.detail, { threadId: "thread-1" });
+    }),
+  );
+
+  it.effect("refreshes auto-compacting token usage after a compaction completes", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
+        Effect.forkChild,
+      );
+
+      lifecycleManager.emit("event", {
+        id: asEventId("evt-codex-compacted-before-usage"),
+        kind: "notification",
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        createdAt: new Date().toISOString(),
+        method: "thread/compacted",
+        payload: {
+          threadId: "thread-1",
+        },
+      } satisfies ProviderEvent);
+      lifecycleManager.emit("event", {
+        id: asEventId("evt-codex-usage-after-compaction"),
+        kind: "notification",
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        createdAt: new Date().toISOString(),
+        method: "thread/tokenUsage/updated",
+        payload: {
+          threadId: "thread-1",
+          tokenUsage: {
+            total: {
+              inputTokens: 1_000,
+              cachedInputTokens: 0,
+              outputTokens: 200,
+              reasoningOutputTokens: 0,
+              totalTokens: 1_200,
+            },
+            last: {
+              inputTokens: 100,
+              cachedInputTokens: 0,
+              outputTokens: 20,
+              reasoningOutputTokens: 0,
+              totalTokens: 120,
+            },
+            modelContextWindow: 258_400,
+          },
+        },
+      } satisfies ProviderEvent);
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      assert.equal(events[0]?.type, "thread.state.changed");
+      if (events[0]?.type === "thread.state.changed") {
+        assert.equal(events[0].payload.state, "compacted");
+      }
+      assert.equal(events[1]?.type, "thread.token-usage.updated");
+      if (events[1]?.type === "thread.token-usage.updated") {
+        assert.equal(events[1].payload.usage.compactsAutomatically, true);
+        assert.equal(events[1].payload.usage.usedTokens, 120);
+        assert.equal(events[1].payload.usage.maxTokens, 258_400);
+      }
+    }),
+  );
 });
 
 afterAll(() => {
