@@ -102,12 +102,14 @@ function makeThread(options: {
   latestTurn?: unknown;
   session?: unknown;
   hasPendingTurnStart?: boolean;
+  hasPendingApprovals?: boolean;
 }): OrchestrationThread {
   return {
     id: asThreadId("thread-1"),
     loop: options.loop ?? makeLoop(),
     messages: options.messages ?? [],
     hasPendingTurnStart: options.hasPendingTurnStart ?? false,
+    hasPendingApprovals: options.hasPendingApprovals ?? false,
     ...(options.latestTurn ? { latestTurn: options.latestTurn } : {}),
     ...(options.session ? { session: options.session } : {}),
   } as unknown as OrchestrationThread;
@@ -133,6 +135,18 @@ function makeLoopSetEvent(loop: ThreadLoop): OrchestrationEvent {
     type: "thread.loop-set",
     payload: {
       threadId: asThreadId("thread-1"),
+      loop,
+    },
+  } as unknown as OrchestrationEvent;
+}
+
+function makeLoopOffEvent(loop: ThreadLoop): OrchestrationEvent {
+  return {
+    ...makeBaseEventFields(),
+    type: "thread.loop-off",
+    payload: {
+      threadId: asThreadId("thread-1"),
+      stopReason: "user_stop",
       loop,
     },
   } as unknown as OrchestrationEvent;
@@ -702,6 +716,95 @@ describe("LoopReactor", () => {
     expect(continueCommand).toMatchObject({
       threadId: thread.id,
       expectedUpdatedAt: loop.updatedAt,
+    });
+
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    await runtime.dispose();
+  });
+
+  it("dispatches continue at endsAt for a duration loop blocked on approval", async () => {
+    const loop = makeLoop({ endsAt: new Date(Date.now() + 150).toISOString() });
+    const thread = makeThread({ loop, hasPendingApprovals: true });
+    const { runtime, eventQueue, dispatchLog } = makeRuntime(
+      makeSnapshot(thread),
+      Option.some(thread),
+    );
+
+    const reactor = await runtime.runPromise(Effect.service(LoopReactor));
+    const scope = await Effect.runPromise(Scope.make("sequential"));
+    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
+
+    await Effect.runPromise(Queue.offer(eventQueue, makeLoopSetEvent(loop)));
+    await Effect.runPromise(Effect.sleep("50 millis"));
+
+    // Blocked on approval: the arm-time pre-check waits, so nothing dispatches
+    // before expiry.
+    let commands = await Effect.runPromise(Ref.get(dispatchLog));
+    expect(commands.filter((command) => command.type === "thread.loop.continue")).toHaveLength(0);
+
+    await Effect.runPromise(Effect.sleep("300 millis"));
+
+    commands = await Effect.runPromise(Ref.get(dispatchLog));
+    const loopContinues = commands.filter((command) => command.type === "thread.loop.continue");
+    expect(loopContinues).toHaveLength(1);
+    expect(loopContinues[0]).toMatchObject({
+      threadId: thread.id,
+      expectedUpdatedAt: loop.updatedAt,
+      expectedActivationId: loop.activationId,
+    });
+
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    await runtime.dispose();
+  });
+
+  it("cancels the expiry timer when the loop is turned off before endsAt", async () => {
+    const loop = makeLoop({ endsAt: new Date(Date.now() + 150).toISOString() });
+    const thread = makeThread({ loop, hasPendingApprovals: true });
+    const { runtime, eventQueue, dispatchLog } = makeRuntime(
+      makeSnapshot(thread),
+      Option.some(thread),
+    );
+
+    const reactor = await runtime.runPromise(Effect.service(LoopReactor));
+    const scope = await Effect.runPromise(Scope.make("sequential"));
+    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
+
+    await Effect.runPromise(Queue.offer(eventQueue, makeLoopSetEvent(loop)));
+    await Effect.runPromise(
+      Queue.offer(eventQueue, makeLoopOffEvent(makeLoop({ ...loop, active: false }))),
+    );
+    await Effect.runPromise(Effect.sleep("300 millis"));
+
+    const commands = await Effect.runPromise(Ref.get(dispatchLog));
+    expect(commands.filter((command) => command.type === "thread.loop.continue")).toHaveLength(0);
+
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    await runtime.dispose();
+  });
+
+  it("arms the expiry timer for duration loops restored on startup", async () => {
+    const loop = makeLoop({ endsAt: new Date(Date.now() + 150).toISOString() });
+    const thread = makeThread({ loop, hasPendingApprovals: true });
+    const { runtime, dispatchLog } = makeRuntime(makeSnapshot(thread), Option.some(thread));
+
+    const reactor = await runtime.runPromise(Effect.service(LoopReactor));
+    const scope = await Effect.runPromise(Scope.make("sequential"));
+    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
+    await Effect.runPromise(reactor.restoreActiveLoops);
+
+    // Restore pre-check waits (approval pending, endsAt not reached), so the
+    // only dispatch must come from the timer firing at endsAt.
+    let commands = await Effect.runPromise(Ref.get(dispatchLog));
+    expect(commands.filter((command) => command.type === "thread.loop.continue")).toHaveLength(0);
+
+    await Effect.runPromise(Effect.sleep("300 millis"));
+
+    commands = await Effect.runPromise(Ref.get(dispatchLog));
+    const loopContinues = commands.filter((command) => command.type === "thread.loop.continue");
+    expect(loopContinues).toHaveLength(1);
+    expect(loopContinues[0]).toMatchObject({
+      threadId: thread.id,
+      expectedActivationId: loop.activationId,
     });
 
     await Effect.runPromise(Scope.close(scope, Exit.void));
