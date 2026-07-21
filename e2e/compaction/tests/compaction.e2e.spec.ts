@@ -125,20 +125,36 @@ async function selectProvider(page: Page, spec: ProviderSpec): Promise<void> {
   const menu = page.getByRole("menu").first();
   await menu.waitFor({ timeout: 15_000 });
 
-  // Available providers render as submenu triggers (role=menuitem, accessible
-  // name is exactly the provider label). Disabled providers append a status
-  // ("Sign in"/"Checking"/"Coming soon") to the name, so an exact match only
-  // hits a selectable provider entry.
-  const providerItem = page.getByRole("menuitem", { name: spec.label, exact: true });
+  // An available provider renders as a submenu trigger
+  // ([data-slot='menu-sub-trigger'], role=menuitem) whose visible text is the
+  // provider name; an unavailable one renders as a disabled plain menu item
+  // with a status suffix ("Unavailable"/"Sign in"/"Checking"/"Coming soon").
+  const providerItem = page
+    .locator("[data-slot='menu-sub-trigger']")
+    .filter({ hasText: spec.label });
   try {
     // Give live provider status a moment to resolve ("Checking" renders a
-    // disabled item whose accessible name includes the status suffix).
+    // disabled item until the server health check completes).
     await providerItem.first().waitFor({ timeout: 10_000 });
   } catch {
     // Combined picker nests the provider list behind the current-model
     // submenu trigger; open it and retry.
     await page.locator("[data-slot='menu-sub-trigger']").last().click();
-    await providerItem.first().waitFor({ timeout: 15_000 });
+    try {
+      await providerItem.first().waitFor({ timeout: 15_000 });
+    } catch (error) {
+      const disabledRow = page
+        .locator("[data-slot='menu-item']")
+        .filter({ hasText: spec.label })
+        .first();
+      if (await disabledRow.isVisible().catch(() => false)) {
+        const rowText = (await disabledRow.textContent()) ?? "";
+        throw new Error(
+          `provider "${spec.label}" is listed but not selectable (row reads "${rowText.trim()}") — likely unavailable on the server`,
+        );
+      }
+      throw error;
+    }
   }
   await providerItem.first().click();
 
