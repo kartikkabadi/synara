@@ -1,257 +1,80 @@
 /* FILE: island.css
-   Purpose: Ember-glass surface + orb-lamp animations for the island overlay.
+   Purpose: Floating-shell surface + status-light styles for the island overlay.
    Layer: Web island UI
-   Why: Bespoke keyframes are allowed here — the island resize is a status
+   Why: Bespoke transitions are allowed here — the island resize is a status
         animation, not a disclosure toggle, so disclosureMotion.ts does not
-        apply (documented decision in .plans/island-siri-orb-v2.md §2.4). */
+        apply. */
+
+:root {
+  color-scheme: dark;
+}
 
 /* ---- Surface -------------------------------------------------------- */
 
 /* One surface, one morph: the window is pre-sized, so every state change is
-   just this element animating width/height/border-radius from a fixed
-   top-center anchor — the pill itself grows downward. `translate` (not
-   transform) keeps centering intact under the WAAPI scale springs.
-
-   Open uses a longer settling curve, close a quick ease-in; the selectors
-   below override per state. */
+   just this element transitioning width/height/border-radius from a fixed
+   top-center anchor. Open is 300ms on the iOS curve, close 200ms (overridden
+   per state below). CSS transitions (not keyframes) so rapid state churn
+   retargets smoothly. */
 .island-surface {
   position: absolute;
   top: 0;
   left: 50%;
   translate: -50%;
   /* Content cross-fade timings derive from the morph duration of the current
-     target state, so leave/enter track the geometry spring on open and the
-     quicker ease-in on close. */
-  --island-morph-ms: 180ms;
-  /* Compositing hint keeps the flat top edge anti-aliased during morphs. */
-  transform: translateZ(0);
+     target state. */
+  --island-morph-ms: 200ms;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Ubuntu, system-ui, sans-serif;
   transition:
-    width 180ms ease-in,
-    height 180ms ease-in,
-    border-radius 180ms ease-in;
-  /* Top-flush slab: square top corners fuse with the screen edge, only the
-     bottom corners round. */
-  border-radius: 0 0 14px 14px;
-  background: linear-gradient(180deg, #17181b, #0b0c0e 55%, #070809);
-  border: 1px solid rgba(0, 0, 0, 0.9);
-  border-top: none;
-  /* No top inset sheen: the top edge must match the interior luminance so the
-     slab fuses with the screen edge instead of showing a 1px bright seam. */
+    width var(--island-morph-ms) cubic-bezier(0.32, 0.72, 0, 1),
+    height var(--island-morph-ms) cubic-bezier(0.32, 0.72, 0, 1),
+    border-radius var(--island-morph-ms) cubic-bezier(0.32, 0.72, 0, 1);
+  border-radius: 16px;
+  background: rgba(10, 10, 12, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-    inset 0 -20px 30px rgba(0, 0, 0, 0.45),
-    0 8px 24px rgba(0, 0, 0, 0.35),
-    0 2px 6px rgba(0, 0, 0, 0.25);
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 8px 24px rgba(0, 0, 0, 0.35);
   /* No backdrop-filter: Chromium cannot blur content behind a transparent
-     BrowserWindow, so it would be dead weight. The layered gradients above
-     carry the glass look on their own. */
+     BrowserWindow. */
 }
 
-/* Open uses a spring with ~2% overshoot (GhostNotch: 340ms, damping ≈.78) so
-   the surface briefly peaks past its final size, then settles; close stays
-   the quick 180ms ease-in above. */
+/* Open morphs (any growth) run 300ms; the base 200ms above covers closes. */
 .island-surface[data-island-state="hover"],
 .island-surface[data-island-state="expanded"] {
-  --island-morph-ms: 340ms;
-  transition:
-    width 340ms cubic-bezier(0.34, 1.2, 0.44, 1),
-    height 340ms cubic-bezier(0.34, 1.2, 0.44, 1),
-    border-radius 340ms cubic-bezier(0.34, 1.2, 0.44, 1);
+  --island-morph-ms: 300ms;
+}
+
+.island-surface[data-island-state="collapsed"][data-island-empty="true"] {
+  border-radius: 15px;
+}
+
+.island-surface[data-island-state="hover"] {
+  border-radius: 20px;
 }
 
 .island-surface[data-island-state="expanded"] {
-  border-radius: 0 0 18px 18px;
-}
-
-/* Noise overlay kills 8-bit banding on the long body gradient. */
-.island-surface::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  opacity: 0.025;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='128' height='128' filter='url(%23n)'/%3E%3C/svg%3E");
-}
-
-/* Notch mode: the top edge must fuse with the physical bezel — body top stop
-   at pure black and the ambient shadow pushed downward-only so nothing halos
-   the camera housing. */
-.island-surface-notch {
-  background: linear-gradient(180deg, #000, #0b0c0e 55%, #070809);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-    inset 0 -20px 30px rgba(0, 0, 0, 0.45),
-    0 10px 24px -6px rgba(0, 0, 0, 0.35),
-    0 2px 6px rgba(0, 0, 0, 0.25);
-}
-
-/* State-hued ambient glow while any session is active. In notch mode the glow
-   is pushed downward only, so a mismatched DEFAULT_NOTCH_WIDTH doesn't halo
-   the physical camera housing. */
-.island-surface-glow {
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-    inset 0 -20px 30px rgba(0, 0, 0, 0.45),
-    0 8px 24px rgba(0, 0, 0, 0.35),
-    0 2px 6px rgba(0, 0, 0, 0.25),
-    0 0 20px hsl(var(--island-hue, 205) 85% 60% / 0.35),
-    0 0 48px hsl(var(--island-hue, 205) 85% 55% / 0.18);
-}
-
-.island-surface-glow-notch {
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-    inset 0 -20px 30px rgba(0, 0, 0, 0.45),
-    0 10px 24px -6px rgba(0, 0, 0, 0.35),
-    0 12px 24px -8px hsl(var(--island-hue, 205) 80% 60% / 0.4),
-    0 24px 48px -12px hsl(var(--island-hue, 205) 80% 55% / 0.2);
-}
-
-/* Done: the glow fades out over 2s instead of cutting off. */
-.island-surface-glow-done {
-  animation: island-glow-fade 2s ease-out both;
-}
-
-@keyframes island-glow-fade {
-  from {
-    box-shadow:
-      inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-      inset 0 -20px 30px rgba(0, 0, 0, 0.45),
-      0 8px 24px rgba(0, 0, 0, 0.35),
-      0 2px 6px rgba(0, 0, 0, 0.25),
-      0 0 20px hsl(var(--island-hue, 205) 85% 60% / 0.35),
-      0 0 48px hsl(var(--island-hue, 205) 85% 55% / 0.18);
-  }
-  to {
-    box-shadow:
-      inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-      inset 0 -20px 30px rgba(0, 0, 0, 0.45),
-      0 8px 24px rgba(0, 0, 0, 0.35),
-      0 2px 6px rgba(0, 0, 0, 0.25),
-      0 0 20px hsl(var(--island-hue, 205) 85% 60% / 0),
-      0 0 48px hsl(var(--island-hue, 205) 85% 55% / 0);
-  }
-}
-
-/* ---- Rim shimmer ------------------------------------------------------ */
-
-/* Liquid-glass rim sweep, active only while work is actually happening
-   (working/looping); needs-approval's pulse owns attention instead. */
-@property --island-rim-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-
-.island-surface::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  pointer-events: none;
-  background: conic-gradient(
-    from var(--island-rim-angle, 0deg),
-    transparent 0deg,
-    hsl(var(--island-hue, 205) 80% 70% / 0.5) 40deg,
-    transparent 110deg
-  );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  opacity: 0;
-  transition: opacity 400ms ease;
-}
-
-.island-surface[data-island-status="working"]::after {
-  opacity: 1;
-  animation: island-rim-sweep 5s linear infinite;
-}
-
-.island-surface[data-island-status="looping"]::after {
-  opacity: 1;
-  animation: island-rim-sweep 3.5s linear infinite;
-}
-
-@keyframes island-rim-sweep {
-  to {
-    --island-rim-angle: 360deg;
-  }
-}
-
-/* Interior state wash: light from the orb tints the capsule interior so the
-   surface participates in the state color, not just the orb. */
-.island-state-wash {
-  border-radius: inherit;
-  background: radial-gradient(
-    140px 70px at 28px 50%,
-    color-mix(in oklab, hsl(var(--island-hue, 225) 90% 60%) 16%, transparent),
-    transparent 75%
-  );
-  transition: opacity 300ms ease;
-}
-
-/* Idle has no work to announce — the wash drops to a faint ember so the
-   collapsed pill reads as glass, not a flat blue slab. */
-.island-surface[data-island-status="idle"] .island-state-wash {
-  opacity: 0.45;
-}
-
-/* Expanded empty state centers its hero orb, so the interior wash must be
-   symmetric around it — the collapsed/hover left-anchored wash would read as a
-   stray off-center light patch. */
-.island-surface[data-island-state="expanded"][data-island-empty="true"] .island-state-wash {
-  background: radial-gradient(
-    140px 90px at 50% 55%,
-    color-mix(in oklab, hsl(var(--island-hue, 225) 90% 60%) 16%, transparent),
-    transparent 75%
-  );
+  border-radius: 22px;
 }
 
 /* ---- Content choreography -------------------------------------------- */
 
 /* Cross-fade swap: both layers stay mounted — the outgoing overlay fades over
-   the first ~55% of the morph while the incoming content fades/scales in from
-   ~30%, so the hand-off overlaps at low opacity: no frame is blank and no
-   frame double-exposes both layers at full strength. */
+   the first half of the morph while the incoming content fades/translates in
+   (≤3px) so the hand-off never leaves a blank frame. */
 .island-leave {
-  animation: island-leave calc(var(--island-morph-ms, 180ms) * 0.55) linear both;
+  animation: island-leave calc(var(--island-morph-ms, 200ms) * 0.5) linear both;
 }
 
 .island-enter-header,
 .island-enter-body {
-  animation: island-enter calc(var(--island-morph-ms, 180ms) * 0.5) ease-out
-    calc(var(--island-morph-ms, 180ms) * 0.3) both;
+  animation: island-enter 130ms cubic-bezier(0.23, 1, 0.32, 1)
+    calc(var(--island-morph-ms, 200ms) * 0.3) both;
 }
 
-/* Close morph gets a tighter hand-off: the outgoing layer is fully faded by
-   45% of the morph before the incoming collapsed content enters at 50%, so no
-   frame double-exposes the rows over the pill. */
-.island-surface[data-island-state="collapsed"] .island-leave {
-  animation-duration: calc(var(--island-morph-ms, 180ms) * 0.45);
-}
-
-.island-surface[data-island-state="collapsed"] .island-enter-header,
-.island-surface[data-island-state="collapsed"] .island-enter-body {
-  animation-duration: calc(var(--island-morph-ms, 180ms) * 0.5);
-  animation-delay: calc(var(--island-morph-ms, 180ms) * 0.5);
-}
-
-/* The leaving layer's orb blooms ride the layer fade only: their own breathe
-   curve would let the warm glow outlive the row and smear the shrinking
-   capsule. */
-.island-leave .island-orb::before {
-  animation: none;
-  opacity: 0.55;
-}
-
-/* Row choreography: each expanded row rises + scales in on a ~30ms stagger
-   (inline animation-delay), so content builds instead of appearing as a slab. */
 .island-enter-row {
-  animation: island-row-enter 160ms ease-out both;
+  animation: island-enter 130ms cubic-bezier(0.23, 1, 0.32, 1) both;
 }
 
 @keyframes island-leave {
@@ -263,278 +86,55 @@
 @keyframes island-enter {
   from {
     opacity: 0;
-    transform: translateY(4px) scale(0.985);
-  }
-}
-
-@keyframes island-row-enter {
-  from {
-    opacity: 0;
-    transform: translateY(4px) scale(0.97);
+    transform: translateY(3px);
   }
 }
 
 /* ---- Expanded panel --------------------------------------------------- */
 
-.island-panel-vignette {
-  background: radial-gradient(120% 90% at 50% 0%, transparent 55%, rgba(0, 0, 0, 0.4));
+.island-list {
+  overscroll-behavior: contain;
 }
 
-/* Glass icon-button chrome for the header chip + close button. */
-.island-chip {
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.04));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+.island-row {
+  transition: background-color 150ms ease;
 }
 
-/* 1px dithered separator between expanded rows. */
-.island-row + .island-row {
-  position: relative;
-}
-
-.island-row + .island-row::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 10px;
-  right: 10px;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.14) 15%,
-    rgba(255, 255, 255, 0.14) 85%,
-    transparent
-  );
-}
-
-/* Hovered rows get a faint state-hued left edge. */
 .island-row:hover {
-  box-shadow: inset 2px 0 0 hsl(var(--island-hue, 205) 80% 60% / 0.5);
+  background: rgba(255, 255, 255, 0.04);
 }
 
-/* Status text shares the orb's state hue tokens (lightened for legibility on
-   the dark glass). */
-.island-status-text-working {
-  color: hsl(195 90% 70%);
+.island-row:focus-visible,
+.island-close:focus-visible,
+.island-pill:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.55);
+  outline-offset: -2px;
 }
 
-.island-status-text-needs-approval {
-  color: hsl(38 95% 66%);
-}
+/* ---- Status light ----------------------------------------------------- */
 
-.island-status-text-done {
-  color: hsl(150 80% 62%);
-}
-
-/* ---- Orb lamp -------------------------------------------------------- */
-
-/* State palette: dim cool blue idle, multi-hue working, warm amber attention,
-   red error, green done. */
-.island-orb {
-  /* Spans are inline by default, which ignores the width/height the component
-     sets — block keeps the orb at its real diameter. */
+/* 9px dot: flat state-color fill plus one small static halo. Only
+   needs-approval pulses, briefly, on entry. */
+.island-light {
   display: block;
-  position: relative;
-  border-radius: 9999px;
   flex-shrink: 0;
-  /* Bloom halo spills past the diameter; nothing here may clip it. */
-  overflow: visible;
-  /* One core gradient shared by the luminous core and its blurred bloom
-     duplicate: hot-white center melting into the state hue, no transparent
-     edge stop (a transparent edge is what read as a plastic bead). The hue
-     number comes from --island-hue set inline by the component. */
-  --orb-core-gradient: radial-gradient(
-    circle at 50% 42%,
-    #fff 0%,
-    hsl(var(--island-hue, 225) 90% 70%) 35%,
-    hsl(var(--island-hue, 225) 80% 45%) 75%
-  );
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background-color: var(--island-light-color, rgba(255, 255, 255, 0.35));
+  box-shadow: 0 0 6px var(--island-light-halo, transparent);
+  transition:
+    background-color 150ms ease,
+    box-shadow 150ms ease;
 }
 
-/* Layer 1 — bloom: a blurred, scaled duplicate of the core breathing behind
-   it, giving the glow spill that makes the lamp read as luminous. */
-.island-orb::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  border-radius: 9999px;
-  transform: scale(1.5);
-  filter: blur(7px);
-  opacity: 0.55;
-  background: var(--orb-core-gradient);
-  animation: island-orb-bloom-breathe 2.8s ease-in-out infinite;
+.island-light[data-light-state="needs-approval"] {
+  animation: island-light-pulse 600ms ease-in-out 2;
 }
 
-/* Layer 2 — core: hot-white center over the state hue, with a slow ±8° hue
-   drift so the lamp never reads as a static dot. */
-.island-orb-core {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  border-radius: 9999px;
-  background: var(--orb-core-gradient);
-  animation: island-orb-hue 7s ease-in-out infinite;
-}
-
-/* Layer 3 — rim: a bright arc sweeping a 1.5px ring around the orb. */
-@property --orb-sweep {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-
-.island-orb::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  border-radius: 9999px;
-  background: conic-gradient(
-    from var(--orb-sweep, 0deg),
-    transparent 0 70%,
-    hsl(var(--island-hue, 225) 90% 78%) 85%,
-    transparent 100%
-  );
-  /* Ring mask on the same box as the core (no padding offset), so the sweep
-     hugs the core edge instead of floating as a detached crescent. */
-  -webkit-mask: radial-gradient(circle, transparent 55%, #000 56%, #000 64%, transparent 65%);
-  mask: radial-gradient(circle, transparent 55%, #000 56%, #000 64%, transparent 65%);
-  animation: island-orb-sweep 2.4s linear infinite;
-}
-
-/* Soft seat so the orb reads as mounted in the pill, not pasted on; kept
-   translucent so the orb's own bloom stays visible. */
-.island-orb-seat {
-  padding: 3px;
-  border-radius: 9999px;
-  background: rgba(0, 0, 0, 0.25);
-  flex-shrink: 0;
-  overflow: visible;
-}
-
-/* State motion: only transform/opacity/filter animate (composited layers). */
-
-.island-orb[data-orb-state="idle"] {
-  animation: island-orb-idle-breathe 2.4s ease-in-out infinite;
-}
-
-/* Idle keeps the shared 50%/42% specular origin but swaps the fast sweep for
-   a static, subtler lower-right rim glint plus a very slow hue drift — calm,
-   yet clearly the same lamp family as the active states. */
-.island-orb[data-orb-state="idle"]::after {
-  animation: none;
-  background: conic-gradient(
-    from 90deg,
-    transparent 0 55%,
-    hsl(var(--island-hue, 225) 90% 78% / 0.55) 70%,
-    transparent 85%
-  );
-  -webkit-mask: radial-gradient(circle, transparent 56%, #000 58%, #000 62%, transparent 64%);
-  mask: radial-gradient(circle, transparent 56%, #000 58%, #000 62%, transparent 64%);
-}
-
-.island-orb[data-orb-state="idle"] .island-orb-core {
-  animation: island-orb-idle-drift 10s ease-in-out infinite;
-}
-
-@keyframes island-orb-idle-drift {
-  0%,
-  100% {
-    filter: hue-rotate(-14deg);
-  }
+@keyframes island-light-pulse {
   50% {
-    filter: hue-rotate(14deg);
-  }
-}
-
-/* Collapsed idle carries a faint cool exterior glow so the pill never reads
-   as completely off. */
-.island-surface[data-island-state="collapsed"][data-island-status="idle"]:not(
-    .island-surface-notch
-  ) {
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-    inset 0 -20px 30px rgba(0, 0, 0, 0.45),
-    0 8px 24px rgba(0, 0, 0, 0.35),
-    0 2px 6px rgba(0, 0, 0, 0.25),
-    0 0 14px hsl(225 80% 60% / 0.12);
-}
-
-/* Active states scale the whole orb 1.15x (composited transform) so a state
-   change is visible from across the room. */
-.island-orb[data-orb-state="working"] {
-  animation: island-orb-breathe 3s ease-in-out infinite;
-}
-
-.island-orb[data-orb-state="looping"] {
-  transform: scale(1.15);
-}
-
-.island-orb[data-orb-state="needs-approval"] {
-  animation: island-orb-pulse 2.4s ease-in-out infinite;
-}
-
-@keyframes island-orb-sweep {
-  to {
-    --orb-sweep: 360deg;
-  }
-}
-
-@keyframes island-orb-bloom-breathe {
-  0%,
-  100% {
-    opacity: 0.4;
-  }
-  50% {
-    opacity: 0.65;
-  }
-}
-
-@keyframes island-orb-hue {
-  0%,
-  100% {
-    filter: hue-rotate(-8deg);
-  }
-  50% {
-    filter: hue-rotate(8deg);
-  }
-}
-
-@keyframes island-orb-idle-breathe {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.06);
-  }
-}
-
-@keyframes island-orb-breathe {
-  0%,
-  100% {
-    transform: scale(1.15);
-  }
-  50% {
-    transform: scale(1.22);
-  }
-}
-
-@keyframes island-orb-pulse {
-  0%,
-  30%,
-  60%,
-  100% {
-    transform: scale(1.15);
-    opacity: 1;
-  }
-  15%,
-  45% {
-    transform: scale(1.29);
-    opacity: 0.85;
+    opacity: 0.55;
   }
 }
 
@@ -542,14 +142,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .island-surface {
-    transition: none;
-  }
-
-  .island-orb,
-  .island-orb::before,
-  .island-orb::after,
-  .island-orb-core {
-    animation: none !important;
+    transition: opacity 200ms ease;
   }
 
   .island-leave,
@@ -559,8 +152,7 @@
     animation: none;
   }
 
-  .island-surface::after,
-  .island-surface-glow-done {
+  .island-light {
     animation: none !important;
   }
 }
