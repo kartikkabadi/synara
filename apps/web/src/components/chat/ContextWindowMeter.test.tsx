@@ -66,27 +66,41 @@ const nativeAutoCompaction: ProviderCompactionCapabilities = {
   },
 };
 
+const manualOnlyCompaction: ProviderCompactionCapabilities = {
+  ...unsupportedCompaction,
+  manual: {
+    mode: "same-session",
+    mechanism: "native-rpc",
+    supportsInstructions: true,
+  },
+  automatic: {
+    mode: "none",
+    statusVisibility: "none",
+    triggerVisibility: "opaque",
+  },
+};
+
 describe("ContextWindowMeterDetails", () => {
   it("renders provider-managed auto compaction copy from the descriptor", () => {
     const markup = renderToStaticMarkup(
       <ContextWindowMeterDetails usage={usage} compaction={nativeAutoCompaction} />,
     );
-    expect(markup).toContain("Automatically compacts its context when needed.");
+    expect(markup).toContain("Auto-compacts when context is nearly full.");
   });
 
   it("renders unavailable copy when the descriptor rules out compaction", () => {
     const markup = renderToStaticMarkup(
       <ContextWindowMeterDetails usage={usage} compaction={unsupportedCompaction} />,
     );
-    expect(markup).toContain("Compaction unavailable.");
-    expect(markup).not.toContain("Automatically compacts its context when needed.");
+    expect(markup).toContain("Compaction unavailable for this provider.");
+    expect(markup).not.toContain("Auto-compacts when context is nearly full.");
   });
 
   it("ignores the legacy snapshot flag without a descriptor", () => {
     const markup = renderToStaticMarkup(
       <ContextWindowMeterDetails usage={usage} compaction={null} />,
     );
-    expect(markup).not.toContain("Automatically compacts its context when needed.");
+    expect(markup).not.toContain("Auto-compacts when context is nearly full.");
   });
 
   it("renders the runtime status trigger for provider-auto compaction", () => {
@@ -103,8 +117,26 @@ describe("ContextWindowMeterDetails", () => {
         compactionRuntimeStatus={runtimeStatus}
       />,
     );
+    expect(markup).toContain("Auto-compacts when context is nearly full.");
     expect(markup).toContain("Auto-compacts at 85%");
-    expect(markup).not.toContain("Automatically compacts its context when needed.");
+  });
+
+  it("renders synara-managed auto compaction copy with the trigger", () => {
+    const runtimeStatus: ThreadCompactionRuntimeStatus = {
+      owner: "synara",
+      providerAutoEnabled: null,
+      manualAvailability: { available: true },
+      trigger: { kind: "remaining-tokens", reserveTokens: 16_000 },
+    };
+    const markup = renderToStaticMarkup(
+      <ContextWindowMeterDetails
+        usage={usage}
+        compaction={manualOnlyCompaction}
+        compactionRuntimeStatus={runtimeStatus}
+      />,
+    );
+    expect(markup).toContain("Synara will compact automatically.");
+    expect(markup).toContain("Keeps 16k tokens free");
   });
 
   it("renders the compact-now affordance for manual-only compaction", () => {
@@ -116,12 +148,13 @@ describe("ContextWindowMeterDetails", () => {
     const markup = renderToStaticMarkup(
       <ContextWindowMeterDetails
         usage={usage}
-        compaction={unsupportedCompaction}
+        compaction={manualOnlyCompaction}
         compactionRuntimeStatus={runtimeStatus}
+        onCompactNow={() => {}}
       />,
     );
     expect(markup).toContain("Compact now");
-    expect(markup).not.toContain("Compaction unavailable.");
+    expect(markup).not.toContain("Compaction unavailable for this provider.");
   });
 
   it("renders unavailable when the runtime status rules out compaction", () => {
@@ -137,7 +170,83 @@ describe("ContextWindowMeterDetails", () => {
         compactionRuntimeStatus={runtimeStatus}
       />,
     );
-    expect(markup).toContain("Compaction unavailable.");
-    expect(markup).not.toContain("Automatically compacts its context when needed.");
+    expect(markup).toContain("Compaction unavailable for this provider.");
+    expect(markup).not.toContain("Auto-compacts when context is nearly full.");
+  });
+
+  it("renders the in-progress spinner copy while compaction is running", () => {
+    const runtimeStatus: ThreadCompactionRuntimeStatus = {
+      owner: "none",
+      providerAutoEnabled: false,
+      manualAvailability: { available: true },
+      phase: { status: "running" },
+    };
+    const markup = renderToStaticMarkup(
+      <ContextWindowMeterDetails
+        usage={usage}
+        compaction={manualOnlyCompaction}
+        compactionRuntimeStatus={runtimeStatus}
+      />,
+    );
+    expect(markup).toContain("Compacting context…");
+  });
+
+  it("renders the error reason with a retry affordance when retryable", () => {
+    const runtimeStatus: ThreadCompactionRuntimeStatus = {
+      owner: "none",
+      providerAutoEnabled: false,
+      manualAvailability: { available: true },
+      phase: { status: "suspended", reason: "Provider rejected the request", retryable: true },
+    };
+    const markup = renderToStaticMarkup(
+      <ContextWindowMeterDetails
+        usage={usage}
+        compaction={manualOnlyCompaction}
+        compactionRuntimeStatus={runtimeStatus}
+        onCompactNow={() => {}}
+      />,
+    );
+    expect(markup).toContain("Provider rejected the request");
+    expect(markup).toContain("Retry compaction");
+  });
+
+  it("hides the retry affordance when the failure is not retryable", () => {
+    const runtimeStatus: ThreadCompactionRuntimeStatus = {
+      owner: "none",
+      providerAutoEnabled: false,
+      manualAvailability: { available: true },
+      phase: { status: "suspended", reason: "Manual compaction unsupported", retryable: false },
+    };
+    const markup = renderToStaticMarkup(
+      <ContextWindowMeterDetails
+        usage={usage}
+        compaction={manualOnlyCompaction}
+        compactionRuntimeStatus={runtimeStatus}
+        onCompactNow={() => {}}
+      />,
+    );
+    expect(markup).toContain("Manual compaction unsupported");
+    expect(markup).not.toContain("Retry compaction");
+  });
+
+  it("renders the settings toggle only for synara-managed candidates", () => {
+    const markup = renderToStaticMarkup(
+      <ContextWindowMeterDetails
+        usage={usage}
+        compaction={manualOnlyCompaction}
+        onUpdateCompactionSettings={() => {}}
+      />,
+    );
+    expect(markup).toContain("Compaction settings");
+    expect(markup).toContain("Enable Synara-managed auto-compaction");
+
+    const nativeMarkup = renderToStaticMarkup(
+      <ContextWindowMeterDetails
+        usage={usage}
+        compaction={nativeAutoCompaction}
+        onUpdateCompactionSettings={() => {}}
+      />,
+    );
+    expect(nativeMarkup).not.toContain("Compaction settings");
   });
 });
