@@ -18,6 +18,7 @@ import {
   getPiSupportedThinkingOptions,
   buildPiAgentGatewayCustomTools,
   makePiBashProcessSupervisor,
+  makePiCompactionRuntimeEvents,
   makePiRuntimeEventBase,
   makePiUserInputOptions,
   normalizePiTokenUsage,
@@ -348,6 +349,69 @@ describe("getPiSupportedThinkingOptions", () => {
     );
 
     expect(options.map((option) => option.value)).toEqual(["minimal", "low", "medium", "high"]);
+  });
+});
+
+describe("Pi compaction runtime events", () => {
+  const makeBase = () =>
+    makePiRuntimeEventBase({
+      session: { threadId: "thread-pi" as never },
+      activeTurnId: undefined,
+    });
+
+  it("opens the compaction item lifecycle on compaction_start", () => {
+    const events = makePiCompactionRuntimeEvents({
+      makeBase,
+      event: { type: "compaction_start" } as never,
+    });
+
+    expect(events.map((event) => event.type)).toEqual(["item.started", "item.updated"]);
+    expect(events[0]?.itemId).toBe(events[1]?.itemId);
+    for (const event of events) {
+      expect(event.payload).toMatchObject({
+        itemType: "context_compaction",
+        status: "inProgress",
+      });
+    }
+  });
+
+  it("refreshes usage before completing the pass on compaction_end", () => {
+    const usage = normalizePiTokenUsage(
+      makePiSessionStats({
+        tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+        contextUsage: { tokens: 120, contextWindow: 200_000, percent: 0.06 },
+      }),
+    );
+    expect(usage).toBeDefined();
+
+    const events = makePiCompactionRuntimeEvents({
+      makeBase,
+      event: { type: "compaction_end", aborted: false } as never,
+      refreshedUsage: usage,
+    });
+
+    expect(events.map((event) => event.type)).toEqual([
+      "thread.token-usage.updated",
+      "item.completed",
+    ]);
+    expect(events[0]?.payload).toMatchObject({ usage: { usedTokens: 120 } });
+    expect(events[1]?.payload).toMatchObject({
+      itemType: "context_compaction",
+      status: "completed",
+    });
+  });
+
+  it("marks the pass failed when compaction_end reports aborted", () => {
+    const events = makePiCompactionRuntimeEvents({
+      makeBase,
+      event: { type: "compaction_end", aborted: true } as never,
+    });
+
+    expect(events.map((event) => event.type)).toEqual(["item.completed"]);
+    expect(events[0]?.payload).toMatchObject({
+      itemType: "context_compaction",
+      status: "failed",
+    });
   });
 });
 

@@ -1580,6 +1580,103 @@ describe("OpenCodeAdapter runtime lifecycle", () => {
     });
   });
 
+  it("emits compaction lifecycle events with auto/overflow flags for native compaction", async () => {
+    const eventQueue = createSubscribedEventQueue();
+    const runtime = createMockOpenCodeRuntime();
+    const client = runtime.runtime.createOpenCodeSdkClient({
+      baseUrl: "http://127.0.0.1:4099",
+      directory: process.cwd(),
+    }) as unknown as {
+      event: {
+        subscribe: () => Promise<{ stream: AsyncIterable<unknown> }>;
+      };
+    };
+    client.event.subscribe = async () => ({ stream: eventQueue.stream });
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const adapter = yield* OpenCodeAdapter;
+        const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 6)).pipe(
+          Effect.forkChild,
+        );
+
+        yield* adapter.startSession({
+          provider: "opencode",
+          threadId: asThreadId("thread-compaction"),
+          runtimeMode: "full-access",
+        });
+
+        eventQueue.push({
+          type: "message.part.updated",
+          properties: {
+            sessionID: "opencode-session-1",
+            part: {
+              id: "part-compaction-1",
+              messageID: "assistant-message-1",
+              type: "compaction",
+              auto: true,
+              overflow: true,
+            },
+          },
+        });
+        eventQueue.push({
+          type: "session.compacted",
+          properties: {
+            sessionID: "opencode-session-1",
+          },
+        });
+
+        const events = Array.from(yield* Fiber.join(eventsFiber));
+        eventQueue.close();
+
+        return { events };
+      }).pipe(
+        Effect.provide(
+          makeOpenCodeAdapterLive({ runtime: runtime.runtime }).pipe(
+            Layer.provideMerge(
+              ServerConfig.layerTest(process.cwd(), { prefix: "opencode-adapter-test-" }),
+            ),
+            Layer.provideMerge(NodeServices.layer),
+          ),
+        ),
+      ),
+    );
+
+    expect(result.events.map((event) => event.type)).toEqual([
+      "session.started",
+      "thread.started",
+      "item.started",
+      "item.updated",
+      "item.completed",
+      "thread.state.changed",
+    ]);
+    expect(result.events[2]).toMatchObject({
+      payload: {
+        itemType: "context_compaction",
+        status: "inProgress",
+        detail: "Compacting context after provider context overflow",
+        data: { auto: true, overflow: true },
+      },
+    });
+    expect(result.events[4]).toMatchObject({
+      payload: {
+        itemType: "context_compaction",
+        status: "completed",
+        data: {
+          auto: true,
+          trigger: "provider-auto",
+          overflow: true,
+          reason: "provider context overflow",
+        },
+      },
+    });
+    expect(result.events[5]).toMatchObject({
+      payload: {
+        state: "compacted",
+      },
+    });
+  });
+
   it("filters Kilo synthetic and ignored text parts from assistant transcript", async () => {
     const eventQueue = createSubscribedEventQueue();
     const runtime = createMockOpenCodeRuntime();

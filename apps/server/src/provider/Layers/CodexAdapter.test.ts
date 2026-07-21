@@ -1490,10 +1490,13 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
-  it.effect("maps thread/compacting notifications to context compaction progress events", () =>
+  it.effect("maps thread/compacting notifications to compaction start and progress events", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+      const eventsFiber = yield* Stream.take(adapter.streamEvents, 2).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
 
       lifecycleManager.emit("event", {
         id: asEventId("evt-codex-thread-compacting"),
@@ -1509,19 +1512,111 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         },
       } satisfies ProviderEvent);
 
-      const firstEvent = yield* Fiber.join(firstEventFiber);
-      assert.equal(firstEvent._tag, "Some");
-      if (firstEvent._tag !== "Some") {
-        return;
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      assert.deepEqual(
+        events.map((event) => event.type),
+        ["item.started", "item.updated"],
+      );
+      for (const event of events) {
+        assert.equal(event.type === "item.started" || event.type === "item.updated", true);
+        if (event.type !== "item.started" && event.type !== "item.updated") {
+          return;
+        }
+        assert.equal(event.payload.itemType, "context_compaction");
+        assert.equal(event.payload.detail, "Compacting context");
+        assert.equal(event.payload.status, "inProgress");
       }
-      assert.equal(firstEvent.value.type, "item.updated");
-      if (firstEvent.value.type !== "item.updated") {
-        return;
-      }
-      assert.equal(firstEvent.value.payload.itemType, "context_compaction");
-      assert.equal(firstEvent.value.payload.detail, "Compacting context");
-      assert.equal(firstEvent.value.payload.status, "inProgress");
     }),
+  );
+
+  it.effect(
+    "maps thread/compacted to completion, compacted state, and a usage snapshot refresh",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* CodexAdapter;
+        const eventsFiber = yield* Stream.take(adapter.streamEvents, 4).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+
+        lifecycleManager.emit("event", {
+          id: asEventId("evt-codex-usage-before-compaction"),
+          kind: "notification",
+          provider: "codex",
+          threadId: asThreadId("thread-1"),
+          turnId: asTurnId("turn-1"),
+          createdAt: new Date().toISOString(),
+          method: "thread/tokenUsage/updated",
+          payload: {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            tokenUsage: {
+              total: {
+                inputTokens: 11_833,
+                cachedInputTokens: 3456,
+                outputTokens: 6,
+                reasoningOutputTokens: 0,
+                totalTokens: 11_839,
+              },
+              last: {
+                inputTokens: 120,
+                cachedInputTokens: 0,
+                outputTokens: 6,
+                reasoningOutputTokens: 0,
+                totalTokens: 126,
+              },
+              modelContextWindow: 258_400,
+            },
+          },
+        } satisfies ProviderEvent);
+
+        lifecycleManager.emit("event", {
+          id: asEventId("evt-codex-thread-compacted"),
+          kind: "notification",
+          provider: "codex",
+          threadId: asThreadId("thread-1"),
+          createdAt: new Date().toISOString(),
+          method: "thread/compacted",
+          payload: {
+            threadId: "thread-1",
+            state: "compacted",
+          },
+        } satisfies ProviderEvent);
+
+        const events = Array.from(yield* Fiber.join(eventsFiber));
+        assert.deepEqual(
+          events.map((event) => event.type),
+          [
+            "thread.token-usage.updated",
+            "thread.token-usage.updated",
+            "item.completed",
+            "thread.state.changed",
+          ],
+        );
+
+        const refreshedUsage = events[1];
+        assert.ok(refreshedUsage && refreshedUsage.type === "thread.token-usage.updated");
+        if (refreshedUsage.type !== "thread.token-usage.updated") {
+          return;
+        }
+        assert.equal(refreshedUsage.payload.usage.usedTokens, 126);
+        assert.equal(refreshedUsage.payload.usage.maxTokens, 258_400);
+
+        const completed = events[2];
+        assert.ok(completed && completed.type === "item.completed");
+        if (completed.type !== "item.completed") {
+          return;
+        }
+        assert.equal(completed.payload.itemType, "context_compaction");
+        assert.equal(completed.payload.status, "completed");
+
+        const stateChanged = events[3];
+        assert.ok(stateChanged && stateChanged.type === "thread.state.changed");
+        if (stateChanged.type !== "thread.state.changed") {
+          return;
+        }
+        assert.equal(stateChanged.payload.state, "compacted");
+      }),
   );
 });
 

@@ -51,6 +51,7 @@ import {
   ThreadId,
   TurnId,
   type UserInputQuestion,
+  type CompactionTrigger,
   type ProviderCompactionCapabilities,
   type ProviderComposerCapabilities,
   supportsThreadCompactionFromCompaction,
@@ -3369,9 +3370,53 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               },
             });
             return;
-          case "compact_boundary":
+          case "compact_boundary": {
+            // The SDK only reports the boundary once compaction already ran, so
+            // the started/completed pair brackets one provider-owned pass.
+            const compactionItemId = asRuntimeItemId(`claude-compaction-${stamp.eventId}`);
             yield* offerRuntimeEvent(context, {
               ...base,
+              itemId: compactionItemId,
+              type: "item.started",
+              payload: {
+                itemType: "context_compaction",
+                status: "inProgress",
+                title: "Context compaction",
+                data: message,
+              },
+            });
+            if (context.lastKnownTokenUsage !== undefined) {
+              const refreshedUsage = mergeClaudeTokenUsageSnapshot(
+                context.lastKnownTokenUsage,
+                undefined,
+                claudeEffectiveContextBudget(context),
+              );
+              context.lastKnownTokenUsage = refreshedUsage;
+              const usageStamp = yield* makeEventStamp();
+              yield* offerRuntimeEvent(context, {
+                ...base,
+                eventId: usageStamp.eventId,
+                type: "thread.token-usage.updated",
+                payload: { usage: refreshedUsage },
+              });
+            }
+            const completedStamp = yield* makeEventStamp();
+            yield* offerRuntimeEvent(context, {
+              ...base,
+              eventId: completedStamp.eventId,
+              itemId: compactionItemId,
+              type: "item.completed",
+              payload: {
+                itemType: "context_compaction",
+                status: "completed",
+                title: "Context compaction",
+                data: message,
+              },
+            });
+            const stateStamp = yield* makeEventStamp();
+            yield* offerRuntimeEvent(context, {
+              ...base,
+              eventId: stateStamp.eventId,
               type: "thread.state.changed",
               payload: {
                 state: "compacted",
@@ -3379,6 +3424,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               },
             });
             return;
+          }
           case "hook_started":
             yield* offerRuntimeEvent(context, {
               ...base,
@@ -5258,6 +5304,20 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       supportsThreadImport: true,
     };
 
+    // Claude auto-compacts when context usage reaches the effective budget
+    // derived from the selected `autoCompactWindow` (or SDK-reported
+    // threshold), so the trigger is an absolute used-token threshold.
+    const getNativeCompactionTrigger: NonNullable<
+      ClaudeAdapterShape["getNativeCompactionTrigger"]
+    > = (threadId) =>
+      Effect.gen(function* () {
+        const context = yield* requireSession(threadId);
+        const budget = claudeEffectiveContextBudget(context);
+        return budget !== undefined
+          ? ({ kind: "absolute-used-tokens", usedTokens: budget } satisfies CompactionTrigger)
+          : undefined;
+      });
+
     const getComposerCapabilities: NonNullable<
       ClaudeAdapterShape["getComposerCapabilities"]
     > = () => Effect.succeed(composerCapabilities);
@@ -5344,6 +5404,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       hasSession,
       stopAll,
       getComposerCapabilities,
+      getNativeCompactionTrigger,
       listCommands,
       listSkills,
       listModels,
