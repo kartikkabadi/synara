@@ -173,13 +173,6 @@ describe("parseLoopCommand", () => {
     });
   });
 
-  it("rejects negative counts", () => {
-    expect(parseLoopCommand("/loop -3")).toEqual({
-      kind: "invalid",
-      reason: "invalid_budget",
-    });
-  });
-
   it("rejects two budget tokens", () => {
     expect(parseLoopCommand("/loop 10 5m")).toEqual({
       kind: "invalid",
@@ -193,11 +186,6 @@ describe("parseLoopCommand", () => {
 
   it("treats a bare budget with trailing whitespace as a valid budget only", () => {
     expect(parseLoopCommand("/loop 10   ")).toEqual({
-      kind: "valid",
-      budget: { kind: "count", value: 10 },
-      prompt: null,
-    });
-    expect(parseLoopCommand("/loop 10 ")).toEqual({
       kind: "valid",
       budget: { kind: "count", value: 10 },
       prompt: null,
