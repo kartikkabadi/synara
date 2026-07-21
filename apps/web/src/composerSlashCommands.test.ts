@@ -17,6 +17,13 @@ import {
   providerSupportsTextNativeReviewCommand,
   shouldHideProviderNativeCommandFromComposerMenu,
 } from "./composerSlashCommands";
+import { SLASH_COMMAND_ICONS, commandMenuTitle } from "./components/chat/ComposerCommandMenu";
+import {
+  buildLoopParseErrorToast,
+  formatLoopParseError,
+  resolveLoopMenuSelection,
+} from "./hooks/useComposerSlashCommands";
+import { LoopIcon } from "./lib/icons";
 
 describe("composerSlashCommands", () => {
   it("recognizes built-in slash commands", () => {
@@ -442,5 +449,50 @@ describe("composerSlashCommands", () => {
   it("treats claude aliases like /fork as provider-native collisions", () => {
     expect(hasProviderNativeSlashCommand("claudeAgent", ["branch", "model"], "fork")).toBe(true);
     expect(hasProviderNativeSlashCommand("claudeAgent", ["clear"], "reset")).toBe(true);
+  });
+});
+
+describe("loop slash command routing", () => {
+  it("opens guided setup when no loop is active", () => {
+    expect(resolveLoopMenuSelection(false)).toEqual({
+      kind: "setup",
+      options: { budget: { kind: "count", turns: 5 }, objective: "", note: null },
+    });
+  });
+
+  it("opens edit mode when a loop is active", () => {
+    expect(resolveLoopMenuSelection(true)).toEqual({ kind: "edit" });
+  });
+
+  it("maps loop command-menu copy to Start/Edit Loop", () => {
+    const item = {
+      id: "slash:loop",
+      type: "slash-command",
+      command: "loop",
+      label: "/loop",
+      description: "Keep working on a prompt after every completed turn",
+      source: "app",
+    } as const;
+    expect(commandMenuTitle(item, false)).toBe("Start Loop");
+    expect(commandMenuTitle(item, true)).toBe("Edit Loop");
+  });
+
+  it("maps the loop command to the shared LoopIcon glyph", () => {
+    expect(SLASH_COMMAND_ICONS.loop).toBe(LoopIcon);
+  });
+
+  it("builds the parse-error toast with a Configure Loop action", () => {
+    const openCalls: unknown[] = [];
+    const toast = buildLoopParseErrorToast("/loop 10 /fix", "prompt_starts_with_slash", (options) =>
+      openCalls.push(options),
+    );
+    expect(toast.type).toBe("warning");
+    expect(toast.title).toBe("Invalid /loop command");
+    expect(toast.description).toBe(formatLoopParseError("prompt_starts_with_slash"));
+    expect(toast.actionProps.children).toBe("Configure Loop");
+    toast.actionProps.onClick();
+    expect(openCalls).toEqual([
+      { budget: { kind: "count", turns: 5 }, objective: "10 /fix", note: null },
+    ]);
   });
 });
