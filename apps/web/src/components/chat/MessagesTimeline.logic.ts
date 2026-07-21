@@ -10,6 +10,7 @@ import {
   type TurnId,
 } from "@synara/contracts";
 import { type TimelineEntry, type WorkLogEntry, formatElapsed } from "../../session-logic";
+import { formatLoopStartLabel } from "./loopPresentation";
 import { normalizeCompactToolLabel as normalizeCompactToolLabelValue } from "../../lib/toolCallLabel";
 import {
   isSummarizableToolCallEntry,
@@ -239,6 +240,8 @@ export type MessagesTimelineRow =
       revertTurnCount?: number | undefined;
       // Set on user and assistant rows whose turn originated from an active `/loop`.
       loopIteration?: number | undefined;
+      // Count budget of the owning loop when known; renders "2/5" style meta.
+      loopMaxIterations?: number | undefined;
     }
   | {
       kind: "proposed-plan";
@@ -265,11 +268,17 @@ export type MessagesTimelineRow =
       open: boolean;
     }
   | {
+      // Divider marking where a `/loop` activation began in the transcript.
+      kind: "loop-start";
+      id: string;
+      label: string;
+    }
+  | {
       // Durable transcript record left behind when a `/loop` turns off. Derived
       // purely from the thread's loop projection (never a fake message), so it
       // disappears if a new loop activates.
       kind: "loop-end";
-      id: "loop-end";
+      id: string;
       loop: ThreadLoop;
     };
 
@@ -504,9 +513,7 @@ export function deriveMessagesTimelineRows(input: {
   const durationStartByMessageId = computeMessageDurationStart(timelineMessages);
   const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(timelineMessages);
   const purposeByTurnId = new Map<string, ThreadTurnPurpose>();
-  // Live loop-owned user messages arrive before a turn id exists, so track the
-  // most recent user message's loop purpose positionally as a fallback.
-  let precedingLoopPurpose: ThreadTurnPurpose | null = null;
+  const seenLoopActivationIds = new Set<string>();
   let pendingWorkGroup: Extract<MessagesTimelineRow, { kind: "work" }> | null = null;
 
   const groupedEntriesEqual = (
@@ -600,10 +607,20 @@ export function deriveMessagesTimelineRows(input: {
     } else {
       flushPendingWorkGroup();
     }
-    if (message.role === "user") {
-      precedingLoopPurpose = message.purpose?.kind === "loop-iteration" ? message.purpose : null;
-      if (message.turnId != null && message.purpose?.kind === "loop-iteration") {
+    if (message.role === "user" && message.purpose?.kind === "loop-iteration") {
+      if (message.turnId != null) {
         purposeByTurnId.set(message.turnId, message.purpose);
+      }
+      if (!seenLoopActivationIds.has(message.purpose.activationId)) {
+        seenLoopActivationIds.add(message.purpose.activationId);
+        nextRows.push({
+          kind: "loop-start",
+          id: `loop-start:${message.purpose.activationId}`,
+          label:
+            input.loop != null && input.loop.activationId === message.purpose.activationId
+              ? formatLoopStartLabel(input.loop)
+              : "Loop started",
+        });
       }
     }
 
@@ -631,16 +648,31 @@ export function deriveMessagesTimelineRows(input: {
           : undefined,
       revertTurnCount:
         message.role === "user" ? input.revertTurnCountByUserMessageId.get(message.id) : undefined,
+      // Assistant loop ownership comes only from stable turn identity; a
+      // temporarily uncorrelated streaming message simply omits the meta.
       ...(message.role === "assistant"
         ? (() => {
             const purpose =
-              (message.turnId != null ? purposeByTurnId.get(message.turnId) : null) ??
-              precedingLoopPurpose;
-            return purpose?.kind === "loop-iteration" ? { loopIteration: purpose.iteration } : {};
+              message.turnId != null ? purposeByTurnId.get(message.turnId) : undefined;
+            const loop = input.loop;
+            if (purpose == null || loop == null || loop.activationId !== purpose.activationId) {
+              return {};
+            }
+            return {
+              loopIteration: purpose.iteration,
+              ...(loop.maxIterations != null ? { loopMaxIterations: loop.maxIterations } : {}),
+            };
           })()
         : {}),
       ...(message.role === "user" && message.purpose?.kind === "loop-iteration"
-        ? { loopIteration: message.purpose.iteration }
+        ? {
+            loopIteration: message.purpose.iteration,
+            ...(input.loop != null &&
+            input.loop.activationId === message.purpose.activationId &&
+            input.loop.maxIterations != null
+              ? { loopMaxIterations: input.loop.maxIterations }
+              : {}),
+          }
         : {}),
     });
   }
@@ -692,9 +724,22 @@ export function deriveMessagesTimelineRows(input: {
   }
 
   // A finished loop leaves a durable transcript record at the tail so the stop
-  // reason survives the composer chip's TTL and page refreshes.
+  // reason survives the composer chip's TTL and page refreshes. Held back while
+  // a matching loop-owned turn is still running so the record never pre-empts
+  // the final turn's output.
   if (input.loop && !input.loop.active && input.loop.lastStopReason != null) {
-    nextRows.push({ kind: "loop-end", id: "loop-end", loop: input.loop });
+    const loopActivationId = input.loop.activationId;
+    const matchingLoopTurnRunning =
+      input.activeTurnInProgress === true &&
+      input.activeTurnId != null &&
+      purposeByTurnId.get(input.activeTurnId)?.activationId === loopActivationId;
+    if (!matchingLoopTurnRunning) {
+      nextRows.push({
+        kind: "loop-end",
+        id: `loop-end:${loopActivationId}:${input.loop.updatedAt}`,
+        loop: input.loop,
+      });
+    }
   }
 
   return nextRows;
@@ -1115,6 +1160,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "proposed-plan":
       return a.proposedPlan === (b as typeof a).proposedPlan;
 
+    case "loop-start":
+      return a.label === (b as typeof a).label;
+
     case "loop-end": {
       const bl = (b as typeof a).loop;
       return (
@@ -1146,7 +1194,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.assistantTurnInProgress === bm.assistantTurnInProgress &&
         a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
         a.revertTurnCount === bm.revertTurnCount &&
-        a.loopIteration === bm.loopIteration
+        a.loopIteration === bm.loopIteration &&
+        a.loopMaxIterations === bm.loopMaxIterations
       );
     }
   }
