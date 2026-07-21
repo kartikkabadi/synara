@@ -185,7 +185,7 @@ import type {
   ProviderReadPluginInput,
   ProviderReadPluginResult,
 } from "./providerDiscovery";
-import type { ProviderCompactThreadInput } from "./provider";
+import type { ProviderCompactionRequest, ProviderCompactionResult } from "./providerRuntime";
 import type {
   StatsGetProfileStatsInput,
   StatsGetProfileStatsResult,
@@ -648,7 +648,7 @@ export interface NativeApi {
     getComposerCapabilities: (
       input: ProviderGetComposerCapabilitiesInput,
     ) => Promise<ProviderComposerCapabilities>;
-    compactThread: (input: ProviderCompactThreadInput) => Promise<void>;
+    compactThread: (input: ProviderCompactionRequest) => Promise<ProviderCompactionResult>;
     listCommands: (input: ProviderListCommandsInput) => Promise<ProviderListCommandsResult>;
     listSkills: (input: ProviderListSkillsInput) => Promise<ProviderListSkillsResult>;
     listSkillsCatalog: (input: ProviderSkillsCatalogInput) => Promise<ProviderSkillsCatalogResult>;

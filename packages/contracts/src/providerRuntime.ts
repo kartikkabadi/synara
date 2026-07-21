@@ -371,6 +371,37 @@ export const ThreadCompactionRuntimeStatus = Schema.Struct({
 });
 export type ThreadCompactionRuntimeStatus = typeof ThreadCompactionRuntimeStatus.Type;
 
+// Correlates one manual/auto compaction pass across request, runtime events,
+// and the persisted operation summary.
+export const CompactionRequestId = TrimmedNonEmptyStringSchema;
+export type CompactionRequestId = typeof CompactionRequestId.Type;
+
+export const ProviderCompactionRequest = Schema.Struct({
+  requestId: CompactionRequestId,
+  threadId: ThreadId,
+  trigger: Schema.Literals(["manual", "synara-auto"]),
+  instructions: Schema.optional(TrimmedNonEmptyStringSchema),
+  expectedLifecycleGeneration: Schema.optional(TrimmedNonEmptyStringSchema),
+});
+export type ProviderCompactionRequest = typeof ProviderCompactionRequest.Type;
+
+export const ProviderCompactionResult = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("same-session"),
+    resumeCursor: Schema.optional(TrimmedNonEmptyStringSchema),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("session-rollover"),
+    resumeCursor: TrimmedNonEmptyStringSchema,
+    providerThreadId: Schema.optional(TrimmedNonEmptyStringSchema),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("runtime-restart-required"),
+    resumeCursor: Schema.optional(TrimmedNonEmptyStringSchema),
+  }),
+]);
+export type ProviderCompactionResult = typeof ProviderCompactionResult.Type;
+
 const ThreadTokenUsageUpdatedPayload = Schema.Struct({
   usage: ThreadTokenUsageSnapshot,
 });
