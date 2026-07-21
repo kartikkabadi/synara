@@ -188,6 +188,13 @@ import {
   sendAppSnapError,
   sendAppSnapState,
 } from "./appSnapIpc";
+import { resolveIslandEnabled } from "./island/islandGeometry";
+import { registerIslandIpcHandlers } from "./island/islandIpc";
+import {
+  IslandWindowManager,
+  readStoredIslandEnabled,
+  writeStoredIslandEnabled,
+} from "./island/islandWindow";
 
 // Capture the real archive identity before any explicit app.asar lookup. Static
 // snapshotting and the runtime watcher both use this same generation as their
@@ -209,6 +216,7 @@ const BASE_DIR =
   Path.join(OS.homedir(), desktopIdentity.defaultHomeDirectoryName);
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_WINDOW_STATE_PATH = Path.join(STATE_DIR, "desktop-window-state.json");
+const ISLAND_SETTINGS_PATH = Path.join(STATE_DIR, "island-settings.json");
 const DESKTOP_SCHEME = desktopIdentity.scheme;
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const APP_DISPLAY_NAME = desktopIdentity.displayName;
@@ -284,6 +292,7 @@ let browserPerfInterval: ReturnType<typeof setInterval> | null = null;
 const browserManager = new DesktopBrowserManager();
 let browserUsePipeServer: BrowserUsePipeServer | null = null;
 let appSnapManager: DesktopAppSnapManager | null = null;
+let islandManager: IslandWindowManager | null = null;
 let configuredGitHubUpdateSource: ReturnType<typeof resolveGitHubUpdateSource> = null;
 let configuredUpdaterCacheDirName: string | null = null;
 
@@ -523,11 +532,19 @@ async function waitForBackendWindowReady(baseUrl: string): Promise<"listening" |
   });
 }
 
+function isIslandBrowserWindow(window: BrowserWindow): boolean {
+  return islandManager?.window === window;
+}
+
+function firstAppWindow(): BrowserWindow | null {
+  return BrowserWindow.getAllWindows().find((window) => !isIslandBrowserWindow(window)) ?? null;
+}
+
 function ensureInitialBackendWindowOpen(baseUrl: string): void {
   openInitialBackendWindow({
     isDevelopment,
     baseUrl,
-    hasExistingWindow: () => (mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null) !== null,
+    hasExistingWindow: () => (mainWindow ?? firstAppWindow()) !== null,
     createWindow: () => {
       mainWindow = createWindow();
     },
@@ -1164,8 +1181,7 @@ function registerDesktopProtocol(): void {
 }
 
 function dispatchMenuAction(action: string): void {
-  const existingWindow =
-    BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
+  const existingWindow = BrowserWindow.getFocusedWindow() ?? mainWindow ?? firstAppWindow();
   const targetWindow = existingWindow ?? createWindow();
   if (!existingWindow) {
     mainWindow = targetWindow;
@@ -1189,7 +1205,7 @@ function dispatchMenuAction(action: string): void {
 }
 
 function resolveMenuTargetWindow(): BrowserWindow | null {
-  return BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0] ?? null;
+  return BrowserWindow.getFocusedWindow() ?? mainWindow ?? firstAppWindow();
 }
 
 function sendDesktopZoomFactor(webContents: Electron.WebContents): void {
@@ -1249,7 +1265,7 @@ function handleCheckForUpdatesMenuClick(): void {
     return;
   }
 
-  if (!BrowserWindow.getAllWindows().length) {
+  if (!firstAppWindow()) {
     mainWindow = createWindow();
   }
   void checkForUpdatesFromMenu();
@@ -2947,6 +2963,8 @@ async function shutdownDesktopRuntime(reason: string): Promise<void> {
     cancelBackendReadinessWait();
     appSnapManager?.dispose();
     appSnapManager = null;
+    islandManager?.destroy();
+    islandManager = null;
     await disposeBrowserUsePipeServerForShutdown(reason);
     browserManager.dispose();
     restoreStdIoCapture?.();
@@ -3292,9 +3310,84 @@ function registerIpcHandlers(): void {
   if (appSnapManager) {
     registerAppSnapIpcHandlers(ipcMain, appSnapManager);
   }
+  registerIslandIpcHandlers(ipcMain, {
+    getManager: () => islandManager,
+    // App renderers (main window, settings) are trusted: the sender must own a
+    // BrowserWindow and be loaded from the app's own entry URL, which excludes
+    // embedded browser-tab WebContentsViews and OAuth popup windows.
+    isTrustedAppSender: (sender) =>
+      BrowserWindow.fromWebContents(sender) !== null && isTrustedAppUrl(sender.getURL()),
+    getEnabled: isIslandEnabled,
+    setEnabled: setIslandEnabled,
+    focusThread: (threadId) => {
+      focusMainWindow({ stealAppFocus: true });
+      // dispatchMenuAction recreates the main window when none is open and
+      // defers the send until the renderer has finished loading.
+      dispatchMenuAction(`notification-open-thread:${threadId}`);
+    },
+    stopLoop: (_threadId) => {
+      // TODO(loop): route to the thread.loop.toggle dispatch path once the
+      // /loop contracts (devin/loop-phase-1) are available on this branch.
+    },
+  });
   registerDesktopVoiceTranscriptionHandler();
   startBrowserPerformanceLogging();
   registerBrowserIpcHandlers(ipcMain, browserManager);
+}
+
+function appEntryBaseUrl(): string {
+  return isDevelopment ? (process.env.VITE_DEV_SERVER_URL as string) : desktopIdentity.entryUrl;
+}
+
+// Origin comparison rather than a raw string prefix: prefix matching breaks
+// when the dev-server URL is unset and can over-match sibling paths. file://
+// URLs have an opaque "null" origin, so those compare protocol + pathname.
+function isTrustedAppUrl(rawUrl: string): boolean {
+  let base: URL;
+  let candidate: URL;
+  try {
+    base = new URL(appEntryBaseUrl());
+    candidate = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  if (base.origin !== "null") return candidate.origin === base.origin;
+  return candidate.protocol === base.protocol && candidate.pathname === base.pathname;
+}
+
+function islandEntryUrl(): string {
+  return `${appEntryBaseUrl()}#/island`;
+}
+
+function isIslandEnabled(): boolean {
+  return resolveIslandEnabled(readStoredIslandEnabled(ISLAND_SETTINGS_PATH), process.platform);
+}
+
+function setIslandEnabled(enabled: boolean): boolean {
+  try {
+    writeStoredIslandEnabled(ISLAND_SETTINGS_PATH, enabled);
+  } catch (error) {
+    console.warn(`[desktop] Failed to persist island setting: ${formatErrorMessage(error)}`);
+  }
+  if (enabled) {
+    ensureIslandWindow();
+  } else {
+    islandManager?.destroy();
+    islandManager = null;
+  }
+  return enabled;
+}
+
+function ensureIslandWindow(): void {
+  if (isQuitting) return;
+  if (!islandManager) {
+    islandManager = new IslandWindowManager({
+      preloadPath: Path.join(__dirname, "islandPreload.js"),
+      url: islandEntryUrl(),
+      platform: process.platform,
+    });
+  }
+  islandManager.create();
 }
 
 function getIconOption(): { icon: string } | Record<string, never> {
@@ -3673,6 +3766,9 @@ if (hasSingleInstanceLock) {
       void bootstrap().catch((error) => {
         handleFatalStartupError("bootstrap", error);
       });
+      if (isIslandEnabled()) {
+        ensureIslandWindow();
+      }
 
       app.on("browser-window-blur", () => {
         markDesktopAppBackgrounded();
@@ -3687,7 +3783,7 @@ if (hasSingleInstanceLock) {
           return;
         }
         handleDesktopAppForegrounded();
-        if (BrowserWindow.getAllWindows().length === 0) {
+        if (firstAppWindow() === null) {
           if (!isDevelopment) {
             ensureInitialBackendWindowOpen(backendHttpUrl);
             return;

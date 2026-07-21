@@ -423,6 +423,35 @@ export interface DesktopWindowState {
   isFullscreen: boolean;
 }
 
+export type IslandWindowState = "collapsed" | "hover" | "expanded";
+
+export interface IslandNotchInfo {
+  width: number;
+  height: number;
+}
+
+export interface IslandDisplayContext {
+  platform: "macos" | "windows" | "linux" | "other";
+  notch: IslandNotchInfo | null;
+}
+
+// Session-count metadata riding along setState so the main process can size
+// the window to the content (idle mini-pill, content-driven expanded height).
+export interface IslandStateMeta {
+  sessionCount: number;
+}
+
+// Bridge exposed to the dedicated island overlay window (islandPreload.ts).
+export interface IslandBridge {
+  // null when the manager is unavailable or the sender is rejected.
+  getContext: () => Promise<IslandDisplayContext | null>;
+  setIgnoreMouse: (ignore: boolean) => Promise<void>;
+  setState: (state: IslandWindowState, meta?: IslandStateMeta) => Promise<void>;
+  focusThread: (threadId: string) => Promise<void>;
+  stopLoop: (threadId: string) => Promise<void>;
+  onToggleExpanded: (listener: () => void) => () => void;
+}
+
 export interface SynaraStorageSnapshot {
   readonly version: 1;
   readonly exportedAt: string;
@@ -489,6 +518,10 @@ export interface DesktopBridge {
   storageMigration: {
     readSnapshot: () => SynaraStorageSnapshot | null;
     acknowledgeSnapshot: () => Promise<void>;
+  };
+  island?: {
+    getEnabled: () => Promise<boolean>;
+    setEnabled: (enabled: boolean) => Promise<boolean>;
   };
   server?: {
     transcribeVoice: (

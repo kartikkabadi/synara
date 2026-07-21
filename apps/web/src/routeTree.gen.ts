@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as IslandRouteImport } from './routes/island'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as ChatSettingsRouteImport } from './routes/_chat.settings'
@@ -25,6 +26,11 @@ import { Route as ChatWorkspaceWorkspaceIdRouteImport } from './routes/_chat.wor
 import { Route as ChatKanbanProjectIdRouteImport } from './routes/_chat.kanban.$projectId'
 import { Route as ChatAutomationsAutomationIdRouteImport } from './routes/_chat.automations.$automationId'
 
+const IslandRoute = IslandRouteImport.update({
+  id: '/island',
+  path: '/island',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ChatRoute = ChatRouteImport.update({
   id: '/_chat',
   getParentRoute: () => rootRouteImport,
@@ -104,6 +110,7 @@ const ChatAutomationsAutomationIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
+  '/island': typeof IslandRoute
   '/$threadId': typeof ChatThreadIdRoute
   '/automations': typeof ChatAutomationsRouteWithChildren
   '/plugins': typeof ChatPluginsRoute
@@ -119,6 +126,7 @@ export interface FileRoutesByFullPath {
   '/workspace/': typeof ChatWorkspaceIndexRoute
 }
 export interface FileRoutesByTo {
+  '/island': typeof IslandRoute
   '/$threadId': typeof ChatThreadIdRoute
   '/plugins': typeof ChatPluginsRoute
   '/settings': typeof ChatSettingsRoute
@@ -135,6 +143,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_chat': typeof ChatRouteWithChildren
+  '/island': typeof IslandRoute
   '/_chat/$threadId': typeof ChatThreadIdRoute
   '/_chat/automations': typeof ChatAutomationsRouteWithChildren
   '/_chat/plugins': typeof ChatPluginsRoute
@@ -154,6 +163,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/island'
     | '/$threadId'
     | '/automations'
     | '/plugins'
@@ -169,6 +179,7 @@ export interface FileRouteTypes {
     | '/workspace/'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/island'
     | '/$threadId'
     | '/plugins'
     | '/settings'
@@ -184,6 +195,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/_chat'
+    | '/island'
     | '/_chat/$threadId'
     | '/_chat/automations'
     | '/_chat/plugins'
@@ -202,10 +214,18 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   ChatRoute: typeof ChatRouteWithChildren
+  IslandRoute: typeof IslandRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/island': {
+      id: '/island'
+      path: '/island'
+      fullPath: '/island'
+      preLoaderRoute: typeof IslandRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_chat': {
       id: '/_chat'
       path: ''
@@ -371,6 +391,7 @@ const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRouteWithChildren,
+  IslandRoute: IslandRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
