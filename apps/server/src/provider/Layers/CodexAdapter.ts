@@ -22,6 +22,7 @@ import {
   type ServerVoiceTranscriptionResult,
   type ThreadTokenUsageSnapshot,
   type ProviderUserInputAnswers,
+  EventId,
   RuntimeItemId,
   RuntimeRequestId,
   RuntimeTaskId,
@@ -1013,16 +1014,47 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "thread/compacting") {
+    const compactingPayload = {
+      itemType: "context_compaction",
+      status: "inProgress",
+      title: "Context compaction",
+      detail: event.message ?? "Compacting context",
+      ...(event.payload !== undefined ? { data: event.payload } : {}),
+    } as const;
     return [
       {
         ...runtimeEventBase(event, canonicalThreadId),
+        eventId: EventId.makeUnsafe(`${event.id}:compaction-started`),
+        type: "item.started",
+        payload: compactingPayload,
+      },
+      {
+        ...runtimeEventBase(event, canonicalThreadId),
         type: "item.updated",
+        payload: compactingPayload,
+      },
+    ];
+  }
+
+  if (event.method === "thread/compacted") {
+    return [
+      {
+        ...runtimeEventBase(event, canonicalThreadId),
+        eventId: EventId.makeUnsafe(`${event.id}:compaction-completed`),
+        type: "item.completed",
         payload: {
           itemType: "context_compaction",
-          status: "inProgress",
+          status: "completed",
           title: "Context compaction",
-          detail: event.message ?? "Compacting context",
           ...(event.payload !== undefined ? { data: event.payload } : {}),
+        },
+      },
+      {
+        type: "thread.state.changed",
+        ...runtimeEventBase(event, canonicalThreadId),
+        payload: {
+          state: "compacted",
+          ...(event.payload !== undefined ? { detail: event.payload } : {}),
         },
       },
     ];
@@ -1032,8 +1064,7 @@ function mapToRuntimeEvents(
     event.method === "thread/status/changed" ||
     event.method === "thread/archived" ||
     event.method === "thread/unarchived" ||
-    event.method === "thread/closed" ||
-    event.method === "thread/compacted"
+    event.method === "thread/closed"
   ) {
     return [
       {
@@ -1045,9 +1076,7 @@ function mapToRuntimeEvents(
               ? "archived"
               : event.method === "thread/closed"
                 ? "closed"
-                : event.method === "thread/compacted"
-                  ? "compacted"
-                  : toThreadState(asObject(payload?.thread)?.state ?? payload?.state),
+                : toThreadState(asObject(payload?.thread)?.state ?? payload?.state),
           ...(event.payload !== undefined ? { detail: event.payload } : {}),
         },
       },
@@ -2021,10 +2050,32 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
           });
 
         const services = yield* Effect.services<never>();
+        // Latest usage per thread, replayed after `thread/compacted` so the
+        // post-compaction snapshot downstream reflects the newest
+        // `thread/tokenUsage/updated` payload the app-server reported.
+        const latestUsageEventByThread = new Map<string, ProviderRuntimeEvent>();
         const listener = (event: ProviderEvent) =>
           Effect.gen(function* () {
             yield* writeNativeEvent(event);
-            const runtimeEvents = mapToRuntimeEvents(event, event.threadId);
+            let runtimeEvents = mapToRuntimeEvents(event, event.threadId);
+            for (const runtimeEvent of runtimeEvents) {
+              if (runtimeEvent.type === "thread.token-usage.updated") {
+                latestUsageEventByThread.set(runtimeEvent.threadId, runtimeEvent);
+              }
+            }
+            if (event.method === "thread/compacted") {
+              const latestUsageEvent = latestUsageEventByThread.get(event.threadId);
+              if (latestUsageEvent !== undefined) {
+                runtimeEvents = [
+                  {
+                    ...latestUsageEvent,
+                    eventId: EventId.makeUnsafe(`${event.id}:usage-refresh`),
+                    createdAt: event.createdAt,
+                  },
+                  ...runtimeEvents,
+                ];
+              }
+            }
             if (runtimeEvents.length === 0) {
               yield* Effect.logDebug("ignoring unhandled Codex provider event", {
                 method: event.method,
