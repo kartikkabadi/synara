@@ -1398,7 +1398,7 @@ describe("deriveMessagesTimelineRows", () => {
     });
     expect(startRows[1]).toMatchObject({
       id: "loop-start:activation-1",
-      label: "Loop started \u00b7 /loop 5 fix the tests",
+      label: "Loop started",
     });
     const rowIds = rows.map((row) => row.id);
     expect(rowIds.indexOf("loop-start:activation-0")).toBe(rowIds.indexOf("entry-loop-user-1") - 1);
@@ -1447,6 +1447,23 @@ describe("deriveMessagesTimelineRows", () => {
       kind: "loop-end",
       id: "loop-end:activation-1:2026-01-01T00:10:00Z",
     });
+  });
+
+  it("holds back the loop-end row when only the active turn purpose identifies the loop turn", () => {
+    const loop = makeLoop({ lastStopReason: "user_stop" });
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries: [userEntry("u1", "2026-01-01T00:00:00Z")],
+      loop,
+      activeTurnInProgress: true,
+      activeTurnId: TurnId.makeUnsafe("t-loop"),
+      activeTurnPurpose: {
+        kind: "loop-iteration",
+        activationId: "activation-1",
+        iteration: 3,
+      },
+    });
+    expect(rows.some((row) => row.kind === "loop-end")).toBe(false);
   });
 
   it("keys the loop-end row by activation and stop time", () => {

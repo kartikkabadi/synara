@@ -10893,6 +10893,7 @@ export default function ChatView({
                   <ChatTranscriptPane
                     activeThreadId={activeThread.id}
                     activeTurnId={activeThread.session?.activeTurnId ?? null}
+                    activeTurnPurpose={activeThread.latestTurn?.purpose ?? null}
                     agentActivityDetail={openAgentActivityDetail}
                     hasMessages={timelineEntries.length > 0}
                     isWorking={isWorking}
