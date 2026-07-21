@@ -50,6 +50,7 @@ import {
   IconPaperclip,
   IconPlus,
   IconRefresh,
+  IconRepeat,
   IconRotate2,
   IconSelector,
   IconStar,
@@ -224,6 +225,9 @@ export const PlayIcon: LucideIcon = centralIconWrapper("play", "fill");
 export const Plus = adaptIcon(IconPlus);
 export const PlusIcon = adaptIcon(IconPlus);
 export const RefreshCwIcon = adaptIcon(IconRefresh);
+// Canonical `/loop` glyph — one feature, one glyph (command menu, setup header,
+// runtime rail, transcript metadata, completion summary).
+export const LoopIcon = adaptIcon(IconRepeat);
 export const RotateCcwIcon = adaptIcon(IconRotate2);
 export const Rows3Icon = adaptIcon(IconLayoutDistributeHorizontal);
 export const SearchIcon: LucideIcon = centralIconWrapper("magnifying-glass");
