@@ -474,7 +474,7 @@ describe("loop slash command routing", () => {
       source: "app",
     } as const;
     expect(commandMenuTitle(item, false)).toBe("Loop");
-    expect(commandMenuTitle(item, true)).toBe("Edit Loop");
+    expect(commandMenuTitle(item, true)).toBe("Edit loop");
   });
 
   it("maps the loop command to the shared LoopIcon glyph", () => {

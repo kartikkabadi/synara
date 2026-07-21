@@ -65,11 +65,11 @@ export function formatLoopParseError(reason: LoopParseErrorReason): string {
     case "invalid_budget":
       return "That budget isn't valid. Use a count up to 100 (/loop 10) or a duration (/loop 30m, /loop 2h).";
     case "ambiguous_second_budget":
-      return "The prompt can't start with a second budget. Quote or reword it, e.g. /loop 10 run 5 checks.";
+      return "The objective can't start with a second budget. Quote or reword it, e.g. /loop 10 run 5 checks.";
     case "prompt_starts_with_slash":
-      return "The loop prompt can't start with /. Try /loop 10 fix the tests.";
+      return "The loop objective can't start with a slash. Try /loop 10 fix the tests.";
     case "prompt_too_long":
-      return "That loop prompt is too long. Shorten it and try again.";
+      return "That loop objective is too long. Shorten it and try again.";
     default:
       return reason satisfies never;
   }
@@ -709,7 +709,7 @@ export function useComposerSlashCommands(input: {
         editorActions.setComposerPromptValue(trimmed);
         toastManager.add({
           type: "error",
-          title: "Could not stop loop",
+          title: "Could not stop Loop",
           description: "Couldn't stop the loop. Try again.",
         });
       }
@@ -740,7 +740,7 @@ export function useComposerSlashCommands(input: {
       if (!ready) {
         toastManager.add({
           type: "error",
-          title: "Could not start loop",
+          title: "Could not start Loop",
           description: "The thread isn't ready yet. Your objective has been preserved.",
         });
         return;
@@ -763,7 +763,7 @@ export function useComposerSlashCommands(input: {
         editorActions.setComposerPromptValue(trimmed);
         toastManager.add({
           type: "error",
-          title: "Could not start loop",
+          title: "Could not start Loop",
           description:
             error instanceof Error
               ? `${error.message} Your objective has been preserved.`
