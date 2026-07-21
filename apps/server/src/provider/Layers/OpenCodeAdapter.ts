@@ -3626,9 +3626,16 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         },
       );
 
-      const compactThread: NonNullable<OpenCodeAdapterShape["compactThread"]> = (threadId) =>
+      const compactThread: NonNullable<OpenCodeAdapterShape["compactThread"]> = (input) =>
         Effect.gen(function* () {
-          const context = ensureAdapterSessionContext(threadId);
+          if (input.instructions !== undefined) {
+            return yield* new ProviderAdapterValidationError({
+              provider,
+              operation: "compactThread",
+              issue: `${adapterConfig.displayName} context compaction does not support custom instructions.`,
+            });
+          }
+          const context = ensureAdapterSessionContext(input.threadId);
           const parsedModel = parseOpenCodeModelSlug(context.session.model);
           if (!parsedModel) {
             return yield* new ProviderAdapterValidationError({
@@ -3645,6 +3652,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
               modelID: parsedModel.modelID,
             }),
           ).pipe(Effect.mapError(toAdapterRequestError));
+          return { kind: "same-session" } as const;
         });
 
       const forkThread: NonNullable<OpenCodeAdapterShape["forkThread"]> = (input) =>
