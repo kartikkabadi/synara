@@ -242,7 +242,7 @@ export function Island() {
   const restSummary = summarizeRest(sessions.slice(1));
 
   return (
-    <div className="flex h-screen w-screen items-start justify-center overflow-hidden bg-transparent">
+    <div className="relative h-screen w-screen overflow-hidden bg-transparent">
       <div
         ref={surfaceRef}
         data-island-state={effectiveState}
@@ -259,16 +259,8 @@ export function Island() {
         className={cn(
           "island-surface pointer-events-auto flex flex-col overflow-hidden text-white",
           isNotch && "island-surface-notch",
-          "transition-[width,height,border-radius] duration-220 ease-out motion-reduce:transition-none",
           glowing && (isNotch ? "island-surface-glow-notch" : "island-surface-glow"),
           aggregate === "done" && !isNotch && "island-surface-glow-done",
-          effectiveState === "expanded"
-            ? "rounded-[26px]"
-            : effectiveState === "hover"
-              ? "rounded-[22px]"
-              : isNotch
-                ? "rounded-b-2xl"
-                : "rounded-full",
         )}
       >
         {effectiveState === "collapsed" ? (
