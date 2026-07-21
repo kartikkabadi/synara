@@ -40,6 +40,38 @@ const CONTENT_LEAVE_MS = 120;
 // Drives done-session pruning and relative timestamps between shell events.
 const CLOCK_TICK_MS = 30_000;
 
+// Dev-only visual harness: set `localStorage["island.mockSessions"] = "1"` to
+// swap in fake rows so the populated layouts can be exercised without live
+// agents. Dead code in production builds (import.meta.env.DEV is false).
+const USE_MOCK_SESSIONS =
+  import.meta.env.DEV &&
+  typeof localStorage !== "undefined" &&
+  localStorage.getItem("island.mockSessions") === "1";
+
+const MOCK_SESSIONS: readonly IslandSession[] = [
+  {
+    threadId: "mock-1",
+    title: "refactor-auth-middleware",
+    provider: "codex",
+    status: "working",
+    lastActivityAt: new Date(Date.now() - 40_000).toISOString(),
+  },
+  {
+    threadId: "mock-2",
+    title: "fix-transcript-scroll",
+    provider: "claudeAgent",
+    status: "needs-approval",
+    lastActivityAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+  },
+  {
+    threadId: "mock-3",
+    title: "island-visual-iteration",
+    provider: "opencode",
+    status: "done",
+    lastActivityAt: new Date(Date.now() - 12 * 60_000).toISOString(),
+  },
+];
+
 let reducedMotionQuery: MediaQueryList | null = null;
 function prefersReducedMotion(): boolean {
   reducedMotionQuery ??= window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -118,7 +150,10 @@ export function Island() {
     return () => clearInterval(timer);
   }, []);
 
-  const sessions = useMemo(() => deriveIslandSessions(threads, nowMs), [threads, nowMs]);
+  const sessions = useMemo(
+    () => (USE_MOCK_SESSIONS ? MOCK_SESSIONS : deriveIslandSessions(threads, nowMs)),
+    [threads, nowMs],
+  );
   const aggregate = aggregateIslandStatus(sessions);
 
   useEffect(() => {
@@ -301,7 +336,7 @@ export function Island() {
             aria-label="Expand agent sessions island"
           >
             <span className="island-orb-seat">
-              <IslandOrb state={orbState} />
+              <IslandOrb state={orbState} size={12} />
             </span>
             {sessions.length > 0 ? (
               <>
@@ -361,13 +396,13 @@ export function Island() {
             <div className="island-enter-header flex items-center justify-between border-b border-white/6 px-4 py-2.5">
               <span className="text-xs font-medium text-white/60">Sessions</span>
               <div className="flex items-center gap-2">
-                <span className="rounded border border-white/10 bg-white/5 px-1 text-[10px] text-white/40">
+                <span className="island-chip px-1.5 py-0.5 text-[10px] text-white/50">
                   {shortcutHint(context)}
                 </span>
                 <button
                   type="button"
                   onClick={() => applyState("collapsed")}
-                  className="rounded-md p-1 text-white/50 hover:bg-white/10 hover:text-white/80"
+                  className="island-chip p-1 text-white/50 hover:bg-white/10 hover:text-white/80"
                   aria-label="Collapse island"
                 >
                   <XIcon className="size-3.5" />
@@ -376,9 +411,9 @@ export function Island() {
             </div>
             <div className="island-enter-body flex-1 overflow-y-auto px-2 pb-2">
               {sessions.length === 0 ? (
-                <div className="flex h-full flex-col items-center justify-center gap-2 px-2">
-                  <IslandOrb state="idle" size={28} />
-                  <span className="text-sm text-white/60">No active sessions</span>
+                <div className="flex h-full flex-col items-center justify-center gap-2.5 px-2">
+                  <IslandOrb state="idle" size={32} />
+                  <span className="text-sm font-medium text-white/70">All quiet</span>
                   <span className="text-xs text-white/35">New agent turns will appear here</span>
                 </div>
               ) : (
@@ -389,15 +424,18 @@ export function Island() {
                     onClick={() => focusThread(session.threadId)}
                     className="island-row group flex h-11 w-full items-center gap-2.5 rounded-lg px-2.5 text-left hover:bg-white/6"
                   >
-                    <IslandOrb state={session.status} size={15} />
-                    <span className="min-w-0 flex-1 truncate text-[13px] text-white/90">
+                    <IslandOrb state={session.status} size={16} />
+                    <span className="min-w-0 flex-1 truncate font-mono text-[13px] font-bold text-white/90">
                       {session.title}
                     </span>
                     <span className="flex shrink-0 items-center gap-2 group-hover:hidden">
-                      <span className="rounded-md border border-white/10 bg-white/8 px-1.5 py-0.5 text-[10px] text-white/60">
-                        {providerLabel(session.provider)}
-                      </span>
-                      <span className="text-[10px] text-white/40">
+                      <span
+                        className={cn(
+                          "island-chip px-1.5 py-0.5 text-[10px]",
+                          STATUS_TEXT_CLASS[session.status],
+                        )}
+                      >
+                        {providerLabel(session.provider)} ·{" "}
                         {islandRelativeTime(session.lastActivityAt, nowMs)}
                       </span>
                       <span
