@@ -2,9 +2,10 @@
 // Purpose: Status light for the island: a 9px state-colored dot with a small static halo.
 // Layer: Web island UI
 
-import type { CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 import type { IslandSessionStatus } from "~/lib/islandSessionTracker";
+import { cn } from "~/lib/utils";
 
 export type IslandOrbState = IslandSessionStatus | "looping" | "idle" | "error";
 
@@ -36,9 +37,30 @@ export interface IslandOrbProps {
 }
 
 export function IslandOrb({ state }: IslandOrbProps) {
+  // Pulse only on an observed transition into needs-approval, never on mount:
+  // content layers remount on every collapsed/hover/expanded swap, and the
+  // light must not replay the pulse each time.
+  const previousStateRef = useRef(state);
+  const [pulse, setPulse] = useState(false);
+  useEffect(() => {
+    if (state === "needs-approval" && previousStateRef.current !== "needs-approval") {
+      setPulse(true);
+    } else if (state !== "needs-approval") {
+      setPulse(false);
+    }
+    previousStateRef.current = state;
+  }, [state]);
+
   const style = {
     "--island-light-color": LIGHT_COLOR[state],
     "--island-light-halo": LIGHT_HALO[state],
   } as CSSProperties;
-  return <span aria-hidden className="island-light" data-light-state={state} style={style} />;
+  return (
+    <span
+      aria-hidden
+      className={cn("island-light", pulse && "island-light-pulse")}
+      data-light-state={state}
+      style={style}
+    />
+  );
 }

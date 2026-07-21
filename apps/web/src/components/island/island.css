@@ -135,7 +135,7 @@
     box-shadow 150ms ease;
 }
 
-.island-light[data-light-state="needs-approval"] {
+.island-light-pulse {
   animation: island-light-pulse 600ms ease-in-out 2;
 }
 
@@ -148,8 +148,22 @@
 /* ---- Reduced motion --------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {
+  /* No geometry morph: each state change instead re-triggers a subtle 200ms
+     fade (per-state keyframe names so the animation restarts on retarget). */
   .island-surface {
-    transition: opacity 200ms ease;
+    transition: none;
+  }
+
+  .island-surface[data-island-state="collapsed"] {
+    animation: island-fade-collapsed 200ms ease;
+  }
+
+  .island-surface[data-island-state="hover"] {
+    animation: island-fade-hover 200ms ease;
+  }
+
+  .island-surface[data-island-state="expanded"] {
+    animation: island-fade-expanded 200ms ease;
   }
 
   .island-leave,
@@ -161,5 +175,23 @@
 
   .island-light {
     animation: none !important;
+  }
+}
+
+@keyframes island-fade-collapsed {
+  from {
+    opacity: 0.6;
+  }
+}
+
+@keyframes island-fade-hover {
+  from {
+    opacity: 0.6;
+  }
+}
+
+@keyframes island-fade-expanded {
+  from {
+    opacity: 0.6;
   }
 }
