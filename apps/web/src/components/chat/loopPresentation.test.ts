@@ -1,0 +1,302 @@
+import { describe, expect, it } from "vitest";
+
+import type { LoopStopReason, OrchestrationLatestTurn, ThreadLoop } from "@synara/contracts";
+
+import {
+  type DeriveLoopPresentationStateInput,
+  deriveLoopPresentationState,
+  deriveLoopProgress,
+  formatLoopRemainingTime,
+  formatLoopStopReason,
+  getLoopAriaValueText,
+  getLoopTickIntervalMs,
+} from "./loopPresentation";
+
+const NOW = new Date("2026-01-01T12:00:00.000Z").getTime();
+
+function makeLoop(overrides: Partial<ThreadLoop> = {}): ThreadLoop {
+  return {
+    active: true,
+    prompt: "Keep fixing tests",
+    iteration: 2,
+    maxIterations: 5,
+    endsAt: null,
+    hardCap: 100,
+    consecutiveErrors: 0,
+    lastStopReason: null,
+    activationId: "activation-1",
+    createdAt: "2026-01-01T11:00:00.000Z",
+    updatedAt: "2026-01-01T11:30:00.000Z",
+    ...overrides,
+  } as ThreadLoop;
+}
+
+function makeRunningLoopTurn(
+  overrides: Partial<OrchestrationLatestTurn> = {},
+): OrchestrationLatestTurn {
+  return {
+    turnId: "turn-1",
+    state: "running",
+    requestedAt: "2026-01-01T11:45:00.000Z",
+    startedAt: "2026-01-01T11:45:01.000Z",
+    completedAt: null,
+    assistantMessageId: null,
+    purpose: { kind: "loop-iteration", activationId: "activation-1", iteration: 2 },
+    ...overrides,
+  } as OrchestrationLatestTurn;
+}
+
+function derive(
+  overrides: Partial<DeriveLoopPresentationStateInput> = {},
+): ReturnType<typeof deriveLoopPresentationState> {
+  return deriveLoopPresentationState({
+    loop: makeLoop(),
+    latestTurn: null,
+    session: null,
+    interactionMode: "default",
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    now: NOW,
+    ...overrides,
+  });
+}
+
+describe("deriveLoopPresentationState", () => {
+  it("returns null when there is no loop", () => {
+    expect(derive({ loop: null })).toBeNull();
+  });
+
+  it("returns null for an inactive loop without a stop reason", () => {
+    expect(derive({ loop: makeLoop({ active: false, lastStopReason: null }) })).toBeNull();
+  });
+
+  it("returns armed for an active loop with an empty prompt", () => {
+    const presentation = derive({ loop: makeLoop({ prompt: "" }) });
+    expect(presentation?.state).toEqual({ kind: "armed" });
+    expect(presentation?.label).toBe("Loop ready");
+    expect(presentation?.detail).toBe("Add a prompt to start");
+    expect(presentation?.color).toBe("neutral");
+    expect(presentation?.progress).toBeNull();
+  });
+
+  it("returns starting for an active loop before the first iteration", () => {
+    const presentation = derive({ loop: makeLoop({ iteration: 0 }) });
+    expect(presentation?.state).toEqual({ kind: "starting" });
+    expect(presentation?.label).toBe("Starting loop");
+    expect(presentation?.detail).toBeNull();
+  });
+
+  it("returns running when the latest turn matches the current activation", () => {
+    const presentation = derive({ latestTurn: makeRunningLoopTurn() });
+    expect(presentation?.state).toEqual({ kind: "running", iteration: 2 });
+    expect(presentation?.label).toBe("Loop running");
+    expect(presentation?.detail).toBe("2 / 5");
+    expect(presentation?.color).toBe("running");
+  });
+
+  it("ignores an unrelated running turn without a loop purpose", () => {
+    const latestTurn = makeRunningLoopTurn({ purpose: undefined });
+    const presentation = derive({ latestTurn });
+    expect(presentation?.state).toEqual({ kind: "ready" });
+    expect(presentation?.label).toBe("Loop on");
+    expect(presentation?.detail).toBe("Starting the next turn…");
+  });
+
+  it("ignores a running turn from a stale activation", () => {
+    const latestTurn = makeRunningLoopTurn({
+      purpose: { kind: "loop-iteration", activationId: "activation-stale", iteration: 7 },
+    });
+    const presentation = derive({ latestTurn });
+    expect(presentation?.state).toEqual({ kind: "ready" });
+  });
+
+  it("returns waiting-approval when approvals are pending", () => {
+    const presentation = derive({
+      latestTurn: makeRunningLoopTurn(),
+      hasPendingApprovals: true,
+    });
+    expect(presentation?.state).toEqual({ kind: "waiting-approval" });
+    expect(presentation?.label).toBe("Loop waiting");
+    expect(presentation?.detail).toBe("Approval required");
+    expect(presentation?.color).toBe("waiting");
+  });
+
+  it("returns waiting-input when user input is pending", () => {
+    const presentation = derive({ hasPendingUserInput: true });
+    expect(presentation?.state).toEqual({ kind: "waiting-input" });
+    expect(presentation?.detail).toBe("Your input is required");
+    expect(presentation?.color).toBe("waiting");
+  });
+
+  it("returns waiting-plan when plan mode is active", () => {
+    const presentation = derive({ interactionMode: "plan" });
+    expect(presentation?.state).toEqual({ kind: "waiting-plan" });
+    expect(presentation?.detail).toBe("Plan mode is active");
+    expect(presentation?.color).toBe("waiting");
+  });
+
+  it("returns ending while a matching turn outlives a toggled-off loop", () => {
+    const presentation = derive({
+      loop: makeLoop({ active: false, lastStopReason: "toggled_off" }),
+      latestTurn: makeRunningLoopTurn(),
+    });
+    expect(presentation?.state).toEqual({ kind: "ending", iteration: 2 });
+    expect(presentation?.label).toBe("Loop ending");
+    expect(presentation?.detail).toBe("Current turn will finish");
+  });
+
+  it("returns ending with time-budget copy when the duration expired mid-turn", () => {
+    const presentation = derive({
+      loop: makeLoop({ active: false, lastStopReason: "budget_duration" }),
+      latestTurn: makeRunningLoopTurn(),
+    });
+    expect(presentation?.state).toEqual({ kind: "ending", iteration: 2 });
+    expect(presentation?.detail).toBe("Time budget reached · current turn finishing");
+  });
+
+  it("returns stopping while a matching turn outlives a user stop", () => {
+    const presentation = derive({
+      loop: makeLoop({ active: false, lastStopReason: "user_stop" }),
+      latestTurn: makeRunningLoopTurn(),
+    });
+    expect(presentation?.state).toEqual({ kind: "stopping", iteration: 2 });
+    expect(presentation?.label).toBe("Stopping loop");
+    expect(presentation?.detail).toBeNull();
+  });
+
+  it("returns ended once no matching turn is running", () => {
+    const presentation = derive({
+      loop: makeLoop({ active: false, iteration: 5, lastStopReason: "budget_iterations" }),
+    });
+    expect(presentation?.state).toEqual({ kind: "ended", reason: "budget_iterations" });
+    expect(presentation?.label).toBe("Loop completed");
+    expect(presentation?.detail).toBe("5 of 5 turns · Budget reached");
+    expect(presentation?.color).toBe("neutral");
+    expect(presentation?.progress).toBeNull();
+  });
+
+  it("uses the error tone for error-class stop reasons", () => {
+    const presentation = derive({
+      loop: makeLoop({ active: false, lastStopReason: "consecutive_errors" }),
+    });
+    expect(presentation?.color).toBe("error");
+  });
+});
+
+describe("deriveLoopProgress", () => {
+  it("renders one segment per turn for count budgets up to eight", () => {
+    const progress = deriveLoopProgress(makeLoop({ iteration: 2, maxIterations: 5 }), NOW);
+    expect(progress.kind).toBe("count");
+    expect(progress.segments).toEqual([1, 1, 0, 0, 0]);
+    expect(progress.counterText).toBe("2 / 5");
+    expect(progress.ariaValueMin).toBe(0);
+    expect(progress.ariaValueMax).toBe(5);
+    expect(progress.ariaValueNow).toBe(2);
+    expect(progress.ariaValueText).toBe("2 of 5 loop turns started");
+    expect(progress.tickIntervalMs).toBeNull();
+  });
+
+  it("normalizes count budgets above eight to five segments", () => {
+    const progress = deriveLoopProgress(makeLoop({ iteration: 17, maxIterations: 50 }), NOW);
+    expect(progress.segments).toEqual([1, 1, 0, 0, 0]);
+    expect(progress.counterText).toBe("17 / 50");
+    expect(progress.ariaValueText).toBe("17 of 50 loop turns started");
+  });
+
+  it("derives duration progress from elapsed time", () => {
+    // Created 12 minutes ago, ends 18 minutes from now: 30-minute budget.
+    const loop = makeLoop({
+      maxIterations: null,
+      createdAt: new Date(NOW - 12 * 60_000).toISOString(),
+      endsAt: new Date(NOW + 18 * 60_000).toISOString(),
+    });
+    const progress = deriveLoopProgress(loop, NOW);
+    expect(progress.kind).toBe("duration");
+    expect(progress.segments).toEqual([1, 1, 0, 0, 0]);
+    expect(progress.counterText).toBe("18m left");
+    expect(progress.tooltipText).toBe("12 minutes elapsed of 30 minutes");
+    expect(progress.ariaValueText).toBe("18 minutes remaining");
+    expect(progress.ariaValueNow).toBe(40);
+    expect(progress.tickIntervalMs).toBe(30_000);
+  });
+
+  it("shows no strip and the safety limit for no-budget loops", () => {
+    const progress = deriveLoopProgress(makeLoop({ maxIterations: null, endsAt: null }), NOW);
+    expect(progress.kind).toBe("none");
+    expect(progress.segments).toEqual([]);
+    expect(progress.counterText).toBe("2 turns");
+    expect(progress.detailText).toBe("Safety limit 100");
+    expect(progress.ariaValueText).toBe("Loop has run 2 turns; no explicit user budget");
+    expect(progress.ariaValueMax).toBeNull();
+  });
+});
+
+describe("formatLoopStopReason", () => {
+  const cases: ReadonlyArray<[LoopStopReason, string, string, string | null]> = [
+    ["budget_iterations", "Loop completed", "5 of 5 turns", "Budget reached"],
+    ["budget_duration", "Loop completed", "Ran until the time budget ended", "Time budget reached"],
+    ["hard_cap", "Loop stopped", "5 turns", "Safety limit reached"],
+    ["user_stop", "Loop stopped", "5 turns", "Stopped by you"],
+    ["toggled_off", "Loop stopped", "5 turns", "Future iterations disabled"],
+    [
+      "consecutive_errors",
+      "Loop stopped",
+      "Stopped after repeated errors",
+      "Review the latest error before restarting",
+    ],
+    ["prompt_invalid", "Loop stopped", "The saved objective was invalid", null],
+    ["attachments_not_supported", "Loop stopped", "Loop prompts are text-only", null],
+    ["replaced_by_manual_policy", "Loop stopped", "5 turns", "Replaced by your manual message"],
+    ["thread_archived", "Loop stopped", "This thread was archived", null],
+    ["thread_deleted", "Loop stopped", "This thread was deleted", null],
+    ["thread_unrunnable", "Loop stopped", "This thread is not available", null],
+  ];
+
+  it.each(cases)("maps %s", (reason, title, summary, reasonLine) => {
+    expect(formatLoopStopReason(reason, 5)).toEqual({ title, summary, reason: reasonLine });
+  });
+
+  it("pluralizes single-turn summaries", () => {
+    expect(formatLoopStopReason("user_stop", 1).summary).toBe("1 turn");
+  });
+});
+
+describe("adaptive time formatting", () => {
+  it("formats remaining time across ranges", () => {
+    expect(formatLoopRemainingTime(0)).toBe("Time budget reached");
+    expect(formatLoopRemainingTime(42)).toBe("42s left");
+    expect(formatLoopRemainingTime(18 * 60)).toBe("18m left");
+    expect(formatLoopRemainingTime(60 * 60)).toBe("1h left");
+    expect(formatLoopRemainingTime(80 * 60)).toBe("1h 20m left");
+  });
+
+  it("uses an adaptive tick interval", () => {
+    expect(getLoopTickIntervalMs(20 * 60)).toBe(30_000);
+    expect(getLoopTickIntervalMs(4 * 60)).toBe(10_000);
+    expect(getLoopTickIntervalMs(45)).toBe(1_000);
+  });
+});
+
+describe("getLoopAriaValueText", () => {
+  it("describes each state for screen readers", () => {
+    expect(getLoopAriaValueText({ kind: "armed" })).toBe("Loop ready. Add a prompt to start.");
+    expect(getLoopAriaValueText({ kind: "starting" })).toBe("Starting loop.");
+    expect(getLoopAriaValueText({ kind: "running", iteration: 2 })).toBe("Loop running. Turn 2.");
+    expect(getLoopAriaValueText({ kind: "ready" })).toBe("Loop on. Starting the next turn.");
+    expect(getLoopAriaValueText({ kind: "waiting-approval" })).toBe("Loop waiting for approval.");
+    expect(getLoopAriaValueText({ kind: "waiting-input" })).toBe("Loop waiting for your input.");
+    expect(getLoopAriaValueText({ kind: "waiting-plan" })).toBe(
+      "Loop waiting. Plan mode is active.",
+    );
+    expect(getLoopAriaValueText({ kind: "ending", iteration: 2 })).toBe(
+      "Loop will stop after the current turn.",
+    );
+    expect(getLoopAriaValueText({ kind: "stopping", iteration: 2 })).toBe("Stopping loop.");
+    expect(getLoopAriaValueText({ kind: "ended", reason: "budget_iterations" })).toBe(
+      "Loop completed. Budget reached.",
+    );
+    expect(getLoopAriaValueText({ kind: "ended", reason: "prompt_invalid" })).toBe(
+      "Loop stopped. The saved objective was invalid.",
+    );
+  });
+});
