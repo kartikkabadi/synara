@@ -88,15 +88,31 @@ const RAIL_BUTTON_CLASS_NAME =
 
 const MENU_ITEM_DESCRIPTION_CLASS_NAME = "text-[10.5px] text-muted-foreground/60";
 
+// The rail's stop control is always the menu while the loop is live; "Stop
+// now" only makes sense when a loop-owned turn is running, so it is disabled
+// otherwise and the trigger label reflects what the primary action does.
+export function deriveLoopStopControl(loopTurnRunning: boolean): {
+  triggerLabel: string;
+  stopNowDisabled: boolean;
+} {
+  return loopTurnRunning
+    ? { triggerLabel: "Stop after turn", stopNowDisabled: false }
+    : { triggerLabel: "Stop loop", stopNowDisabled: true };
+}
+
 function LoopStopMenu({
   onStopAfterTurn,
   onStopNow,
   onEditLoop,
-}: Pick<LoopRuntimeRailProps, "onStopAfterTurn" | "onStopNow" | "onEditLoop">) {
+  loopTurnRunning,
+}: Pick<LoopRuntimeRailProps, "onStopAfterTurn" | "onStopNow" | "onEditLoop"> & {
+  loopTurnRunning: boolean;
+}) {
+  const { triggerLabel, stopNowDisabled } = deriveLoopStopControl(loopTurnRunning);
   return (
     <Menu>
       <MenuTrigger className={RAIL_BUTTON_CLASS_NAME}>
-        Stop after turn
+        {triggerLabel}
         <ChevronDownIcon className="size-3" />
       </MenuTrigger>
       <MenuPopupBase align="end">
@@ -108,7 +124,7 @@ function LoopStopMenu({
             </span>
           </span>
         </MenuItem>
-        <MenuItem onClick={onStopNow} variant="destructive">
+        <MenuItem disabled={stopNowDisabled} onClick={onStopNow} variant="destructive">
           <span className="flex flex-col items-start">
             <span>Stop now</span>
             <span className={MENU_ITEM_DESCRIPTION_CLASS_NAME}>{LOOP_STOP_NOW_DESCRIPTION}</span>
@@ -189,10 +205,10 @@ export function LoopRuntimeRail({
   const label = presentation?.label ?? "";
   const loopTurnRunning = isLoopOwnedTurnRunning(loop, latestTurn);
   const showControl = stateKind !== null && stateKind !== "ending" && stateKind !== "stopping";
-  const controlKind = !showControl ? "none" : loopTurnRunning ? "menu" : "button";
+  const controlKind = showControl ? "menu" : "none";
 
-  // The stop control swaps between a menu trigger and a plain button; keep
-  // keyboard focus on the control across the swap instead of dropping to body.
+  // The stop control mounts/unmounts as the loop settles; keep keyboard focus
+  // on the control across the swap instead of dropping to body.
   const controlWrapperRef = useRef<HTMLSpanElement | null>(null);
   const controlHadFocusRef = useRef(false);
   const previousControlKindRef = useRef(controlKind);
@@ -239,18 +255,14 @@ export function LoopRuntimeRail({
 
   let control: React.ReactNode = null;
   if (showControl) {
-    control =
-      controlKind === "menu" ? (
-        <LoopStopMenu
-          onStopAfterTurn={onStopAfterTurn}
-          onStopNow={onStopNow}
-          onEditLoop={onEditLoop}
-        />
-      ) : (
-        <button className={RAIL_BUTTON_CLASS_NAME} onClick={onStopAfterTurn} type="button">
-          Stop loop
-        </button>
-      );
+    control = (
+      <LoopStopMenu
+        loopTurnRunning={loopTurnRunning}
+        onEditLoop={onEditLoop}
+        onStopAfterTurn={onStopAfterTurn}
+        onStopNow={onStopNow}
+      />
+    );
   }
 
   return (
