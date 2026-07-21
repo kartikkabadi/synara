@@ -1,5 +1,5 @@
 // FILE: LoopReactor.ts
-// Purpose: Automatically continue `/loop` iterations on terminal settlement and arm.
+// Purpose: Automatically continue `/loop` iterations on terminal settlement, arm, and duration expiry.
 // Layer: Orchestration runtime reactor
 
 import {
@@ -10,7 +10,7 @@ import {
   type OrchestrationThreadShell,
   type ThreadLoop,
 } from "@synara/contracts";
-import { Effect, Layer, Option, Stream } from "effect";
+import { Effect, Layer, Option, Queue, Ref, Stream } from "effect";
 
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { buildLoopContinuationThreadView, decideLoopContinuation } from "../loopDecision.ts";
@@ -92,6 +92,37 @@ const makeLoopReactor = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const projectionThreadLoopRepository = yield* ProjectionThreadLoopRepository;
 
+  // Duration-budget loops need a wall-clock wake: a loop blocked on approval or
+  // user input receives no settlement event, so without a timer it would sit
+  // past `endsAt` indefinitely. One deadline entry per active duration loop; a
+  // single timer fiber sleeps until min(endsAt) and re-arms on every change.
+  const durationDeadlinesRef = yield* Ref.make(new Map<OrchestrationThreadShell["id"], number>());
+  const timerWakeQueue = yield* Queue.unbounded<void>();
+
+  const syncDurationDeadline = (
+    threadId: OrchestrationThreadShell["id"],
+    loop: ThreadLoop | null,
+  ) =>
+    Effect.gen(function* () {
+      const endsAtMs =
+        loop?.active === true && loop.endsAt !== null ? Date.parse(loop.endsAt) : null;
+      const deadline = endsAtMs !== null && Number.isFinite(endsAtMs) ? endsAtMs : null;
+      const deadlines = yield* Ref.get(durationDeadlinesRef);
+      if ((deadlines.get(threadId) ?? null) === deadline) {
+        return;
+      }
+      yield* Ref.update(durationDeadlinesRef, (current) => {
+        const next = new Map(current);
+        if (deadline === null) {
+          next.delete(threadId);
+        } else {
+          next.set(threadId, deadline);
+        }
+        return next;
+      });
+      yield* Queue.offer(timerWakeQueue, undefined);
+    });
+
   const continueThread = (threadId: OrchestrationThreadShell["id"], createdAt: string) =>
     Effect.gen(function* () {
       const threadOption = yield* projectionSnapshotQuery.getThreadShellById(threadId);
@@ -117,6 +148,7 @@ const makeLoopReactor = Effect.gen(function* () {
     const now = new Date().toISOString();
     for (const thread of readModel.threads) {
       if (thread.loop?.active === true) {
+        yield* syncDurationDeadline(thread.id, thread.loop);
         yield* dispatchLoopContinue({
           orchestrationEngine,
           thread,
@@ -127,12 +159,69 @@ const makeLoopReactor = Effect.gen(function* () {
     }
   });
 
+  // Single timer fiber: sleep until the earliest deadline (no interval
+  // polling), racing against wake signals that fire whenever the active loop
+  // set or any `endsAt` changes. On expiry, dispatch the same pre-checked
+  // continue path; the decider then turns the loop off with `budget_duration`.
+  const runDurationExpiryTimer = Effect.gen(function* () {
+    while (true) {
+      const deadlines = yield* Ref.get(durationDeadlinesRef);
+      let nextWakeMs: number | null = null;
+      for (const endsAtMs of deadlines.values()) {
+        if (nextWakeMs === null || endsAtMs < nextWakeMs) {
+          nextWakeMs = endsAtMs;
+        }
+      }
+      if (nextWakeMs === null) {
+        yield* Queue.take(timerWakeQueue);
+        continue;
+      }
+      const delayMs = Math.max(0, nextWakeMs - Date.now());
+      const outcome = yield* Effect.race(
+        Queue.take(timerWakeQueue).pipe(Effect.as("reset" as const)),
+        Effect.sleep(delayMs).pipe(Effect.as("expired" as const)),
+      );
+      if (outcome === "reset") {
+        continue;
+      }
+      const nowMs = Date.now();
+      const nowIso = new Date(nowMs).toISOString();
+      const expired = [...deadlines].filter(([, endsAtMs]) => endsAtMs <= nowMs);
+      // Drop fired entries up front so a rejected dispatch cannot hot-loop the
+      // timer; a subsequent thread.loop-set event re-adds any still-live loop.
+      yield* Ref.update(durationDeadlinesRef, (current) => {
+        const next = new Map(current);
+        for (const [threadId] of expired) {
+          next.delete(threadId);
+        }
+        return next;
+      });
+      for (const [threadId] of expired) {
+        yield* continueThread(threadId, nowIso).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("loop duration expiry continue failed", {
+              threadId,
+              error: String(error),
+            }),
+          ),
+        );
+      }
+    }
+  });
+
   const start: LoopReactorShape["start"] = Effect.gen(function* () {
+    yield* Effect.forkScoped(runDurationExpiryTimer);
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) =>
         Effect.gen(function* () {
           if (event.type === "thread.loop-set") {
+            yield* syncDurationDeadline(event.payload.threadId, event.payload.loop);
             yield* continueThread(event.payload.threadId, event.occurredAt);
+            return;
+          }
+
+          if (event.type === "thread.loop-continued" || event.type === "thread.loop-off") {
+            yield* syncDurationDeadline(event.payload.threadId, event.payload.loop);
             return;
           }
 
@@ -168,6 +257,7 @@ const makeLoopReactor = Effect.gen(function* () {
           }
 
           if (event.type === "thread.archived" || event.type === "thread.deleted") {
+            yield* syncDurationDeadline(event.payload.threadId, null);
             const loopOption = yield* projectionThreadLoopRepository.getByThreadId({
               threadId: event.payload.threadId,
             });
