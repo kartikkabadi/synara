@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DARWIN_HIDDEN_MENU_BAR_TOP_INSET,
   DEFAULT_NOTCH_WIDTH,
   detectNotch,
   islandCollapsedSize,
@@ -88,6 +89,19 @@ describe("island anchoring", () => {
     const bounds = islandWindowBounds(secondaryDisplay, null);
     expect(bounds.x).toBe(1920 + (1920 - 560) / 2);
     expect(bounds.y).toBe(-175 + 6);
+  });
+
+  it("pads past a possible notch when the macOS menu bar auto-hides", () => {
+    const autoHideDisplay: IslandDisplayMetrics = {
+      bounds: { x: 0, y: 0, width: 1512, height: 982 },
+      workArea: { x: 0, y: 0, width: 1512, height: 982 },
+    };
+    expect(detectNotch("darwin", autoHideDisplay)).toBeNull();
+    expect(islandWindowBounds(autoHideDisplay, null, "darwin").y).toBe(
+      DARWIN_HIDDEN_MENU_BAR_TOP_INSET + 6,
+    );
+    // Non-darwin platforms keep the plain work-area anchor.
+    expect(islandWindowBounds(autoHideDisplay, null, "win32").y).toBe(6);
   });
 
   it("sizes Linux state bounds per window state", () => {

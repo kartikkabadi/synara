@@ -39,6 +39,12 @@ export const NOTCH_TOP_INSET_THRESHOLD = 30;
 
 export const ISLAND_FLOATING_TOP_MARGIN = 6;
 
+// With "Automatically hide and show the menu bar" the work area reaches the
+// screen top, so the notch heuristic is blind. Fall back to the notched
+// menu-bar inset (~38pt) so a floating island can never sit under the
+// physical camera housing.
+export const DARWIN_HIDDEN_MENU_BAR_TOP_INSET = 38;
+
 export function detectNotch(
   platform: NodeJS.Platform,
   metrics: IslandDisplayMetrics,
@@ -49,15 +55,26 @@ export function detectNotch(
   return { width: DEFAULT_NOTCH_WIDTH, height: topInset };
 }
 
+function islandFloatingTop(metrics: IslandDisplayMetrics, platform?: NodeJS.Platform): number {
+  const topInset = metrics.workArea.y - metrics.bounds.y;
+  if (platform === "darwin" && topInset <= 0) {
+    return metrics.bounds.y + DARWIN_HIDDEN_MENU_BAR_TOP_INSET;
+  }
+  return metrics.workArea.y;
+}
+
 // Top-center anchor: flush with the screen top in notch mode (the pill reads
 // as a camera-housing extension), 6px below the work area top elsewhere.
 function islandAnchoredBounds(
   size: IslandSize,
   metrics: IslandDisplayMetrics,
   notch: IslandNotchInfo | null,
+  platform?: NodeJS.Platform,
 ): IslandRect {
   const centerX = metrics.bounds.x + Math.round((metrics.bounds.width - size.width) / 2);
-  const y = notch ? metrics.bounds.y : metrics.workArea.y + ISLAND_FLOATING_TOP_MARGIN;
+  const y = notch
+    ? metrics.bounds.y
+    : islandFloatingTop(metrics, platform) + ISLAND_FLOATING_TOP_MARGIN;
   return { x: centerX, y, width: size.width, height: size.height };
 }
 
@@ -66,8 +83,9 @@ function islandAnchoredBounds(
 export function islandWindowBounds(
   metrics: IslandDisplayMetrics,
   notch: IslandNotchInfo | null,
+  platform?: NodeJS.Platform,
 ): IslandRect {
-  return islandAnchoredBounds(ISLAND_EXPANDED_SIZE, metrics, notch);
+  return islandAnchoredBounds(ISLAND_EXPANDED_SIZE, metrics, notch, platform);
 }
 
 // Linux (no click-through forwarding): the window only spans the current
@@ -76,8 +94,9 @@ export function islandStateBounds(
   state: IslandWindowState,
   metrics: IslandDisplayMetrics,
   notch: IslandNotchInfo | null,
+  platform?: NodeJS.Platform,
 ): IslandRect {
-  return islandAnchoredBounds(islandStateSize(state, notch), metrics, notch);
+  return islandAnchoredBounds(islandStateSize(state, notch), metrics, notch, platform);
 }
 
 // null means "use the platform default": on for macOS/Windows, off for Linux.

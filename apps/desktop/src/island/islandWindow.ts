@@ -90,8 +90,8 @@ export class IslandWindowManager {
     const metrics = primaryDisplayMetrics();
     const notch = this.#detectNotch();
     const bounds = this.isLinux
-      ? islandStateBounds(this.#state, metrics, notch)
-      : islandWindowBounds(metrics, notch);
+      ? islandStateBounds(this.#state, metrics, notch, this.#options.platform)
+      : islandWindowBounds(metrics, notch, this.#options.platform);
 
     const window = new BrowserWindow({
       ...bounds,
@@ -176,7 +176,14 @@ export class IslandWindowManager {
     if (!this.isLinux) return;
     const window = this.#window;
     if (!window || window.isDestroyed()) return;
-    window.setBounds(islandStateBounds(state, primaryDisplayMetrics(), this.#detectNotch()));
+    window.setBounds(
+      islandStateBounds(
+        state,
+        primaryDisplayMetrics(),
+        this.#detectNotch(),
+        this.#options.platform,
+      ),
+    );
   }
 
   toggleExpanded(): void {
@@ -195,8 +202,8 @@ export class IslandWindowManager {
     const notch = this.#detectNotch();
     window.setBounds(
       this.isLinux
-        ? islandStateBounds(this.#state, metrics, notch)
-        : islandWindowBounds(metrics, notch),
+        ? islandStateBounds(this.#state, metrics, notch, this.#options.platform)
+        : islandWindowBounds(metrics, notch, this.#options.platform),
     );
   }
 
