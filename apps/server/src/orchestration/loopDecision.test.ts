@@ -116,12 +116,7 @@ describe("decideLoopContinuation", () => {
   it.each<[string, Partial<ThreadLoop>, Partial<LoopContinuationThreadView>, string]>([
     ["the thread is deleted", {}, { deletedAt: "2026-07-19T11:00:00.000Z" }, "thread_deleted"],
     ["the thread is archived", {}, { archivedAt: "2026-07-19T11:00:00.000Z" }, "thread_archived"],
-    [
-      "the thread is not top-level",
-      {},
-      { parentThreadId: "thread-parent-1" },
-      "thread_unrunnable",
-    ],
+    ["the thread is not top-level", {}, { parentThreadId: "thread-parent-1" }, "thread_unrunnable"],
     [
       "the duration budget has expired",
       { endsAt: "2026-07-19T11:59:59.000Z" },
@@ -314,5 +309,4 @@ describe("decideLoopContinuation", () => {
       nextConsecutiveErrors: 2,
     });
   });
-
 });
