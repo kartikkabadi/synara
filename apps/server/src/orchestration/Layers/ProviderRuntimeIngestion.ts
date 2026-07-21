@@ -33,6 +33,7 @@ import {
 } from "../../codexGeneratedImages.ts";
 import { copyAndAttributeStudioGeneratedImage } from "../../studioGeneratedImages.ts";
 import { parseCheckpointFilesFromUnifiedDiff } from "../../checkpointing/Diffs.ts";
+import { isAbortLikeProviderErrorMessage } from "../../provider/abortErrorClassification.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import {
   classifyTerminalTurnApplicability,
@@ -1933,13 +1934,26 @@ const make = Effect.gen(function* () {
         const status = (() => {
           switch (event.type) {
             case "session.state.changed":
-              return event.payload.state === "waiting" ? "running" : event.payload.state;
+              if (event.payload.state === "waiting") {
+                return "running";
+              }
+              // An abort-like "error" is an intentional stop, not a provider failure.
+              return event.payload.state === "error" &&
+                isAbortLikeProviderErrorMessage(event.payload.reason)
+                ? "interrupted"
+                : event.payload.state;
             case "turn.started":
               return "running";
             case "session.exited":
               return "stopped";
             case "turn.completed":
-              return runtimeTurnState(event) === "failed" ? "error" : "ready";
+              return runtimeTurnState(event) !== "failed"
+                ? "ready"
+                : isAbortLikeProviderErrorMessage(
+                      asString(runtimePayloadRecord(event)?.errorMessage),
+                    )
+                  ? "interrupted"
+                  : "error";
             case "turn.aborted":
               return "interrupted";
             case "session.started":
@@ -1950,14 +1964,14 @@ const make = Effect.gen(function* () {
           }
         })();
         const lastError =
-          event.type === "session.state.changed" && event.payload.state === "error"
-            ? (event.payload.reason ?? thread.session?.lastError ?? "Provider session error")
-            : status === "error"
-              ? (asString(runtimePayloadRecord(event)?.errorMessage) ??
-                thread.session?.lastError ??
-                "Turn failed")
-              : status === "ready" || status === "interrupted"
-                ? null
+          status === "ready" || status === "interrupted"
+            ? null
+            : event.type === "session.state.changed" && event.payload.state === "error"
+              ? (event.payload.reason ?? thread.session?.lastError ?? "Provider session error")
+              : status === "error"
+                ? (asString(runtimePayloadRecord(event)?.errorMessage) ??
+                  thread.session?.lastError ??
+                  "Turn failed")
                 : (thread.session?.lastError ?? null);
 
         if (shouldApplyThreadLifecycle) {
@@ -2269,6 +2283,9 @@ const make = Effect.gen(function* () {
       if (event.type === "runtime.error") {
         const runtimeErrorMessage =
           asString(runtimePayloadRecord(event)?.message) ?? "Provider runtime error";
+        // An abort-like runtime error follows an intentional stop; the turn is
+        // interrupted, not failed, and must not surface as a thread error.
+        const runtimeErrorIsAbortLike = isAbortLikeProviderErrorMessage(runtimeErrorMessage);
         const erroredTurnId = eventTurnId ?? activeTurnId ?? undefined;
 
         if (erroredTurnId) {
@@ -2300,11 +2317,11 @@ const make = Effect.gen(function* () {
             threadId: thread.id,
             session: {
               threadId: thread.id,
-              status: "error",
+              status: runtimeErrorIsAbortLike ? "interrupted" : "error",
               providerName: event.provider,
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
-              activeTurnId: eventTurnId ?? null,
-              lastError: runtimeErrorMessage,
+              activeTurnId: runtimeErrorIsAbortLike ? null : (eventTurnId ?? null),
+              lastError: runtimeErrorIsAbortLike ? null : runtimeErrorMessage,
               updatedAt: now,
             },
             createdAt: now,
