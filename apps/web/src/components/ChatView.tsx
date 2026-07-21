@@ -448,7 +448,7 @@ import { ComposerExtrasMenu } from "./chat/ComposerExtrasMenu";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { ComposerInputBanners } from "./chat/ComposerInputBanners";
 import { LoopComposerModeCta, LoopComposerModeHeader } from "./chat/LoopComposerMode";
-import { isLoopOwnedTurnRunning } from "./chat/loopPresentation";
+import { isLoopOwnedTurnRunning, LOOP_ACTIVE_COMPOSER_PLACEHOLDER } from "./chat/loopPresentation";
 import { isUnsupportedLoopContext, useLoopComposerMode } from "./chat/useLoopComposerMode";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerVoiceButton } from "./chat/ComposerVoiceButton";
@@ -10332,7 +10332,7 @@ export default function ChatView({
                               : activeThread?.loop?.active
                                 ? activeThread.loop.prompt.trim().length === 0
                                   ? "Your next message starts the loop"
-                                  : "Your next message replaces the loop prompt"
+                                  : LOOP_ACTIVE_COMPOSER_PLACEHOLDER
                                 : activeThread?.parentThreadId
                                   ? "Message this subagent while it works"
                                   : hasLiveTurn

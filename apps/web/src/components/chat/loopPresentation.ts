@@ -63,6 +63,9 @@ export interface DeriveLoopPresentationStateInput {
   now: number;
 }
 
+// Composer placeholder while a loop with a saved objective is active (spec §9).
+export const LOOP_ACTIVE_COMPOSER_PLACEHOLDER = "Steer the next iteration…";
+
 const NORMALIZED_SEGMENT_COUNT = 5;
 const MAX_PER_TURN_SEGMENTS = 8;
 
