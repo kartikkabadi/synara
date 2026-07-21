@@ -1,4 +1,11 @@
-import { ApprovalRequestId, CommandId, type OrchestrationEvent } from "@synara/contracts";
+import {
+  ApprovalRequestId,
+  CommandId,
+  type OrchestrationEvent,
+  type ThreadId,
+  type ThreadTurnPurpose,
+  type TurnId,
+} from "@synara/contracts";
 import {
   addPinnedMessage,
   removePinnedMessage,
@@ -482,6 +489,33 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig;
 
+  const resolveAssistantTurnPurpose = (input: {
+    threadId: ThreadId;
+    turnId: TurnId | null;
+    eventPurpose: ThreadTurnPurpose | undefined;
+  }) =>
+    Effect.gen(function* () {
+      if (input.eventPurpose != null) {
+        return input.eventPurpose;
+      }
+      if (input.turnId !== null) {
+        const existingTurn = yield* projectionTurnRepository.getByTurnId({
+          threadId: input.threadId,
+          turnId: input.turnId,
+        });
+        if (Option.isSome(existingTurn) && existingTurn.value.purpose != null) {
+          return existingTurn.value.purpose;
+        }
+      }
+      const pendingStart = yield* projectionTurnRepository.getPendingTurnStartByThreadId({
+        threadId: input.threadId,
+      });
+      if (Option.isSome(pendingStart) && pendingStart.value.purpose != null) {
+        return pendingStart.value.purpose;
+      }
+      return undefined;
+    });
+
   const applyProjectsProjection: ProjectorDefinition["apply"] = (event, _attachmentSideEffects) =>
     event.type === "project.created" ||
     event.type === "project.meta-updated" ||
@@ -864,6 +898,14 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
               : Option.isSome(existingMessage)
                 ? existingMessage.value.attachments
                 : undefined;
+          const assistantPurpose =
+            event.payload.role === "assistant"
+              ? yield* resolveAssistantTurnPurpose({
+                  threadId: event.payload.threadId,
+                  turnId: event.payload.turnId,
+                  eventPurpose: event.payload.purpose,
+                })
+              : event.payload.purpose;
           yield* projectionThreadMessageRepository.upsert({
             messageId: event.payload.messageId,
             threadId: event.payload.threadId,
@@ -889,7 +931,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
               : {}),
             isStreaming: event.payload.streaming,
             source: event.payload.source,
-            ...(event.payload.purpose != null ? { purpose: event.payload.purpose } : {}),
+            ...(assistantPurpose != null ? { purpose: assistantPurpose } : {}),
             sequence: Option.isSome(existingMessage)
               ? (existingMessage.value.sequence ?? event.sequence)
               : event.sequence,
@@ -1289,6 +1331,11 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             threadId: event.payload.threadId,
             turnId: event.payload.turnId,
           });
+          const assistantTurnPurpose = yield* resolveAssistantTurnPurpose({
+            threadId: event.payload.threadId,
+            turnId: event.payload.turnId,
+            eventPurpose: event.payload.purpose,
+          });
           if (Option.isSome(existingTurn)) {
             const existingIsTerminal =
               existingTurn.value.state === "completed" ||
@@ -1305,6 +1352,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
                 event.payload.streaming && !existingIsTerminal
                   ? null
                   : existingTurn.value.completedAt,
+              purpose: assistantTurnPurpose ?? existingTurn.value.purpose,
               startedAt: existingTurn.value.startedAt ?? event.payload.createdAt,
               requestedAt: existingTurn.value.requestedAt ?? event.payload.createdAt,
             });
@@ -1316,7 +1364,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             pendingMessageId: null,
             sourceProposedPlanThreadId: null,
             sourceProposedPlanId: null,
-            purpose: event.payload.purpose,
+            purpose: assistantTurnPurpose,
             assistantMessageId: event.payload.messageId,
             state: "running",
             requestedAt: event.payload.createdAt,
