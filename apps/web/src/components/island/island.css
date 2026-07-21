@@ -297,67 +297,43 @@
   position: relative;
   border-radius: 9999px;
   flex-shrink: 0;
-  /* State hue tokens — the single source for core, bloom, rim sweep, and (via
-     --island-hue on the surface) the interior wash and exterior glow. */
-  --orb-state: hsl(225 95% 68%);
-  --state-hue-mid: var(--orb-state);
-  --state-hue-bright: color-mix(in oklab, var(--orb-state) 65%, white);
+  /* Bloom halo spills past the diameter; nothing here may clip it. */
+  overflow: visible;
+  /* One core gradient shared by the luminous core and its blurred bloom
+     duplicate: hot-white center melting into the state hue, no transparent
+     edge stop (a transparent edge is what read as a plastic bead). The hue
+     number comes from --island-hue set inline by the component. */
+  --orb-core-gradient: radial-gradient(
+    circle at 50% 42%,
+    #fff 0%,
+    hsl(var(--island-hue, 225) 90% 70%) 35%,
+    hsl(var(--island-hue, 225) 80% 45%) 75%
+  );
 }
 
-.island-orb[data-orb-state="idle"] {
-  --orb-state: hsl(225 95% 68%);
-}
-
-.island-orb[data-orb-state="working"] {
-  --orb-state: hsl(195 90% 60%);
-}
-
-.island-orb[data-orb-state="looping"] {
-  --orb-state: hsl(265 90% 65%);
-}
-
-.island-orb[data-orb-state="needs-approval"] {
-  --orb-state: hsl(38 95% 60%);
-}
-
-.island-orb[data-orb-state="done"] {
-  --orb-state: hsl(150 80% 55%);
-}
-
-.island-orb[data-orb-state="error"] {
-  --orb-state: hsl(3 85% 60%);
-}
-
-/* Layer 1 — bloom: a blurred halo behind the core, breathing .4→.65. */
+/* Layer 1 — bloom: a blurred, scaled duplicate of the core breathing behind
+   it, giving the glow spill that makes the lamp read as luminous. */
 .island-orb::before {
   content: "";
   position: absolute;
   inset: 0;
+  z-index: 0;
   border-radius: 9999px;
-  transform: scale(1.4);
-  filter: blur(6px);
+  transform: scale(1.5);
+  filter: blur(7px);
   opacity: 0.55;
-  background: radial-gradient(
-    circle at 35% 30%,
-    rgba(255, 255, 255, 0.6),
-    var(--state-hue-mid) 45%,
-    transparent 72%
-  );
+  background: var(--orb-core-gradient);
   animation: island-orb-bloom-breathe 2.8s ease-in-out infinite;
 }
 
-/* Layer 2 — core: hot-white highlight melting into the state hue, with a slow
-   ±8° hue drift so the lamp never reads as a static dot. */
+/* Layer 2 — core: hot-white center over the state hue, with a slow ±8° hue
+   drift so the lamp never reads as a static dot. */
 .island-orb-core {
   position: absolute;
   inset: 0;
+  z-index: 1;
   border-radius: 9999px;
-  background: radial-gradient(
-    circle at 35% 30%,
-    rgba(255, 255, 255, 0.95),
-    var(--state-hue-mid) 45%,
-    transparent 72%
-  );
+  background: var(--orb-core-gradient);
   animation: island-orb-hue 7s ease-in-out infinite;
 }
 
@@ -372,19 +348,18 @@
   content: "";
   position: absolute;
   inset: 0;
+  z-index: 2;
   border-radius: 9999px;
-  padding: 1.5px;
   background: conic-gradient(
     from var(--orb-sweep, 0deg),
     transparent 0 70%,
-    var(--state-hue-bright) 85%,
+    hsl(var(--island-hue, 225) 90% 78%) 85%,
     transparent 100%
   );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
+  /* Ring mask on the same box as the core (no padding offset), so the sweep
+     hugs the core edge instead of floating as a detached crescent. */
+  -webkit-mask: radial-gradient(circle, transparent 55%, #000 56%, #000 64%, transparent 65%);
+  mask: radial-gradient(circle, transparent 55%, #000 56%, #000 64%, transparent 65%);
   animation: island-orb-sweep 2.4s linear infinite;
 }
 
@@ -395,6 +370,7 @@
   border-radius: 9999px;
   background: rgba(0, 0, 0, 0.25);
   flex-shrink: 0;
+  overflow: visible;
 }
 
 /* State motion: only transform/opacity/filter animate (composited layers). */
