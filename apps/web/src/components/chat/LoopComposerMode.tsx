@@ -20,14 +20,11 @@ import {
 } from "../ui/menu";
 import { ChevronDownIcon } from "~/lib/icons";
 import {
-  LOOP_BUDGET_COUNT_ERROR,
-  LOOP_BUDGET_DURATION_ERROR,
   LOOP_COUNT_PRESETS,
   LOOP_DEFAULT_HARD_CAP,
   LOOP_DURATION_PRESETS_SECONDS,
   LOOP_UNSUPPORTED_CONTEXT_MESSAGE,
   formatLoopBudgetChoiceLabel,
-  validateLoopBudgetChoice,
   type LoopBudgetChoice,
   type LoopComposerMode as LoopComposerModeState,
 } from "./useLoopComposerMode";
@@ -78,8 +75,6 @@ export function LoopBudgetPicker(props: {
       props.onChange({ kind: "duration", seconds });
     }
   };
-
-  const budgetError = validateLoopBudgetChoice(props.budget);
 
   return (
     <div className="flex flex-col items-end gap-1">
@@ -214,13 +209,6 @@ export function LoopBudgetPicker(props: {
             <option value="hours">hours</option>
           </select>
         </label>
-      ) : null}
-      {budgetError ? (
-        <p className="text-[11px] text-destructive" role="alert">
-          {budgetError === LOOP_BUDGET_COUNT_ERROR
-            ? LOOP_BUDGET_COUNT_ERROR
-            : LOOP_BUDGET_DURATION_ERROR}
-        </p>
       ) : null}
     </div>
   );
