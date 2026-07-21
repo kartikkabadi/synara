@@ -30,15 +30,20 @@ function isBlockerResolvedActivity(activity: { kind: string }): boolean {
   return BLOCKER_RESOLVED_ACTIVITY_KINDS.has(activity.kind);
 }
 
-// Deterministic continuation identity: the same {thread, loop state version,
-// iteration count} always maps to the same commandId, so duplicate signals
-// (event replays, races between reactor triggers) collapse in the engine's
-// command receipt/fingerprint dedupe instead of needing a durable claim ledger.
+// Unique continuation identity per trigger: the command payload carries a
+// `createdAt` timestamp, so the commandId must include it to avoid identity
+// collisions when multiple settlement events (e.g. `thread.session-set` and
+// `thread.activity-appended`) trigger `continueThread` for the same loop state.
+// Idempotency is still guaranteed by `expectedUpdatedAt`/`expectedActivationId`
+// in `decideLoopContinue`.
 function makeLoopContinueCommandId(
   threadId: OrchestrationThread["id"],
   loop: ThreadLoop,
+  createdAt: string,
 ): CommandId {
-  return CommandId.makeUnsafe(`loop-continue:${threadId}:${loop.updatedAt}:${loop.iteration}`);
+  return CommandId.makeUnsafe(
+    `loop-continue:${threadId}:${loop.updatedAt}:${loop.iteration}:${createdAt}`,
+  );
 }
 
 // Dispatches the deterministic continuation command. The decider is the single
@@ -60,7 +65,7 @@ function dispatchLoopContinue(options: {
 
   const command = {
     type: "thread.loop.continue" as const,
-    commandId: makeLoopContinueCommandId(threadId, loop),
+    commandId: makeLoopContinueCommandId(threadId, loop, createdAt),
     threadId,
     expectedUpdatedAt: loop.updatedAt,
     expectedActivationId: loop.activationId,
