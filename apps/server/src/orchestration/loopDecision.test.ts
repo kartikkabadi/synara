@@ -145,6 +145,20 @@ describe("decideLoopContinuation", () => {
     });
   });
 
+  it("turns off on duration expiry even while blocked on approval or user input", () => {
+    const expired = makeLoop({ endsAt: "2026-07-19T11:59:59.000Z" });
+    for (const blocked of [
+      makeThread({ hasPendingApproval: true }),
+      makeThread({ hasPendingUserInput: true }),
+    ]) {
+      expect(decideLoopContinuation({ loop: expired, nowMs: NOW, thread: blocked })).toEqual({
+        type: "off",
+        reason: "budget_duration",
+        nextConsecutiveErrors: 0,
+      });
+    }
+  });
+
   it("turns off when the count budget is exhausted", () => {
     const result = decideLoopContinuation({
       loop: makeLoop({ maxIterations: 5, iteration: 5 }),
