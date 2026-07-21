@@ -106,7 +106,10 @@ export function LoopCompletionRecord({ loop }: LoopCompletionRecordProps) {
         className="flex w-full items-center gap-3 px-3.5 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-border)]"
       >
         <Icon
-          className={cn("size-4 shrink-0", destructive ? "text-destructive" : "text-muted-foreground")}
+          className={cn(
+            "size-4 shrink-0",
+            destructive ? "text-destructive" : "text-muted-foreground",
+          )}
           aria-hidden
         />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
