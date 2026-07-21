@@ -140,7 +140,7 @@ describe("registerIslandIpcHandlers", () => {
     await expect(invokeAs(APP_SENDER, ISLAND_IPC_CHANNELS.setEnabled, true)).resolves.toBe(true);
     expect(delegate.setEnabled).toHaveBeenCalledWith(true);
 
-    await expect(invokeAs(APP_SENDER, ISLAND_IPC_CHANNELS.getContext)).resolves.toBeUndefined();
+    await expect(invokeAs(APP_SENDER, ISLAND_IPC_CHANNELS.getContext)).resolves.toBeNull();
     await invokeAs(APP_SENDER, ISLAND_IPC_CHANNELS.focusThread, "thread-1");
     await invokeAs(APP_SENDER, ISLAND_IPC_CHANNELS.stopLoop, "thread-1");
     expect(delegate.focusThread).not.toHaveBeenCalled();
@@ -161,7 +161,7 @@ describe("registerIslandIpcHandlers", () => {
   it("tolerates a missing manager", async () => {
     const { ipcMain, invoke } = createFakeIpcMain();
     registerIslandIpcHandlers(ipcMain, createDelegate(null));
-    await expect(invoke(ISLAND_IPC_CHANNELS.getContext)).resolves.toBeUndefined();
+    await expect(invoke(ISLAND_IPC_CHANNELS.getContext)).resolves.toBeNull();
     await expect(invoke(ISLAND_IPC_CHANNELS.setState, "hover")).resolves.toBeUndefined();
   });
 
@@ -171,7 +171,7 @@ describe("registerIslandIpcHandlers", () => {
     registerIslandIpcHandlers(ipcMain, delegate);
 
     const stranger = { id: "other-web-contents" };
-    await expect(invokeAs(stranger, ISLAND_IPC_CHANNELS.getContext)).resolves.toBeUndefined();
+    await expect(invokeAs(stranger, ISLAND_IPC_CHANNELS.getContext)).resolves.toBeNull();
     await expect(invokeAs(stranger, ISLAND_IPC_CHANNELS.getEnabled)).resolves.toBeUndefined();
     await invokeAs(stranger, ISLAND_IPC_CHANNELS.focusThread, "thread-1");
     await invokeAs(stranger, ISLAND_IPC_CHANNELS.stopLoop, "thread-1");

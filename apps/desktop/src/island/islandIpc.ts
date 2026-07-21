@@ -42,8 +42,8 @@ export function registerIslandIpcHandlers(ipcMain: IpcMain, delegate: IslandIpcD
 
   ipcMain.removeHandler(ISLAND_IPC_CHANNELS.getContext);
   ipcMain.handle(ISLAND_IPC_CHANNELS.getContext, async (event) => {
-    if (!isIslandSender(event)) return;
-    return delegate.getManager()?.getContext();
+    if (!isIslandSender(event)) return null;
+    return delegate.getManager()?.getContext() ?? null;
   });
 
   ipcMain.removeHandler(ISLAND_IPC_CHANNELS.setIgnoreMouse);

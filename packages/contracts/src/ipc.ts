@@ -436,7 +436,8 @@ export interface IslandStateMeta {
 
 // Bridge exposed to the dedicated island overlay window (islandPreload.ts).
 export interface IslandBridge {
-  getContext: () => Promise<IslandDisplayContext>;
+  // null when the manager is unavailable or the sender is rejected.
+  getContext: () => Promise<IslandDisplayContext | null>;
   setIgnoreMouse: (ignore: boolean) => Promise<void>;
   setState: (state: IslandWindowState, meta?: IslandStateMeta) => Promise<void>;
   focusThread: (threadId: string) => Promise<void>;
