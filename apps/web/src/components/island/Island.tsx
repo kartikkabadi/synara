@@ -240,10 +240,13 @@ export function Island() {
     else if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
   }, [uiState, armIdleTimer]);
 
-  // Global shortcut toggles arrive from the main process.
+  // Global shortcut toggles arrive from the main process as requests; the
+  // renderer owns the displayed state and computes the next one so a stale
+  // main-process state can never invert the toggle.
   useEffect(() => {
-    return window.islandBridge?.onStateChanged((state) => {
-      setUiState(state);
+    return window.islandBridge?.onToggleExpanded(() => {
+      setPopped(false);
+      setUiState((current) => (current === "expanded" ? "collapsed" : "expanded"));
     });
   }, []);
 

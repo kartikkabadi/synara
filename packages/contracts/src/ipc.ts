@@ -442,7 +442,7 @@ export interface IslandBridge {
   setState: (state: IslandWindowState, meta?: IslandStateMeta) => Promise<void>;
   focusThread: (threadId: string) => Promise<void>;
   stopLoop: (threadId: string) => Promise<void>;
-  onStateChanged: (listener: (state: IslandWindowState) => void) => () => void;
+  onToggleExpanded: (listener: () => void) => () => void;
 }
 
 export interface SynaraStorageSnapshot {

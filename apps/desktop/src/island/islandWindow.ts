@@ -210,13 +210,15 @@ export class IslandWindowManager {
     if (sessionCount !== undefined) this.#sessionCount = sessionCount;
   }
 
+  // The renderer owns the displayed state, so the shortcut only requests a
+  // toggle; the renderer computes the next state and mirrors it back through
+  // setState. Computing the toggle here from #state could invert against the
+  // renderer whenever a mirror update was still in flight.
   toggleExpanded(): void {
     const window = this.#window;
     if (!window || window.isDestroyed()) return;
     if (!window.isVisible()) window.showInactive();
-    const next: IslandWindowState = this.#state === "expanded" ? "collapsed" : "expanded";
-    this.setState(next);
-    window.webContents.send(ISLAND_IPC_CHANNELS.stateChanged, next);
+    window.webContents.send(ISLAND_IPC_CHANNELS.toggleExpanded);
   }
 
   reanchor(): void {

@@ -50,7 +50,7 @@ export const DESKTOP_IPC_CHANNELS = {
     stopLoop: "desktop:island-stop-loop",
     getEnabled: "desktop:island-get-enabled",
     setEnabled: "desktop:island-set-enabled",
-    stateChanged: "desktop:island-state-changed",
+    toggleExpanded: "desktop:island-toggle-expanded",
   },
   browser: {
     state: "desktop:browser-state",

@@ -20,6 +20,7 @@ vi.mock("electron", () => {
     once = vi.fn();
     on = vi.fn();
     isDestroyed = vi.fn(() => false);
+    isVisible = vi.fn(() => true);
     destroy = vi.fn();
     setBounds = vi.fn();
     getBounds = vi.fn(() => ({ x: 0, y: 0, width: 100, height: 100 }));
@@ -40,6 +41,7 @@ vi.mock("electron", () => {
   };
 });
 
+import { ISLAND_IPC_CHANNELS } from "../ipcChannels";
 import {
   ISLAND_GLOBAL_SHORTCUT,
   IslandWindowManager,
@@ -88,6 +90,23 @@ describe("IslandWindowManager global shortcut ownership", () => {
     manager.create();
     manager.destroy();
     expect(globalShortcutMock.unregister).not.toHaveBeenCalled();
+  });
+});
+
+describe("IslandWindowManager shortcut toggle", () => {
+  it("sends a toggle request instead of computing the next state in main", () => {
+    const manager = createManager();
+    manager.create();
+    const send = (manager.window as unknown as { webContents: { send: ReturnType<typeof vi.fn> } })
+      .webContents.send;
+    send.mockClear();
+    manager.setState("expanded");
+    manager.toggleExpanded();
+    manager.toggleExpanded();
+    expect(send.mock.calls).toEqual([
+      [ISLAND_IPC_CHANNELS.toggleExpanded],
+      [ISLAND_IPC_CHANNELS.toggleExpanded],
+    ]);
   });
 });
 

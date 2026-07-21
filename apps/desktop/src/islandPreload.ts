@@ -34,14 +34,13 @@ contextBridge.exposeInMainWorld("islandBridge", {
   setState: (state, meta) => ipcRenderer.invoke(IPC.island.setState, state, meta),
   focusThread: (threadId) => ipcRenderer.invoke(IPC.island.focusThread, threadId),
   stopLoop: (threadId) => ipcRenderer.invoke(IPC.island.stopLoop, threadId),
-  onStateChanged: (listener) => {
-    const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
-      if (state !== "collapsed" && state !== "hover" && state !== "expanded") return;
-      listener(state as IslandWindowState);
+  onToggleExpanded: (listener) => {
+    const wrappedListener = () => {
+      listener();
     };
-    ipcRenderer.on(IPC.island.stateChanged, wrappedListener);
+    ipcRenderer.on(IPC.island.toggleExpanded, wrappedListener);
     return () => {
-      ipcRenderer.removeListener(IPC.island.stateChanged, wrappedListener);
+      ipcRenderer.removeListener(IPC.island.toggleExpanded, wrappedListener);
     };
   },
 } satisfies IslandBridge);
