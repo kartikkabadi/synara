@@ -461,6 +461,7 @@ import { ComposerExtrasMenu } from "./chat/ComposerExtrasMenu";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { ComposerInputBanners } from "./chat/ComposerInputBanners";
 import { LoopComposerModeCta, LoopComposerModeHeader } from "./chat/LoopComposerMode";
+import { isLoopOwnedTurnRunning } from "./chat/loopPresentation";
 import { isUnsupportedLoopContext, useLoopComposerMode } from "./chat/useLoopComposerMode";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerVoiceButton } from "./chat/ComposerVoiceButton";
@@ -4397,7 +4398,8 @@ export default function ChatView({
     });
   }, [activeThread, isServerThread]);
 
-  const handleStopLoop = useCallback(async () => {
+  // Stop after this turn: disable future iterations; the running turn finishes.
+  const handleStopLoopAfterTurn = useCallback(async () => {
     const api = readNativeApi();
     if (!api || !activeThread || activeThread.loop?.active !== true) {
       return;
@@ -4409,6 +4411,42 @@ export default function ChatView({
         threadId: activeThread.id,
         createdAt: new Date().toISOString(),
       });
+      const snapshot = await api.orchestration.getShellSnapshot();
+      syncServerShellSnapshot(snapshot);
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not stop loop",
+        description:
+          error instanceof Error ? error.message : "An error occurred while stopping the loop.",
+      });
+    }
+  }, [activeThread, syncServerShellSnapshot]);
+
+  // Stop now: interrupt the running loop-owned turn (the decider atomically
+  // turns the loop off); fall back to a plain loop-off when no concrete turn exists.
+  const handleStopLoopNow = useCallback(async () => {
+    const api = readNativeApi();
+    const loop = activeThread?.loop;
+    if (!api || !activeThread || loop == null) {
+      return;
+    }
+    try {
+      if (isLoopOwnedTurnRunning(loop, activeThread.latestTurn)) {
+        await api.orchestration.dispatchCommand({
+          type: "thread.turn.interrupt",
+          commandId: newCommandId(),
+          threadId: activeThread.id,
+          createdAt: new Date().toISOString(),
+        });
+      } else if (loop.active) {
+        await api.orchestration.dispatchCommand({
+          type: "thread.loop.off",
+          commandId: newCommandId(),
+          threadId: activeThread.id,
+          createdAt: new Date().toISOString(),
+        });
+      }
       const snapshot = await api.orchestration.getShellSnapshot();
       syncServerShellSnapshot(snapshot);
     } catch (error) {
@@ -10563,7 +10601,9 @@ export default function ChatView({
                 <ComposerInputBanners
                   roundedTopReset={false}
                   thread={activeThread}
-                  onStopLoop={handleStopLoop}
+                  onStopLoopAfterTurn={handleStopLoopAfterTurn}
+                  onStopLoopNow={handleStopLoopNow}
+                  onEditLoop={loopComposer.openEdit}
                   planFollowUp={
                     !activePendingApproval &&
                     pendingUserInputs.length === 0 &&
