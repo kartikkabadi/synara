@@ -402,6 +402,86 @@ export const ProviderCompactionResult = Schema.Union([
 ]);
 export type ProviderCompactionResult = typeof ProviderCompactionResult.Type;
 
+// Canonical compaction orchestration lifecycle. These events describe one
+// compaction pass end to end and drive the durable compaction control state.
+export const ThreadCompactionRequestedPayload = Schema.Struct({
+  requestId: CompactionRequestId,
+  trigger: Schema.Literals(["manual", "synara-auto"]),
+  instructions: Schema.optional(TrimmedNonEmptyStringSchema),
+  createdAt: TrimmedNonEmptyStringSchema,
+});
+export type ThreadCompactionRequestedPayload = typeof ThreadCompactionRequestedPayload.Type;
+
+export const ThreadCompactionStartedPayload = Schema.Struct({
+  requestId: CompactionRequestId,
+  owner: Schema.Literals(["provider", "synara"]),
+  trigger: Schema.Literals(["manual", "provider-auto", "synara-auto"]),
+  beforeUsage: Schema.optional(ThreadTokenUsageSnapshot),
+  createdAt: TrimmedNonEmptyStringSchema,
+});
+export type ThreadCompactionStartedPayload = typeof ThreadCompactionStartedPayload.Type;
+
+export const ThreadCompactionCompletedPayload = Schema.Struct({
+  requestId: CompactionRequestId,
+  sessionEffect: Schema.Literals(["same-session", "session-rollover", "runtime-restart"]),
+  beforeUsage: Schema.optional(ThreadTokenUsageSnapshot),
+  afterUsage: Schema.optional(ThreadTokenUsageSnapshot),
+  durationMs: Schema.optional(NonNegativeInt),
+  createdAt: TrimmedNonEmptyStringSchema,
+});
+export type ThreadCompactionCompletedPayload = typeof ThreadCompactionCompletedPayload.Type;
+
+export const ThreadCompactionFailedPayload = Schema.Struct({
+  requestId: CompactionRequestId,
+  outcomeKnown: Schema.Boolean,
+  retryable: Schema.Boolean,
+  failureKind: TrimmedNonEmptyStringSchema,
+  detail: Schema.optional(TrimmedNonEmptyStringSchema),
+  createdAt: TrimmedNonEmptyStringSchema,
+});
+export type ThreadCompactionFailedPayload = typeof ThreadCompactionFailedPayload.Type;
+
+export const ThreadCompactionSuspendedPayload = Schema.Struct({
+  reason: TrimmedNonEmptyStringSchema,
+  detail: Schema.optional(TrimmedNonEmptyStringSchema),
+  createdAt: TrimmedNonEmptyStringSchema,
+});
+export type ThreadCompactionSuspendedPayload = typeof ThreadCompactionSuspendedPayload.Type;
+
+export const ThreadCompactionLifecycleEvent = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("thread.compaction-requested"),
+    threadId: ThreadId,
+    payload: ThreadCompactionRequestedPayload,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.compaction-started"),
+    threadId: ThreadId,
+    payload: ThreadCompactionStartedPayload,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.compaction-completed"),
+    threadId: ThreadId,
+    payload: ThreadCompactionCompletedPayload,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.compaction-failed"),
+    threadId: ThreadId,
+    payload: ThreadCompactionFailedPayload,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.compaction-suspended"),
+    threadId: ThreadId,
+    payload: ThreadCompactionSuspendedPayload,
+  }),
+]);
+export type ThreadCompactionLifecycleEvent = typeof ThreadCompactionLifecycleEvent.Type;
+
+// Thread-activity kind under which compaction runtime status snapshots are
+// projected to clients (payload: ThreadCompactionRuntimeStatus).
+export const THREAD_COMPACTION_RUNTIME_STATUS_ACTIVITY_KIND =
+  "thread.compaction-runtime-status.updated" as const;
+
 const ThreadTokenUsageUpdatedPayload = Schema.Struct({
   usage: ThreadTokenUsageSnapshot,
 });
