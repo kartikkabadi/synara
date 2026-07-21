@@ -266,7 +266,9 @@
     rgba(255, 255, 255, 0.5) 60deg,
     transparent 140deg,
     rgba(255, 255, 255, 0.12) 220deg,
-    transparent 300deg
+    transparent 300deg,
+    /* Explicit closed loop — same value as the 0deg stop, so no seam. */
+    transparent 360deg
   );
   animation: island-orb-spin 6s linear infinite;
   animation-play-state: paused;
@@ -288,22 +290,27 @@
 
 /* State motion: only transform/opacity animate (composited layers). */
 
-/* Idle is a dim ember, not a gray dot. */
+/* Idle is a dim blue-slate ember with a specular and faint bloom, so the
+   sphere still reads at the 64×30 pill size — a lamp, not a gray dot. */
 .island-orb[data-orb-state="idle"] {
-  opacity: 0.9;
+  opacity: 1;
 }
 
 .island-orb[data-orb-state="idle"] .island-orb-core {
   background: radial-gradient(
     circle at 35% 30%,
-    hsl(220 30% 60%),
-    hsl(222 25% 35%) 55%,
-    hsl(224 25% 16%)
+    hsl(218 45% 66%),
+    hsl(220 35% 38%) 55%,
+    hsl(224 30% 18%)
   );
 }
 
 .island-orb[data-orb-state="idle"] .island-orb-bloom {
-  opacity: 0.25;
+  opacity: 0.3;
+}
+
+.island-orb[data-orb-state="idle"] .island-orb-spec {
+  opacity: 0.8;
 }
 
 /* Active states scale the whole orb 1.15x (composited transform) so a state
