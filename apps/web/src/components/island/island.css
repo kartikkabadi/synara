@@ -282,8 +282,7 @@
     transparent 140deg,
     rgba(255, 255, 255, 0.12) 220deg,
     transparent 300deg,
-    /* Explicit closed loop — same value as the 0deg stop, so no seam. */
-    transparent 360deg
+    /* Explicit closed loop — same value as the 0deg stop, so no seam. */ transparent 360deg
   );
   animation: island-orb-spin 6s linear infinite;
   animation-play-state: paused;
