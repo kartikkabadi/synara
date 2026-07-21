@@ -72,7 +72,9 @@ export const ThreadLoop = Schema.Struct({
 
   // Canonical configured duration budget in seconds; null means no duration
   // budget. Budget copy derives from this, never from endsAt - createdAt.
-  durationSeconds: Schema.optional(Schema.NullOr(PositiveInt)),
+  durationSeconds: Schema.optional(Schema.NullOr(PositiveInt)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
 
   // Always present. Default 100.
   hardCap: PositiveInt,

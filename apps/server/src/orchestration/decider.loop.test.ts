@@ -475,27 +475,20 @@ describe("decider loop commands", () => {
     expect(event?.type).toBe("thread.loop-set");
   });
 
-  it("rejects thread.loop.set when expectedActivationId no longer matches", async () => {
+  it.each([
+    ["the activation no longer matches", { active: true, activationId: "activation-2" }],
+    ["no loop is active", { active: false, activationId: "activation-1" }],
+  ] as const)("rejects thread.loop.set with expectedActivationId when %s", async (_name, loop) => {
     const readModel = await projectLoopSet(
       await makeReadModelWithThread(),
-      makeLoop({ active: true, activationId: LoopActivationId.makeUnsafe("activation-2") }),
-    );
-    await expectRejected(
-      readModel,
-      loopSetCommand("cmd-loop-edit-stale", {
-        expectedActivationId: LoopActivationId.makeUnsafe("activation-1"),
+      makeLoop({
+        active: loop.active,
+        activationId: LoopActivationId.makeUnsafe(loop.activationId),
       }),
     );
-  });
-
-  it("rejects thread.loop.set with expectedActivationId when no loop is active", async () => {
-    const readModel = await projectLoopSet(
-      await makeReadModelWithThread(),
-      makeLoop({ active: false, activationId: LoopActivationId.makeUnsafe("activation-1") }),
-    );
     await expectRejected(
       readModel,
-      loopSetCommand("cmd-loop-edit-ended", {
+      loopSetCommand("cmd-loop-edit-guarded", {
         expectedActivationId: LoopActivationId.makeUnsafe("activation-1"),
       }),
     );
@@ -532,7 +525,6 @@ describe("decider loop commands", () => {
     const [event] = await decide(readModel, loopOffCommand("cmd-loop-off-idempotent", "user_stop"));
     expect(event?.type).toBe("thread.loop-off");
     expect(event?.payload).toMatchObject({
-      threadId: asThreadId("thread-loop"),
       loop: { active: false, lastStopReason: "user_stop" },
     });
   });
@@ -545,7 +537,6 @@ describe("decider loop commands", () => {
     );
     expect(event?.type).toBe("thread.loop-off");
     expect(event?.payload).toMatchObject({
-      threadId: asThreadId("thread-loop"),
       loop: { active: false, lastStopReason: "thread_deleted" },
     });
   });

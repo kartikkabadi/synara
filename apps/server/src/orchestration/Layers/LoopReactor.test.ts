@@ -269,6 +269,11 @@ function makeFakes(snapshot: OrchestrationReadModel, thread: Option.Option<Orche
 
   const fakeSnapshotQuery: ProjectionSnapshotQueryShape = {
     getSnapshot: () => Effect.succeed(snapshot),
+    getShellSnapshot: () =>
+      Effect.succeed({
+        threads: snapshot.threads as unknown as ReadonlyArray<OrchestrationThreadShell>,
+        snapshotSequence: { sequence: 0, updatedAt: now },
+      } as unknown as never),
     getThreadShellById: () =>
       Effect.succeed(thread as unknown as Option.Option<OrchestrationThreadShell>),
   } as unknown as ProjectionSnapshotQueryShape;
@@ -314,8 +319,13 @@ async function withReactor(
   body: (scenario: ReactorScenario) => Promise<void>,
   options: { start?: boolean } = {},
 ): Promise<void> {
-  const { eventQueue, dispatchLog, fakeEngine, fakeSnapshotQuery, fakeProjectionThreadLoopRepository } =
-    makeFakes(makeSnapshot(thread), Option.some(thread));
+  const {
+    eventQueue,
+    dispatchLog,
+    fakeEngine,
+    fakeSnapshotQuery,
+    fakeProjectionThreadLoopRepository,
+  } = makeFakes(makeSnapshot(thread), Option.some(thread));
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
       Layer.provide(

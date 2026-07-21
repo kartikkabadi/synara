@@ -190,7 +190,7 @@ export interface LoopStopReasonCopy {
 
 export interface LoopStopReasonContext {
   readonly maxIterations: number | null;
-  readonly durationSeconds?: number | null;
+  readonly durationSeconds?: number | null | undefined;
   readonly hardCap: number;
   readonly consecutiveErrors: number;
 }
@@ -199,7 +199,7 @@ export interface LoopStopReasonContext {
 // without one. Never derived from endsAt - createdAt: endsAt re-anchors on
 // reconfigure while createdAt keeps the original activation start.
 export function loopDurationMinutes(loop: {
-  readonly durationSeconds?: number | null;
+  readonly durationSeconds?: number | null | undefined;
 }): number | null {
   if (loop.durationSeconds == null) return null;
   return Math.max(1, Math.round(loop.durationSeconds / 60));
