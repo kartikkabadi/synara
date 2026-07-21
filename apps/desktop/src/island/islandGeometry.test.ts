@@ -57,8 +57,8 @@ describe("island sizes", () => {
   });
 
   it("uses the floating pill size without a notch", () => {
-    expect(islandCollapsedSize(null)).toEqual({ width: 180, height: 32 });
-    expect(islandCollapsedSize(null, 2)).toEqual({ width: 180, height: 32 });
+    expect(islandCollapsedSize(null)).toEqual({ width: 76, height: 32 });
+    expect(islandCollapsedSize(null, 2)).toEqual({ width: 76, height: 32 });
   });
 
   it("shrinks to the idle mini pill with zero sessions, except in notch mode", () => {
@@ -126,9 +126,9 @@ describe("island anchoring", () => {
 
   it("centers the surface rect at the window top per state", () => {
     expect(islandSurfaceRect("collapsed", windowsDisplay, null)).toEqual({
-      x: (2560 - 180) / 2,
+      x: (2560 - 76) / 2,
       y: 0,
-      width: 180,
+      width: 76,
       height: 32,
     });
     expect(islandSurfaceRect("hover", windowsDisplay, null)).toMatchObject({

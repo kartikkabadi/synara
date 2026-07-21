@@ -114,7 +114,8 @@ export function shortcutHint(context: IslandDisplayContext | null): string {
     const uaData = (navigator as { userAgentData?: { platform?: string } }).userAgentData;
     isMac = isMacPlatform(uaData?.platform ?? navigator.platform ?? "");
   }
-  return isMac ? "\u2318\u21e7I" : "Ctrl\u21e7I";
+  // Windows/Linux users read "Shift", not the mac ⇧ glyph.
+  return isMac ? "\u2318\u21e7I" : "Ctrl+Shift+I";
 }
 
 function providerLabel(provider: string): string {
@@ -342,8 +343,8 @@ export function Island() {
         type="button"
         onClick={() => applyState("expanded")}
         className={cn(
-          "island-enter-body flex h-full w-full items-center text-xs font-medium tracking-wide text-white/80",
-          sessions.length > 0 ? "justify-center gap-2 px-3" : "justify-center px-3",
+          "island-enter-body flex h-full w-full items-center justify-center text-xs font-medium tracking-wide text-white/80",
+          sessions.length > 0 ? "gap-2 pl-2.5 pr-3" : "px-3",
           leaving && "island-leave",
         )}
         aria-label="Expand agent sessions island"
@@ -363,7 +364,7 @@ export function Island() {
         type="button"
         onClick={() => applyState("expanded")}
         className={cn(
-          "island-enter-body flex h-full w-full flex-col items-stretch justify-center gap-1.5 px-4 py-3 text-left",
+          "island-enter-body flex h-full w-full flex-col items-stretch justify-center gap-1.5 px-5 py-3 text-left",
           leaving && "island-leave",
         )}
         aria-label="Expand agent sessions island"

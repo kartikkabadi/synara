@@ -25,7 +25,9 @@ export const ISLAND_WINDOW_SIZE: IslandSize = {
   height: ISLAND_EXPANDED_SIZE.height + ISLAND_WINDOW_MARGIN.bottom,
 };
 export const ISLAND_EXPANDED_EMPTY_SIZE: IslandSize = { width: 560, height: 180 };
-export const ISLAND_FLOATING_COLLAPSED_SIZE: IslandSize = { width: 180, height: 32 };
+// Content-fit pill: orb seat + session count with 10/12px padding — no dead
+// space or trailing filler.
+export const ISLAND_FLOATING_COLLAPSED_SIZE: IslandSize = { width: 76, height: 32 };
 // With zero sessions the floating pill shrinks to just the seated orb.
 export const ISLAND_IDLE_COLLAPSED_SIZE: IslandSize = { width: 64, height: 30 };
 export const ISLAND_HOVER_HEIGHT = 104;
