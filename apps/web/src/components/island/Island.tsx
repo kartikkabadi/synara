@@ -23,7 +23,11 @@ import {
   type IslandSession,
   type IslandSessionStatus,
 } from "~/lib/islandSessionTracker";
+import { XIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
+
+import { IslandOrb, orbHue, orbStateForStatus } from "./IslandOrb";
+import "./island.css";
 
 const AUTO_POP_MS = 4_000;
 const EXPANDED_IDLE_COLLAPSE_MS = 8_000;
@@ -34,10 +38,10 @@ function innerSize(state: IslandWindowState, context: IslandDisplayContext | nul
   return islandStateSize(state, context?.notch ?? null);
 }
 
-const STATUS_DOT_CLASS: Record<IslandSessionStatus, string> = {
-  working: "bg-blue-400 animate-pulse",
-  "needs-approval": "bg-amber-400",
-  done: "bg-emerald-400",
+const STATUS_TEXT_CLASS: Record<IslandSessionStatus, string> = {
+  working: "text-cyan-300",
+  "needs-approval": "text-amber-300",
+  done: "text-emerald-300",
 };
 
 const STATUS_LABEL: Record<IslandSessionStatus, string> = {
@@ -50,6 +54,21 @@ function providerLabel(provider: string): string {
   return PROVIDER_DISPLAY_NAMES[provider as ProviderKind] ?? provider;
 }
 
+// e.g. "+2 more working · 1 done" under the hover headline row.
+function summarizeRest(rest: readonly IslandSession[]): string | null {
+  if (rest.length === 0) return null;
+  const counts = new Map<IslandSessionStatus, number>();
+  for (const session of rest) counts.set(session.status, (counts.get(session.status) ?? 0) + 1);
+  const parts: string[] = [];
+  for (const status of ["needs-approval", "working", "done"] as const) {
+    const count = counts.get(status);
+    if (!count) continue;
+    const label = STATUS_LABEL[status].toLowerCase();
+    parts.push(parts.length === 0 ? `+${count} more ${label}` : `${count} ${label}`);
+  }
+  return parts.join(" · ");
+}
+
 export function Island() {
   const [context, setContext] = useState<IslandDisplayContext | null>(null);
   const [threads, setThreads] = useState<readonly OrchestrationThreadShell[]>([]);
@@ -58,6 +77,7 @@ export function Island() {
   const sessionsRef = useRef<IslandSession[]>([]);
   const popTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
 
   const sessions = useMemo(() => deriveIslandSessions(threads, Date.now()), [threads]);
   const aggregate = aggregateIslandStatus(sessions);
@@ -102,7 +122,10 @@ export function Island() {
     };
   }, []);
 
-  // Auto-pop on needs-approval / turn-completed transitions.
+  // Auto-pop on needs-approval / turn-completed transitions, with a spring
+  // overshoot on the surface. The resize itself keeps the 220ms ease-out
+  // transition — it is a status animation, not a disclosure toggle, so
+  // disclosureMotion.ts does not apply (see .plans/island-siri-orb-v2.md §2.4).
   useEffect(() => {
     const transition = findPopTransition(sessionsRef.current, sessions);
     sessionsRef.current = sessions;
@@ -110,6 +133,12 @@ export function Island() {
     setPopped(true);
     if (popTimerRef.current) clearTimeout(popTimerRef.current);
     popTimerRef.current = setTimeout(() => setPopped(false), AUTO_POP_MS);
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      surfaceRef.current?.animate(
+        { transform: ["scale(1)", "scale(1.035)", "scale(1)"] },
+        { duration: 280, easing: "cubic-bezier(0.34,1.56,0.64,1)" },
+      );
+    }
   }, [sessions]);
 
   // Expanded panel collapses after a period without pointer activity.
@@ -160,81 +189,101 @@ export function Island() {
 
   const size = innerSize(effectiveState, context);
   const isNotch = context?.notch != null;
+  const orbState = orbStateForStatus(aggregate);
+  const glowing = aggregate === "working" || aggregate === "needs-approval";
+  const headline = sessions[0] ?? null;
+  const restSummary = summarizeRest(sessions.slice(1));
 
   return (
     <div className="flex h-screen w-screen items-start justify-center overflow-hidden bg-transparent">
       <div
+        ref={surfaceRef}
         data-island-state={effectiveState}
         onPointerEnter={onPointerEnter}
         onPointerLeave={onPointerLeave}
-        style={{ width: size.width, height: size.height }}
+        style={{ width: size.width, height: size.height, "--island-hue": orbHue(orbState) }}
         className={cn(
-          "pointer-events-auto flex flex-col overflow-hidden bg-black/90 text-white shadow-lg backdrop-blur",
+          "island-surface pointer-events-auto flex flex-col overflow-hidden text-white",
           "transition-[width,height,border-radius] duration-220 ease-out motion-reduce:transition-none",
-          isNotch && effectiveState === "collapsed" ? "rounded-b-2xl" : "rounded-2xl",
+          glowing && (isNotch ? "island-surface-glow-notch" : "island-surface-glow"),
+          effectiveState === "expanded"
+            ? "rounded-[26px]"
+            : effectiveState === "hover"
+              ? "rounded-[22px]"
+              : isNotch
+                ? "rounded-b-2xl"
+                : "rounded-full",
         )}
       >
         {effectiveState === "collapsed" ? (
           <button
+            key="collapsed"
             type="button"
             onClick={() => applyState("expanded")}
-            className="flex h-full w-full items-center justify-center gap-2 px-3 text-xs font-medium"
+            className="island-crossfade flex h-full w-full items-center justify-center gap-2 px-3 text-xs font-medium tracking-wide text-white/80"
             aria-label="Expand agent sessions island"
           >
-            <span
-              className={cn(
-                "size-2 rounded-full",
-                aggregate ? STATUS_DOT_CLASS[aggregate] : "bg-white/30",
-              )}
-            />
-            <span className="tabular-nums">{sessions.length}</span>
+            <IslandOrb state={orbState} />
+            {sessions.length > 0 ? (
+              <span className="tabular-nums">{sessions.length}</span>
+            ) : null}
           </button>
         ) : effectiveState === "hover" ? (
           <button
+            key="hover"
             type="button"
             onClick={() => applyState("expanded")}
-            className="flex h-full w-full flex-col items-stretch gap-1 px-4 py-3 text-left"
+            className="island-crossfade flex h-full w-full flex-col items-stretch justify-center gap-1.5 px-4 py-3 text-left"
             aria-label="Expand agent sessions island"
           >
-            <div className="flex items-center gap-2 text-xs text-white/70">
-              <span
-                className={cn(
-                  "size-2 rounded-full",
-                  aggregate ? STATUS_DOT_CLASS[aggregate] : "bg-white/30",
-                )}
-              />
-              {sessions.length === 1 ? "1 session" : `${sessions.length} sessions`}
-            </div>
-            <div className="flex items-center gap-2 overflow-hidden">
-              {sessions.slice(0, 8).map((session) => (
-                <span
-                  key={session.threadId}
-                  title={session.title}
-                  className={cn("size-2.5 shrink-0 rounded-full", STATUS_DOT_CLASS[session.status])}
-                />
-              ))}
-              {sessions.length === 0 ? (
+            {headline ? (
+              <>
+                <div className="flex items-center gap-2.5">
+                  <IslandOrb state={headline.status} size={14} />
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-white/90">
+                    {headline.title}
+                  </span>
+                  <span
+                    className={cn(
+                      "shrink-0 text-xs font-medium",
+                      STATUS_TEXT_CLASS[headline.status],
+                    )}
+                  >
+                    {STATUS_LABEL[headline.status]}
+                  </span>
+                </div>
+                {restSummary ? (
+                  <div className="pl-[26px] text-xs text-white/50">{restSummary}</div>
+                ) : null}
+              </>
+            ) : (
+              <div className="flex items-center gap-2.5">
+                <IslandOrb state="idle" size={14} />
                 <span className="text-xs text-white/50">No active sessions</span>
-              ) : null}
-            </div>
+              </div>
+            )}
           </button>
         ) : (
-          <div className="flex h-full flex-col" onPointerMove={armIdleTimer}>
-            <div className="flex items-center justify-between px-4 py-2 text-xs text-white/70">
-              <span>Agent sessions</span>
-              <button
-                type="button"
-                onClick={() => applyState("collapsed")}
-                className="rounded px-1.5 py-0.5 hover:bg-white/10"
-                aria-label="Collapse island"
-              >
-                ×
-              </button>
+          <div key="expanded" className="island-crossfade flex h-full flex-col" onPointerMove={armIdleTimer}>
+            <div className="flex items-center justify-between px-4 py-2.5">
+              <span className="text-[11px] uppercase tracking-widest text-white/40">Sessions</span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-white/25">⌘⇧I</span>
+                <button
+                  type="button"
+                  onClick={() => applyState("collapsed")}
+                  className="rounded-md p-1 text-white/50 hover:bg-white/10 hover:text-white/80"
+                  aria-label="Collapse island"
+                >
+                  <XIcon className="size-3.5" />
+                </button>
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto px-2 pb-2">
               {sessions.length === 0 ? (
-                <div className="px-2 py-6 text-center text-xs text-white/50">
-                  No active sessions
+                <div className="flex flex-col items-center gap-3 px-2 py-8">
+                  <IslandOrb state="idle" />
+                  <span className="text-xs text-white/50">No active sessions</span>
                 </div>
               ) : (
                 sessions.map((session) => (
@@ -242,20 +291,27 @@ export function Island() {
                     key={session.threadId}
                     type="button"
                     onClick={() => focusThread(session.threadId)}
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-white/10"
+                    className="group flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left hover:bg-white/5"
                   >
-                    <span
-                      className={cn(
-                        "size-2 shrink-0 rounded-full",
-                        STATUS_DOT_CLASS[session.status],
-                      )}
-                    />
-                    <span className="min-w-0 flex-1 truncate text-sm">{session.title}</span>
-                    <span className="shrink-0 rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-white/70">
-                      {providerLabel(session.provider)}
+                    <IslandOrb state={session.status} size={14} />
+                    <span className="min-w-0 flex-1 truncate text-sm text-white/90">
+                      {session.title}
                     </span>
-                    <span className="shrink-0 text-[10px] text-white/50">
-                      {STATUS_LABEL[session.status]}
+                    <span className="flex shrink-0 items-center gap-2 group-hover:hidden">
+                      <span className="rounded-md border border-white/10 bg-white/8 px-1.5 py-0.5 text-[10px] text-white/60">
+                        {providerLabel(session.provider)}
+                      </span>
+                      <span
+                        className={cn(
+                          "text-[10px] font-medium",
+                          STATUS_TEXT_CLASS[session.status],
+                        )}
+                      >
+                        {STATUS_LABEL[session.status]}
+                      </span>
+                    </span>
+                    <span className="hidden shrink-0 text-[10px] font-medium text-white/70 group-hover:inline">
+                      Open
                     </span>
                   </button>
                 ))

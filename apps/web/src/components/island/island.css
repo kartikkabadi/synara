@@ -1,0 +1,181 @@
+/* FILE: island.css
+   Purpose: Ember-glass surface + orb-lamp animations for the island overlay.
+   Layer: Web island UI
+   Why: Bespoke keyframes are allowed here — the island resize is a status
+        animation, not a disclosure toggle, so disclosureMotion.ts does not
+        apply (documented decision in .plans/island-siri-orb-v2.md §2.4). */
+
+/* ---- Surface -------------------------------------------------------- */
+
+.island-surface {
+  background: linear-gradient(180deg, rgba(24, 24, 27, 0.92), rgba(9, 9, 11, 0.96));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 8px 32px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+}
+
+/* State-hued ambient glow while any session is active. In notch mode the glow
+   is pushed downward only, so a mismatched DEFAULT_NOTCH_WIDTH doesn't halo
+   the physical camera housing. */
+.island-surface-glow {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 8px 32px rgba(0, 0, 0, 0.45),
+    0 0 24px hsl(var(--island-hue, 205) 80% 60% / 0.15);
+}
+
+.island-surface-glow-notch {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 8px 32px rgba(0, 0, 0, 0.45),
+    0 12px 24px -8px hsl(var(--island-hue, 205) 80% 60% / 0.2);
+}
+
+/* ---- Content crossfade ---------------------------------------------- */
+
+.island-crossfade {
+  animation: island-crossfade-in 160ms ease-out 60ms both;
+}
+
+@keyframes island-crossfade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---- Orb lamp -------------------------------------------------------- */
+
+.island-orb {
+  position: relative;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+
+.island-orb-core {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: radial-gradient(
+    circle at 35% 30%,
+    hsl(var(--island-hue, 205) 90% 75%),
+    hsl(var(--island-hue, 205) 85% 55%) 55%,
+    hsl(var(--island-hue, 205) 80% 35%)
+  );
+}
+
+.island-orb-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.island-orb-sheen::before {
+  content: "";
+  position: absolute;
+  inset: -25%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(255, 255, 255, 0.35) 60deg,
+    transparent 140deg,
+    rgba(255, 255, 255, 0.12) 220deg,
+    transparent 300deg
+  );
+  animation: island-orb-spin 6s linear infinite;
+  animation-play-state: paused;
+}
+
+.island-orb-bloom {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: radial-gradient(
+    circle at 35% 30%,
+    hsl(var(--island-hue, 205) 90% 75%),
+    hsl(var(--island-hue, 205) 85% 55%) 55%,
+    hsl(var(--island-hue, 205) 80% 35%)
+  );
+  filter: blur(6px);
+  opacity: 0.6;
+}
+
+/* State motion: only transform/opacity animate (composited layers). */
+
+.island-orb[data-orb-state="idle"] {
+  opacity: 0.4;
+}
+
+.island-orb[data-orb-state="idle"] .island-orb-core,
+.island-orb[data-orb-state="idle"] .island-orb-bloom {
+  filter: saturate(0.15);
+}
+
+.island-orb[data-orb-state="working"] {
+  animation: island-orb-breathe 3s ease-in-out infinite;
+}
+
+.island-orb[data-orb-state="working"] .island-orb-sheen::before {
+  animation-play-state: running;
+}
+
+.island-orb[data-orb-state="looping"] .island-orb-sheen::before {
+  animation-duration: 3s;
+  animation-play-state: running;
+}
+
+.island-orb[data-orb-state="needs-approval"] {
+  animation: island-orb-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes island-orb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes island-orb-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+
+@keyframes island-orb-pulse {
+  0%,
+  30%,
+  60%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  15%,
+  45% {
+    transform: scale(1.12);
+    opacity: 0.85;
+  }
+}
+
+/* ---- Reduced motion --------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .island-orb,
+  .island-orb-sheen::before {
+    animation: none !important;
+  }
+
+  .island-crossfade {
+    animation: none;
+  }
+}
