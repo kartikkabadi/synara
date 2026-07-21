@@ -189,6 +189,42 @@ async function waitForAssistantReply(page: Page, timeout = 180_000): Promise<voi
   });
 }
 
+// The timeline collapses compaction work-log entries into a "Worked for Xs" /
+// "Details" disclosure by default, so the terminal "Context compacted" text may
+// be hidden until that disclosure is expanded.
+function compactionText(page: Page) {
+  return page.getByText(/Context compacted|Context compacted manually/).first();
+}
+
+function workLogTrigger(page: Page) {
+  return page
+    .locator('[data-slot="collapsible-trigger"]')
+    .filter({ hasText: /^Worked for|Details/ })
+    .last();
+}
+
+async function waitForCompactionRow(page: Page, timeout = 180_000): Promise<void> {
+  const text = compactionText(page);
+  const trigger = workLogTrigger(page);
+
+  const deadline = Date.now() + timeout;
+  await expect(async () => {
+    const textVisible = await text.isVisible().catch(() => false);
+    const triggerVisible = await trigger.isVisible().catch(() => false);
+    if (!textVisible && !triggerVisible) {
+      throw new Error(
+        "neither the compaction text nor a collapsed work-log disclosure appeared in the timeline",
+      );
+    }
+  }).toPass({ timeout });
+
+  if (await text.isVisible().catch(() => false)) return;
+
+  await trigger.click();
+  const remaining = Math.max(deadline - Date.now(), 10_000);
+  await expect(text).toBeVisible({ timeout: remaining });
+}
+
 for (const spec of PROVIDERS) {
   const requested = requestedProviders();
   const included =
@@ -256,9 +292,7 @@ for (const spec of PROVIDERS) {
       // 2) Timeline shows the compaction item (manual compaction always emits
       //    one; auto compaction emits one once the threshold is crossed).
       if (spec.manualCompact) {
-        await expect(page.getByText(/Context compacted|Compacting context/).first()).toBeVisible({
-          timeout: 180_000,
-        });
+        await waitForCompactionRow(page);
       }
 
       // 3) The thread still works after compaction.
