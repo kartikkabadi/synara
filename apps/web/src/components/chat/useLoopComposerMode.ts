@@ -14,7 +14,7 @@ import {
   type ThreadLoop,
 } from "@synara/contracts";
 import { parseLoopCommand, type LoopBudget } from "@synara/shared/loop";
-import { useCallback, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { newCommandId } from "../../lib/utils";
 import { readNativeApi } from "../../nativeApi";
 
@@ -36,6 +36,7 @@ export const LOOP_DURATION_PRESETS_SECONDS = [30 * 60, 60 * 60] as const;
 
 export const LOOP_BUDGET_COUNT_ERROR = "Choose between 1 and 100 turns.";
 export const LOOP_BUDGET_DURATION_ERROR = "Duration cannot exceed 24 hours.";
+export const LOOP_CHOOSE_BUDGET_NOTE = "Choose how long the loop should run.";
 export const LOOP_UNSUPPORTED_CONTEXT_MESSAGE =
   "Loop prompts are text-only. Remove attachments and selected tools to continue.";
 
@@ -142,12 +143,31 @@ export function validateLoopObjective(
   return null;
 }
 
+export type LoopSetupNote = "choose-budget" | "invalid-budget" | "unsupported-context";
+
+// Best-effort mapping of a malformed budget token (e.g. `0`, `101`, `25h`) to a
+// budget choice so setup can show the invalid value instead of silently
+// resetting to the default.
+export function loopBudgetChoiceFromInvalidToken(token: string): LoopBudgetChoice | null {
+  if (/^[+-]?\d+$/.test(token)) {
+    return { kind: "count", turns: Number(token) };
+  }
+  const durationMatch = /^([+-]?\d+)(s|m|min|mins|h|hr|hrs)$/i.exec(token);
+  if (durationMatch) {
+    const value = Number(durationMatch[1]);
+    const unit = durationMatch[2]!.toLowerCase();
+    const seconds = unit === "s" ? value : unit.startsWith("m") ? value * 60 : value * 3600;
+    return { kind: "duration", seconds };
+  }
+  return null;
+}
+
 export type LoopInvocationInterpretation =
   | {
       kind: "open-setup";
       budget: LoopBudgetChoice;
       objective: string;
-      note: "choose-budget" | "invalid-budget" | null;
+      note: LoopSetupNote | null;
     }
   | { kind: "start-direct"; budget: LoopBudget; prompt: string }
   | { kind: "toggle-off" }
@@ -187,10 +207,12 @@ export function interpretLoopInvocation(
       };
     }
     if (parsed.reason === "invalid_budget") {
+      const firstToken = args.match(/^\S*/)?.[0] ?? "";
+      const invalidChoice = loopBudgetChoiceFromInvalidToken(firstToken);
       return {
         kind: "open-setup",
-        budget: LOOP_DEFAULT_BUDGET_CHOICE,
-        objective: args,
+        budget: invalidChoice ?? LOOP_DEFAULT_BUDGET_CHOICE,
+        objective: invalidChoice === null ? args : args.slice(firstToken.length).trim(),
         note: "invalid-budget",
       };
     }
@@ -264,115 +286,138 @@ export interface UseLoopComposerModeInput {
 export interface LoopComposerController {
   mode: LoopComposerMode;
   isDispatching: boolean;
-  inlineError: string | null;
+  note: string | null;
+  error: string | null;
   budgetError: string | null;
   isUnsupportedContext: boolean;
   startDisabled: boolean;
-  openCreate: (options?: {
-    budget?: LoopBudgetChoice;
-    objective?: string;
-    note?: "choose-budget" | "invalid-budget" | null;
-  }) => void;
+  openCreate: (options?: LoopComposerOpenCreateOptions) => void;
   openEdit: () => void;
   setBudget: (budget: LoopBudgetChoice) => void;
   cancel: () => void;
   submit: () => Promise<void>;
 }
 
-export function useLoopComposerMode(input: UseLoopComposerModeInput): LoopComposerController {
-  const {
-    threadId,
-    activeLoop,
-    hasUnsupportedContext,
-    getObjective,
-    setObjective,
-    clearObjective,
-    focusEditor,
-    syncServerShellSnapshot,
-    ensureThreadReady,
-  } = input;
+export interface LoopComposerOpenCreateOptions {
+  budget?: LoopBudgetChoice;
+  objective?: string;
+  note?: LoopSetupNote | null;
+}
 
-  const [mode, setMode] = useState<LoopComposerMode>({ kind: "closed" });
-  const [isDispatching, setIsDispatching] = useState(false);
-  const [inlineError, setInlineError] = useState<string | null>(null);
+export interface LoopComposerCoreState {
+  mode: LoopComposerMode;
+  // `note` is a quiet informational hint; `error` is a validation failure.
+  note: string | null;
+  error: string | null;
+  isDispatching: boolean;
+}
 
-  const budgetError = mode.kind === "closed" ? null : validateLoopBudgetChoice(mode.budget);
-  const objectiveInvalidReason =
-    mode.kind === "closed" ? null : validateLoopObjective(getObjective(), hasUnsupportedContext);
-  const startDisabled =
-    mode.kind === "closed" ||
-    isDispatching ||
-    budgetError !== null ||
-    objectiveInvalidReason !== null;
+export const LOOP_COMPOSER_CLOSED_STATE: LoopComposerCoreState = {
+  mode: { kind: "closed" },
+  note: null,
+  error: null,
+  isDispatching: false,
+};
 
-  const openCreate = useCallback(
-    (options?: {
-      budget?: LoopBudgetChoice;
-      objective?: string;
-      note?: "choose-budget" | "invalid-budget" | null;
-    }) => {
-      const sourceDraft = getObjective();
-      if (options?.objective !== undefined) {
-        setObjective(options.objective);
-      }
-      setInlineError(
-        options?.note === "choose-budget"
-          ? "Choose how long the loop should run."
-          : options?.note === "invalid-budget"
-            ? LOOP_BUDGET_COUNT_ERROR
+export interface LoopComposerCoreEnv {
+  getThreadId: () => ThreadId;
+  getActiveLoop: () => ThreadLoop | null;
+  hasUnsupportedContext: () => boolean;
+  getObjective: () => string;
+  setObjective: (value: string) => void;
+  clearObjective: () => void;
+  focusEditor: () => void;
+  syncServerShellSnapshot: () => Promise<void>;
+  ensureThreadReady: (titleSeed: string) => Promise<boolean>;
+  getDispatchDeps: () => LoopSetupDispatchDeps | null;
+}
+
+export interface LoopComposerCore {
+  getState: () => LoopComposerCoreState;
+  openCreate: (options?: LoopComposerOpenCreateOptions) => void;
+  openEdit: () => void;
+  setBudget: (budget: LoopBudgetChoice) => void;
+  cancel: () => void;
+  submit: () => Promise<void>;
+}
+
+/**
+ * Framework-free controller for the guided setup / edit modes. The hook wires
+ * it to React state; tests drive it directly.
+ */
+export function createLoopComposerCore(
+  env: LoopComposerCoreEnv,
+  onStateChange?: (state: LoopComposerCoreState) => void,
+): LoopComposerCore {
+  let state = LOOP_COMPOSER_CLOSED_STATE;
+  const setState = (partial: Partial<LoopComposerCoreState>) => {
+    state = { ...state, ...partial };
+    onStateChange?.(state);
+  };
+
+  const openCreate = (options?: LoopComposerOpenCreateOptions) => {
+    const sourceDraft = env.getObjective();
+    if (options?.objective !== undefined) {
+      env.setObjective(options.objective);
+    }
+    const budget = options?.budget ?? LOOP_DEFAULT_BUDGET_CHOICE;
+    setState({
+      mode: { kind: "create", budget, sourceDraft },
+      note: options?.note === "choose-budget" ? LOOP_CHOOSE_BUDGET_NOTE : null,
+      error:
+        options?.note === "invalid-budget"
+          ? (validateLoopBudgetChoice(budget) ?? LOOP_BUDGET_COUNT_ERROR)
+          : options?.note === "unsupported-context"
+            ? LOOP_UNSUPPORTED_CONTEXT_MESSAGE
             : null,
-      );
-      setMode({
-        kind: "create",
-        budget: options?.budget ?? LOOP_DEFAULT_BUDGET_CHOICE,
-        sourceDraft,
-      });
-      focusEditor();
-    },
-    [focusEditor, getObjective, setObjective],
-  );
-
-  const openEdit = useCallback(() => {
-    if (activeLoop == null || !activeLoop.active) return;
-    const sourceDraft = getObjective();
-    setObjective(activeLoop.prompt);
-    setInlineError(null);
-    setMode({
-      kind: "edit",
-      budget: loopBudgetChoiceFromLoop(activeLoop),
-      sourceDraft,
-      activationId: activeLoop.activationId,
     });
-    focusEditor();
-  }, [activeLoop, focusEditor, getObjective, setObjective]);
+    env.focusEditor();
+  };
 
-  const setBudget = useCallback((budget: LoopBudgetChoice) => {
-    setInlineError(null);
-    setMode((current) => (current.kind === "closed" ? current : { ...current, budget }));
-  }, []);
+  const openEdit = () => {
+    const activeLoop = env.getActiveLoop();
+    if (activeLoop == null || !activeLoop.active) return;
+    const sourceDraft = env.getObjective();
+    env.setObjective(activeLoop.prompt);
+    setState({
+      mode: {
+        kind: "edit",
+        budget: loopBudgetChoiceFromLoop(activeLoop),
+        sourceDraft,
+        activationId: activeLoop.activationId,
+      },
+      note: null,
+      error: null,
+    });
+    env.focusEditor();
+  };
+
+  const setBudget = (budget: LoopBudgetChoice) => {
+    if (state.mode.kind === "closed") return;
+    setState({ mode: { ...state.mode, budget }, note: null, error: null });
+  };
 
   // Lossless cancel: keep the objective text (and attachments/context) in the
   // normal composer, discard only the loop budget, and retain focus.
-  const cancel = useCallback(() => {
-    setMode((current) => {
-      if (current.kind === "edit") {
-        setObjective(current.sourceDraft);
-      }
-      return { kind: "closed" };
-    });
-    setInlineError(null);
-    setIsDispatching(false);
-    focusEditor();
-  }, [focusEditor, setObjective]);
+  const cancel = () => {
+    if (state.mode.kind === "edit") {
+      env.setObjective(state.mode.sourceDraft);
+    }
+    setState(LOOP_COMPOSER_CLOSED_STATE);
+    env.focusEditor();
+  };
 
-  const submit = useCallback(async () => {
-    if (mode.kind === "closed" || isDispatching) return;
-    const objective = getObjective();
-    const objectiveError = validateLoopObjective(objective, hasUnsupportedContext);
+  const submit = async () => {
+    const mode = state.mode;
+    if (mode.kind === "closed" || state.isDispatching) return;
+    const objective = env.getObjective();
+    const objectiveError = validateLoopObjective(objective, env.hasUnsupportedContext());
     const nextBudgetError = validateLoopBudgetChoice(mode.budget);
     if (objectiveError !== null || nextBudgetError !== null) {
-      setInlineError(
-        nextBudgetError ??
+      setState({
+        note: null,
+        error:
+          nextBudgetError ??
           (objectiveError === "unsupported-context"
             ? LOOP_UNSUPPORTED_CONTEXT_MESSAGE
             : objectiveError === "starts-with-slash"
@@ -380,73 +425,113 @@ export function useLoopComposerMode(input: UseLoopComposerModeInput): LoopCompos
               : objectiveError === "too-long"
                 ? "That loop objective is too long. Shorten it and try again."
                 : "Describe what Synara should keep working on."),
-      );
-      focusEditor();
+      });
+      env.focusEditor();
       return;
     }
 
-    const api = readNativeApi();
-    if (!api) {
-      setInlineError("Unable to connect to the app server.");
-      focusEditor();
+    const dispatchDeps = env.getDispatchDeps();
+    if (!dispatchDeps) {
+      setState({ note: null, error: "Unable to connect to the app server." });
+      env.focusEditor();
       return;
     }
 
-    setIsDispatching(true);
-    setInlineError(null);
+    setState({ isDispatching: true, note: null, error: null });
     try {
-      const ready = await ensureThreadReady(objective);
+      const ready = await env.ensureThreadReady(objective);
       if (!ready) {
-        setInlineError("Unable to connect to the app server.");
-        focusEditor();
+        setState({ error: "Unable to connect to the app server." });
+        env.focusEditor();
         return;
       }
-      const result = await performLoopSetupSubmit(
-        {
+      const result = await performLoopSetupSubmit(dispatchDeps, {
+        threadId: env.getThreadId(),
+        objective,
+        budget: mode.budget,
+      });
+      if (!result.ok) {
+        setState({ error: result.message });
+        env.focusEditor();
+        return;
+      }
+      await env.syncServerShellSnapshot();
+      // Authoritative success: exit setup and clear the objective from the
+      // normal composer. Never clear local state before this point.
+      env.clearObjective();
+      setState({ mode: { kind: "closed" } });
+      env.focusEditor();
+    } finally {
+      setState({ isDispatching: false });
+    }
+  };
+
+  return { getState: () => state, openCreate, openEdit, setBudget, cancel, submit };
+}
+
+function createBoundLoopComposerCore(
+  inputRef: { readonly current: UseLoopComposerModeInput },
+  onStateChange: (state: LoopComposerCoreState) => void,
+): LoopComposerCore {
+  return createLoopComposerCore(
+    {
+      getThreadId: () => inputRef.current.threadId,
+      getActiveLoop: () => inputRef.current.activeLoop,
+      hasUnsupportedContext: () => inputRef.current.hasUnsupportedContext,
+      getObjective: () => inputRef.current.getObjective(),
+      setObjective: (value) => inputRef.current.setObjective(value),
+      clearObjective: () => inputRef.current.clearObjective(),
+      focusEditor: () => inputRef.current.focusEditor(),
+      syncServerShellSnapshot: () => inputRef.current.syncServerShellSnapshot(),
+      ensureThreadReady: (titleSeed) => inputRef.current.ensureThreadReady(titleSeed),
+      getDispatchDeps: () => {
+        const api = readNativeApi();
+        if (!api) return null;
+        return {
           dispatchCommand: (command) => api.orchestration.dispatchCommand(command),
           newCommandId,
           now: () => new Date().toISOString(),
-        },
-        { threadId, objective, budget: mode.budget },
-      );
-      if (!result.ok) {
-        setInlineError(result.message);
-        focusEditor();
-        return;
-      }
-      await syncServerShellSnapshot();
-      // Authoritative success: exit setup and clear the objective from the
-      // normal composer. Never clear local state before this point.
-      clearObjective();
-      setMode({ kind: "closed" });
-      focusEditor();
-    } finally {
-      setIsDispatching(false);
-    }
-  }, [
-    clearObjective,
-    ensureThreadReady,
-    focusEditor,
-    getObjective,
-    hasUnsupportedContext,
-    isDispatching,
-    mode,
-    syncServerShellSnapshot,
-    threadId,
-  ]);
+        };
+      },
+    },
+    onStateChange,
+  );
+}
+
+export function useLoopComposerMode(input: UseLoopComposerModeInput): LoopComposerController {
+  const inputRef = useRef(input);
+  useEffect(() => {
+    inputRef.current = input;
+  }, [input]);
+
+  const [state, setState] = useState<LoopComposerCoreState>(LOOP_COMPOSER_CLOSED_STATE);
+  const [core] = useState(() => createBoundLoopComposerCore(inputRef, setState));
+
+  const { mode, note, error, isDispatching } = state;
+  const budgetError = mode.kind === "closed" ? null : validateLoopBudgetChoice(mode.budget);
+  const objectiveInvalidReason =
+    mode.kind === "closed"
+      ? null
+      : validateLoopObjective(input.getObjective(), input.hasUnsupportedContext);
+  const startDisabled =
+    mode.kind === "closed" ||
+    isDispatching ||
+    budgetError !== null ||
+    objectiveInvalidReason !== null;
 
   return {
     mode,
     isDispatching,
-    inlineError: inlineError ?? budgetError,
+    note,
+    error: error ?? budgetError,
     budgetError,
-    isUnsupportedContext: mode.kind !== "closed" && hasUnsupportedContext,
+    isUnsupportedContext: mode.kind !== "closed" && input.hasUnsupportedContext,
     startDisabled,
-    openCreate,
-    openEdit,
-    setBudget,
-    cancel,
-    submit,
+    openCreate: core.openCreate,
+    openEdit: core.openEdit,
+    setBudget: core.setBudget,
+    cancel: core.cancel,
+    submit: core.submit,
   };
 }
 
