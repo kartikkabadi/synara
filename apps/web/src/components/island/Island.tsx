@@ -342,6 +342,7 @@ export function Island() {
         ref={surfaceRef}
         data-island-state={effectiveState}
         data-island-status={orbState}
+        data-island-empty={sessionCount === 0}
         onPointerEnter={onPointerEnter}
         onPointerLeave={onPointerLeave}
         style={
@@ -416,7 +417,9 @@ export function Island() {
         onClick={() => applyState("expanded")}
         className={cn(
           leaving ? "island-leave" : "island-enter-body",
-          "flex h-full w-full flex-col items-stretch justify-center gap-1.5 px-5 py-3 text-left",
+          // Slightly heavier top padding optically centers the two-line block
+          // (the headline's cap height sits low in its line box).
+          "flex h-full w-full flex-col items-stretch justify-center gap-1.5 px-5 pb-[9px] pt-[15px] text-left",
         )}
         aria-label="Expand agent sessions island"
       >
