@@ -9,6 +9,7 @@ import {
   ThreadId,
   type ThreadLoop,
   type ThreadMarker,
+  type ThreadTurnPurpose,
   type TurnId,
 } from "@synara/contracts";
 import { resolveLatestTailUserMessageEditTarget } from "@synara/shared/conversationEdit";
