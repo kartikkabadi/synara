@@ -8,14 +8,33 @@
 /* ---- Surface -------------------------------------------------------- */
 
 .island-surface {
-  background: linear-gradient(180deg, rgba(24, 24, 27, 0.92), rgba(9, 9, 11, 0.96));
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 30%),
+    linear-gradient(180deg, #232326 0%, #131316 45%, #0a0a0c 100%);
+  /* Dark keyline so the silhouette holds on light desktops. */
+  border: 1px solid rgba(0, 0, 0, 0.9);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 8px 32px rgba(0, 0, 0, 0.45);
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.6),
+    inset 0 0 24px rgba(0, 0, 0, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 12px 40px rgba(0, 0, 0, 0.35);
   /* No backdrop-filter: Chromium cannot blur content behind a transparent
-     BrowserWindow, so it would be dead weight. The gradient above is
-     opaque enough to carry the glass look on its own. */
+     BrowserWindow, so it would be dead weight. The layered gradients above
+     carry the glass look on their own. */
+}
+
+/* Notch mode: the top edge must fuse with the physical bezel — no top rim
+   light, and the body top stop goes to pure black. */
+.island-surface-notch {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 30%),
+    linear-gradient(180deg, #000 0%, #131316 45%, #0a0a0c 100%);
+  box-shadow:
+    inset 0 -1px 0 rgba(0, 0, 0, 0.6),
+    inset 0 0 24px rgba(0, 0, 0, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 12px 40px rgba(0, 0, 0, 0.35);
 }
 
 /* State-hued ambient glow while any session is active. In notch mode the glow
@@ -72,6 +91,28 @@
   );
 }
 
+/* Specular highlight: the "sphere" cue the flat core lacks at small sizes. */
+.island-orb-spec {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: radial-gradient(
+    circle at 32% 26%,
+    rgba(255, 255, 255, 0.9),
+    rgba(255, 255, 255, 0.25) 22%,
+    transparent 40%
+  );
+}
+
+/* Recessed socket so the orb reads as mounted in the pill, not pasted on. */
+.island-orb-seat {
+  padding: 3px;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.4);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+  flex-shrink: 0;
+}
+
 .island-orb-sheen {
   position: absolute;
   inset: 0;
@@ -86,7 +127,7 @@
   background: conic-gradient(
     from 0deg,
     transparent 0deg,
-    rgba(255, 255, 255, 0.35) 60deg,
+    rgba(255, 255, 255, 0.5) 60deg,
     transparent 140deg,
     rgba(255, 255, 255, 0.12) 220deg,
     transparent 300deg
@@ -97,7 +138,7 @@
 
 .island-orb-bloom {
   position: absolute;
-  inset: 0;
+  inset: -35%;
   border-radius: 9999px;
   background: radial-gradient(
     circle at 35% 30%,
@@ -105,23 +146,38 @@
     hsl(var(--island-hue, 205) 85% 55%) 55%,
     hsl(var(--island-hue, 205) 80% 35%)
   );
-  filter: blur(6px);
-  opacity: 0.6;
+  filter: blur(8px);
+  opacity: 0.8;
 }
 
 /* State motion: only transform/opacity animate (composited layers). */
 
+/* Idle is a dim ember, not a gray dot. */
 .island-orb[data-orb-state="idle"] {
-  opacity: 0.4;
+  opacity: 0.9;
 }
 
-.island-orb[data-orb-state="idle"] .island-orb-core,
+.island-orb[data-orb-state="idle"] .island-orb-core {
+  background: radial-gradient(
+    circle at 35% 30%,
+    hsl(220 30% 60%),
+    hsl(222 25% 35%) 55%,
+    hsl(224 25% 16%)
+  );
+}
+
 .island-orb[data-orb-state="idle"] .island-orb-bloom {
-  filter: saturate(0.15);
+  opacity: 0.25;
 }
 
+/* Active states scale the whole orb 1.15x (composited transform) so a state
+   change is visible from across the room. */
 .island-orb[data-orb-state="working"] {
   animation: island-orb-breathe 3s ease-in-out infinite;
+}
+
+.island-orb[data-orb-state="looping"] {
+  transform: scale(1.15);
 }
 
 .island-orb[data-orb-state="working"] .island-orb-sheen::before {
@@ -146,10 +202,10 @@
 @keyframes island-orb-breathe {
   0%,
   100% {
-    transform: scale(1);
+    transform: scale(1.15);
   }
   50% {
-    transform: scale(1.06);
+    transform: scale(1.22);
   }
 }
 
@@ -158,12 +214,12 @@
   30%,
   60%,
   100% {
-    transform: scale(1);
+    transform: scale(1.15);
     opacity: 1;
   }
   15%,
   45% {
-    transform: scale(1.12);
+    transform: scale(1.29);
     opacity: 0.85;
   }
 }

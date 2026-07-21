@@ -226,6 +226,7 @@ export function Island() {
         }
         className={cn(
           "island-surface pointer-events-auto flex flex-col overflow-hidden text-white",
+          isNotch && "island-surface-notch",
           "transition-[width,height,border-radius] duration-220 ease-out motion-reduce:transition-none",
           glowing && (isNotch ? "island-surface-glow-notch" : "island-surface-glow"),
           effectiveState === "expanded"

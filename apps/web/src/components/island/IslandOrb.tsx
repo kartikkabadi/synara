@@ -29,11 +29,11 @@ export function orbHue(state: IslandOrbState): number {
 
 export interface IslandOrbProps {
   state: IslandOrbState;
-  /** Diameter in px: 16 in the collapsed pill, 14 in rows. */
+  /** Diameter in px: 18 in the collapsed pill, 15 in rows, 28 as the empty-state hero. */
   size?: number;
 }
 
-export function IslandOrb({ state, size = 16 }: IslandOrbProps) {
+export function IslandOrb({ state, size = 18 }: IslandOrbProps) {
   const style = {
     width: size,
     height: size,
@@ -43,6 +43,7 @@ export function IslandOrb({ state, size = 16 }: IslandOrbProps) {
     <span aria-hidden className="island-orb" data-orb-state={state} style={style}>
       <span className="island-orb-bloom" />
       <span className="island-orb-core" />
+      <span className="island-orb-spec" />
       <span className="island-orb-sheen" />
     </span>
   );
