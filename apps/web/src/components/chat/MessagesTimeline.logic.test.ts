@@ -1383,7 +1383,7 @@ describe("deriveMessagesTimelineRows", () => {
           iteration: 2,
         }),
         loopUserEntry("loop-user-3", "2026-01-01T00:03:00Z", {
-          turnId: "t3",
+          turnId: "turn-3",
           activationId: "activation-1",
           iteration: 1,
         }),
