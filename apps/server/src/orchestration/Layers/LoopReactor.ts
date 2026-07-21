@@ -10,7 +10,7 @@ import {
   type OrchestrationThreadShell,
   type ThreadLoop,
 } from "@synara/contracts";
-import { Effect, Layer, Option, Queue, Ref, Stream } from "effect";
+import { Clock, Effect, Layer, Option, Queue, Ref, Stream } from "effect";
 
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { buildLoopContinuationThreadView, decideLoopContinuation } from "../loopDecision.ts";
@@ -145,7 +145,7 @@ const makeLoopReactor = Effect.gen(function* () {
     // treating them as an empty snapshot would skip loop restoration and
     // strand active loops after a restart.
     const readModel = yield* projectionSnapshotQuery.getShellSnapshot().pipe(Effect.orDie);
-    const now = new Date().toISOString();
+    const now = new Date(yield* Clock.currentTimeMillis).toISOString();
     for (const thread of readModel.threads) {
       if (thread.loop?.active === true) {
         yield* syncDurationDeadline(thread.id, thread.loop);
@@ -176,7 +176,7 @@ const makeLoopReactor = Effect.gen(function* () {
         yield* Queue.take(timerWakeQueue);
         continue;
       }
-      const delayMs = Math.max(0, nextWakeMs - Date.now());
+      const delayMs = Math.max(0, nextWakeMs - (yield* Clock.currentTimeMillis));
       const outcome = yield* Effect.race(
         Queue.take(timerWakeQueue).pipe(Effect.as("reset" as const)),
         Effect.sleep(delayMs).pipe(Effect.as("expired" as const)),
@@ -184,7 +184,7 @@ const makeLoopReactor = Effect.gen(function* () {
       if (outcome === "reset") {
         continue;
       }
-      const nowMs = Date.now();
+      const nowMs = yield* Clock.currentTimeMillis;
       const nowIso = new Date(nowMs).toISOString();
       const expired = [...deadlines].filter(([, endsAtMs]) => endsAtMs <= nowMs);
       // Drop fired entries up front so a rejected dispatch cannot hot-loop the

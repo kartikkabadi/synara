@@ -12,9 +12,10 @@ import type {
   ThreadTurnPurpose,
   TurnId,
 } from "@synara/contracts";
-import { LOOP_DEFAULT_HARD_CAP } from "@synara/contracts";
+import { makeLoop as makeLoopFixture } from "@synara/shared/loopTestFixtures";
 import { describe, expect, it } from "vitest";
 import { Effect, Exit, Layer, ManagedRuntime, Option, Queue, Ref, Scope, Stream } from "effect";
+import { TestClock } from "effect/testing";
 
 import {
   ProjectionSnapshotQuery,
@@ -62,20 +63,23 @@ function asCommandId(value: string) {
 }
 
 function makeLoop(overrides?: Partial<ThreadLoop>): ThreadLoop {
-  return {
-    active: true,
+  return makeLoopFixture({
     prompt: "fix the tests",
     iteration: 0,
     maxIterations: null,
-    endsAt: null,
-    hardCap: LOOP_DEFAULT_HARD_CAP,
-    consecutiveErrors: 0,
-    lastStopReason: null,
     activationId: "loop-activation",
     createdAt: now,
     updatedAt: now,
     ...overrides,
-  } as ThreadLoop;
+  });
+}
+
+function loopIterationPurpose(iteration: number): ThreadTurnPurpose {
+  return {
+    kind: "loop-iteration",
+    activationId: "loop-activation",
+    iteration,
+  } as ThreadTurnPurpose;
 }
 
 function makeMessage(options: {
@@ -342,7 +346,20 @@ function makeFakes(snapshot: OrchestrationReadModel, thread: Option.Option<Orche
   };
 }
 
-function makeRuntime(snapshot: OrchestrationReadModel, thread: Option.Option<OrchestrationThread>) {
+interface ReactorScenario {
+  offer: (event: OrchestrationEvent) => Promise<void>;
+  restore: () => Promise<void>;
+  // Advances the TestClock so timer sleeps fire and the event pump settles.
+  advance: (millis: number) => Promise<void>;
+  commands: () => Promise<OrchestrationCommand[]>;
+  commandsOfType: (type: OrchestrationCommand["type"]) => Promise<OrchestrationCommand[]>;
+}
+
+async function withReactor(
+  thread: OrchestrationThread,
+  body: (scenario: ReactorScenario) => Promise<void>,
+  options: { start?: boolean } = {},
+): Promise<void> {
   const {
     eventQueue,
     dispatchLog,
@@ -351,519 +368,313 @@ function makeRuntime(snapshot: OrchestrationReadModel, thread: Option.Option<Orc
     fakeProjectionTurnRepository,
     fakeQueuedTurnPromotionRepository,
     fakeProjectionThreadLoopRepository,
-  } = makeFakes(snapshot, thread);
+  } = makeFakes(makeSnapshot(thread), Option.some(thread));
   const runtime = ManagedRuntime.make(
-    Layer.provide(
-      LoopReactorLive,
-      Layer.mergeAll(
-        Layer.succeed(OrchestrationEngineService, fakeEngine),
-        Layer.succeed(ProjectionSnapshotQuery, fakeSnapshotQuery),
-        Layer.succeed(ProjectionTurnRepository, fakeProjectionTurnRepository),
-        Layer.succeed(QueuedTurnPromotionRepository, fakeQueuedTurnPromotionRepository),
-        Layer.succeed(ProjectionThreadLoopRepository, fakeProjectionThreadLoopRepository),
+    Layer.mergeAll(
+      Layer.provide(
+        LoopReactorLive,
+        Layer.mergeAll(
+          Layer.succeed(OrchestrationEngineService, fakeEngine),
+          Layer.succeed(ProjectionSnapshotQuery, fakeSnapshotQuery),
+          Layer.succeed(ProjectionTurnRepository, fakeProjectionTurnRepository),
+          Layer.succeed(QueuedTurnPromotionRepository, fakeQueuedTurnPromotionRepository),
+          Layer.succeed(ProjectionThreadLoopRepository, fakeProjectionThreadLoopRepository),
+        ),
       ),
+      TestClock.layer(),
     ),
   );
-  return { runtime, eventQueue, dispatchLog };
+  await runtime.runPromise(Effect.scoped(TestClock.setTime(Date.parse(now))));
+  const reactor = await runtime.runPromise(Effect.service(LoopReactor));
+  const scope = await runtime.runPromise(Scope.make("sequential"));
+  if (options.start !== false) {
+    await runtime.runPromise(reactor.start.pipe(Scope.provide(scope)));
+  }
+  const scenario: ReactorScenario = {
+    offer: (event) => runtime.runPromise(Queue.offer(eventQueue, event)).then(() => undefined),
+    restore: () => runtime.runPromise(reactor.restoreActiveLoops).then(() => undefined),
+    advance: (millis) => runtime.runPromise(Effect.scoped(TestClock.adjust(`${millis} millis`))),
+    commands: () => runtime.runPromise(Ref.get(dispatchLog)).then((commands) => [...commands]),
+    commandsOfType: async (type) => {
+      const commands = await runtime.runPromise(Ref.get(dispatchLog));
+      return commands.filter((command) => command.type === type);
+    },
+  };
+  try {
+    await body(scenario);
+  } finally {
+    await runtime.runPromise(Scope.close(scope, Exit.void));
+    await runtime.dispose();
+  }
 }
 
 describe("LoopReactor", () => {
   it("dispatches arm continue on thread.loop-set when loop is active", async () => {
     const loop = makeLoop();
     const thread = makeThread({ loop });
-    const { runtime, eventQueue, dispatchLog } = makeRuntime(
-      makeSnapshot(thread),
-      Option.some(thread),
-    );
-
-    const reactor = await runtime.runPromise(Effect.service(LoopReactor));
-    const scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
-
-    await Effect.runPromise(Queue.offer(eventQueue, makeLoopSetEvent(loop)));
-    await Effect.runPromise(Effect.sleep("50 millis"));
-
-    const commands = await Effect.runPromise(Ref.get(dispatchLog));
-    const loopContinues = commands.filter((command) => command.type === "thread.loop.continue");
-    expect(loopContinues.length).toBeGreaterThan(0);
-    const continueCommand = loopContinues[loopContinues.length - 1];
-    expect(continueCommand).toMatchObject({
-      threadId: thread.id,
-      commandId: `loop-continue:${thread.id}:${loop.updatedAt}:${loop.iteration}`,
-      expectedUpdatedAt: loop.updatedAt,
-      expectedActivationId: loop.activationId,
+    await withReactor(thread, async ({ offer, advance, commandsOfType }) => {
+      await offer(makeLoopSetEvent(loop));
+      await advance(50);
+      const loopContinues = await commandsOfType("thread.loop.continue");
+      expect(loopContinues.length).toBeGreaterThan(0);
+      expect(loopContinues[loopContinues.length - 1]).toMatchObject({
+        threadId: thread.id,
+        commandId: `loop-continue:${thread.id}:${loop.updatedAt}:${loop.iteration}`,
+        expectedUpdatedAt: loop.updatedAt,
+        expectedActivationId: loop.activationId,
+      });
     });
-
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-    await runtime.dispose();
   });
 
   it("dispatches continue on session settlement when the latest loop-owned turn completed", async () => {
     const loop = makeLoop();
-    const _turnId = asTurnId("turn-1");
     const thread = makeThread({
       loop,
       messages: [
-        makeMessage({
-          role: "user",
-          turnId: "turn-1",
-          purpose: {
-            kind: "loop-iteration",
-            activationId: "loop-activation",
-            iteration: 1,
-          },
-        }),
+        makeMessage({ role: "user", turnId: "turn-1", purpose: loopIterationPurpose(1) }),
         makeMessage({ role: "assistant", turnId: "turn-1" }),
       ],
       session: makeSession({ status: "ready", activeTurnId: null }),
       latestTurn: makeLatestTurn({
         turnId: "turn-1",
         state: "completed",
-        purpose: {
-          kind: "loop-iteration",
-          activationId: "loop-activation",
-          iteration: 1,
-        },
+        purpose: loopIterationPurpose(1),
       }),
     });
-    const { runtime, eventQueue, dispatchLog } = makeRuntime(
-      makeSnapshot(thread),
-      Option.some(thread),
-    );
-
-    const reactor = await runtime.runPromise(Effect.service(LoopReactor));
-    const scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
-
-    await Effect.runPromise(
-      Queue.offer(
-        eventQueue,
-        makeSessionSetEvent({
-          session: makeSession({ status: "ready", activeTurnId: null }),
-        }),
-      ),
-    );
-    await Effect.runPromise(Effect.sleep("50 millis"));
-
-    const commands = await Effect.runPromise(Ref.get(dispatchLog));
-    const loopContinues = commands.filter((command) => command.type === "thread.loop.continue");
-    expect(loopContinues.length).toBeGreaterThan(0);
-    const continueCommand = loopContinues[loopContinues.length - 1];
-    expect(continueCommand).toMatchObject({
-      threadId: thread.id,
-      commandId: `loop-continue:${thread.id}:${loop.updatedAt}:${loop.iteration}`,
-      expectedUpdatedAt: loop.updatedAt,
+    await withReactor(thread, async ({ offer, advance, commandsOfType }) => {
+      await offer(
+        makeSessionSetEvent({ session: makeSession({ status: "ready", activeTurnId: null }) }),
+      );
+      await advance(50);
+      const loopContinues = await commandsOfType("thread.loop.continue");
+      expect(loopContinues.length).toBeGreaterThan(0);
+      expect(loopContinues[loopContinues.length - 1]).toMatchObject({
+        threadId: thread.id,
+        commandId: `loop-continue:${thread.id}:${loop.updatedAt}:${loop.iteration}`,
+        expectedUpdatedAt: loop.updatedAt,
+      });
     });
-
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-    await runtime.dispose();
   });
 
   it("dispatches continue on session settlement using latestTurn when assistant message is missing", async () => {
     const loop = makeLoop();
-    const turnId = asTurnId("turn-1");
     const thread = makeThread({
       loop,
-      messages: [
-        makeMessage({
-          role: "user",
-          purpose: {
-            kind: "loop-iteration",
-            activationId: "loop-activation",
-            iteration: 1,
-          },
-        }),
-      ],
+      messages: [makeMessage({ role: "user", purpose: loopIterationPurpose(1) })],
       session: makeSession({ status: "ready", activeTurnId: null }),
       latestTurn: {
-        turnId,
+        turnId: asTurnId("turn-1"),
         state: "completed",
         requestedAt: now,
         startedAt: now,
         completedAt: now,
         assistantMessageId: asMessageId("missing-assistant"),
-        purpose: {
-          kind: "loop-iteration",
-          activationId: "loop-activation",
-          iteration: 1,
-        },
+        purpose: loopIterationPurpose(1),
       },
     });
-    const { runtime, eventQueue, dispatchLog } = makeRuntime(
-      makeSnapshot(thread),
-      Option.some(thread),
-    );
-
-    const reactor = await runtime.runPromise(Effect.service(LoopReactor));
-    const scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
-
-    await Effect.runPromise(
-      Queue.offer(
-        eventQueue,
-        makeSessionSetEvent({
-          session: makeSession({ status: "ready", activeTurnId: null }),
-        }),
-      ),
-    );
-    await Effect.runPromise(Effect.sleep("50 millis"));
-
-    const commands = await Effect.runPromise(Ref.get(dispatchLog));
-    const loopContinues = commands.filter((command) => command.type === "thread.loop.continue");
-    expect(loopContinues.length).toBeGreaterThan(0);
-    const continueCommand = loopContinues[loopContinues.length - 1];
-    expect(continueCommand).toMatchObject({
-      threadId: thread.id,
-      expectedUpdatedAt: loop.updatedAt,
+    await withReactor(thread, async ({ offer, advance, commandsOfType }) => {
+      await offer(
+        makeSessionSetEvent({ session: makeSession({ status: "ready", activeTurnId: null }) }),
+      );
+      await advance(50);
+      const loopContinues = await commandsOfType("thread.loop.continue");
+      expect(loopContinues.length).toBeGreaterThan(0);
+      expect(loopContinues[loopContinues.length - 1]).toMatchObject({
+        threadId: thread.id,
+        expectedUpdatedAt: loop.updatedAt,
+      });
     });
-
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-    await runtime.dispose();
   });
 
   it("dispatches continue on approval.resolved activity when loop is active", async () => {
     const loop = makeLoop();
     const thread = makeThread({ loop });
-    const { runtime, eventQueue, dispatchLog } = makeRuntime(
-      makeSnapshot(thread),
-      Option.some(thread),
-    );
-
-    const reactor = await runtime.runPromise(Effect.service(LoopReactor));
-    const scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
-
-    await Effect.runPromise(
-      Queue.offer(eventQueue, makeActivityAppendedEvent("approval.resolved")),
-    );
-    await Effect.runPromise(Effect.sleep("50 millis"));
-
-    const commands = await Effect.runPromise(Ref.get(dispatchLog));
-    const loopContinues = commands.filter((command) => command.type === "thread.loop.continue");
-    expect(loopContinues.length).toBeGreaterThan(0);
-    const continueCommand = loopContinues[loopContinues.length - 1];
-    expect(continueCommand).toMatchObject({
-      threadId: thread.id,
-      expectedUpdatedAt: loop.updatedAt,
+    await withReactor(thread, async ({ offer, advance, commandsOfType }) => {
+      await offer(makeActivityAppendedEvent("approval.resolved"));
+      await advance(50);
+      const loopContinues = await commandsOfType("thread.loop.continue");
+      expect(loopContinues.length).toBeGreaterThan(0);
+      expect(loopContinues[loopContinues.length - 1]).toMatchObject({
+        threadId: thread.id,
+        expectedUpdatedAt: loop.updatedAt,
+      });
     });
-
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-    await runtime.dispose();
   });
 
   it("dispatches thread.loop.off with thread_archived on thread.archived", async () => {
-    const loop = makeLoop();
-    const thread = makeThread({ loop });
-    const { runtime, eventQueue, dispatchLog } = makeRuntime(
-      makeSnapshot(thread),
-      Option.some(thread),
-    );
-
-    const reactor = await runtime.runPromise(Effect.service(LoopReactor));
-    const scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
-
-    await Effect.runPromise(Queue.offer(eventQueue, makeArchivedEvent()));
-    await Effect.runPromise(Effect.sleep("50 millis"));
-
-    const commands = await Effect.runPromise(Ref.get(dispatchLog));
-    const offCommands = commands.filter((command) => command.type === "thread.loop.off");
-    expect(offCommands.length).toBeGreaterThan(0);
-    const offCommand = offCommands[offCommands.length - 1];
-    expect(offCommand).toMatchObject({
-      threadId: thread.id,
-      reason: "thread_archived",
+    const thread = makeThread({ loop: makeLoop() });
+    await withReactor(thread, async ({ offer, advance, commandsOfType }) => {
+      await offer(makeArchivedEvent());
+      await advance(50);
+      const offCommands = await commandsOfType("thread.loop.off");
+      expect(offCommands.length).toBeGreaterThan(0);
+      expect(offCommands[offCommands.length - 1]).toMatchObject({
+        threadId: thread.id,
+        reason: "thread_archived",
+      });
     });
-
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-    await runtime.dispose();
   });
 
   it("dispatches thread.loop.off with thread_deleted on thread.deleted", async () => {
-    const loop = makeLoop();
-    const thread = makeThread({ loop });
-    const { runtime, eventQueue, dispatchLog } = makeRuntime(
-      makeSnapshot(thread),
-      Option.some(thread),
-    );
-
-    const reactor = await runtime.runPromise(Effect.service(LoopReactor));
-    const scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
-
-    await Effect.runPromise(Queue.offer(eventQueue, makeDeletedEvent()));
-    await Effect.runPromise(Effect.sleep("50 millis"));
-
-    const commands = await Effect.runPromise(Ref.get(dispatchLog));
-    const offCommands = commands.filter((command) => command.type === "thread.loop.off");
-    expect(offCommands.length).toBeGreaterThan(0);
-    const offCommand = offCommands[offCommands.length - 1];
-    expect(offCommand).toMatchObject({
-      threadId: thread.id,
-      reason: "thread_deleted",
+    const thread = makeThread({ loop: makeLoop() });
+    await withReactor(thread, async ({ offer, advance, commandsOfType }) => {
+      await offer(makeDeletedEvent());
+      await advance(50);
+      const offCommands = await commandsOfType("thread.loop.off");
+      expect(offCommands.length).toBeGreaterThan(0);
+      expect(offCommands[offCommands.length - 1]).toMatchObject({
+        threadId: thread.id,
+        reason: "thread_deleted",
+      });
     });
-
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-    await runtime.dispose();
   });
 
   it("dispatches startup restore for active loop via restoreActiveLoops", async () => {
     const loop = makeLoop();
     const thread = makeThread({ loop });
-    const { runtime, dispatchLog } = makeRuntime(makeSnapshot(thread), Option.some(thread));
-
-    const reactor = await runtime.runPromise(Effect.service(LoopReactor));
-    await Effect.runPromise(reactor.restoreActiveLoops);
-
-    const commands = await Effect.runPromise(Ref.get(dispatchLog));
-    const continueCommand = commands.find((command) => command.type === "thread.loop.continue");
-    expect(continueCommand).toBeDefined();
-    expect(continueCommand).toMatchObject({
-      commandId: `loop-continue:${thread.id}:${loop.updatedAt}:${loop.iteration}`,
-      expectedUpdatedAt: loop.updatedAt,
-      expectedActivationId: loop.activationId,
-    });
-
-    await runtime.dispose();
+    await withReactor(
+      thread,
+      async ({ restore, commandsOfType }) => {
+        await restore();
+        const loopContinues = await commandsOfType("thread.loop.continue");
+        expect(loopContinues[0]).toBeDefined();
+        expect(loopContinues[0]).toMatchObject({
+          commandId: `loop-continue:${thread.id}:${loop.updatedAt}:${loop.iteration}`,
+          expectedUpdatedAt: loop.updatedAt,
+          expectedActivationId: loop.activationId,
+        });
+      },
+      { start: false },
+    );
   });
 
   it("ignores thread.session-set from restart reconciliation and leaves startup restore to restoreActiveLoops", async () => {
-    const loop = makeLoop();
     const thread = makeThread({
-      loop,
+      loop: makeLoop(),
       session: makeSession({ status: "interrupted", activeTurnId: null }),
       latestTurn: makeLatestTurn({ turnId: "turn-1", state: "interrupted" }),
     });
-    const { runtime, eventQueue, dispatchLog } = makeRuntime(
-      makeSnapshot(thread),
-      Option.some(thread),
-    );
-
-    const reactor = await runtime.runPromise(Effect.service(LoopReactor));
-    const scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
-
-    await Effect.runPromise(
-      Queue.offer(
-        eventQueue,
+    await withReactor(thread, async ({ offer, advance, commandsOfType }) => {
+      await offer(
         makeSessionSetEvent({
           commandId: `restart-reconcile:${thread.id}:now`,
           session: makeSession({ status: "interrupted", activeTurnId: null }),
         }),
-      ),
-    );
-    await Effect.runPromise(Effect.sleep("50 millis"));
-
-    const commands = await Effect.runPromise(Ref.get(dispatchLog));
-    const continueCommand = commands.find((command) => command.type === "thread.loop.continue");
-    expect(continueCommand).toBeUndefined();
-
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-    await runtime.dispose();
+      );
+      await advance(50);
+      expect(await commandsOfType("thread.loop.continue")).toHaveLength(0);
+    });
   });
 
   it("dispatches continue for thread.session-set when a loop-owned turn is aborted", async () => {
     const loop = makeLoop();
-    const turnId = asTurnId("turn-1");
     const thread = makeThread({
       loop,
       messages: [
-        makeMessage({
-          role: "user",
-          turnId: turnId as unknown as string,
-          purpose: {
-            kind: "loop-iteration",
-            activationId: "loop-activation",
-            iteration: 1,
-          },
-        }),
-        makeMessage({ role: "assistant", turnId: turnId as unknown as string }),
+        makeMessage({ role: "user", turnId: "turn-1", purpose: loopIterationPurpose(1) }),
+        makeMessage({ role: "assistant", turnId: "turn-1" }),
       ],
       session: makeSession({ status: "interrupted", activeTurnId: null }),
       latestTurn: makeLatestTurn({
         turnId: "turn-1",
         state: "interrupted",
-        purpose: {
-          kind: "loop-iteration",
-          activationId: "loop-activation",
-          iteration: 1,
-        },
+        purpose: loopIterationPurpose(1),
       }),
     });
-    const { runtime, eventQueue, dispatchLog } = makeRuntime(
-      makeSnapshot(thread),
-      Option.some(thread),
-    );
-
-    const reactor = await runtime.runPromise(Effect.service(LoopReactor));
-    const scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
-
-    await Effect.runPromise(
-      Queue.offer(
-        eventQueue,
+    await withReactor(thread, async ({ offer, advance, commandsOfType }) => {
+      await offer(
         makeSessionSetEvent({
           commandId: "provider:evt:thread-session-set:thread-1",
           session: makeSession({ status: "interrupted", activeTurnId: null }),
         }),
-      ),
-    );
-    await Effect.runPromise(Effect.sleep("50 millis"));
-
-    const commands = await Effect.runPromise(Ref.get(dispatchLog));
-    const continueCommand = commands.find((command) => command.type === "thread.loop.continue");
-    expect(continueCommand).toBeDefined();
-    expect(continueCommand).toMatchObject({
-      threadId: thread.id,
-      expectedUpdatedAt: loop.updatedAt,
+      );
+      await advance(50);
+      const loopContinues = await commandsOfType("thread.loop.continue");
+      expect(loopContinues[0]).toBeDefined();
+      expect(loopContinues[0]).toMatchObject({
+        threadId: thread.id,
+        expectedUpdatedAt: loop.updatedAt,
+      });
     });
-
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-    await runtime.dispose();
   });
 
   it("dispatches continue at endsAt for a duration loop blocked on approval", async () => {
-    const loop = makeLoop({ endsAt: new Date(Date.now() + 150).toISOString() });
+    const loop = makeLoop({ endsAt: new Date(Date.parse(now) + 150).toISOString() });
     const thread = makeThread({ loop, hasPendingApprovals: true });
-    const { runtime, eventQueue, dispatchLog } = makeRuntime(
-      makeSnapshot(thread),
-      Option.some(thread),
-    );
+    await withReactor(thread, async ({ offer, advance, commandsOfType }) => {
+      await offer(makeLoopSetEvent(loop));
+      await advance(50);
 
-    const reactor = await runtime.runPromise(Effect.service(LoopReactor));
-    const scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
+      // Blocked on approval: the arm-time pre-check waits, so nothing dispatches
+      // before expiry.
+      expect(await commandsOfType("thread.loop.continue")).toHaveLength(0);
 
-    await Effect.runPromise(Queue.offer(eventQueue, makeLoopSetEvent(loop)));
-    await Effect.runPromise(Effect.sleep("50 millis"));
-
-    // Blocked on approval: the arm-time pre-check waits, so nothing dispatches
-    // before expiry.
-    let commands = await Effect.runPromise(Ref.get(dispatchLog));
-    expect(commands.filter((command) => command.type === "thread.loop.continue")).toHaveLength(0);
-
-    await Effect.runPromise(Effect.sleep("300 millis"));
-
-    commands = await Effect.runPromise(Ref.get(dispatchLog));
-    const loopContinues = commands.filter((command) => command.type === "thread.loop.continue");
-    expect(loopContinues).toHaveLength(1);
-    expect(loopContinues[0]).toMatchObject({
-      threadId: thread.id,
-      expectedUpdatedAt: loop.updatedAt,
-      expectedActivationId: loop.activationId,
+      await advance(300);
+      const loopContinues = await commandsOfType("thread.loop.continue");
+      expect(loopContinues).toHaveLength(1);
+      expect(loopContinues[0]).toMatchObject({
+        threadId: thread.id,
+        expectedUpdatedAt: loop.updatedAt,
+        expectedActivationId: loop.activationId,
+      });
     });
-
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-    await runtime.dispose();
   });
 
   it("cancels the expiry timer when the loop is turned off before endsAt", async () => {
-    const loop = makeLoop({ endsAt: new Date(Date.now() + 150).toISOString() });
+    const loop = makeLoop({ endsAt: new Date(Date.parse(now) + 150).toISOString() });
     const thread = makeThread({ loop, hasPendingApprovals: true });
-    const { runtime, eventQueue, dispatchLog } = makeRuntime(
-      makeSnapshot(thread),
-      Option.some(thread),
-    );
-
-    const reactor = await runtime.runPromise(Effect.service(LoopReactor));
-    const scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
-
-    await Effect.runPromise(Queue.offer(eventQueue, makeLoopSetEvent(loop)));
-    await Effect.runPromise(
-      Queue.offer(eventQueue, makeLoopOffEvent(makeLoop({ ...loop, active: false }))),
-    );
-    await Effect.runPromise(Effect.sleep("300 millis"));
-
-    const commands = await Effect.runPromise(Ref.get(dispatchLog));
-    expect(commands.filter((command) => command.type === "thread.loop.continue")).toHaveLength(0);
-
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-    await runtime.dispose();
+    await withReactor(thread, async ({ offer, advance, commandsOfType }) => {
+      await offer(makeLoopSetEvent(loop));
+      await offer(makeLoopOffEvent(makeLoop({ ...loop, active: false })));
+      await advance(300);
+      expect(await commandsOfType("thread.loop.continue")).toHaveLength(0);
+    });
   });
 
   it("arms the expiry timer for duration loops restored on startup", async () => {
-    const loop = makeLoop({ endsAt: new Date(Date.now() + 150).toISOString() });
+    const loop = makeLoop({ endsAt: new Date(Date.parse(now) + 150).toISOString() });
     const thread = makeThread({ loop, hasPendingApprovals: true });
-    const { runtime, dispatchLog } = makeRuntime(makeSnapshot(thread), Option.some(thread));
+    await withReactor(thread, async ({ restore, advance, commandsOfType }) => {
+      await restore();
 
-    const reactor = await runtime.runPromise(Effect.service(LoopReactor));
-    const scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
-    await Effect.runPromise(reactor.restoreActiveLoops);
+      // Restore pre-check waits (approval pending, endsAt not reached), so the
+      // only dispatch must come from the timer firing at endsAt.
+      expect(await commandsOfType("thread.loop.continue")).toHaveLength(0);
 
-    // Restore pre-check waits (approval pending, endsAt not reached), so the
-    // only dispatch must come from the timer firing at endsAt.
-    let commands = await Effect.runPromise(Ref.get(dispatchLog));
-    expect(commands.filter((command) => command.type === "thread.loop.continue")).toHaveLength(0);
-
-    await Effect.runPromise(Effect.sleep("300 millis"));
-
-    commands = await Effect.runPromise(Ref.get(dispatchLog));
-    const loopContinues = commands.filter((command) => command.type === "thread.loop.continue");
-    expect(loopContinues).toHaveLength(1);
-    expect(loopContinues[0]).toMatchObject({
-      threadId: thread.id,
-      expectedActivationId: loop.activationId,
+      await advance(300);
+      const loopContinues = await commandsOfType("thread.loop.continue");
+      expect(loopContinues).toHaveLength(1);
+      expect(loopContinues[0]).toMatchObject({
+        threadId: thread.id,
+        expectedActivationId: loop.activationId,
+      });
     });
-
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-    await runtime.dispose();
   });
 
   it("does not dispatch continue while a queued turn start is pending", async () => {
-    const loop = makeLoop({ iteration: 2, consecutiveErrors: 1 });
     const thread = makeThread({
-      loop,
+      loop: makeLoop({ iteration: 2, consecutiveErrors: 1 }),
       messages: [
-        makeMessage({
-          role: "user",
-          turnId: "turn-1",
-          purpose: {
-            kind: "loop-iteration",
-            activationId: "loop-activation",
-            iteration: 1,
-          },
-        }),
+        makeMessage({ role: "user", turnId: "turn-1", purpose: loopIterationPurpose(1) }),
         makeMessage({ role: "assistant", turnId: "turn-1" }),
       ],
       session: makeSession({ status: "ready", activeTurnId: null }),
       latestTurn: makeLatestTurn({
         turnId: "turn-1",
         state: "error",
-        purpose: {
-          kind: "loop-iteration",
-          activationId: "loop-activation",
-          iteration: 1,
-        },
+        purpose: loopIterationPurpose(1),
       }),
       hasPendingTurnStart: true,
     });
-    const { runtime, eventQueue, dispatchLog } = makeRuntime(
-      makeSnapshot(thread),
-      Option.some(thread),
-    );
-
-    const reactor = await runtime.runPromise(Effect.service(LoopReactor));
-    const scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
-
-    await Effect.runPromise(
-      Queue.offer(
-        eventQueue,
+    await withReactor(thread, async ({ offer, advance, commandsOfType }) => {
+      await offer(
         makeSessionSetEvent({
           commandId: "provider:evt:thread-session-set:thread-1",
           session: makeSession({ status: "ready", activeTurnId: null }),
         }),
-      ),
-    );
-    await Effect.runPromise(Effect.sleep("50 millis"));
-
-    const commands = await Effect.runPromise(Ref.get(dispatchLog));
-    const continueCommand = commands.find((command) => command.type === "thread.loop.continue");
-    expect(continueCommand).toBeUndefined();
-
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-    await runtime.dispose();
+      );
+      await advance(50);
+      expect(await commandsOfType("thread.loop.continue")).toHaveLength(0);
+    });
   });
 });
