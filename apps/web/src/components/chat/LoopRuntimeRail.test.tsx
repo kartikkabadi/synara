@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
+  deriveLoopStopControl,
   isLoopRuntimeRailVisible,
   LOOP_STEERING_TOOLTIP_TEXT,
   LOOP_STOP_AFTER_TURN_DESCRIPTION,
@@ -200,19 +201,32 @@ describe("LoopRuntimeRail", () => {
     expect(starting).not.toContain("animate-[spin_3s_linear_infinite]");
   });
 
-  it("renders ready state with a plain Stop loop button", () => {
+  it("renders ready state with the stop menu so Edit loop stays reachable", () => {
     const markup = renderRail();
     expect(markup).toContain("Loop on");
     expect(markup).toContain("Starting the next turn…");
     expect(markup).toContain("Stop loop");
+    expect(markup).toContain('data-slot="menu-trigger"');
     expect(markup).not.toContain("Stop after turn");
   });
 
-  it("renders armed state without progress", () => {
+  it("renders armed state without progress and with the stop menu", () => {
     const markup = renderRail({ loop: makeLoop({ prompt: "" }) });
     expect(markup).toContain("Loop ready");
     expect(markup).toContain("Add a prompt to start");
+    expect(markup).toContain('data-slot="menu-trigger"');
     expect(countSegments(markup)).toBe(0);
+  });
+
+  it("disables Stop now in the menu when no loop-owned turn is running", () => {
+    expect(deriveLoopStopControl(false)).toEqual({
+      triggerLabel: "Stop loop",
+      stopNowDisabled: true,
+    });
+    expect(deriveLoopStopControl(true)).toEqual({
+      triggerLabel: "Stop after turn",
+      stopNowDisabled: false,
+    });
   });
 
   it("renders waiting-approval with counter and stop menu while the turn runs", () => {
