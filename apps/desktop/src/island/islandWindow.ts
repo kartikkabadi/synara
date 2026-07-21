@@ -26,8 +26,9 @@ export const ISLAND_GLOBAL_SHORTCUT = "CommandOrControl+Shift+I";
 // Linux click-through: setIgnoreMouseEvents has no `forward` there, so the
 // main process polls the cursor against the current surface rect instead.
 export const LINUX_CURSOR_POLL_MS = 100;
-// Must exceed the poll interval or the grace window can never elapse a poll.
-export const LINUX_CURSOR_EXIT_GRACE_MS = 250;
+// Must exceed the poll interval or the grace window can never elapse a poll;
+// matches the renderer's hover exit grace.
+export const LINUX_CURSOR_EXIT_GRACE_MS = 150;
 
 const decodeIslandSettings = Schema.decodeUnknownSync(DesktopIslandSettings);
 
