@@ -9,9 +9,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   isLoopRuntimeRailVisible,
+  LOOP_STEERING_TOOLTIP_TEXT,
+  LOOP_STOP_AFTER_TURN_DESCRIPTION,
+  LOOP_STOP_NOW_DESCRIPTION,
   LoopRuntimeRail,
   type LoopRuntimeRailProps,
 } from "./LoopRuntimeRail";
+import { LOOP_ACTIVE_COMPOSER_PLACEHOLDER } from "./loopPresentation";
 
 function makeLoop(overrides: Partial<ThreadLoop> = {}): ThreadLoop {
   return {
@@ -66,6 +70,29 @@ function countSegments(markup: string): number {
   return markup.split("h-1 flex-1 rounded-full").length - 1;
 }
 
+// Extracts the markup of the `role="status"` live region (balanced spans) so
+// tests can assert what screen readers are re-announced on.
+function statusRegion(markup: string): string {
+  const start = markup.indexOf('role="status"');
+  expect(start).toBeGreaterThanOrEqual(0);
+  const open = markup.lastIndexOf("<span", start);
+  let depth = 0;
+  let index = open;
+  while (index < markup.length) {
+    const nextOpen = markup.indexOf("<span", index);
+    const nextClose = markup.indexOf("</span>", index);
+    if (nextOpen !== -1 && nextOpen < nextClose) {
+      depth += 1;
+      index = nextOpen + 5;
+    } else {
+      depth -= 1;
+      if (depth === 0) return markup.slice(open, nextClose + 7);
+      index = nextClose + 7;
+    }
+  }
+  throw new Error("unbalanced status region");
+}
+
 describe("isLoopRuntimeRailVisible", () => {
   it("is hidden without a loop", () => {
     expect(isLoopRuntimeRailVisible(null, null)).toBe(false);
@@ -105,11 +132,48 @@ describe("LoopRuntimeRail", () => {
   it("exposes ARIA progress attributes on the progress container", () => {
     const markup = renderRail({ latestTurn: makeRunningLoopTurn() });
     expect(markup).toContain('role="progressbar"');
+    expect(markup).toContain('aria-label="Loop progress"');
     expect(markup).toContain('aria-valuemin="0"');
     expect(markup).toContain('aria-valuemax="5"');
     expect(markup).toContain('aria-valuenow="2"');
     expect(markup).toContain('aria-valuetext="2 of 5 loop turns started"');
     expect(markup).toContain("aria-hidden");
+  });
+
+  it("scopes the live region to the status copy only", () => {
+    const markup = renderRail({ latestTurn: makeRunningLoopTurn() });
+    const region = statusRegion(markup);
+    expect(region).toContain("Loop running");
+    expect(region).not.toContain('role="progressbar"');
+    expect(region).not.toContain("2 / 5");
+    expect(region).not.toContain("Stop");
+  });
+
+  it("surfaces the no-budget safety limit as detail with a labeled progressbar", () => {
+    const markup = renderRail({
+      loop: makeLoop({ maxIterations: null, endsAt: null }),
+      latestTurn: makeRunningLoopTurn(),
+    });
+    expect(markup).toContain("Safety limit 100");
+    expect(markup).toContain("2 turns");
+    expect(markup).toContain('role="progressbar"');
+    expect(markup).toContain('aria-label="Loop progress"');
+    expect(markup).toContain('aria-valuetext="Loop has run 2 turns; no explicit user budget"');
+    expect(markup).not.toContain("aria-valuenow");
+  });
+
+  it("describes the stop menu items", () => {
+    // The menu popup is portal-rendered only when open, so static markup cannot
+    // include the items; assert the copy the menu renders instead.
+    expect(LOOP_STOP_AFTER_TURN_DESCRIPTION).toBe("Let the current work finish, then stop.");
+    expect(LOOP_STOP_NOW_DESCRIPTION).toBe("Interrupt current work and stop the loop.");
+  });
+
+  it("exposes the steering tooltip copy and composer placeholder", () => {
+    expect(LOOP_STEERING_TOOLTIP_TEXT).toBe(
+      "Messages sent while Loop is active become the objective for the next iteration.",
+    );
+    expect(LOOP_ACTIVE_COMPOSER_PLACEHOLDER).toBe("Steer the next iteration…");
   });
 
   it("normalizes budgets over eight turns to five segments", () => {
@@ -126,6 +190,14 @@ describe("LoopRuntimeRail", () => {
   it("respects reduced motion on the running icon", () => {
     const markup = renderRail({ latestTurn: makeRunningLoopTurn() });
     expect(markup).toContain("motion-reduce:animate-none");
+  });
+
+  it("only spins the icon while running, not while starting", () => {
+    const running = renderRail({ latestTurn: makeRunningLoopTurn() });
+    expect(running).toContain("animate-[spin_3s_linear_infinite]");
+    const starting = renderRail({ loop: makeLoop({ iteration: 0 }) });
+    expect(starting).toContain("Starting loop");
+    expect(starting).not.toContain("animate-[spin_3s_linear_infinite]");
   });
 
   it("renders ready state with a plain Stop loop button", () => {
@@ -164,23 +236,27 @@ describe("LoopRuntimeRail", () => {
     expect(markup).not.toContain("2 / 5");
   });
 
-  it("renders ending state without stop controls", () => {
+  it("renders ending state with counter and progress but no stop controls", () => {
     const markup = renderRail({
       loop: makeLoop({ active: false, lastStopReason: "toggled_off" }),
       latestTurn: makeRunningLoopTurn(),
     });
     expect(markup).toContain("Loop ending");
     expect(markup).toContain("Current turn will finish");
+    expect(markup).toContain("2 / 5");
+    expect(countSegments(markup)).toBe(5);
     expect(markup).not.toContain("Stop after turn");
     expect(markup).not.toContain("Stop loop");
   });
 
-  it("renders stopping state without stop controls", () => {
+  it("renders stopping state with counter and progress but no stop controls", () => {
     const markup = renderRail({
       loop: makeLoop({ active: false, lastStopReason: "user_stop" }),
       latestTurn: makeRunningLoopTurn(),
     });
     expect(markup).toContain("Stopping loop");
+    expect(markup).toContain("2 / 5");
+    expect(countSegments(markup)).toBe(5);
     expect(markup).not.toContain("Stop after turn");
     expect(markup).not.toContain("Stop loop");
   });
