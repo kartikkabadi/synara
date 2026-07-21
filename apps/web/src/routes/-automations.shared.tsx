@@ -700,12 +700,13 @@ export function AutomationModelPicker({
     activeProjectCwd: projectCwd,
     serverCwd: serverConfigQuery.data?.cwd ?? null,
   });
-  const { modelOptionsByProvider, loadingModelProviders } = useProviderModelCatalog({
-    selectedProvider: value.provider,
-    discoveryEnabled: open,
-    cwd: providerModelDiscoveryCwd,
-    modelHintByProvider,
-  });
+  const { modelOptionsByProvider, loadingModelProviders, discoveryErrorsByProvider } =
+    useProviderModelCatalog({
+      selectedProvider: value.provider,
+      discoveryEnabled: open,
+      cwd: providerModelDiscoveryCwd,
+      modelHintByProvider,
+    });
 
   return (
     <ProviderModelPicker
@@ -716,6 +717,7 @@ export function AutomationModelPicker({
       providers={providerStatuses}
       modelOptionsByProvider={modelOptionsByProvider}
       loadingModelProviders={loadingModelProviders}
+      discoveryErrorsByProvider={discoveryErrorsByProvider}
       hiddenProviders={settings.hiddenProviders}
       providerOrder={settings.providerOrder}
       open={open}
@@ -813,7 +815,7 @@ export function AutomationDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogPopup surface="solid" showCloseButton={false} className="max-w-3xl">
+      <DialogPopup showCloseButton={false} className="max-w-3xl">
         <DialogTitle className="sr-only">
           {editing ? "Edit automation" : "New automation"}
         </DialogTitle>

@@ -45,6 +45,7 @@ type ComposerModelEffortPickerProps = {
   providers?: ReadonlyArray<ServerProviderStatus>;
   modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<ProviderModelOption>>;
   loadingModelProviders?: Partial<Record<ProviderKind, boolean>>;
+  discoveryErrorsByProvider?: Partial<Record<ProviderKind, string | undefined>>;
   hiddenProviders?: ReadonlyArray<ProviderKind>;
   providerOrder?: ReadonlyArray<ProviderKind>;
   compact?: boolean;
@@ -165,7 +166,8 @@ export function ComposerModelEffortPicker(props: ComposerModelEffortPickerProps)
       <ProviderIcon
         aria-hidden="true"
         className={cn(
-          "size-3.5 shrink-0",
+          // opacity-100 opts out of the Button base's [&_svg]:opacity-80 dimming.
+          "size-3.5 shrink-0 opacity-100",
           getProviderIconClassName(activeProvider, "text-[var(--color-text-foreground)]"),
         )}
       />
@@ -269,6 +271,9 @@ export function ComposerModelEffortPicker(props: ComposerModelEffortPickerProps)
               modelOptionsByProvider={props.modelOptionsByProvider}
               {...(props.loadingModelProviders
                 ? { loadingModelProviders: props.loadingModelProviders }
+                : {})}
+              {...(props.discoveryErrorsByProvider
+                ? { discoveryErrorsByProvider: props.discoveryErrorsByProvider }
                 : {})}
               {...(props.hiddenProviders ? { hiddenProviders: props.hiddenProviders } : {})}
               {...(props.providerOrder ? { providerOrder: props.providerOrder } : {})}

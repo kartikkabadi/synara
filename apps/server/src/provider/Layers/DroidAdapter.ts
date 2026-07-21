@@ -36,7 +36,7 @@ import {
   Stream,
 } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import type * as EffectAcpSchema from "effect-acp/schema";
+import type * as Acp from "@agentclientprotocol/sdk";
 
 import { buildAcpSynaraMcpServers } from "../../agentGateway/mcpInjection.ts";
 import {
@@ -80,6 +80,7 @@ import {
   scopeAcpToolCallStateForTurn,
   settleAcpPendingApprovalsAsCancelled,
   settleAcpPendingUserInputsAsEmptyAnswers,
+  waitForAcpQueuedTurnEventsDrained,
   withAcpPlanModePrompt,
 } from "../acp/AcpAdapterSessionSupport.ts";
 import { type AcpSessionRuntimeShape } from "../acp/AcpSessionRuntime.ts";
@@ -111,6 +112,7 @@ import { cancelDroidTurnAndWait } from "../acp/DroidTurnCancellation.ts";
 import {
   elicitationQuestionsFromRequest,
   elicitationResponseFromAnswers,
+  isFormElicitationRequest,
 } from "../acp/AcpElicitationSupport.ts";
 import { DroidAdapter, type DroidAdapterShape } from "../Services/DroidAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
@@ -295,7 +297,7 @@ type DroidPermissionPolicyOutcome =
 export function resolveDroidPermissionPolicy(input: {
   readonly runtimeMode: "approval-required" | "full-access";
   readonly interactionMode: ProviderInteractionMode | undefined;
-  readonly options: ReadonlyArray<Pick<EffectAcpSchema.PermissionOption, "kind" | "optionId">>;
+  readonly options: ReadonlyArray<Pick<Acp.PermissionOption, "kind" | "optionId">>;
 }): DroidPermissionPolicyOutcome | undefined {
   if (input.interactionMode === "plan") {
     const rejectedOptionId = selectAcpPermissionOptionId("decline", input.options);
@@ -647,24 +649,12 @@ export function makeDroidAdapter(
         return ctx.activeTurnId;
       });
 
-    // Holds the active-turn window open until session/update events that were
-    // already enqueued when the prompt response resolved have been fully
-    // handled by the notification consumer, so they settle with their turn
-    // attribution (and recorded failed-tool detail) intact. Snapshotting the
-    // runtime's enqueued count and waiting for the adapter's processed count
-    // to catch up is immune to stream chunk buffering and in-flight handlers,
-    // unlike a queue-size probe. Returns immediately when the consumer kept
-    // up; bounded so a chatty stream cannot stall settlement past the cap.
     const waitForDroidQueuedTurnEventsDrained = (ctx: DroidSessionContext) =>
-      Effect.gen(function* () {
-        const target = yield* ctx.acp.sessionUpdatesEnqueuedCount;
-        const startedAt = Date.now();
-        while (
-          ctx.sessionUpdatesProcessed < target &&
-          Date.now() - startedAt < DROID_TURN_SETTLE_DRAIN_MAX_WAIT_MS
-        ) {
-          yield* Effect.sleep(DROID_TURN_SETTLE_DRAIN_POLL_MS);
-        }
+      waitForAcpQueuedTurnEventsDrained({
+        sessionUpdatesEnqueuedCount: ctx.acp.sessionUpdatesEnqueuedCount,
+        sessionUpdatesProcessed: () => ctx.sessionUpdatesProcessed,
+        maxWaitMs: DROID_TURN_SETTLE_DRAIN_MAX_WAIT_MS,
+        pollMs: DROID_TURN_SETTLE_DRAIN_POLL_MS,
       });
 
     // On session/load, Droid can replay old ACP updates after the session is "ready".
@@ -802,7 +792,7 @@ export function makeDroidAdapter(
             clientInfo: { name: "Synara", version: "0.0.0" },
             ...(agentGatewayCredentials
               ? {
-                  buildMcpServers: (initializeResult: EffectAcpSchema.InitializeResponse) =>
+                  buildMcpServers: (initializeResult: Acp.InitializeResponse) =>
                     buildAcpSynaraMcpServers({
                       connection: gatewaySessionLease!.connection,
                       initializeResult,
@@ -922,12 +912,12 @@ export function makeDroidAdapter(
             yield* acp.handleElicitation((params) =>
               Effect.gen(function* () {
                 yield* logNative(input.threadId, "session/elicitation", params);
-                if (params.mode !== "form") {
-                  return { action: { action: "decline" as const } };
+                if (!isFormElicitationRequest(params)) {
+                  return { action: "decline" as const };
                 }
                 const questions = elicitationQuestionsFromRequest(params);
                 if (questions.length === 0) {
-                  return { action: { action: "decline" as const } };
+                  return { action: "decline" as const };
                 }
                 const requestId = ApprovalRequestId.makeUnsafe(crypto.randomUUID());
                 const runtimeRequestId = RuntimeRequestId.makeUnsafe(requestId);
@@ -1431,7 +1421,7 @@ export function makeDroidAdapter(
             }),
           ),
         );
-        const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
+        const promptParts: Array<Acp.ContentBlock> = [];
         const promptText = appendFileAttachmentsPromptBlock({
           text: appendProviderReferencesPromptBlock({
             text: input.input?.trim()
