@@ -131,8 +131,10 @@ describe("deriveLoopPresentationState", () => {
   it("returns waiting-plan when plan mode is active", () => {
     const presentation = derive({ interactionMode: "plan" });
     expect(presentation?.state).toEqual({ kind: "waiting-plan" });
+    expect(presentation?.label).toBe("Loop waiting");
     expect(presentation?.detail).toBe("Plan mode is active");
     expect(presentation?.color).toBe("waiting");
+    expect(presentation?.progress).toBeNull();
   });
 
   it("returns ending while a matching turn outlives a toggled-off loop", () => {
@@ -145,13 +147,13 @@ describe("deriveLoopPresentationState", () => {
     expect(presentation?.detail).toBe("Current turn will finish");
   });
 
-  it("returns ending with time-budget copy when the duration expired mid-turn", () => {
+  it("uses the same ending detail when the duration expired mid-turn", () => {
     const presentation = derive({
       loop: makeLoop({ active: false, lastStopReason: "budget_duration" }),
       latestTurn: makeRunningLoopTurn(),
     });
     expect(presentation?.state).toEqual({ kind: "ending", iteration: 2 });
-    expect(presentation?.detail).toBe("Time budget reached · current turn finishing");
+    expect(presentation?.detail).toBe("Current turn will finish");
   });
 
   it("returns stopping while a matching turn outlives a user stop", () => {
@@ -233,17 +235,8 @@ describe("deriveLoopProgress", () => {
 
 describe("formatLoopStopReason", () => {
   const cases: ReadonlyArray<[LoopStopReason, string, string, string | null]> = [
-    ["budget_iterations", "Loop completed", "5 of 5 turns", "Budget reached"],
-    ["budget_duration", "Loop completed", "Ran until the time budget ended", "Time budget reached"],
-    ["hard_cap", "Loop stopped", "5 turns", "Safety limit reached"],
     ["user_stop", "Loop stopped", "5 turns", "Stopped by you"],
     ["toggled_off", "Loop stopped", "5 turns", "Future iterations disabled"],
-    [
-      "consecutive_errors",
-      "Loop stopped",
-      "Stopped after repeated errors",
-      "Review the latest error before restarting",
-    ],
     ["prompt_invalid", "Loop stopped", "The saved objective was invalid", null],
     ["attachments_not_supported", "Loop stopped", "Loop prompts are text-only", null],
     ["replaced_by_manual_policy", "Loop stopped", "5 turns", "Replaced by your manual message"],
@@ -253,11 +246,65 @@ describe("formatLoopStopReason", () => {
   ];
 
   it.each(cases)("maps %s", (reason, title, summary, reasonLine) => {
-    expect(formatLoopStopReason(reason, 5)).toEqual({ title, summary, reason: reasonLine });
+    expect(formatLoopStopReason(reason, makeLoop(), 5)).toEqual({
+      title,
+      summary,
+      reason: reasonLine,
+    });
+  });
+
+  it("uses maxIterations for the budget_iterations summary", () => {
+    expect(formatLoopStopReason("budget_iterations", makeLoop({ maxIterations: 5 }), 5)).toEqual({
+      title: "Loop completed",
+      summary: "5 of 5 turns",
+      reason: "Budget reached",
+    });
+  });
+
+  it("expresses the duration budget in whole minutes", () => {
+    const thirtyMinutes = makeLoop({
+      maxIterations: null,
+      createdAt: new Date(NOW - 30 * 60_000).toISOString(),
+      endsAt: new Date(NOW).toISOString(),
+    });
+    expect(formatLoopStopReason("budget_duration", thirtyMinutes, 4)).toEqual({
+      title: "Loop completed",
+      summary: "Ran until the time budget ended",
+      reason: "30-minute budget reached",
+    });
+  });
+
+  it("expresses hour-long duration budgets in minutes", () => {
+    const oneHour = makeLoop({
+      maxIterations: null,
+      createdAt: new Date(NOW - 60 * 60_000).toISOString(),
+      endsAt: new Date(NOW).toISOString(),
+    });
+    expect(formatLoopStopReason("budget_duration", oneHour, 4).reason).toBe(
+      "60-minute budget reached",
+    );
+  });
+
+  it("uses hardCap for the hard_cap summary", () => {
+    expect(formatLoopStopReason("hard_cap", makeLoop({ hardCap: 100 }), 100)).toEqual({
+      title: "Loop stopped",
+      summary: "100 turns",
+      reason: "Safety limit reached",
+    });
+  });
+
+  it("uses consecutiveErrors for the consecutive_errors summary", () => {
+    expect(
+      formatLoopStopReason("consecutive_errors", makeLoop({ consecutiveErrors: 3 }), 7),
+    ).toEqual({
+      title: "Loop stopped",
+      summary: "3 consecutive errors",
+      reason: "Review the latest error before restarting",
+    });
   });
 
   it("pluralizes single-turn summaries", () => {
-    expect(formatLoopStopReason("user_stop", 1).summary).toBe("1 turn");
+    expect(formatLoopStopReason("user_stop", makeLoop(), 1).summary).toBe("1 turn");
   });
 });
 
