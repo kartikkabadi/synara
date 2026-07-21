@@ -1717,6 +1717,70 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("brackets compact_boundary with compaction item lifecycle and compacted state", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil(
+          (event) => event.type === "thread.state.changed" && event.payload.state === "compacted",
+        ),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "hello",
+        attachments: [],
+      });
+
+      harness.query.emit({
+        type: "system",
+        subtype: "compact_boundary",
+        session_id: "sdk-session-compact",
+        uuid: "system-compact-1",
+        compact_metadata: {
+          trigger: "auto",
+          pre_tokens: 167_000,
+        },
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+
+      const started = runtimeEvents.find(
+        (event) => event.type === "item.started" && event.payload.itemType === "context_compaction",
+      );
+      assert.equal(started?.type, "item.started");
+
+      const completed = runtimeEvents.find(
+        (event) =>
+          event.type === "item.completed" && event.payload.itemType === "context_compaction",
+      );
+      assert.equal(completed?.type, "item.completed");
+      if (completed?.type === "item.completed") {
+        assert.equal(completed.payload.status, "completed");
+        assert.equal(completed.itemId, started?.itemId);
+      }
+
+      const stateChanged = runtimeEvents.at(-1);
+      assert.equal(stateChanged?.type, "thread.state.changed");
+      if (stateChanged?.type === "thread.state.changed") {
+        assert.equal(stateChanged.payload.state, "compacted");
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("routes subagent-tagged messages to a child provider thread", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
