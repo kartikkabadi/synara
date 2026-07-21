@@ -473,7 +473,7 @@ describe("loop slash command routing", () => {
       description: "Keep working on a prompt after every completed turn",
       source: "app",
     } as const;
-    expect(commandMenuTitle(item, false)).toBe("Start Loop");
+    expect(commandMenuTitle(item, false)).toBe("Loop");
     expect(commandMenuTitle(item, true)).toBe("Edit Loop");
   });
 
