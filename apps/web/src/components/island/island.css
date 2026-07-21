@@ -203,17 +203,17 @@
 /* ---- Content choreography -------------------------------------------- */
 
 /* Cross-fade swap: both layers stay mounted — the outgoing overlay fades over
-   the first ~45% of the morph while the incoming content fades/scales in over
-   the last ~60%, overlapping slightly around the midpoint so no frame is
-   blank and no frame double-exposes both layers. */
+   the first ~55% of the morph while the incoming content fades/scales in from
+   ~30%, so the hand-off overlaps at low opacity: no frame is blank and no
+   frame double-exposes both layers at full strength. */
 .island-leave {
-  animation: island-leave calc(var(--island-morph-ms, 180ms) * 0.45) linear both;
+  animation: island-leave calc(var(--island-morph-ms, 180ms) * 0.55) linear both;
 }
 
 .island-enter-header,
 .island-enter-body {
-  animation: island-enter calc(var(--island-morph-ms, 180ms) * 0.6) ease-out
-    calc(var(--island-morph-ms, 180ms) * 0.4) both;
+  animation: island-enter calc(var(--island-morph-ms, 180ms) * 0.5) ease-out
+    calc(var(--island-morph-ms, 180ms) * 0.3) both;
 }
 
 /* Row choreography: each expanded row rises + scales in on a ~30ms stagger
