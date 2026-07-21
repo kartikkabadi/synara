@@ -8,6 +8,7 @@ import {
   type ThreadId,
   type ThreadLoop,
 } from "@synara/contracts";
+import { makeLoop as makeLoopFixture } from "@synara/shared/loopTestFixtures";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const reactHarness = vi.hoisted(() => {
@@ -63,20 +64,7 @@ import { shouldToastLoopStop, useLoopStopErrorToast } from "./useLoopStopErrorTo
 import { formatLoopStopReasonShort } from "./loopPresentation";
 
 function makeLoop(overrides: Partial<ThreadLoop>): ThreadLoop {
-  return {
-    activationId: LoopActivationId.makeUnsafe("act-1"),
-    active: false,
-    prompt: "fix the tests",
-    iteration: 3,
-    maxIterations: 5,
-    endsAt: null,
-    hardCap: 100,
-    consecutiveErrors: 0,
-    lastStopReason: null,
-    createdAt: "2026-07-21T00:00:00.000Z",
-    updatedAt: "2026-07-21T00:10:00.000Z",
-    ...overrides,
-  } as ThreadLoop;
+  return makeLoopFixture({ activationId: "act-1", active: false, ...overrides });
 }
 
 describe("shouldToastLoopStop", () => {

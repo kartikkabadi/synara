@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CommandId, LoopActivationId, ThreadId, type ThreadLoop } from "@synara/contracts";
+import { makeLoop } from "@synara/shared/loopTestFixtures";
 
 import {
   LOOP_BUDGET_COUNT_ERROR,
@@ -40,23 +41,6 @@ function makeDeps(overrides: Partial<LoopSetupDispatchDeps> = {}): {
     ...overrides,
   };
   return { deps, dispatched };
-}
-
-function makeLoop(overrides: Partial<ThreadLoop> = {}): ThreadLoop {
-  return {
-    active: true,
-    prompt: "Keep fixing tests",
-    iteration: 2,
-    maxIterations: 5,
-    endsAt: null,
-    hardCap: 100,
-    consecutiveErrors: 0,
-    lastStopReason: null,
-    activationId: LoopActivationId.makeUnsafe("activation-1"),
-    createdAt: "2026-01-01T11:00:00.000Z",
-    updatedAt: "2026-01-01T11:30:00.000Z",
-    ...overrides,
-  } as ThreadLoop;
 }
 
 describe("interpretLoopInvocation", () => {
