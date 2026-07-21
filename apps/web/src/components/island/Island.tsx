@@ -426,7 +426,7 @@ export function Island() {
         onClick={() => applyState("expanded")}
         className={cn(
           leaving ? "island-leave" : "island-enter-body",
-          "flex h-full w-full flex-col items-stretch justify-center gap-1 px-5 text-left",
+          "island-pill flex h-full w-full flex-col items-stretch justify-center gap-1 px-5 text-left",
         )}
         aria-label="Expand agent sessions island"
       >
@@ -441,7 +441,7 @@ export function Island() {
                 {STATUS_LABEL[headline.status]}
               </span>
             </div>
-            <div className="pl-[19px] text-[11px] text-white/40">
+            <div className="pl-[19px] text-[11px] tabular-nums text-white/40">
               {providerLabel(headline.provider)} ·{" "}
               {islandRelativeTime(headline.lastActivityAt, nowMs)}
             </div>
@@ -467,11 +467,11 @@ export function Island() {
         >
           <span className="text-[13px] font-medium text-white/[0.92]">Sessions</span>
           <div className="flex items-center gap-2.5">
-            <span className="text-[11px] text-white/40">{shortcutHint(context)}</span>
+            <span className="text-[11px] text-white/25">{shortcutHint(context)}</span>
             <button
               type="button"
               onClick={() => applyState("collapsed")}
-              className="island-close rounded p-1 text-white/40 hover:text-white/[0.92]"
+              className="island-close rounded p-1.5 text-white/40"
               aria-label="Close"
             >
               <XIcon className="size-3.5" />
@@ -509,7 +509,7 @@ export function Island() {
                       {STATUS_LABEL[session.status]}
                     </span>
                   </span>
-                  <span className="text-[11px] text-white/40">
+                  <span className="text-[11px] tabular-nums text-white/40">
                     {providerLabel(session.provider)} ·{" "}
                     {islandRelativeTime(session.lastActivityAt, nowMs)}
                   </span>

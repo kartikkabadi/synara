@@ -99,8 +99,16 @@
   transition: background-color 150ms ease;
 }
 
-.island-row:hover {
-  background: rgba(255, 255, 255, 0.04);
+/* Hover styling only on true hover devices so touch taps don't leave a
+   sticky hover state. */
+@media (hover: hover) and (pointer: fine) {
+  .island-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .island-close:hover {
+    color: rgba(255, 255, 255, 0.92);
+  }
 }
 
 .island-row:focus-visible,
