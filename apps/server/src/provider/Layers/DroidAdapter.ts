@@ -119,6 +119,47 @@ import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogg
 
 const PROVIDER = "droid" as const;
 
+// Droid's TUI has /compact and /compress, but the current Factory ACP surface
+// rejects them ("The compress command is only available in the interactive TUI
+// right now") and exposes no compaction RPC. The probe below flips the
+// descriptor only if a future droid build advertises a compact/compress
+// command over ACP `available_commands_update`.
+export function droidCommandSignalsCompaction(name: string): boolean {
+  const normalized = name.trim().toLowerCase().replace(/^\//, "");
+  return normalized === "compact" || normalized === "compress";
+}
+
+export function resolveDroidCompactionCapabilities(
+  availableCommands: ReadonlyArray<{ readonly name: string }>,
+): ProviderCompactionCapabilities {
+  const advertised = availableCommands.some((command) =>
+    droidCommandSignalsCompaction(command.name),
+  );
+  return {
+    manual: advertised
+      ? {
+          // Droid's TUI compaction paths imply session-rollover semantics.
+          mode: "session-rollover",
+          mechanism: "control-command",
+          supportsInstructions: true,
+        }
+      : {
+          mode: "unsupported",
+          mechanism: "unsupported",
+          supportsInstructions: false,
+        },
+    automatic: {
+      mode: "native",
+      statusVisibility: "none",
+      triggerVisibility: "opaque",
+    },
+    telemetry: {
+      lifecycle: "none",
+      contextUsage: "provider-estimated",
+    },
+  };
+}
+
 export const takeDroidSynaraHarnessPolicyTextPart = (
   state: SynaraHarnessPolicyDeliveryState,
   scopedGatewayConnectionAvailable: boolean,
@@ -1936,39 +1977,30 @@ export function makeDroidAdapter(
         return ctx !== undefined && !ctx.stopped;
       });
 
-    // Droid's TUI has /compact and /compress, but Factory ACP exposes no
-    // compaction RPC (those TUI paths imply session-rollover semantics). Native
-    // automatic compaction is assumed but not observable over ACP.
-    const droidCompaction: ProviderCompactionCapabilities = {
-      manual: {
-        mode: "unsupported",
-        mechanism: "unsupported",
-        supportsInstructions: false,
-      },
-      automatic: {
-        mode: "native",
-        statusVisibility: "none",
-        triggerVisibility: "opaque",
-      },
-      telemetry: {
-        lifecycle: "none",
-        contextUsage: "provider-estimated",
-      },
-    };
-
     const getComposerCapabilities: NonNullable<DroidAdapterShape["getComposerCapabilities"]> = () =>
-      Effect.succeed({
-        provider: PROVIDER,
-        supportsSkillMentions: false,
-        supportsSkillDiscovery: false,
-        supportsNativeSlashCommandDiscovery: true,
-        supportsPluginMentions: true,
-        supportsPluginDiscovery: true,
-        supportsRuntimeModelList: true,
-        compaction: droidCompaction,
-        supportsThreadCompaction: supportsThreadCompactionFromCompaction(droidCompaction),
-        supportsThreadImport: true,
-      } satisfies ProviderComposerCapabilities);
+      Effect.gen(function* () {
+        // Probe live sessions for an ACP-advertised compact/compress command
+        // instead of hard-coding support; today's Factory ACP never advertises
+        // one, so the descriptor stays unsupported until droid does.
+        const advertisedCommands: Array<EffectAcpSchema.AvailableCommand> = [];
+        for (const ctx of sessions.values()) {
+          if (ctx.stopped) continue;
+          advertisedCommands.push(...(yield* ctx.acp.getAvailableCommands));
+        }
+        const droidCompaction = resolveDroidCompactionCapabilities(advertisedCommands);
+        return {
+          provider: PROVIDER,
+          supportsSkillMentions: false,
+          supportsSkillDiscovery: false,
+          supportsNativeSlashCommandDiscovery: true,
+          supportsPluginMentions: true,
+          supportsPluginDiscovery: true,
+          supportsRuntimeModelList: true,
+          compaction: droidCompaction,
+          supportsThreadCompaction: supportsThreadCompactionFromCompaction(droidCompaction),
+          supportsThreadImport: true,
+        } satisfies ProviderComposerCapabilities;
+      });
 
     const listModels: NonNullable<DroidAdapterShape["listModels"]> = (input) =>
       discoveryLock.withPermits(1)(
