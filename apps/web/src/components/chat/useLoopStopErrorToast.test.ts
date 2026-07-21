@@ -2,7 +2,8 @@
 // Purpose: Guards the exceptional-stop toast policy (spec §14) — errors toast, routine stops don't.
 // Layer: Pure logic tests
 
-import type { LoopStopReason, ThreadId, ThreadLoop } from "@synara/contracts";
+import type { ThreadId, ThreadLoop } from "@synara/contracts";
+import { makeLoop as makeLoopFixture } from "@synara/shared/loopTestFixtures";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const reactHarness = vi.hoisted(() => {
@@ -61,20 +62,7 @@ import {
 } from "./useLoopStopErrorToast";
 
 function makeLoop(overrides: Partial<ThreadLoop>): ThreadLoop {
-  return {
-    activationId: "act-1",
-    active: false,
-    prompt: "fix the tests",
-    iteration: 3,
-    maxIterations: 5,
-    endsAt: null,
-    hardCap: 100,
-    consecutiveErrors: 0,
-    lastStopReason: null,
-    createdAt: "2026-07-21T00:00:00.000Z",
-    updatedAt: "2026-07-21T00:10:00.000Z",
-    ...overrides,
-  } as ThreadLoop;
+  return makeLoopFixture({ activationId: "act-1", active: false, ...overrides });
 }
 
 describe("getLoopStopErrorToastCopy", () => {
@@ -145,31 +133,23 @@ describe("useLoopStopErrorToast", () => {
     useLoopStopErrorToast(currentThreadId, loop, addToast);
   }
 
-  it.each(["consecutive_errors", "prompt_invalid", "thread_unrunnable"] as LoopStopReason[])(
-    "toasts when an active loop stops with %s",
-    (reason) => {
-      const addToast = vi.fn();
-      render(threadId, makeLoop({ active: true }), addToast);
-      render(threadId, makeLoop({ active: false, lastStopReason: reason }), addToast);
-      expect(addToast).toHaveBeenCalledTimes(1);
-      expect(addToast).toHaveBeenCalledWith({
-        ...getLoopStopErrorToastCopy(reason),
-        threadId,
-      });
-    },
-  );
-
-  it.each([
-    "user_stop",
-    "toggled_off",
-    "budget_iterations",
-    "budget_duration",
-    "hard_cap",
-    "replaced_by_manual_policy",
-  ] as LoopStopReason[])("stays quiet when an active loop stops with %s", (reason) => {
+  // Which reasons toast is owned by the getLoopStopErrorToastCopy tests; the
+  // hook tests only cover transition wiring.
+  it("toasts when an active loop stops with an exceptional reason", () => {
     const addToast = vi.fn();
     render(threadId, makeLoop({ active: true }), addToast);
-    render(threadId, makeLoop({ active: false, lastStopReason: reason }), addToast);
+    render(threadId, makeLoop({ active: false, lastStopReason: "consecutive_errors" }), addToast);
+    expect(addToast).toHaveBeenCalledTimes(1);
+    expect(addToast).toHaveBeenCalledWith({
+      ...getLoopStopErrorToastCopy("consecutive_errors"),
+      threadId,
+    });
+  });
+
+  it("stays quiet when an active loop stops with a routine reason", () => {
+    const addToast = vi.fn();
+    render(threadId, makeLoop({ active: true }), addToast);
+    render(threadId, makeLoop({ active: false, lastStopReason: "user_stop" }), addToast);
     expect(addToast).not.toHaveBeenCalled();
   });
 

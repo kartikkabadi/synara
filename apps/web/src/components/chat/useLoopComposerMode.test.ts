@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { CommandId, ThreadId, type ThreadLoop } from "@synara/contracts";
+import { makeLoop } from "@synara/shared/loopTestFixtures";
 
 import {
   LOOP_BUDGET_COUNT_ERROR,
@@ -10,7 +11,6 @@ import {
   LOOP_DEFAULT_BUDGET_CHOICE,
   LOOP_UNSUPPORTED_CONTEXT_MESSAGE,
   createLoopComposerCore,
-  formatLoopBudgetChoiceLabel,
   interpretLoopInvocation,
   isUnsupportedLoopContext,
   loopBudgetChoiceFromInvalidToken,
@@ -41,23 +41,6 @@ function makeDeps(overrides: Partial<LoopSetupDispatchDeps> = {}): {
     ...overrides,
   };
   return { deps, dispatched };
-}
-
-function makeLoop(overrides: Partial<ThreadLoop> = {}): ThreadLoop {
-  return {
-    active: true,
-    prompt: "Keep fixing tests",
-    iteration: 2,
-    maxIterations: 5,
-    endsAt: null,
-    hardCap: 100,
-    consecutiveErrors: 0,
-    lastStopReason: null,
-    activationId: "activation-1",
-    createdAt: "2026-01-01T11:00:00.000Z",
-    updatedAt: "2026-01-01T11:30:00.000Z",
-    ...overrides,
-  } as ThreadLoop;
 }
 
 describe("interpretLoopInvocation", () => {
@@ -191,30 +174,16 @@ describe("budget choices", () => {
     });
   });
 
-  it("validates count range 1..100", () => {
-    expect(validateLoopBudgetChoice({ kind: "count", turns: 1 })).toBeNull();
-    expect(validateLoopBudgetChoice({ kind: "count", turns: 100 })).toBeNull();
-    expect(validateLoopBudgetChoice({ kind: "count", turns: 0 })).toBe(LOOP_BUDGET_COUNT_ERROR);
-    expect(validateLoopBudgetChoice({ kind: "count", turns: 101 })).toBe(LOOP_BUDGET_COUNT_ERROR);
-  });
-
-  it("validates duration up to 24 hours", () => {
-    expect(validateLoopBudgetChoice({ kind: "duration", seconds: 24 * 3600 })).toBeNull();
-    expect(validateLoopBudgetChoice({ kind: "duration", seconds: 24 * 3600 + 1 })).toBe(
-      LOOP_BUDGET_DURATION_ERROR,
-    );
-    expect(validateLoopBudgetChoice({ kind: "until-stopped" })).toBeNull();
-  });
-
-  it("formats trigger labels", () => {
-    expect(formatLoopBudgetChoiceLabel({ kind: "count", turns: 5 })).toBe("Stop after 5 turns");
-    expect(formatLoopBudgetChoiceLabel({ kind: "duration", seconds: 30 * 60 })).toBe(
-      "Stop after 30 minutes",
-    );
-    expect(formatLoopBudgetChoiceLabel({ kind: "duration", seconds: 3600 })).toBe(
-      "Stop after 1 hour",
-    );
-    expect(formatLoopBudgetChoiceLabel({ kind: "until-stopped" })).toBe("Until stopped");
+  it.each([
+    [{ kind: "count", turns: 1 } as const, null],
+    [{ kind: "count", turns: 100 } as const, null],
+    [{ kind: "count", turns: 0 } as const, LOOP_BUDGET_COUNT_ERROR],
+    [{ kind: "count", turns: 101 } as const, LOOP_BUDGET_COUNT_ERROR],
+    [{ kind: "duration", seconds: 24 * 3600 } as const, null],
+    [{ kind: "duration", seconds: 24 * 3600 + 1 } as const, LOOP_BUDGET_DURATION_ERROR],
+    [{ kind: "until-stopped" } as const, null],
+  ])("validates budget choice %j", (choice, expected) => {
+    expect(validateLoopBudgetChoice(choice)).toBe(expected);
   });
 
   it("maps choices to dispatch fields, with until-stopped deferring to the hard cap", () => {

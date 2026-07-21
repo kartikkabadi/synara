@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { LoopStopReason, OrchestrationLatestTurn, ThreadLoop } from "@synara/contracts";
+import type { LoopStopReason, ThreadLoop } from "@synara/contracts";
+import { makeLoop, makeRunningLoopTurn } from "@synara/shared/loopTestFixtures";
 
 import {
   type DeriveLoopPresentationStateInput,
@@ -13,38 +14,6 @@ import {
 } from "./loopPresentation";
 
 const NOW = new Date("2026-01-01T12:00:00.000Z").getTime();
-
-function makeLoop(overrides: Partial<ThreadLoop> = {}): ThreadLoop {
-  return {
-    active: true,
-    prompt: "Keep fixing tests",
-    iteration: 2,
-    maxIterations: 5,
-    endsAt: null,
-    hardCap: 100,
-    consecutiveErrors: 0,
-    lastStopReason: null,
-    activationId: "activation-1",
-    createdAt: "2026-01-01T11:00:00.000Z",
-    updatedAt: "2026-01-01T11:30:00.000Z",
-    ...overrides,
-  } as ThreadLoop;
-}
-
-function makeRunningLoopTurn(
-  overrides: Partial<OrchestrationLatestTurn> = {},
-): OrchestrationLatestTurn {
-  return {
-    turnId: "turn-1",
-    state: "running",
-    requestedAt: "2026-01-01T11:45:00.000Z",
-    startedAt: "2026-01-01T11:45:01.000Z",
-    completedAt: null,
-    assistantMessageId: null,
-    purpose: { kind: "loop-iteration", activationId: "activation-1", iteration: 2 },
-    ...overrides,
-  } as OrchestrationLatestTurn;
-}
 
 function derive(
   overrides: Partial<DeriveLoopPresentationStateInput> = {},
@@ -234,72 +203,72 @@ describe("deriveLoopProgress", () => {
 });
 
 describe("formatLoopStopReason", () => {
-  const cases: ReadonlyArray<[LoopStopReason, string, string, string | null]> = [
-    ["user_stop", "Loop stopped", "5 turns", "Stopped by you"],
-    ["toggled_off", "Loop stopped", "5 turns", "Future iterations disabled"],
-    ["prompt_invalid", "Loop stopped", "The saved objective was invalid", null],
-    ["attachments_not_supported", "Loop stopped", "Loop prompts are text-only", null],
-    ["replaced_by_manual_policy", "Loop stopped", "5 turns", "Replaced by your manual message"],
-    ["thread_archived", "Loop stopped", "This thread was archived", null],
-    ["thread_deleted", "Loop stopped", "This thread was deleted", null],
-    ["thread_unrunnable", "Loop stopped", "This thread is not available", null],
+  const cases: ReadonlyArray<
+    [LoopStopReason, Partial<ThreadLoop>, number, string, string, string | null]
+  > = [
+    ["user_stop", {}, 5, "Loop stopped", "5 turns", "Stopped by you"],
+    ["toggled_off", {}, 5, "Loop stopped", "5 turns", "Future iterations disabled"],
+    ["prompt_invalid", {}, 5, "Loop stopped", "The saved objective was invalid", null],
+    ["attachments_not_supported", {}, 5, "Loop stopped", "Loop prompts are text-only", null],
+    [
+      "replaced_by_manual_policy",
+      {},
+      5,
+      "Loop stopped",
+      "5 turns",
+      "Replaced by your manual message",
+    ],
+    ["thread_archived", {}, 5, "Loop stopped", "This thread was archived", null],
+    ["thread_deleted", {}, 5, "Loop stopped", "This thread was deleted", null],
+    ["thread_unrunnable", {}, 5, "Loop stopped", "This thread is not available", null],
+    [
+      "budget_iterations",
+      { maxIterations: 5 },
+      5,
+      "Loop completed",
+      "5 of 5 turns",
+      "Budget reached",
+    ],
+    [
+      "budget_duration",
+      {
+        maxIterations: null,
+        createdAt: new Date(NOW - 30 * 60_000).toISOString(),
+        endsAt: new Date(NOW).toISOString(),
+      },
+      4,
+      "Loop completed",
+      "Ran until the time budget ended",
+      "30-minute budget reached",
+    ],
+    [
+      "budget_duration",
+      {
+        maxIterations: null,
+        createdAt: new Date(NOW - 60 * 60_000).toISOString(),
+        endsAt: new Date(NOW).toISOString(),
+      },
+      4,
+      "Loop completed",
+      "Ran until the time budget ended",
+      "60-minute budget reached",
+    ],
+    ["hard_cap", { hardCap: 100 }, 100, "Loop stopped", "100 turns", "Safety limit reached"],
+    [
+      "consecutive_errors",
+      { consecutiveErrors: 3 },
+      7,
+      "Loop stopped",
+      "3 consecutive errors",
+      "Review the latest error before restarting",
+    ],
   ];
 
-  it.each(cases)("maps %s", (reason, title, summary, reasonLine) => {
-    expect(formatLoopStopReason(reason, makeLoop(), 5)).toEqual({
+  it.each(cases)("maps %s", (reason, overrides, turns, title, summary, reasonLine) => {
+    expect(formatLoopStopReason(reason, makeLoop(overrides), turns)).toEqual({
       title,
       summary,
       reason: reasonLine,
-    });
-  });
-
-  it("uses maxIterations for the budget_iterations summary", () => {
-    expect(formatLoopStopReason("budget_iterations", makeLoop({ maxIterations: 5 }), 5)).toEqual({
-      title: "Loop completed",
-      summary: "5 of 5 turns",
-      reason: "Budget reached",
-    });
-  });
-
-  it("expresses the duration budget in whole minutes", () => {
-    const thirtyMinutes = makeLoop({
-      maxIterations: null,
-      createdAt: new Date(NOW - 30 * 60_000).toISOString(),
-      endsAt: new Date(NOW).toISOString(),
-    });
-    expect(formatLoopStopReason("budget_duration", thirtyMinutes, 4)).toEqual({
-      title: "Loop completed",
-      summary: "Ran until the time budget ended",
-      reason: "30-minute budget reached",
-    });
-  });
-
-  it("expresses hour-long duration budgets in minutes", () => {
-    const oneHour = makeLoop({
-      maxIterations: null,
-      createdAt: new Date(NOW - 60 * 60_000).toISOString(),
-      endsAt: new Date(NOW).toISOString(),
-    });
-    expect(formatLoopStopReason("budget_duration", oneHour, 4).reason).toBe(
-      "60-minute budget reached",
-    );
-  });
-
-  it("uses hardCap for the hard_cap summary", () => {
-    expect(formatLoopStopReason("hard_cap", makeLoop({ hardCap: 100 }), 100)).toEqual({
-      title: "Loop stopped",
-      summary: "100 turns",
-      reason: "Safety limit reached",
-    });
-  });
-
-  it("uses consecutiveErrors for the consecutive_errors summary", () => {
-    expect(
-      formatLoopStopReason("consecutive_errors", makeLoop({ consecutiveErrors: 3 }), 7),
-    ).toEqual({
-      title: "Loop stopped",
-      summary: "3 consecutive errors",
-      reason: "Review the latest error before restarting",
     });
   });
 
