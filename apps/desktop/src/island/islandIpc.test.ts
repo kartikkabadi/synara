@@ -7,10 +7,12 @@ import type { IslandWindowManager } from "./islandWindow";
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown;
 
-// Handlers only accept invocations whose event.sender is the island window's
-// own webContents, so the fake IPC main invokes with this shared sender and
-// the fake manager exposes it as `window.webContents`.
+// Island-only handlers accept invocations whose event.sender is the island
+// window's own webContents, so the fake IPC main invokes with this shared
+// sender and the fake manager exposes it as `window.webContents`. The enable
+// toggle additionally accepts trusted app senders (e.g. the main window).
 const ISLAND_SENDER = { id: "island-web-contents" };
+const APP_SENDER = { id: "app-web-contents" };
 
 function createFakeIpcMain() {
   const handlers = new Map<string, Handler>();
@@ -44,6 +46,7 @@ function createDelegate(manager: Partial<IslandWindowManager> | null | undefined
         : { window: { webContents: ISLAND_SENDER }, ...manager };
   return {
     getManager: () => resolved as IslandWindowManager | null,
+    isTrustedAppSender: vi.fn((sender: unknown) => sender === APP_SENDER),
     getEnabled: vi.fn(() => true),
     setEnabled: vi.fn((enabled: boolean) => enabled),
     focusThread: vi.fn(),
@@ -126,6 +129,33 @@ describe("registerIslandIpcHandlers", () => {
     await expect(invoke(ISLAND_IPC_CHANNELS.setEnabled, true)).resolves.toBe(true);
     expect(delegate.setEnabled).toHaveBeenCalledWith(true);
     await expect(invoke(ISLAND_IPC_CHANNELS.setEnabled, "true")).resolves.toBe(false);
+  });
+
+  it("allows trusted app senders to use the enable toggle only", async () => {
+    const { ipcMain, invokeAs } = createFakeIpcMain();
+    const delegate = createDelegate();
+    registerIslandIpcHandlers(ipcMain, delegate);
+
+    await expect(invokeAs(APP_SENDER, ISLAND_IPC_CHANNELS.getEnabled)).resolves.toBe(true);
+    await expect(invokeAs(APP_SENDER, ISLAND_IPC_CHANNELS.setEnabled, true)).resolves.toBe(true);
+    expect(delegate.setEnabled).toHaveBeenCalledWith(true);
+
+    await expect(invokeAs(APP_SENDER, ISLAND_IPC_CHANNELS.getContext)).resolves.toBeUndefined();
+    await invokeAs(APP_SENDER, ISLAND_IPC_CHANNELS.focusThread, "thread-1");
+    await invokeAs(APP_SENDER, ISLAND_IPC_CHANNELS.stopLoop, "thread-1");
+    expect(delegate.focusThread).not.toHaveBeenCalled();
+    expect(delegate.stopLoop).not.toHaveBeenCalled();
+  });
+
+  it("keeps island-only channels closed to trusted app senders", async () => {
+    const { ipcMain, invokeAs } = createFakeIpcMain();
+    const manager = { setState: vi.fn(), setIgnoreMouse: vi.fn() };
+    registerIslandIpcHandlers(ipcMain, createDelegate(manager));
+
+    await invokeAs(APP_SENDER, ISLAND_IPC_CHANNELS.setState, "expanded");
+    await invokeAs(APP_SENDER, ISLAND_IPC_CHANNELS.setIgnoreMouse, true);
+    expect(manager.setState).not.toHaveBeenCalled();
+    expect(manager.setIgnoreMouse).not.toHaveBeenCalled();
   });
 
   it("tolerates a missing manager", async () => {

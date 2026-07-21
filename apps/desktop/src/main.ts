@@ -3243,6 +3243,12 @@ function registerIpcHandlers(): void {
   }
   registerIslandIpcHandlers(ipcMain, {
     getManager: () => islandManager,
+    // App renderers (main window, settings) are trusted: the sender must own a
+    // BrowserWindow and be loaded from the app's own entry URL, which excludes
+    // embedded browser-tab WebContentsViews and OAuth popup windows.
+    isTrustedAppSender: (sender) =>
+      BrowserWindow.fromWebContents(sender) !== null &&
+      sender.getURL().startsWith(appEntryBaseUrl()),
     getEnabled: isIslandEnabled,
     setEnabled: setIslandEnabled,
     focusThread: (threadId) => {
@@ -3261,11 +3267,12 @@ function registerIpcHandlers(): void {
   registerBrowserIpcHandlers(ipcMain, browserManager);
 }
 
+function appEntryBaseUrl(): string {
+  return isDevelopment ? (process.env.VITE_DEV_SERVER_URL as string) : desktopIdentity.entryUrl;
+}
+
 function islandEntryUrl(): string {
-  const base = isDevelopment
-    ? (process.env.VITE_DEV_SERVER_URL as string)
-    : desktopIdentity.entryUrl;
-  return `${base}#/island`;
+  return `${appEntryBaseUrl()}#/island`;
 }
 
 function isIslandEnabled(): boolean {
