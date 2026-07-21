@@ -6,3 +6,4 @@ artifacts/
 server.log
 web.log
 bun.lock
+playwright-report/
