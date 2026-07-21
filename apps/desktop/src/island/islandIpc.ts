@@ -41,10 +41,18 @@ export function registerIslandIpcHandlers(ipcMain: IpcMain, delegate: IslandIpcD
   });
 
   ipcMain.removeHandler(ISLAND_IPC_CHANNELS.setState);
-  ipcMain.handle(ISLAND_IPC_CHANNELS.setState, async (event, state: unknown) => {
+  ipcMain.handle(ISLAND_IPC_CHANNELS.setState, async (event, state: unknown, meta: unknown) => {
     if (!isIslandSender(event)) return;
     if (typeof state === "string" && ISLAND_WINDOW_STATES.has(state)) {
-      delegate.getManager()?.setState(state as IslandWindowState);
+      const rawCount =
+        typeof meta === "object" && meta !== null
+          ? (meta as { sessionCount?: unknown }).sessionCount
+          : undefined;
+      const sessionCount =
+        typeof rawCount === "number" && Number.isInteger(rawCount) && rawCount >= 0
+          ? rawCount
+          : undefined;
+      delegate.getManager()?.setState(state as IslandWindowState, sessionCount);
     }
   });
 

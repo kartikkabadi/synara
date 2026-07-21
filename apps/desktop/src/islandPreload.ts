@@ -31,7 +31,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
 contextBridge.exposeInMainWorld("islandBridge", {
   getContext: () => ipcRenderer.invoke(IPC.island.getContext),
   setIgnoreMouse: (ignore) => ipcRenderer.invoke(IPC.island.setIgnoreMouse, ignore),
-  setState: (state) => ipcRenderer.invoke(IPC.island.setState, state),
+  setState: (state, meta) => ipcRenderer.invoke(IPC.island.setState, state, meta),
   focusThread: (threadId) => ipcRenderer.invoke(IPC.island.focusThread, threadId),
   stopLoop: (threadId) => ipcRenderer.invoke(IPC.island.stopLoop, threadId),
   onStateChanged: (listener) => {

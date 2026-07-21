@@ -13,9 +13,12 @@ import {
 export {
   DEFAULT_NOTCH_WIDTH,
   ISLAND_EXPANDED_SIZE,
+  ISLAND_EXPANDED_EMPTY_SIZE,
   ISLAND_FLOATING_COLLAPSED_SIZE,
   ISLAND_HOVER_HEIGHT,
+  ISLAND_IDLE_COLLAPSED_SIZE,
   islandCollapsedSize,
+  islandExpandedSize,
   islandHoverSize,
   islandStateSize,
   type IslandSize,
@@ -95,8 +98,9 @@ export function islandStateBounds(
   metrics: IslandDisplayMetrics,
   notch: IslandNotchInfo | null,
   platform?: NodeJS.Platform,
+  sessionCount?: number,
 ): IslandRect {
-  return islandAnchoredBounds(islandStateSize(state, notch), metrics, notch, platform);
+  return islandAnchoredBounds(islandStateSize(state, notch, sessionCount), metrics, notch, platform);
 }
 
 // null means "use the platform default": on for macOS/Windows, off for Linux.

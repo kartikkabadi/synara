@@ -34,8 +34,12 @@ const EXPANDED_IDLE_COLLAPSE_MS = 8_000;
 
 // The window is pre-sized to the expanded bounds (except Linux) and only this
 // inner container animates, using the same sizing as the Electron window.
-function innerSize(state: IslandWindowState, context: IslandDisplayContext | null) {
-  return islandStateSize(state, context?.notch ?? null);
+function innerSize(
+  state: IslandWindowState,
+  context: IslandDisplayContext | null,
+  sessionCount: number,
+) {
+  return islandStateSize(state, context?.notch ?? null, sessionCount);
 }
 
 const STATUS_TEXT_CLASS: Record<IslandSessionStatus, string> = {
@@ -225,11 +229,12 @@ export function Island() {
   // Every displayed state change (click, shortcut, idle collapse, auto-pop) is
   // mirrored to the main process: on Linux there is no click-through
   // forwarding, so the window itself must resize to the displayed state.
+  const sessionCount = sessions.length;
   useEffect(() => {
-    void window.islandBridge?.setState(effectiveState);
-  }, [effectiveState]);
+    void window.islandBridge?.setState(effectiveState, { sessionCount });
+  }, [effectiveState, sessionCount]);
 
-  const size = innerSize(effectiveState, context);
+  const size = innerSize(effectiveState, context, sessionCount);
   const isNotch = context?.notch != null;
   const orbState = orbStateForStatus(aggregate);
   const glowing = aggregate === "working" || aggregate === "needs-approval";
@@ -272,13 +277,24 @@ export function Island() {
             type="button"
             onClick={() => applyState("expanded")}
             className={cn(
-              "island-crossfade flex h-full w-full items-center justify-center gap-2 px-3 text-xs font-medium tracking-wide text-white/80",
+              "island-crossfade flex h-full w-full items-center text-xs font-medium tracking-wide text-white/80",
+              sessions.length > 0 ? "gap-2 pl-2.5 pr-3" : "justify-center px-3",
               wasExpanded && "island-crossfade-nodelay",
             )}
             aria-label="Expand agent sessions island"
           >
-            <IslandOrb state={orbState} />
-            {sessions.length > 0 ? <span className="tabular-nums">{sessions.length}</span> : null}
+            <span className="island-orb-seat">
+              <IslandOrb state={orbState} />
+            </span>
+            {sessions.length > 0 ? (
+              <>
+                <span className="text-[13px] font-semibold tabular-nums text-white/90">
+                  {sessions.length}
+                </span>
+                <span className="flex-1" />
+                <span className="h-1 w-1 rounded-full bg-[hsl(var(--island-hue)_85%_65%)]" />
+              </>
+            ) : null}
           </button>
         ) : effectiveState === "hover" ? (
           <button

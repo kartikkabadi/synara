@@ -428,11 +428,17 @@ export interface IslandDisplayContext {
   notch: IslandNotchInfo | null;
 }
 
+// Session-count metadata riding along setState so the main process can size
+// the window to the content (idle mini-pill, content-driven expanded height).
+export interface IslandStateMeta {
+  sessionCount: number;
+}
+
 // Bridge exposed to the dedicated island overlay window (islandPreload.ts).
 export interface IslandBridge {
   getContext: () => Promise<IslandDisplayContext>;
   setIgnoreMouse: (ignore: boolean) => Promise<void>;
-  setState: (state: IslandWindowState) => Promise<void>;
+  setState: (state: IslandWindowState, meta?: IslandStateMeta) => Promise<void>;
   focusThread: (threadId: string) => Promise<void>;
   stopLoop: (threadId: string) => Promise<void>;
   onStateChanged: (listener: (state: IslandWindowState) => void) => () => void;

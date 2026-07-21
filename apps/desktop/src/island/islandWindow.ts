@@ -54,6 +54,7 @@ export class IslandWindowManager {
   #options: IslandWindowManagerOptions;
   #window: BrowserWindow | null = null;
   #state: IslandWindowState = "collapsed";
+  #sessionCount = 0;
   #detachDisplayListeners: (() => void) | null = null;
 
   constructor(options: IslandWindowManagerOptions) {
@@ -90,7 +91,7 @@ export class IslandWindowManager {
     const metrics = primaryDisplayMetrics();
     const notch = this.#detectNotch();
     const bounds = this.isLinux
-      ? islandStateBounds(this.#state, metrics, notch, this.#options.platform)
+      ? islandStateBounds(this.#state, metrics, notch, this.#options.platform, this.#sessionCount)
       : islandWindowBounds(metrics, notch, this.#options.platform);
 
     const window = new BrowserWindow({
@@ -171,8 +172,9 @@ export class IslandWindowManager {
     window.setIgnoreMouseEvents(ignore, ignore ? { forward: true } : undefined);
   }
 
-  setState(state: IslandWindowState): void {
+  setState(state: IslandWindowState, sessionCount?: number): void {
     this.#state = state;
+    if (sessionCount !== undefined) this.#sessionCount = sessionCount;
     if (!this.isLinux) return;
     const window = this.#window;
     if (!window || window.isDestroyed()) return;
@@ -182,6 +184,7 @@ export class IslandWindowManager {
         primaryDisplayMetrics(),
         this.#detectNotch(),
         this.#options.platform,
+        this.#sessionCount,
       ),
     );
   }
@@ -202,7 +205,7 @@ export class IslandWindowManager {
     const notch = this.#detectNotch();
     window.setBounds(
       this.isLinux
-        ? islandStateBounds(this.#state, metrics, notch, this.#options.platform)
+        ? islandStateBounds(this.#state, metrics, notch, this.#options.platform, this.#sessionCount)
         : islandWindowBounds(metrics, notch, this.#options.platform),
     );
   }

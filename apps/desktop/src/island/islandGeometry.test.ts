@@ -5,6 +5,7 @@ import {
   DEFAULT_NOTCH_WIDTH,
   detectNotch,
   islandCollapsedSize,
+  islandExpandedSize,
   islandHoverSize,
   islandStateBounds,
   islandWindowBounds,
@@ -57,6 +58,20 @@ describe("island sizes", () => {
 
   it("uses the floating pill size without a notch", () => {
     expect(islandCollapsedSize(null)).toEqual({ width: 180, height: 32 });
+    expect(islandCollapsedSize(null, 2)).toEqual({ width: 180, height: 32 });
+  });
+
+  it("shrinks to the idle mini pill with zero sessions, except in notch mode", () => {
+    expect(islandCollapsedSize(null, 0)).toEqual({ width: 64, height: 30 });
+    expect(islandCollapsedSize({ width: 180, height: 38 }, 0)).toEqual({ width: 240, height: 38 });
+  });
+
+  it("derives the expanded height from the row count", () => {
+    expect(islandExpandedSize()).toEqual({ width: 560, height: 320 });
+    expect(islandExpandedSize(0)).toEqual({ width: 560, height: 180 });
+    expect(islandExpandedSize(1)).toEqual({ width: 560, height: 140 });
+    expect(islandExpandedSize(3)).toEqual({ width: 560, height: 208 });
+    expect(islandExpandedSize(10)).toEqual({ width: 560, height: 320 });
   });
 
   it("keeps the hover width at least 420", () => {
@@ -117,6 +132,17 @@ describe("island anchoring", () => {
     expect(islandStateBounds("expanded", windowsDisplay, null)).toMatchObject({
       width: 560,
       height: 320,
+    });
+  });
+
+  it("sizes Linux state bounds from the session count", () => {
+    expect(islandStateBounds("collapsed", windowsDisplay, null, "linux", 0)).toMatchObject({
+      width: 64,
+      height: 30,
+    });
+    expect(islandStateBounds("expanded", windowsDisplay, null, "linux", 2)).toMatchObject({
+      width: 560,
+      height: 164,
     });
   });
 });

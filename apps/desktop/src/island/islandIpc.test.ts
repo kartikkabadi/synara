@@ -102,7 +102,14 @@ describe("registerIslandIpcHandlers", () => {
     await invoke(ISLAND_IPC_CHANNELS.setState, "expanded");
     await invoke(ISLAND_IPC_CHANNELS.setState, "bogus");
     expect(manager.setState).toHaveBeenCalledTimes(1);
-    expect(manager.setState).toHaveBeenCalledWith("expanded");
+    expect(manager.setState).toHaveBeenCalledWith("expanded", undefined);
+
+    await invoke(ISLAND_IPC_CHANNELS.setState, "collapsed", { sessionCount: 2 });
+    expect(manager.setState).toHaveBeenCalledWith("collapsed", 2);
+    await invoke(ISLAND_IPC_CHANNELS.setState, "collapsed", { sessionCount: -1 });
+    expect(manager.setState).toHaveBeenCalledWith("collapsed", undefined);
+    await invoke(ISLAND_IPC_CHANNELS.setState, "collapsed", { sessionCount: "3" });
+    expect(manager.setState).toHaveBeenCalledWith("collapsed", undefined);
 
     await invoke(ISLAND_IPC_CHANNELS.setIgnoreMouse, true);
     await invoke(ISLAND_IPC_CHANNELS.setIgnoreMouse, "yes");
