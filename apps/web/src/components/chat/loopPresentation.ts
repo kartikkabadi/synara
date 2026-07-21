@@ -138,6 +138,34 @@ export function formatLoopRemainingTime(remainingSeconds: number): string {
   return minutes === 0 ? `${hours}h left` : `${hours}h ${minutes}m left`;
 }
 
+// Human-readable duration for budget labels (e.g. "10 seconds", "30 minutes", "1 hour").
+export function formatDuration(seconds: number | null | undefined): string {
+  if (seconds == null || seconds <= 0) return "0 seconds";
+  if (seconds < 60) {
+    const value = Math.ceil(seconds);
+    return `${value} ${value === 1 ? "second" : "seconds"}`;
+  }
+  if (seconds < 3600) {
+    const minutes = Math.ceil(seconds / 60);
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+  }
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.ceil((seconds % 3600) / 60);
+  if (minutes === 0) return `${hours} ${hours === 1 ? "hour" : "hours"}`;
+  return `${hours}h ${minutes}m`;
+}
+
+// Stop-reason copy for duration budgets (e.g. "10-second budget reached").
+export function formatDurationBudget(seconds: number | null | undefined): string {
+  if (seconds == null || seconds <= 0) return "Time budget reached";
+  if (seconds < 60) return `${Math.ceil(seconds)}-second budget reached`;
+  if (seconds < 3600) return `${Math.ceil(seconds / 60)}-minute budget reached`;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.ceil((seconds % 3600) / 60);
+  if (minutes === 0) return `${hours}-hour budget reached`;
+  return `${hours}h ${minutes}m budget reached`;
+}
+
 // Presentation refresh cadence: 30s beyond five minutes, 10s under five
 // minutes, every second inside the final minute. Correctness is server-owned.
 export function getLoopTickIntervalMs(remainingSeconds: number): number {
@@ -232,16 +260,6 @@ export interface LoopStopReasonContext {
   readonly consecutiveErrors: number;
 }
 
-// Whole-minute duration budget from the configured budget; null for loops
-// without one. Never derived from endsAt - createdAt: endsAt re-anchors on
-// reconfigure while createdAt keeps the original activation start.
-export function loopDurationMinutes(loop: {
-  readonly durationSeconds?: number | null | undefined;
-}): number | null {
-  if (loop.durationSeconds == null) return null;
-  return Math.max(1, Math.round(loop.durationSeconds / 60));
-}
-
 export function formatLoopStopReason(
   reason: LoopStopReason,
   loop: LoopStopReasonContext,
@@ -258,7 +276,7 @@ export function formatLoopStopReason(
       return {
         title: "Loop completed",
         summary: "Ran until the time budget ended",
-        reason: `${loopDurationMinutes(loop) ?? 0}-minute budget reached`,
+        reason: formatDurationBudget(loop.durationSeconds),
       };
     case "hard_cap":
       return {

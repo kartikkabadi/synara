@@ -12,11 +12,7 @@ import { disclosureContentClassName } from "~/lib/disclosureMotion";
 import { cn } from "~/lib/utils";
 import { DisclosureChevron } from "../ui/DisclosureChevron";
 import { DisclosureRegion } from "../ui/DisclosureRegion";
-import {
-  formatLoopStopReason,
-  loopDurationMinutes,
-  type LoopStopReasonCopy,
-} from "./loopPresentation";
+import { formatDuration, formatLoopStopReason, type LoopStopReasonCopy } from "./loopPresentation";
 
 interface LoopCompletionRecordProps {
   loop: ThreadLoop;
@@ -56,9 +52,8 @@ function budgetLabel(loop: ThreadLoop): string {
   if (loop.maxIterations !== null) {
     return `${loop.maxIterations} ${loop.maxIterations === 1 ? "turn" : "turns"}`;
   }
-  const minutes = loopDurationMinutes(loop);
-  if (minutes !== null) {
-    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+  if (loop.durationSeconds != null) {
+    return formatDuration(loop.durationSeconds);
   }
   return `Until stopped (safety limit ${loop.hardCap} turns)`;
 }

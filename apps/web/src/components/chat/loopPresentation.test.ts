@@ -7,11 +7,12 @@ import {
   type DeriveLoopPresentationStateInput,
   deriveLoopPresentationState,
   deriveLoopProgress,
+  formatDuration,
+  formatDurationBudget,
   formatLoopRemainingTime,
   formatLoopStopReason,
   formatLoopStopReasonShort,
   getLoopTickIntervalMs,
-  loopDurationMinutes,
 } from "./loopPresentation";
 
 const NOW = new Date("2026-01-01T12:00:00.000Z").getTime();
@@ -258,7 +259,19 @@ describe("formatLoopStopReason", () => {
       4,
       "Loop completed",
       "Ran until the time budget ended",
-      "60-minute budget reached",
+      "1-hour budget reached",
+    ],
+    [
+      "budget_duration",
+      {
+        maxIterations: null,
+        durationSeconds: 10,
+        endsAt: new Date(NOW).toISOString(),
+      },
+      2,
+      "Loop completed",
+      "Ran until the time budget ended",
+      "10-second budget reached",
     ],
     ["hard_cap", { hardCap: 100 }, 100, "Loop stopped", "100 turns", "Safety limit reached"],
     [
@@ -300,10 +313,25 @@ describe("adaptive time formatting", () => {
   });
 });
 
-describe("loopDurationMinutes", () => {
-  it("returns whole minutes for a duration budget and null otherwise", () => {
-    expect(loopDurationMinutes(makeLoop({ durationSeconds: 30 * 60 }))).toBe(30);
-    expect(loopDurationMinutes(makeLoop({ durationSeconds: null }))).toBeNull();
+describe("formatDuration", () => {
+  it("formats duration budgets for humans", () => {
+    expect(formatDuration(10)).toBe("10 seconds");
+    expect(formatDuration(60)).toBe("1 minute");
+    expect(formatDuration(30 * 60)).toBe("30 minutes");
+    expect(formatDuration(60 * 60)).toBe("1 hour");
+    expect(formatDuration(80 * 60)).toBe("1h 20m");
+    expect(formatDuration(null)).toBe("0 seconds");
+  });
+});
+
+describe("formatDurationBudget", () => {
+  it("formats duration budget stop reasons", () => {
+    expect(formatDurationBudget(10)).toBe("10-second budget reached");
+    expect(formatDurationBudget(60)).toBe("1-minute budget reached");
+    expect(formatDurationBudget(30 * 60)).toBe("30-minute budget reached");
+    expect(formatDurationBudget(60 * 60)).toBe("1-hour budget reached");
+    expect(formatDurationBudget(80 * 60)).toBe("1h 20m budget reached");
+    expect(formatDurationBudget(null)).toBe("Time budget reached");
   });
 });
 
