@@ -20,6 +20,10 @@
       "types": "./src/githubRepository.ts",
       "import": "./src/githubRepository.ts"
     },
+    "./loopTestFixtures": {
+      "types": "./src/loopTestFixtures.ts",
+      "import": "./src/loopTestFixtures.ts"
+    },
     "./logging": {
       "types": "./src/logging.ts",
       "import": "./src/logging.ts"
