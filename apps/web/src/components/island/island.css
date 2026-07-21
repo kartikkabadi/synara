@@ -42,12 +42,15 @@
      carry the glass look on their own. */
 }
 
+/* Open uses a spring with ~2% overshoot (GhostNotch: 340ms, damping ≈.78) so
+   the surface briefly peaks past its final size, then settles; close stays
+   the quick 180ms ease-in above. */
 .island-surface[data-island-state="hover"],
 .island-surface[data-island-state="expanded"] {
   transition:
-    width 340ms cubic-bezier(0.32, 0.72, 0, 1),
-    height 340ms cubic-bezier(0.32, 0.72, 0, 1),
-    border-radius 340ms cubic-bezier(0.32, 0.72, 0, 1);
+    width 340ms cubic-bezier(0.34, 1.2, 0.44, 1),
+    height 340ms cubic-bezier(0.34, 1.2, 0.44, 1),
+    border-radius 340ms cubic-bezier(0.34, 1.2, 0.44, 1);
 }
 
 .island-surface[data-island-state="expanded"] {
@@ -178,19 +181,25 @@
 
 /* ---- Content choreography -------------------------------------------- */
 
-/* Cross-fade swap: outgoing content fades over the first ~35% of the surface
-   morph while the incoming content waits out a matching 120ms delay, then
-   rises translateY(6px)→0 — the panel is never blank mid-morph. */
+/* Cross-fade swap: both layers stay mounted — the outgoing overlay fades over
+   the first ~40% of the 340ms morph while the incoming content fades/scales
+   in over the last ~60%, so the surface never renders empty. */
 .island-leave {
-  animation: island-leave 120ms ease-out both;
+  animation: island-leave 150ms ease-out both;
 }
 
 .island-enter-header {
-  animation: island-enter 180ms ease-out 120ms both;
+  animation: island-enter 200ms ease-out 120ms both;
 }
 
 .island-enter-body {
-  animation: island-enter 180ms ease-out 120ms both;
+  animation: island-enter 200ms ease-out 120ms both;
+}
+
+/* Row choreography: each expanded row rises + scales in on a ~30ms stagger
+   (inline animation-delay), so content builds instead of appearing as a slab. */
+.island-enter-row {
+  animation: island-row-enter 160ms ease-out both;
 }
 
 @keyframes island-leave {
@@ -202,7 +211,14 @@
 @keyframes island-enter {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(4px) scale(0.985);
+  }
+}
+
+@keyframes island-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.97);
   }
 }
 
@@ -467,7 +483,8 @@
 
   .island-leave,
   .island-enter-header,
-  .island-enter-body {
+  .island-enter-body,
+  .island-enter-row {
     animation: none;
   }
 

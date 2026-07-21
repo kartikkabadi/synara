@@ -33,10 +33,10 @@ import "./island.css";
 
 const AUTO_POP_MS = 4_000;
 const EXPANDED_IDLE_COLLAPSE_MS = 8_000;
-// Cross-fade choreography: outgoing content fades for CONTENT_LEAVE_MS while
-// the incoming content waits out a matching 120ms enter delay, then rises
-// translateY(6px)→0 — the panel is never blank mid-morph.
-const CONTENT_LEAVE_MS = 120;
+// Cross-fade choreography: outgoing content stays mounted as an absolute
+// overlay fading over the first ~40% of the 340ms morph while the incoming
+// content enters during the last ~60% — the panel is never blank mid-morph.
+const CONTENT_LEAVE_MS = 150;
 // Drives done-session pruning and relative timestamps between shell events.
 const CLOCK_TICK_MS = 30_000;
 
@@ -253,22 +253,21 @@ export function Island() {
 
   const effectiveState: IslandWindowState = uiState === "collapsed" && popped ? "hover" : uiState;
 
-  // Two-phase content swap: the surface morph starts immediately while the
-  // outgoing content fades for CONTENT_LEAVE_MS, then the incoming content
-  // mounts and runs its delayed enter keyframes.
+  // Cross-fade content swap: both layers stay mounted during the morph. The
+  // incoming content renders immediately (with its delayed enter keyframes)
+  // while the outgoing content lingers as a fading overlay for CONTENT_LEAVE_MS.
   const [renderedState, setRenderedState] = useState<IslandWindowState>(effectiveState);
-  const [contentLeaving, setContentLeaving] = useState(false);
+  const [leavingState, setLeavingState] = useState<IslandWindowState | null>(null);
   useEffect(() => {
     if (effectiveState === renderedState) return;
     if (prefersReducedMotion()) {
       setRenderedState(effectiveState);
+      setLeavingState(null);
       return;
     }
-    setContentLeaving(true);
-    const timer = setTimeout(() => {
-      setRenderedState(effectiveState);
-      setContentLeaving(false);
-    }, CONTENT_LEAVE_MS);
+    setLeavingState(renderedState);
+    setRenderedState(effectiveState);
+    const timer = setTimeout(() => setLeavingState(null), CONTENT_LEAVE_MS);
     return () => clearTimeout(timer);
   }, [effectiveState, renderedState]);
 
@@ -323,42 +322,49 @@ export function Island() {
           aggregate === "done" && !isNotch && "island-surface-glow-done",
         )}
       >
-        {renderedState === "collapsed" ? (
-          <button
-            key="collapsed"
-            type="button"
-            onClick={() => applyState("expanded")}
-            className={cn(
-              "island-enter-body flex h-full w-full items-center text-xs font-medium tracking-wide text-white/80",
-              sessions.length > 0 ? "gap-2 pl-2.5 pr-3" : "justify-center px-3",
-              contentLeaving && "island-leave",
-            )}
-            aria-label="Expand agent sessions island"
-          >
-            <span className="island-orb-seat">
-              <IslandOrb state={orbState} size={12} />
-            </span>
-            {sessions.length > 0 ? (
-              <>
-                <span className="text-[13px] font-semibold tabular-nums text-white/90">
-                  {sessions.length}
-                </span>
-                <span className="flex-1" />
-                <span className="h-1 w-1 rounded-full bg-[hsl(var(--island-hue)_85%_65%)]" />
-              </>
-            ) : null}
-          </button>
-        ) : renderedState === "hover" ? (
-          <button
-            key="hover"
-            type="button"
-            onClick={() => applyState("expanded")}
-            className={cn(
-              "island-enter-body flex h-full w-full flex-col items-stretch justify-center gap-1.5 px-4 py-3 text-left",
-              contentLeaving && "island-leave",
-            )}
-            aria-label="Expand agent sessions island"
-          >
+        {renderIslandContent(renderedState, false)}
+        {leavingState !== null && leavingState !== renderedState ? (
+          <div className="pointer-events-none absolute inset-0 flex flex-col overflow-hidden">
+            {renderIslandContent(leavingState, true)}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+
+  function renderIslandContent(state: IslandWindowState, leaving: boolean) {
+    return state === "collapsed" ? (
+      <button
+        key={leaving ? "collapsed-leave" : "collapsed"}
+        type="button"
+        onClick={() => applyState("expanded")}
+        className={cn(
+          "island-enter-body flex h-full w-full items-center text-xs font-medium tracking-wide text-white/80",
+          sessions.length > 0 ? "justify-center gap-2 px-3" : "justify-center px-3",
+          leaving && "island-leave",
+        )}
+        aria-label="Expand agent sessions island"
+      >
+        <span className="island-orb-seat">
+          <IslandOrb state={orbState} size={12} />
+        </span>
+        {sessions.length > 0 ? (
+          <span className="text-[13px] font-semibold tabular-nums text-white/90">
+            {sessions.length}
+          </span>
+        ) : null}
+      </button>
+    ) : state === "hover" ? (
+      <button
+        key={leaving ? "hover-leave" : "hover"}
+        type="button"
+        onClick={() => applyState("expanded")}
+        className={cn(
+          "island-enter-body flex h-full w-full flex-col items-stretch justify-center gap-1.5 px-4 py-3 text-left",
+          leaving && "island-leave",
+        )}
+        aria-label="Expand agent sessions island"
+      >
             {headline ? (
               <>
                 <div className="flex items-center gap-2.5">
@@ -385,13 +391,13 @@ export function Island() {
                 <span className="text-xs text-white/50">No active sessions</span>
               </div>
             )}
-          </button>
-        ) : (
-          <div
-            key="expanded"
-            className={cn("relative flex h-full flex-col", contentLeaving && "island-leave")}
-            onPointerMove={armIdleTimer}
-          >
+      </button>
+    ) : (
+      <div
+        key={leaving ? "expanded-leave" : "expanded"}
+        className={cn("relative flex h-full flex-col", leaving && "island-leave")}
+        onPointerMove={armIdleTimer}
+      >
             <div className="island-panel-vignette pointer-events-none absolute inset-0" />
             <div className="island-enter-header flex items-center justify-between border-b border-white/6 px-4 py-2.5">
               <span className="text-xs font-medium text-white/60">Sessions</span>
@@ -417,12 +423,13 @@ export function Island() {
                   <span className="text-xs text-white/35">New agent turns will appear here</span>
                 </div>
               ) : (
-                sessions.map((session) => (
+                sessions.map((session, index) => (
                   <button
                     key={session.threadId}
                     type="button"
                     onClick={() => focusThread(session.threadId)}
-                    className="island-row group flex h-11 w-full items-center gap-2.5 rounded-lg px-2.5 text-left hover:bg-white/6"
+                    style={{ animationDelay: `${150 + index * 30}ms` }}
+                    className="island-row island-enter-row group flex h-11 w-full items-center gap-2.5 rounded-lg px-2.5 text-left hover:bg-white/6"
                   >
                     <IslandOrb state={session.status} size={16} />
                     <span className="min-w-0 flex-1 truncate font-mono text-[13px] font-bold text-white/90">
@@ -450,10 +457,8 @@ export function Island() {
                   </button>
                 ))
               )}
-            </div>
-          </div>
-        )}
+        </div>
       </div>
-    </div>
-  );
+    );
+  }
 }
