@@ -349,10 +349,13 @@ function makeFakes(snapshot: OrchestrationReadModel, thread: Option.Option<Orche
 interface ReactorScenario {
   offer: (event: OrchestrationEvent) => Promise<void>;
   restore: () => Promise<void>;
-  // Advances the TestClock so timer sleeps fire and the event pump settles.
   advance: (millis: number) => Promise<void>;
   commands: () => Promise<OrchestrationCommand[]>;
   commandsOfType: (type: OrchestrationCommand["type"]) => Promise<OrchestrationCommand[]>;
+  expectLastDispatched: (
+    type: OrchestrationCommand["type"],
+    match: Record<string, unknown>,
+  ) => Promise<void>;
 }
 
 async function withReactor(
@@ -399,6 +402,11 @@ async function withReactor(
       const commands = await runtime.runPromise(Ref.get(dispatchLog));
       return commands.filter((command) => command.type === type);
     },
+    expectLastDispatched: async (type, match) => {
+      const commands = await scenario.commandsOfType(type);
+      expect(commands.length).toBeGreaterThan(0);
+      expect(commands[commands.length - 1]).toMatchObject(match);
+    },
   };
   try {
     await body(scenario);
@@ -412,12 +420,10 @@ describe("LoopReactor", () => {
   it("dispatches arm continue on thread.loop-set when loop is active", async () => {
     const loop = makeLoop();
     const thread = makeThread({ loop });
-    await withReactor(thread, async ({ offer, advance, commandsOfType }) => {
+    await withReactor(thread, async ({ offer, advance, expectLastDispatched }) => {
       await offer(makeLoopSetEvent(loop));
       await advance(50);
-      const loopContinues = await commandsOfType("thread.loop.continue");
-      expect(loopContinues.length).toBeGreaterThan(0);
-      expect(loopContinues[loopContinues.length - 1]).toMatchObject({
+      await expectLastDispatched("thread.loop.continue", {
         threadId: thread.id,
         commandId: `loop-continue:${thread.id}:${loop.updatedAt}:${loop.iteration}`,
         expectedUpdatedAt: loop.updatedAt,
@@ -441,14 +447,12 @@ describe("LoopReactor", () => {
         purpose: loopIterationPurpose(1),
       }),
     });
-    await withReactor(thread, async ({ offer, advance, commandsOfType }) => {
+    await withReactor(thread, async ({ offer, advance, expectLastDispatched }) => {
       await offer(
         makeSessionSetEvent({ session: makeSession({ status: "ready", activeTurnId: null }) }),
       );
       await advance(50);
-      const loopContinues = await commandsOfType("thread.loop.continue");
-      expect(loopContinues.length).toBeGreaterThan(0);
-      expect(loopContinues[loopContinues.length - 1]).toMatchObject({
+      await expectLastDispatched("thread.loop.continue", {
         threadId: thread.id,
         commandId: `loop-continue:${thread.id}:${loop.updatedAt}:${loop.iteration}`,
         expectedUpdatedAt: loop.updatedAt,
@@ -472,14 +476,12 @@ describe("LoopReactor", () => {
         purpose: loopIterationPurpose(1),
       },
     });
-    await withReactor(thread, async ({ offer, advance, commandsOfType }) => {
+    await withReactor(thread, async ({ offer, advance, expectLastDispatched }) => {
       await offer(
         makeSessionSetEvent({ session: makeSession({ status: "ready", activeTurnId: null }) }),
       );
       await advance(50);
-      const loopContinues = await commandsOfType("thread.loop.continue");
-      expect(loopContinues.length).toBeGreaterThan(0);
-      expect(loopContinues[loopContinues.length - 1]).toMatchObject({
+      await expectLastDispatched("thread.loop.continue", {
         threadId: thread.id,
         expectedUpdatedAt: loop.updatedAt,
       });
@@ -489,12 +491,10 @@ describe("LoopReactor", () => {
   it("dispatches continue on approval.resolved activity when loop is active", async () => {
     const loop = makeLoop();
     const thread = makeThread({ loop });
-    await withReactor(thread, async ({ offer, advance, commandsOfType }) => {
+    await withReactor(thread, async ({ offer, advance, expectLastDispatched }) => {
       await offer(makeActivityAppendedEvent("approval.resolved"));
       await advance(50);
-      const loopContinues = await commandsOfType("thread.loop.continue");
-      expect(loopContinues.length).toBeGreaterThan(0);
-      expect(loopContinues[loopContinues.length - 1]).toMatchObject({
+      await expectLastDispatched("thread.loop.continue", {
         threadId: thread.id,
         expectedUpdatedAt: loop.updatedAt,
       });
@@ -503,12 +503,10 @@ describe("LoopReactor", () => {
 
   it("dispatches thread.loop.off with thread_archived on thread.archived", async () => {
     const thread = makeThread({ loop: makeLoop() });
-    await withReactor(thread, async ({ offer, advance, commandsOfType }) => {
+    await withReactor(thread, async ({ offer, advance, expectLastDispatched }) => {
       await offer(makeArchivedEvent());
       await advance(50);
-      const offCommands = await commandsOfType("thread.loop.off");
-      expect(offCommands.length).toBeGreaterThan(0);
-      expect(offCommands[offCommands.length - 1]).toMatchObject({
+      await expectLastDispatched("thread.loop.off", {
         threadId: thread.id,
         reason: "thread_archived",
       });
@@ -517,12 +515,10 @@ describe("LoopReactor", () => {
 
   it("dispatches thread.loop.off with thread_deleted on thread.deleted", async () => {
     const thread = makeThread({ loop: makeLoop() });
-    await withReactor(thread, async ({ offer, advance, commandsOfType }) => {
+    await withReactor(thread, async ({ offer, advance, expectLastDispatched }) => {
       await offer(makeDeletedEvent());
       await advance(50);
-      const offCommands = await commandsOfType("thread.loop.off");
-      expect(offCommands.length).toBeGreaterThan(0);
-      expect(offCommands[offCommands.length - 1]).toMatchObject({
+      await expectLastDispatched("thread.loop.off", {
         threadId: thread.id,
         reason: "thread_deleted",
       });
