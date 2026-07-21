@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 
-import { ProviderRuntimeEvent, type ProviderRuntimeEventType } from "./providerRuntime";
+import {
+  ProviderCompactionRequest,
+  ProviderCompactionResult,
+  ProviderRuntimeEvent,
+  type ProviderRuntimeEventType,
+} from "./providerRuntime";
 
 const decodeRuntimeEvent = Schema.decodeUnknownSync(ProviderRuntimeEvent);
 
@@ -239,5 +244,58 @@ describe("ProviderRuntimeEvent", () => {
         },
       }),
     ).toThrow();
+  });
+});
+
+describe("ProviderCompactionRequest", () => {
+  const decodeRequest = Schema.decodeUnknownSync(ProviderCompactionRequest);
+
+  it("decodes a manual request with instructions", () => {
+    const parsed = decodeRequest({
+      requestId: "compact-req-1",
+      threadId: "thread-1",
+      trigger: "manual",
+      instructions: "Keep the migration plan",
+      expectedLifecycleGeneration: "gen-1",
+    });
+    expect(parsed.trigger).toBe("manual");
+    expect(parsed.instructions).toBe("Keep the migration plan");
+  });
+
+  it("decodes a synara-auto request without optional fields", () => {
+    const parsed = decodeRequest({
+      requestId: "compact-req-2",
+      threadId: "thread-2",
+      trigger: "synara-auto",
+    });
+    expect(parsed.trigger).toBe("synara-auto");
+    expect(parsed.instructions).toBeUndefined();
+  });
+
+  it("rejects unknown triggers", () => {
+    expect(() =>
+      decodeRequest({ requestId: "r", threadId: "t", trigger: "provider-auto" }),
+    ).toThrow();
+  });
+});
+
+describe("ProviderCompactionResult", () => {
+  const decodeResult = Schema.decodeUnknownSync(ProviderCompactionResult);
+
+  it("decodes each result kind", () => {
+    expect(decodeResult({ kind: "same-session" }).kind).toBe("same-session");
+    const rollover = decodeResult({
+      kind: "session-rollover",
+      resumeCursor: "cursor-1",
+      providerThreadId: "provider-thread-1",
+    });
+    expect(rollover.kind).toBe("session-rollover");
+    expect(decodeResult({ kind: "runtime-restart-required", resumeCursor: "cursor-2" }).kind).toBe(
+      "runtime-restart-required",
+    );
+  });
+
+  it("requires a resume cursor for session rollover", () => {
+    expect(() => decodeResult({ kind: "session-rollover" })).toThrow();
   });
 });

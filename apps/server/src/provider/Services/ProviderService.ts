@@ -13,6 +13,8 @@
  */
 import type {
   ProviderBackgroundTaskInput,
+  ProviderCompactionRequest,
+  ProviderCompactionResult,
   ProviderForkThreadInput,
   ProviderForkThreadResult,
   ProviderInterruptTurnInput,
@@ -180,9 +182,9 @@ export interface ProviderServiceShape {
   /**
    * Trigger provider-native context compaction for a thread.
    */
-  readonly compactThread: (input: {
-    readonly threadId: ThreadId;
-  }) => Effect.Effect<void, ProviderServiceError>;
+  readonly compactThread: (
+    input: ProviderCompactionRequest,
+  ) => Effect.Effect<ProviderCompactionResult, ProviderServiceError>;
 
   /**
    * Stop provider event producers, drain the lossless fan-out while subscribers

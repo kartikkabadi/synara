@@ -10,7 +10,7 @@
  * @module ProviderServiceLive
  */
 import {
-  ProviderCompactThreadInput,
+  ProviderCompactionRequest,
   ProviderForkThreadInput,
   ModelSelection,
   NonNegativeInt,
@@ -2105,10 +2105,10 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       Effect.gen(function* () {
         const input = yield* decodeInputOrValidationError({
           operation: "ProviderService.compactThread",
-          schema: ProviderCompactThreadInput,
+          schema: ProviderCompactionRequest,
           payload: rawInput,
         });
-        yield* runIdleSensitiveProviderWork(
+        return yield* runIdleSensitiveProviderWork(
           input.threadId,
           Effect.gen(function* () {
             const routed = yield* resolveRoutableSession({
@@ -2122,7 +2122,18 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 `Context compaction is unavailable for provider '${routed.adapter.provider}'.`,
               );
             }
-            yield* routed.adapter.compactThread(input.threadId);
+            if (input.instructions !== undefined) {
+              const capabilities = routed.adapter.getComposerCapabilities
+                ? yield* routed.adapter.getComposerCapabilities()
+                : undefined;
+              if (capabilities?.compaction.manual.supportsInstructions !== true) {
+                return yield* toValidationError(
+                  "ProviderService.compactThread",
+                  `Provider '${routed.adapter.provider}' does not support compaction instructions.`,
+                );
+              }
+            }
+            const result = yield* routed.adapter.compactThread(input);
             const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
             if (binding) {
               yield* directory.upsert({
@@ -2143,6 +2154,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             yield* analytics.record("provider.thread.compacted", {
               provider: routed.adapter.provider,
             });
+            return result;
           }),
           { scheduleIdleStopOnSuccess: true },
         );

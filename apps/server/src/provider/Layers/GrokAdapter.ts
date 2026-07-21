@@ -283,6 +283,9 @@ interface GrokSessionContext {
   // before dispatching so a cancelled turn is never prompted.
   pendingTurnInterrupted: boolean;
   compactingThread: boolean;
+  // Correlates the in-flight manual compaction's synthetic context_compaction
+  // items with the originating ProviderCompactionRequest.
+  compactionRequestId: string | undefined;
   // Failed compaction tool-call detail recorded while compactingThread is set;
   // runGrokCompaction reads it so a failed compaction whose /compact prompt
   // still resolves successfully is not persisted as compacted (mirrors how
@@ -766,6 +769,9 @@ export function makeGrokAdapter(
             itemType: "context_compaction",
             status: input.status,
             title: input.title,
+            ...(ctx.compactionRequestId !== undefined
+              ? { requestId: ctx.compactionRequestId }
+              : {}),
             ...(input.detail ? { detail: input.detail } : {}),
           },
         });
@@ -1158,6 +1164,7 @@ export function makeGrokAdapter(
             turnStarting: false,
             pendingTurnInterrupted: false,
             compactingThread: false,
+            compactionRequestId: undefined,
             compactionFailedToolDetail: undefined,
             compactionQuietUntil: undefined,
             compactionCancelFiber: undefined,
@@ -1957,8 +1964,9 @@ export function makeGrokAdapter(
         supportsThreadImport: false,
       } satisfies ProviderComposerCapabilities);
 
-    const compactThread: NonNullable<GrokAdapterShape["compactThread"]> = (threadId) =>
+    const compactThread: NonNullable<GrokAdapterShape["compactThread"]> = (input) =>
       Effect.gen(function* () {
+        const threadId = input.threadId;
         // Wait for a settling resume replay before taking the thread lock:
         // stopSession/startSession need that lock, and stopping the session is
         // what resolves the deferred early, so awaiting under the lock would
@@ -1975,7 +1983,8 @@ export function makeGrokAdapter(
         // take the same lock, and a hung compaction must never block
         // stopSessionInternal from cancelling or killing the child.
         const ctx = yield* withThreadLock(threadId, claimGrokCompactionSlot(threadId, preLockCtx));
-        return yield* runGrokCompaction(ctx).pipe(
+        ctx.compactionRequestId = input.requestId;
+        return yield* runGrokCompaction(ctx, input.instructions).pipe(
           // compactingThread stays set until this clears it: sendTurn only
           // rejects while the flag is true, so clearing before the
           // completion/thread-state events publish would let a new turn start
@@ -1983,6 +1992,7 @@ export function makeGrokAdapter(
           Effect.ensuring(
             Effect.sync(() => {
               ctx.compactingThread = false;
+              ctx.compactionRequestId = undefined;
             }),
           ),
         );
@@ -2035,7 +2045,7 @@ export function makeGrokAdapter(
         return ctx;
       });
 
-    const runGrokCompaction = (ctx: GrokSessionContext) =>
+    const runGrokCompaction = (ctx: GrokSessionContext, instructions?: string) =>
       Effect.gen(function* () {
         // A previous timed-out /compact may still be cancelling; same ordering
         // requirement as new turns.
@@ -2048,7 +2058,15 @@ export function makeGrokAdapter(
 
         const compactResult = yield* ctx.acp
           .prompt({
-            prompt: [{ type: "text", text: GROK_COMPACT_PROMPT }],
+            prompt: [
+              {
+                type: "text",
+                text:
+                  instructions === undefined
+                    ? GROK_COMPACT_PROMPT
+                    : `${GROK_COMPACT_PROMPT} ${instructions}`,
+              },
+            ],
           })
           .pipe(
             Effect.mapError((error) =>
@@ -2171,6 +2189,7 @@ export function makeGrokAdapter(
             detail: { reason: "provider.compactThread" },
           },
         });
+        return { kind: "same-session" } as const;
       });
 
     const listModels: NonNullable<GrokAdapterShape["listModels"]> = (input) => {

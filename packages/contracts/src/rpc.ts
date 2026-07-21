@@ -88,7 +88,7 @@ import {
   OrchestrationShellStreamItem,
   OrchestrationThreadStreamItem,
 } from "./orchestration";
-import { ProviderCompactThreadInput } from "./provider";
+import { ProviderCompactionRequest, ProviderCompactionResult } from "./providerRuntime";
 import {
   ProviderGetComposerCapabilitiesInput,
   ProviderComposerCapabilities,
@@ -800,8 +800,8 @@ export const WsProviderGetComposerCapabilitiesRpc = Rpc.make(
 );
 
 export const WsProviderCompactThreadRpc = Rpc.make(WS_METHODS.providerCompactThread, {
-  payload: ProviderCompactThreadInput,
-  success: Schema.Void,
+  payload: ProviderCompactionRequest,
+  success: ProviderCompactionResult,
   error: WsRpcError,
 });
 

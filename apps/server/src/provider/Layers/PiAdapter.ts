@@ -2523,22 +2523,28 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         return snapshotThread(context);
       });
 
-    const compactThread: NonNullable<PiAdapterShape["compactThread"]> = (threadId) =>
-      requireSession(threadId).pipe(
-        Effect.flatMap((context) =>
-          Effect.tryPromise({
-            try: () => context.runtime.session.compact(),
-            catch: (cause) =>
-              new ProviderAdapterRequestError({
-                provider: PROVIDER,
-                method: "thread/compact",
-                detail: toMessage(cause, "Failed to compact Pi thread."),
-                cause,
-              }),
-          }),
-        ),
-        Effect.asVoid,
-      );
+    const compactThread: NonNullable<PiAdapterShape["compactThread"]> = (input) =>
+      Effect.gen(function* () {
+        if (input.instructions !== undefined) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "compactThread",
+            issue: "Pi context compaction does not support custom instructions.",
+          });
+        }
+        const context = yield* requireSession(input.threadId);
+        yield* Effect.tryPromise({
+          try: () => context.runtime.session.compact(),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "thread/compact",
+              detail: toMessage(cause, "Failed to compact Pi thread."),
+              cause,
+            }),
+        });
+        return { kind: "same-session" } as const;
+      });
 
     const stopAll: PiAdapterShape["stopAll"] = () =>
       Effect.forEach(Array.from(sessions.keys()), (threadId) => stopSession(threadId), {

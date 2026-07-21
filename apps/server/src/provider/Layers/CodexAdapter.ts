@@ -1856,10 +1856,20 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
       );
     };
 
-    const compactThread: NonNullable<CodexAdapterShape["compactThread"]> = (threadId) =>
-      Effect.tryPromise({
-        try: () => manager.compactThread(threadId),
-        catch: (cause) => toRequestError(threadId, "thread/compact/start", cause),
+    const compactThread: NonNullable<CodexAdapterShape["compactThread"]> = (input) =>
+      Effect.gen(function* () {
+        if (input.instructions !== undefined) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "compactThread",
+            issue: "Codex context compaction does not support custom instructions.",
+          });
+        }
+        yield* Effect.tryPromise({
+          try: () => manager.compactThread(input.threadId),
+          catch: (cause) => toRequestError(input.threadId, "thread/compact/start", cause),
+        });
+        return { kind: "same-session" } as const;
       });
 
     const forkThread: CodexAdapterShape["forkThread"] = (input) =>
