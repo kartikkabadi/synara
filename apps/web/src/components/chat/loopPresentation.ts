@@ -189,27 +189,42 @@ export interface LoopStopReasonCopy {
   reason: string | null;
 }
 
+export interface LoopStopReasonContext {
+  readonly maxIterations: number | null;
+  readonly endsAt: string | null;
+  readonly createdAt: string;
+  readonly hardCap: number;
+  readonly consecutiveErrors: number;
+}
+
+function configuredBudgetMinutes(loop: LoopStopReasonContext): number {
+  if (loop.endsAt === null) return 0;
+  const totalMs = new Date(loop.endsAt).getTime() - new Date(loop.createdAt).getTime();
+  return Math.max(1, Math.round(totalMs / 60_000));
+}
+
 export function formatLoopStopReason(
   reason: LoopStopReason,
+  loop: LoopStopReasonContext,
   iteration: number,
 ): LoopStopReasonCopy {
   switch (reason) {
     case "budget_iterations":
       return {
         title: "Loop completed",
-        summary: `${iteration} of ${iteration} turns`,
+        summary: `${iteration} of ${loop.maxIterations ?? iteration} turns`,
         reason: "Budget reached",
       };
     case "budget_duration":
       return {
         title: "Loop completed",
         summary: "Ran until the time budget ended",
-        reason: "Time budget reached",
+        reason: `${configuredBudgetMinutes(loop)}-minute budget reached`,
       };
     case "hard_cap":
       return {
         title: "Loop stopped",
-        summary: `${iteration} ${pluralizeTurns(iteration)}`,
+        summary: `${loop.hardCap} turns`,
         reason: "Safety limit reached",
       };
     case "user_stop":
@@ -227,7 +242,7 @@ export function formatLoopStopReason(
     case "consecutive_errors":
       return {
         title: "Loop stopped",
-        summary: "Stopped after repeated errors",
+        summary: `${loop.consecutiveErrors} consecutive errors`,
         reason: "Review the latest error before restarting",
       };
     case "prompt_invalid":
@@ -303,10 +318,15 @@ export function getLoopAriaValueText(state: LoopPresentationState): string {
     case "stopping":
       return "Stopping loop.";
     case "ended": {
-      const copy = formatLoopStopReason(state.reason, 0);
-      return copy.reason === null
-        ? `${copy.title}. ${copy.summary}.`
-        : `${copy.title}. ${copy.reason}.`;
+      const copy = formatLoopStopReason(
+        state.reason,
+        { maxIterations: null, endsAt: null, createdAt: "", hardCap: 0, consecutiveErrors: 0 },
+        0,
+      );
+      // The duration reason line is dynamic (minutes) and reads poorly
+      // without loop data; fall back to its static summary.
+      const useSummary = copy.reason === null || state.reason === "budget_duration";
+      return useSummary ? `${copy.title}. ${copy.summary}.` : `${copy.title}. ${copy.reason}.`;
     }
     default:
       return state satisfies never;
@@ -338,16 +358,13 @@ export function deriveLoopPresentationState(
       return {
         state: { kind: "ending", iteration: loop.iteration },
         label: "Loop ending",
-        detail:
-          loop.lastStopReason === "budget_duration"
-            ? "Time budget reached · current turn finishing"
-            : "Current turn will finish",
+        detail: "Current turn will finish",
         color: "neutral",
         progress,
       };
     }
     if (loop.lastStopReason == null) return null;
-    const copy = formatLoopStopReason(loop.lastStopReason, loop.iteration);
+    const copy = formatLoopStopReason(loop.lastStopReason, loop, loop.iteration);
     return {
       state: { kind: "ended", reason: loop.lastStopReason },
       label: copy.title,
@@ -393,7 +410,7 @@ export function deriveLoopPresentationState(
       label: "Loop waiting",
       detail: "Plan mode is active",
       color: "waiting",
-      progress,
+      progress: null,
     };
   }
 
