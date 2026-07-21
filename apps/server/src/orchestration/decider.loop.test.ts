@@ -432,6 +432,82 @@ describe("decider loop commands", () => {
     );
   });
 
+  it("accepts thread.loop.set when expectedActivationId matches the active loop", async () => {
+    const readModel = await projectLoopSet(
+      await makeReadModelWithThread(),
+      makeLoop({ active: true, activationId: "activation-1" }),
+    );
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.loop.set",
+          commandId: asCommandId("cmd-loop-edit"),
+          threadId: asThreadId("thread-loop"),
+          prompt: "new prompt",
+          maxIterations: 3,
+          durationSeconds: null,
+          expectedActivationId: "activation-1",
+          createdAt: NOW,
+        },
+        readModel,
+      }),
+    );
+    const event = Array.isArray(result) ? result[0] : result;
+    expect(event.type).toBe("thread.loop-set");
+  });
+
+  it("rejects thread.loop.set when expectedActivationId no longer matches", async () => {
+    const readModel = await projectLoopSet(
+      await makeReadModelWithThread(),
+      makeLoop({ active: true, activationId: "activation-2" }),
+    );
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.loop.set",
+            commandId: asCommandId("cmd-loop-edit-stale"),
+            threadId: asThreadId("thread-loop"),
+            prompt: "new prompt",
+            maxIterations: 3,
+            durationSeconds: null,
+            expectedActivationId: "activation-1",
+            createdAt: NOW,
+          },
+          readModel,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      commandType: "thread.loop.set",
+    });
+  });
+
+  it("rejects thread.loop.set with expectedActivationId when no loop is active", async () => {
+    const readModel = await projectLoopSet(
+      await makeReadModelWithThread(),
+      makeLoop({ active: false, activationId: "activation-1" }),
+    );
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.loop.set",
+            commandId: asCommandId("cmd-loop-edit-ended"),
+            threadId: asThreadId("thread-loop"),
+            prompt: "new prompt",
+            maxIterations: 3,
+            durationSeconds: null,
+            expectedActivationId: "activation-1",
+            createdAt: NOW,
+          },
+          readModel,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      commandType: "thread.loop.set",
+    });
+  });
+
   it("rejects thread.loop.set on archived threads", async () => {
     const readModel = await archiveThread(await makeReadModelWithThread());
     await expect(

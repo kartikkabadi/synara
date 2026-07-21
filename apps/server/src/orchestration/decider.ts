@@ -2528,6 +2528,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
 
       const existingLoop = thread.loop?.active === true ? thread.loop : null;
+      if (
+        command.expectedActivationId !== undefined &&
+        existingLoop?.activationId !== command.expectedActivationId
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Loop activation '${command.expectedActivationId}' is no longer active.`,
+        });
+      }
       const isReconfigure = existingLoop !== null;
       // Duration budget is anchored from server time so a stale client clock cannot
       // artificially extend or shorten a loop run.
