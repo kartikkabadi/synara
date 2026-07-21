@@ -15,17 +15,44 @@ if [[ -f "$HERE/.env" ]]; then
   set +a
 fi
 
-SERVER_PORT="${SYNARA_E2E_PORT:-3899}"
-WEB_PORT="${SYNARA_E2E_WEB_PORT:-5899}"
+port_in_use() {
+  local port=$1
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+  else
+    (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null && { exec 3>&-; return 0; } || return 1
+  fi
+}
+
+free_port() {
+  bun -e 'const s = Bun.listen({hostname: "127.0.0.1", port: 0, socket: {data(){}}}); console.log(s.port); s.stop();'
+}
+
+# Ports: honor explicit env overrides but never kill an unknown listener —
+# fail with diagnostics instead. Without overrides, allocate free ports.
+if [[ -n "${SYNARA_E2E_PORT:-}" ]]; then
+  SERVER_PORT="$SYNARA_E2E_PORT"
+  if port_in_use "$SERVER_PORT"; then
+    echo "error: SYNARA_E2E_PORT=$SERVER_PORT is already in use; refusing to kill the listener. Free the port or unset SYNARA_E2E_PORT." >&2
+    exit 1
+  fi
+else
+  SERVER_PORT="$(free_port)"
+fi
+if [[ -n "${SYNARA_E2E_WEB_PORT:-}" ]]; then
+  WEB_PORT="$SYNARA_E2E_WEB_PORT"
+  if port_in_use "$WEB_PORT"; then
+    echo "error: SYNARA_E2E_WEB_PORT=$WEB_PORT is already in use; refusing to kill the listener. Free the port or unset SYNARA_E2E_WEB_PORT." >&2
+    exit 1
+  fi
+else
+  WEB_PORT="$(free_port)"
+fi
+
 SYNARA_HOME_DIR="$HERE/.synara-home-$$"
 ARTIFACT_DIR="$HERE/artifacts/$(date +%Y%m%d-%H%M%S)"
 SERVER_LOG="$HERE/server.log"
 WEB_LOG="$HERE/web.log"
-
-# Free ports before starting — kill any process listening on them.
-for port in "$SERVER_PORT" "$WEB_PORT"; do
-  fuser -k "$port/tcp" 2>/dev/null || true
-done
 
 # OpenCode/Kilo accept both OPENCODE_API_KEY and OPENCODE_GO_API_KEY. Map
 # the newest available key to both variables.
@@ -64,15 +91,21 @@ fi
 # create a scratch workspace at ~/<name> and seed the project with the same path.
 WORKSPACE_NAME="${SYNARA_E2E_WORKSPACE_NAME:-synara-e2e-compaction-$$}"
 WORKSPACE_LINK="$HOME/$WORKSPACE_NAME"
-WORKSPACE_SENTINEL="$WORKSPACE_LINK/.synara-e2e-workspace"
 
+# Fail closed: never adopt a pre-existing path. Ownership is established only
+# by creating the path ourselves in this run (WORKSPACE_OWNED), never inferred
+# from markers inside an existing directory — cleanup does rm -rf.
+WORKSPACE_OWNED=""
+if [[ -e "$WORKSPACE_LINK" || -L "$WORKSPACE_LINK" ]]; then
+  echo "error: workspace path $WORKSPACE_LINK already exists; refusing to reuse or overwrite it. Choose an unused SYNARA_E2E_WORKSPACE_NAME." >&2
+  exit 1
+fi
 if [[ -n "${SYNARA_E2E_WORKSPACE:-}" ]]; then
   ln -s "$SYNARA_E2E_WORKSPACE" "$WORKSPACE_LINK"
+  WORKSPACE_OWNED="link"
 else
-  mkdir -p "$WORKSPACE_LINK"
-  if [[ ! -f "$WORKSPACE_SENTINEL" ]]; then
-    touch "$WORKSPACE_SENTINEL"
-  fi
+  mkdir "$WORKSPACE_LINK"
+  WORKSPACE_OWNED="dir"
   (cd "$WORKSPACE_LINK" && git init -q && echo "# scratch" > README.md && git add README.md && git -c user.email=e2e@synara.dev -c user.name=e2e commit -qm init || true)
 fi
 
@@ -88,7 +121,9 @@ cleanup() {
   [[ -n "$WEB_PID" ]] && kill "$WEB_PID" 2>/dev/null || true
   [[ -n "$SERVER_PID" ]] && kill "$SERVER_PID" 2>/dev/null || true
   wait 2>/dev/null || true
-  if [[ -n "$WORKSPACE_LINK" && -f "$WORKSPACE_LINK/.synara-e2e-workspace" ]]; then
+  if [[ "$WORKSPACE_OWNED" == "link" ]]; then
+    rm -f "$WORKSPACE_LINK"
+  elif [[ "$WORKSPACE_OWNED" == "dir" ]]; then
     rm -rf "$WORKSPACE_LINK"
   fi
   mv "$SERVER_LOG" "$WEB_LOG" "$ARTIFACT_DIR/" 2>/dev/null || true
@@ -102,19 +137,30 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Test hook: simulate a failure after workspace creation so the cleanup-safety
+# regression test can prove trapped cleanup only removes run-owned paths.
+if [[ -n "${SYNARA_E2E_FAIL_AFTER_WORKSPACE:-}" ]]; then
+  echo "==> SYNARA_E2E_FAIL_AFTER_WORKSPACE set; simulating failure" >&2
+  exit 1
+fi
+
 # Seed a project.created event before the server starts so the projection
 # pipeline picks it up on boot and creates the "Home" project.
 echo "==> seeding project.created event"
 SYNARA_HOME="$SYNARA_HOME_DIR" bun "$HERE/seed-project.ts"
 
 echo "==> starting server on :$SERVER_PORT (SYNARA_HOME=$SYNARA_HOME_DIR)"
-env -u SYNARA_AUTH_TOKEN \
-  SYNARA_HOME="$SYNARA_HOME_DIR" \
-  SYNARA_PORT="$SERVER_PORT" \
-  SYNARA_MODE=web \
-  SYNARA_NO_BROWSER=1 \
-  VITE_DEV_SERVER_URL="http://localhost:$WEB_PORT" \
-  bun "$REPO_ROOT/apps/server/src/index.ts" >"$SERVER_LOG" 2>&1 &
+(
+  unset SYNARA_AUTH_TOKEN
+  export SYNARA_HOME="$SYNARA_HOME_DIR"
+  export SYNARA_PORT="$SERVER_PORT"
+  export SYNARA_MODE=web
+  export SYNARA_NO_BROWSER=1
+  export SYNARA_LOG_PROVIDER_EVENTS=1
+  export SYNARA_LOG_WS_EVENTS=1
+  export VITE_DEV_SERVER_URL="http://localhost:$WEB_PORT"
+  exec bun "$REPO_ROOT/apps/server/src/index.ts"
+) >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
 wait_for() {
