@@ -13,7 +13,7 @@ import { cn } from "~/lib/utils";
 import type { Thread } from "../../types";
 import { ComposerAutomationSetupBanner } from "./ComposerAutomationSetupBanner";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
-import { isLoopIndicatorVisible, LoopIndicator } from "./LoopIndicator";
+import { isLoopRuntimeRailVisible, LoopRuntimeRail } from "./LoopRuntimeRail";
 import { COMPOSER_INPUT_SURFACE_BANNER_CLASS_NAME } from "./composerPickerStyles";
 
 interface ComposerInputBannersProps {
@@ -26,7 +26,9 @@ interface ComposerInputBannersProps {
   // itself renders as bubbles in the transcript).
   automationSetup: { onCancel: () => void } | null;
   thread: Thread | null | undefined;
-  onStopLoop: () => void;
+  onStopLoopAfterTurn: () => void;
+  onStopLoopNow: () => void;
+  onEditLoop: () => void;
 }
 
 export function ComposerInputBanners({
@@ -34,7 +36,9 @@ export function ComposerInputBanners({
   planFollowUp,
   automationSetup,
   thread,
-  onStopLoop,
+  onStopLoopAfterTurn,
+  onStopLoopNow,
+  onEditLoop,
 }: ComposerInputBannersProps) {
   const loop = thread?.loop;
   const banners: ReactNode[] = [];
@@ -50,9 +54,20 @@ export function ComposerInputBanners({
       <ComposerAutomationSetupBanner key="automation" onCancel={automationSetup.onCancel} />,
     );
   }
-  if (loop != null && isLoopIndicatorVisible(loop)) {
+  if (loop != null && isLoopRuntimeRailVisible(loop, thread?.latestTurn)) {
     banners.push(
-      <LoopIndicator key="loop" loop={loop} thread={thread ?? undefined} onStop={onStopLoop} />,
+      <LoopRuntimeRail
+        key="loop"
+        hasPendingApprovals={thread?.hasPendingApprovals === true}
+        hasPendingUserInput={thread?.hasPendingUserInput === true}
+        interactionMode={thread?.interactionMode ?? "default"}
+        latestTurn={thread?.latestTurn ?? null}
+        loop={loop}
+        onEditLoop={onEditLoop}
+        onStopAfterTurn={onStopLoopAfterTurn}
+        onStopNow={onStopLoopNow}
+        session={thread?.session ?? null}
+      />,
     );
   }
 
