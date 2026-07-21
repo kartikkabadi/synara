@@ -535,6 +535,24 @@ export const ThreadCompactionSettings = Schema.Struct({
 });
 export type ThreadCompactionSettings = typeof ThreadCompactionSettings.Type;
 
+// Evaluable trigger for Synara-managed auto-compaction. Unlike
+// `CompactionTrigger` there is no `opaque` member: Synara can only act on a
+// threshold it can compute from token usage.
+export const SynaraAutoCompactionTrigger = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("percent"), percent: Schema.Number }),
+  Schema.Struct({ kind: Schema.Literal("remaining-tokens"), reserveTokens: NonNegativeInt }),
+  Schema.Struct({ kind: Schema.Literal("absolute-used-tokens"), usedTokens: NonNegativeInt }),
+]);
+export type SynaraAutoCompactionTrigger = typeof SynaraAutoCompactionTrigger.Type;
+
+// Fully-resolved policy the auto-compaction decider evaluates for one thread.
+export const SynaraAutoCompactionOptions = Schema.Struct({
+  enabled: Schema.Boolean,
+  trigger: SynaraAutoCompactionTrigger,
+  cooldownMs: Schema.optional(NonNegativeInt),
+});
+export type SynaraAutoCompactionOptions = typeof SynaraAutoCompactionOptions.Type;
+
 export const ProviderSetCompactionSettingsInput = Schema.Struct({
   threadId: ThreadId,
   settings: ThreadCompactionSettings,

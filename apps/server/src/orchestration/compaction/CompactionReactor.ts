@@ -20,12 +20,14 @@ import {
   type ProviderCompactionResult,
   type ProviderRuntimeEvent,
   type ProviderSetCompactionSettingsInput,
+  type RuntimeSessionState,
+  type SynaraAutoCompactionOptions,
   type ThreadCompactionLifecycleEvent,
   type ThreadCompactionSettings,
   type ThreadTokenUsageSnapshot,
 } from "@synara/contracts";
 import { CommandId } from "@synara/contracts";
-import { Cause, Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
+import { Cause, Deferred, Effect, Exit, Layer, Option, Schema, Scope, Stream } from "effect";
 import { makeDrainableWorker, startDrainableWorkerProducers } from "@synara/shared/DrainableWorker";
 
 import { ProviderValidationError, type ProviderServiceError } from "../../provider/Errors.ts";
@@ -51,8 +53,32 @@ import {
   compactionSummaryFromOperation,
   deriveThreadCompactionRuntimeStatus,
 } from "./compactionRuntimeStatus.ts";
+import { decideAutoCompaction } from "./decideCompaction.ts";
 
 const COMPACTION_REACTOR_CAPACITY = 256;
+const AUTO_COMPACTION_MAX_CONSECUTIVE_FAILURES = 2;
+
+// Resolve the per-thread settings into a decider policy. Threads without an
+// evaluable trigger have no Synara-managed auto-compaction; there is no
+// universal default threshold.
+function autoOptionsFromSettings(
+  settings: ThreadCompactionSettings | undefined,
+): SynaraAutoCompactionOptions | null {
+  if (settings === undefined || !settings.autoEnabled) {
+    return null;
+  }
+  const trigger = settings.trigger;
+  if (trigger === undefined || trigger.kind === "opaque") {
+    return null;
+  }
+  return {
+    enabled: true,
+    trigger,
+    ...(settings.cooldownSeconds !== undefined
+      ? { cooldownMs: settings.cooldownSeconds * 1_000 }
+      : {}),
+  };
+}
 
 const isProviderDiscoveryKind = Schema.is(ProviderDiscoveryKind);
 
@@ -97,6 +123,10 @@ const make = Effect.gen(function* () {
   const lastCompactions = new Map<string, CompactionOperationSummary>();
   const capabilitiesCache = new Map<string, ProviderCompactionCapabilities | null>();
   const pendingWaiters = new Map<string, PendingWaiter>();
+  const lastAutoCompactionAt = new Map<string, number>();
+  const autoFailureCounts = new Map<string, number>();
+  const autoInFlight = new Set<string>();
+  let autoScope: Scope.Closeable | null = null;
   const inFlight = new Map<
     string,
     Deferred.Deferred<ProviderCompactionResult, ProviderServiceError>
@@ -441,6 +471,106 @@ const make = Effect.gen(function* () {
       return yield* runOperation(input);
     });
 
+  const suspendAutoCompaction = (threadId: ThreadId, reason: string, detail?: string) =>
+    applyEvent(threadId, {
+      type: "thread.compaction-suspended",
+      payload: {
+        reason,
+        ...(detail !== undefined ? { detail } : {}),
+        createdAt: new Date().toISOString(),
+      },
+    }).pipe(Effect.asVoid);
+
+  const runAutoCompaction = (threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const requestId = `synara-auto:${crypto.randomUUID()}`;
+      const outcome = yield* request({ requestId, threadId, trigger: "synara-auto" }).pipe(
+        Effect.map((result) => ({ _tag: "ok" as const, result })),
+        Effect.catch((error) => Effect.succeed({ _tag: "err" as const, error })),
+      );
+      if (outcome._tag === "ok") {
+        autoFailureCounts.delete(threadId);
+        lastAutoCompactionAt.set(threadId, Date.now());
+        return;
+      }
+      const error = outcome.error;
+      if (
+        error._tag === "ProviderValidationError" ||
+        error._tag === "ProviderUnsupportedError" ||
+        error._tag === "ProviderAdapterValidationError"
+      ) {
+        yield* suspendAutoCompaction(threadId, "provider-state-uncertain", error.message);
+        return;
+      }
+      const failures = (autoFailureCounts.get(threadId) ?? 0) + 1;
+      autoFailureCounts.set(threadId, failures);
+      if (failures >= AUTO_COMPACTION_MAX_CONSECUTIVE_FAILURES) {
+        yield* suspendAutoCompaction(threadId, "repeated-failure", error.message);
+      }
+    }).pipe(Effect.ensuring(Effect.sync(() => autoInFlight.delete(threadId))));
+
+  const maybeAutoCompact = (threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const options = autoOptionsFromSettings(settings.get(threadId));
+      const usage = latestUsage.get(threadId);
+      if (options === null || usage === undefined || autoInFlight.has(threadId)) {
+        return;
+      }
+      const provider = yield* lookupProviderName(threadId);
+      const capability = yield* lookupCapabilities(provider);
+      if (capability === null) {
+        return;
+      }
+      const threadOption = yield* projectionSnapshotQuery
+        .getThreadDetailById(threadId)
+        .pipe(Effect.catch(() => Effect.succeed(Option.none())));
+      const session = Option.getOrUndefined(threadOption)?.session ?? null;
+      if (session === null) {
+        return;
+      }
+      const runtimeStatus = yield* buildRuntimeStatus(threadId);
+      const decisionInput = {
+        usage,
+        options,
+        capability,
+        runtimeStatus,
+        threadState: session.status as RuntimeSessionState,
+        activeTurnId: session.activeTurnId ?? undefined,
+        now: Date.now(),
+      };
+      const decision = decideAutoCompaction({
+        ...decisionInput,
+        lastAutoCompactionAt: lastAutoCompactionAt.get(threadId),
+      });
+      if (decision.action === "none" && decision.reason === "cooldown") {
+        // Usage still exceeds the trigger inside the cooldown window right
+        // after a Synara-triggered pass: the compaction is not reclaiming
+        // enough context to make progress.
+        const withoutCooldown = decideAutoCompaction({
+          ...decisionInput,
+          lastAutoCompactionAt: undefined,
+        });
+        if (withoutCooldown.action === "compact" || withoutCooldown.action === "pending") {
+          yield* suspendAutoCompaction(
+            threadId,
+            "compaction-thrashing",
+            "Context usage still exceeds the trigger immediately after an automatic compaction.",
+          );
+        }
+        return;
+      }
+      const shouldRequest =
+        decision.action === "compact" ||
+        (decision.action === "pending" && decision.reason === "active-turn");
+      if (!shouldRequest || autoScope === null) {
+        return;
+      }
+      // Fork so a request deferred behind an active turn cannot block the
+      // reactor worker that must process the turn-completion event.
+      autoInFlight.add(threadId);
+      yield* runAutoCompaction(threadId).pipe(Effect.forkIn(autoScope));
+    });
+
   const promotePendingRequest = (threadId: string) =>
     Effect.gen(function* () {
       const waiter = pendingWaiters.get(threadId);
@@ -492,9 +622,13 @@ const make = Effect.gen(function* () {
   const processRuntimeEvent = Effect.fnUntraced(function* (event: ProviderRuntimeEvent) {
     if (event.type === "thread.token-usage.updated") {
       latestUsage.set(event.threadId, event.payload.usage);
+      yield* maybeAutoCompact(event.threadId);
       return;
     }
     if (event.type === "turn.completed" || event.type === "turn.aborted") {
+      // Auto decisions deferred behind the turn already sit in pendingWaiters;
+      // fresh evaluations wait for the next usage event so a stale pre-turn
+      // snapshot cannot re-trigger a compaction that just ran.
       yield* promotePendingRequest(event.threadId);
       return;
     }
@@ -586,6 +720,9 @@ const make = Effect.gen(function* () {
   const start: CompactionReactorShape["start"] = startDrainableWorkerProducers(
     worker,
     Effect.gen(function* () {
+      const scope = yield* Scope.make("sequential");
+      autoScope = scope;
+      yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
       yield* reconcile;
       yield* Effect.forkScoped(
         Stream.runForEach(providerService.streamEvents, (event) => {
@@ -612,6 +749,13 @@ const make = Effect.gen(function* () {
   ) =>
     Effect.suspend(() => {
       settings.set(input.threadId, input.settings);
+      // Re-applying settings is the manual resume action: it clears an
+      // auto-compaction suspension and resets the failure streak.
+      autoFailureCounts.delete(input.threadId);
+      const state = getState(input.threadId);
+      if (state.status === "suspended") {
+        states.set(input.threadId, IDLE_COMPACTION_STATE);
+      }
       return publishStatus(input.threadId, getState(input.threadId));
     });
 

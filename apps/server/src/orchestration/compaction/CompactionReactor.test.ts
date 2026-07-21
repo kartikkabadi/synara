@@ -10,7 +10,12 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect, Exit, Layer, ManagedRuntime, Option, PubSub, Scope, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ProviderAdapterProcessError, type ProviderServiceError } from "../../provider/Errors.ts";
+import {
+  ProviderAdapterProcessError,
+  ProviderAdapterSessionNotFoundError,
+  ProviderAdapterValidationError,
+  type ProviderServiceError,
+} from "../../provider/Errors.ts";
 import {
   ProviderService,
   type ProviderServiceShape,
@@ -49,10 +54,27 @@ type PartialThread = {
   } | null;
 };
 
+const NATIVE_AUTO_COMPACTION = {
+  manual: { mode: "same-session", mechanism: "native-rpc", supportsInstructions: true },
+  automatic: {
+    mode: "native",
+    statusVisibility: "partial",
+    triggerVisibility: "derived",
+  },
+  telemetry: { lifecycle: "native", contextUsage: "exact" },
+} as const;
+
+const MANUAL_ONLY_COMPACTION = {
+  manual: { mode: "same-session", mechanism: "control-command", supportsInstructions: false },
+  automatic: { mode: "none", statusVisibility: "none", triggerVisibility: "opaque" },
+  telemetry: { lifecycle: "inferred", contextUsage: "exact" },
+} as const;
+
 function makeHarness(options?: {
   readonly compactThread?: (
     input: ProviderCompactionRequest,
   ) => Effect.Effect<ProviderCompactionResult, ProviderServiceError>;
+  readonly compaction?: typeof NATIVE_AUTO_COMPACTION | typeof MANUAL_ONLY_COMPACTION;
 }) {
   const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
   const compactThread = vi.fn(
@@ -111,15 +133,7 @@ function makeHarness(options?: {
         supportsPluginMentions: false,
         supportsPluginDiscovery: false,
         supportsRuntimeModelList: false,
-        compaction: {
-          manual: { mode: "same-session", mechanism: "native-rpc", supportsInstructions: true },
-          automatic: {
-            mode: "native",
-            statusVisibility: "partial",
-            triggerVisibility: "derived",
-          },
-          telemetry: { lifecycle: "native", contextUsage: "exact" },
-        },
+        compaction: options?.compaction ?? NATIVE_AUTO_COMPACTION,
       }),
   } as unknown as ProviderDiscoveryServiceShape;
 
@@ -434,6 +448,181 @@ describe("CompactionReactor", () => {
     ).activity.payload;
     expect(lastPayload).toMatchObject({
       lastCompaction: { requestId: "req-crashed", result: "failed" },
+    });
+  });
+
+  describe("synara-auto", () => {
+    const AUTO_SETTINGS = {
+      autoEnabled: true,
+      trigger: { kind: "percent", percent: 90 },
+    } as const;
+
+    const highUsage = { usage: { usedTokens: 95_000, maxTokens: 100_000 } };
+
+    it("auto-triggers a compaction from a usage event", async () => {
+      const harness = makeHarness({ compaction: MANUAL_ONLY_COMPACTION });
+      const { reactor, operations } = await startReactor(harness);
+      await runtime!.runPromise(
+        reactor.setThreadSettings({ threadId: THREAD_ID, settings: AUTO_SETTINGS }),
+      );
+
+      harness.emit(runtimeEvent("thread.token-usage.updated", highUsage));
+      await waitFor(
+        () => Promise.resolve(harness.compactThread.mock.calls.length),
+        (calls) => calls === 1,
+      );
+      expect(harness.compactThread.mock.calls[0]?.[0]).toMatchObject({ trigger: "synara-auto" });
+      await waitFor(
+        () => runtime!.runPromise(reactor.getControlState(THREAD_ID)),
+        (state) => state.status === "idle",
+      );
+      const row = Option.getOrThrow(await runtime!.runPromise(operations.getByThreadId(THREAD_ID)));
+      expect(row.status).toBe("completed");
+      expect(row.owner).toBe("synara");
+      expect(row.trigger).toBe("synara-auto");
+    });
+
+    it("does not auto-trigger below the threshold or when native auto is active", async () => {
+      const nativeHarness = makeHarness();
+      const { reactor } = await startReactor(nativeHarness);
+      await runtime!.runPromise(
+        reactor.setThreadSettings({ threadId: THREAD_ID, settings: AUTO_SETTINGS }),
+      );
+      nativeHarness.emit(runtimeEvent("thread.token-usage.updated", highUsage));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(nativeHarness.compactThread).not.toHaveBeenCalled();
+    });
+
+    it("defers behind an active turn as pending, then compacts after the turn", async () => {
+      const harness = makeHarness({ compaction: MANUAL_ONLY_COMPACTION });
+      const { reactor } = await startReactor(harness);
+      await runtime!.runPromise(
+        reactor.setThreadSettings({ threadId: THREAD_ID, settings: AUTO_SETTINGS }),
+      );
+      harness.threadState.current = {
+        session: { ...harness.threadState.current.session!, activeTurnId: "turn-1" },
+      };
+
+      harness.emit(runtimeEvent("thread.token-usage.updated", highUsage));
+      await waitFor(
+        () => runtime!.runPromise(reactor.getControlState(THREAD_ID)),
+        (state) => state.status === "pending",
+      );
+      expect(harness.compactThread).not.toHaveBeenCalled();
+
+      harness.threadState.current = {
+        session: { ...harness.threadState.current.session!, activeTurnId: null },
+      };
+      harness.emit(runtimeEvent("turn.completed", {}));
+      await waitFor(
+        () => runtime!.runPromise(reactor.getControlState(THREAD_ID)),
+        (state) => state.status === "idle",
+      );
+      expect(harness.compactThread).toHaveBeenCalledTimes(1);
+    });
+
+    it("suspends as compaction-thrashing when usage stays above the trigger inside the cooldown", async () => {
+      const harness = makeHarness({ compaction: MANUAL_ONLY_COMPACTION });
+      const { reactor } = await startReactor(harness);
+      await runtime!.runPromise(
+        reactor.setThreadSettings({
+          threadId: THREAD_ID,
+          settings: { ...AUTO_SETTINGS, cooldownSeconds: 3_600 },
+        }),
+      );
+
+      harness.emit(runtimeEvent("thread.token-usage.updated", highUsage));
+      await waitFor(
+        () => Promise.resolve(harness.compactThread.mock.calls.length),
+        (calls) => calls === 1,
+      );
+      await waitFor(
+        () => runtime!.runPromise(reactor.getControlState(THREAD_ID)),
+        (state) => state.status === "idle",
+      );
+
+      harness.emit(runtimeEvent("thread.token-usage.updated", highUsage));
+      const state = await waitFor(
+        () => runtime!.runPromise(reactor.getControlState(THREAD_ID)),
+        (current) => current.status === "suspended",
+      );
+      expect(state).toMatchObject({ status: "suspended", reason: "compaction-thrashing" });
+      expect(harness.compactThread).toHaveBeenCalledTimes(1);
+    });
+
+    it("suspends as repeated-failure after two consecutive failures and resumes via settings", async () => {
+      const harness = makeHarness({
+        compaction: MANUAL_ONLY_COMPACTION,
+        compactThread: () =>
+          Effect.fail(
+            new ProviderAdapterSessionNotFoundError({ provider: "codex", threadId: THREAD_ID }),
+          ),
+      });
+      const { reactor } = await startReactor(harness);
+      await runtime!.runPromise(
+        reactor.setThreadSettings({ threadId: THREAD_ID, settings: AUTO_SETTINGS }),
+      );
+
+      harness.emit(runtimeEvent("thread.token-usage.updated", highUsage));
+      await waitFor(
+        () => Promise.resolve(harness.compactThread.mock.calls.length),
+        (calls) => calls === 1,
+      );
+      await waitFor(
+        () => runtime!.runPromise(reactor.getControlState(THREAD_ID)),
+        (state) => state.status === "idle",
+      );
+
+      harness.emit(runtimeEvent("thread.token-usage.updated", highUsage));
+      const suspendedState = await waitFor(
+        () => runtime!.runPromise(reactor.getControlState(THREAD_ID)),
+        (state) => state.status === "suspended",
+      );
+      expect(suspendedState).toMatchObject({ status: "suspended", reason: "repeated-failure" });
+      expect(harness.compactThread).toHaveBeenCalledTimes(2);
+
+      // No automatic retry while suspended.
+      harness.emit(runtimeEvent("thread.token-usage.updated", highUsage));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(harness.compactThread).toHaveBeenCalledTimes(2);
+
+      // Re-applying settings is the manual resume action.
+      await runtime!.runPromise(
+        reactor.setThreadSettings({ threadId: THREAD_ID, settings: AUTO_SETTINGS }),
+      );
+      const resumed = await runtime!.runPromise(reactor.getControlState(THREAD_ID));
+      expect(resumed).toEqual({ status: "idle" });
+      harness.emit(runtimeEvent("thread.token-usage.updated", highUsage));
+      await waitFor(
+        () => Promise.resolve(harness.compactThread.mock.calls.length),
+        (calls) => calls === 3,
+      );
+    });
+
+    it("suspends as provider-state-uncertain on an adapter validation rejection", async () => {
+      const harness = makeHarness({
+        compaction: MANUAL_ONLY_COMPACTION,
+        compactThread: () =>
+          Effect.fail(
+            new ProviderAdapterValidationError({
+              provider: "codex",
+              operation: "compactThread",
+              issue: "compaction is not supported by this adapter",
+            }),
+          ),
+      });
+      const { reactor } = await startReactor(harness);
+      await runtime!.runPromise(
+        reactor.setThreadSettings({ threadId: THREAD_ID, settings: AUTO_SETTINGS }),
+      );
+
+      harness.emit(runtimeEvent("thread.token-usage.updated", highUsage));
+      const state = await waitFor(
+        () => runtime!.runPromise(reactor.getControlState(THREAD_ID)),
+        (current) => current.status === "suspended",
+      );
+      expect(state).toMatchObject({ status: "suspended", reason: "provider-state-uncertain" });
+      expect(harness.compactThread).toHaveBeenCalledTimes(1);
     });
   });
 });
