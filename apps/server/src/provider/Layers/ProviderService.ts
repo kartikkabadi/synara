@@ -28,6 +28,7 @@ import {
   ProviderStopSessionInput,
   ProviderStartOptions,
   TurnId,
+  type ProviderCompactionResult,
   type ProviderRuntimeEvent,
   type ProviderSession,
 } from "@synara/contracts";
@@ -47,6 +48,7 @@ import {
 import * as Semaphore from "effect/Semaphore";
 
 import { ProviderValidationError } from "../Errors.ts";
+import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
 import {
@@ -2101,6 +2103,134 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         );
       });
 
+    const bindingLifecycleGeneration = (
+      binding: ProviderRuntimeBinding | undefined,
+    ): string | undefined => {
+      if (binding?.lifecycleGeneration !== undefined) {
+        return binding.lifecycleGeneration;
+      }
+      const payloadGeneration = runtimePayloadRecord(binding?.runtimePayload).lifecycleGeneration;
+      return typeof payloadGeneration === "string" ? payloadGeneration : undefined;
+    };
+
+    const bindingIdentityFields = (binding: ProviderRuntimeBinding) => ({
+      threadId: binding.threadId,
+      provider: binding.provider,
+      ...(binding.adapterKey !== undefined ? { adapterKey: binding.adapterKey } : {}),
+      ...(binding.runtimeMode !== undefined ? { runtimeMode: binding.runtimeMode } : {}),
+    });
+
+    const compactionRuntimePayload = (
+      binding: ProviderRuntimeBinding,
+      extra?: Record<string, unknown>,
+    ): Record<string, unknown> => ({
+      ...runtimePayloadRecord(binding.runtimePayload),
+      activeTurnId: null,
+      lastRuntimeEvent: "provider.compactThread",
+      lastRuntimeEventAt: new Date().toISOString(),
+      ...extra,
+    });
+
+    const applyCompactionResult = <TError>(
+      threadId: ThreadId,
+      result: ProviderCompactionResult,
+      adapter: ProviderAdapterShape<TError>,
+    ) =>
+      Effect.gen(function* () {
+        switch (result.kind) {
+          case "same-session": {
+            // The provider compacted in place; the runtime stays live.
+            yield* withBindingWriteLock(
+              threadId,
+              Effect.gen(function* () {
+                const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+                if (!binding) {
+                  return;
+                }
+                yield* directory.upsert({
+                  ...bindingIdentityFields(binding),
+                  status: "running",
+                  ...(binding.lifecycleGeneration !== undefined
+                    ? { lifecycleGeneration: binding.lifecycleGeneration }
+                    : {}),
+                  resumeCursor: result.resumeCursor ?? binding.resumeCursor,
+                  runtimePayload: compactionRuntimePayload(binding),
+                });
+              }),
+            );
+            yield* adapter.readThread(threadId).pipe(Effect.ignore);
+            return;
+          }
+          case "runtime-restart-required": {
+            // The normal recovery path restarts the runtime (and refreshes usage).
+            yield* withBindingWriteLock(
+              threadId,
+              Effect.gen(function* () {
+                const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+                if (!binding) {
+                  return;
+                }
+                yield* directory.upsert({
+                  ...bindingIdentityFields(binding),
+                  status: "stopped",
+                  ...(binding.lifecycleGeneration !== undefined
+                    ? { lifecycleGeneration: binding.lifecycleGeneration }
+                    : {}),
+                  resumeCursor: result.resumeCursor ?? binding.resumeCursor,
+                  runtimePayload: compactionRuntimePayload(binding),
+                });
+              }),
+            );
+            return;
+          }
+          case "session-rollover": {
+            // Atomically replace the provider session identity: persist the new
+            // cursor under a fresh lifecycle generation first, then retire the
+            // old runtime so a crash mid-rollover never loses the new cursor.
+            yield* lifecycle.run(threadId, (lease) =>
+              withBindingWriteLock(
+                threadId,
+                Effect.gen(function* () {
+                  const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+                  if (!binding) {
+                    return;
+                  }
+                  yield* directory.upsert({
+                    ...bindingIdentityFields(binding),
+                    status: binding.status ?? "running",
+                    lifecycleGeneration: lease.generation,
+                    resumeCursor: result.resumeCursor,
+                    runtimePayload: compactionRuntimePayload(binding, {
+                      lifecycleGeneration: lease.generation,
+                      ...(result.providerThreadId !== undefined
+                        ? { providerThreadId: result.providerThreadId }
+                        : {}),
+                    }),
+                  });
+                  yield* adapter.readThread(threadId).pipe(Effect.ignore);
+                  if (yield* adapter.hasSession(threadId)) {
+                    yield* adapter.stopSession(threadId).pipe(Effect.ignore);
+                  }
+                  liveRuntimeTaskIds.delete(threadId);
+                  const persisted = Option.getOrUndefined(yield* directory.getBinding(threadId));
+                  if (!persisted) {
+                    return;
+                  }
+                  yield* directory.upsert({
+                    ...bindingIdentityFields(persisted),
+                    status: "stopped",
+                    lifecycleGeneration: lease.generation,
+                    resumeCursor: persisted.resumeCursor,
+                    runtimePayload: runtimePayloadRecord(persisted.runtimePayload),
+                  });
+                }),
+              ),
+            );
+            return;
+          }
+        }
+      });
+
     const compactThread: ProviderServiceShape["compactThread"] = (rawInput) =>
       Effect.gen(function* () {
         const input = yield* decodeInputOrValidationError({
@@ -2133,30 +2263,42 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 );
               }
             }
-            const result = yield* routed.adapter.compactThread(input);
-            const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
-            if (binding) {
-              yield* directory.upsert({
-                threadId: input.threadId,
-                provider: binding.provider,
-                ...(binding.adapterKey !== undefined ? { adapterKey: binding.adapterKey } : {}),
-                ...(binding.runtimeMode !== undefined ? { runtimeMode: binding.runtimeMode } : {}),
-                status: "stopped",
-                resumeCursor: binding.resumeCursor,
-                runtimePayload: {
-                  ...runtimePayloadRecord(binding.runtimePayload),
-                  activeTurnId: null,
-                  lastRuntimeEvent: "provider.compactThread",
-                  lastRuntimeEventAt: new Date().toISOString(),
-                },
-              });
+            const preBinding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
+            if (
+              input.expectedLifecycleGeneration !== undefined &&
+              bindingLifecycleGeneration(preBinding) !== input.expectedLifecycleGeneration
+            ) {
+              return yield* toValidationError(
+                "ProviderService.compactThread",
+                "Compaction request is stale; the provider session has changed.",
+              );
             }
+            const liveSession = (yield* routed.adapter.listSessions()).find(
+              (session) => session.threadId === input.threadId,
+            );
+            if (
+              runtimeActiveTurnId(preBinding?.runtimePayload) !== undefined ||
+              liveSession?.activeTurnId !== undefined
+            ) {
+              return yield* toValidationError(
+                "ProviderService.compactThread",
+                "Cannot compact the thread while a turn is active.",
+              );
+            }
+            const startedAtMs = Date.now();
+            const result = yield* routed.adapter.compactThread(input);
+            const durationMs = Date.now() - startedAtMs;
+            yield* applyCompactionResult(input.threadId, result, routed.adapter);
             yield* analytics.record("provider.thread.compacted", {
               provider: routed.adapter.provider,
+              resultKind: result.kind,
+              owner: "provider",
+              trigger: input.trigger,
+              durationMs,
             });
             return result;
           }),
-          { scheduleIdleStopOnSuccess: true },
+          { scheduleIdleStopOnSuccess: false },
         );
       });
 
