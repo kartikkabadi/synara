@@ -76,7 +76,7 @@ describe("island sizes", () => {
     expect(islandExpandedSize()).toEqual({ width: 432, height: 288 });
     expect(islandExpandedSize(0)).toEqual({ width: 432, height: 140 });
     expect(islandExpandedSize(1)).toEqual({ width: 432, height: 140 });
-    expect(islandExpandedSize(3)).toEqual({ width: 432, height: 196 });
+    expect(islandExpandedSize(3)).toEqual({ width: 432, height: 200 });
     expect(islandExpandedSize(10)).toEqual({ width: 432, height: 288 });
   });
 
@@ -87,7 +87,7 @@ describe("island sizes", () => {
   });
 
   it("shrinks the hover preview with zero sessions, except in notch mode", () => {
-    expect(islandHoverSize("floating", null, 0)).toEqual({ width: 272, height: 60 });
+    expect(islandHoverSize("floating", null, 0)).toEqual({ width: 272, height: 54 });
     expect(islandHoverSize("notch", { width: 180, height: 38 }, 0)).toEqual({
       width: 380,
       height: 80,
@@ -164,7 +164,7 @@ describe("island anchoring", () => {
     });
     expect(islandSurfaceRect("expanded", windowsDisplay, null, "linux", 2)).toMatchObject({
       width: 432,
-      height: 152,
+      height: 156,
     });
   });
 });

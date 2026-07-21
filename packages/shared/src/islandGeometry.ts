@@ -41,10 +41,10 @@ export const ISLAND_IDLE_COLLAPSED_SIZE: IslandSize = { width: 64, height: 30 };
 export const ISLAND_HOVER_SIZE: IslandSize = { width: 372, height: 80 };
 // With zero sessions the hover preview is a single line, so a compact panel
 // avoids a mostly-empty surface.
-export const ISLAND_HOVER_EMPTY_SIZE: IslandSize = { width: 272, height: 60 };
+export const ISLAND_HOVER_EMPTY_SIZE: IslandSize = { width: 272, height: 54 };
 
 const EXPANDED_ROW_HEIGHT = 44;
-const EXPANDED_CHROME_HEIGHT = 64;
+const EXPANDED_CHROME_HEIGHT = 68;
 
 // sessionCount undefined means "unknown": callers without content knowledge
 // keep the classic sizes.

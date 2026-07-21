@@ -431,21 +431,23 @@ export function Island() {
         aria-label="Expand agent sessions island"
       >
         {headline ? (
-          <>
-            <div className="flex items-center gap-2.5">
-              <IslandOrb state={headline.status} />
-              <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-white/[0.92]">
-                {headline.title}
-              </span>
-              <span className="shrink-0 text-[11px] text-white/60">
-                {STATUS_LABEL[headline.status]}
-              </span>
+          <div className="flex items-center gap-2.5">
+            <IslandOrb state={headline.status} />
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-white/[0.92]">
+                  {headline.title}
+                </span>
+                <span className="shrink-0 text-[11px] text-white/60">
+                  {STATUS_LABEL[headline.status]}
+                </span>
+              </div>
+              <div className="text-[11px] tabular-nums text-white/40">
+                {providerLabel(headline.provider)} ·{" "}
+                {islandRelativeTime(headline.lastActivityAt, nowMs)}
+              </div>
             </div>
-            <div className="pl-[19px] text-[11px] tabular-nums text-white/40">
-              {providerLabel(headline.provider)} ·{" "}
-              {islandRelativeTime(headline.lastActivityAt, nowMs)}
-            </div>
-          </>
+          </div>
         ) : (
           <div className="flex items-center justify-center gap-2.5">
             <IslandOrb state="idle" />
@@ -481,7 +483,7 @@ export function Island() {
         <div
           className={cn(
             !leaving && "island-enter-body",
-            "island-list flex-1 overflow-y-auto px-2 pb-2",
+            "island-list flex-1 overflow-y-auto px-2 pb-3",
           )}
         >
           {sessions.length === 0 ? (
@@ -496,7 +498,7 @@ export function Island() {
                 onClick={() => focusThread(session.threadId)}
                 className={cn(
                   !leaving && "island-enter-row",
-                  "island-row flex min-h-11 w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left",
+                  "island-row flex min-h-11 w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left",
                 )}
               >
                 <IslandOrb state={session.status} />
