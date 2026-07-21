@@ -447,6 +447,8 @@ import { ComposerPendingApprovalPanel } from "./chat/ComposerPendingApprovalPane
 import { ComposerExtrasMenu } from "./chat/ComposerExtrasMenu";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { ComposerInputBanners } from "./chat/ComposerInputBanners";
+import { LoopComposerModeCta, LoopComposerModeHeader } from "./chat/LoopComposerMode";
+import { isUnsupportedLoopContext, useLoopComposerMode } from "./chat/useLoopComposerMode";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerVoiceButton } from "./chat/ComposerVoiceButton";
 import { ComposerVoiceRecorderBar } from "./chat/ComposerVoiceRecorderBar";
@@ -9000,6 +9002,83 @@ export default function ChatView({
     ],
   );
 
+  const loopUnsupportedContext = isUnsupportedLoopContext({
+    imageCount: composerImages.length,
+    fileCount: composerFiles.length,
+    terminalContextCount: composerTerminalContexts.length,
+    selectedSkillCount: composerSkills.length,
+    selectedMentionCount: composerMentions.length,
+    assistantSelectionCount: composerAssistantSelections.length,
+  });
+
+  // Promotes a local new-chat draft to a server thread before a loop can be
+  // set on it. Shared by direct `/loop 5 fix tests` starts and guided setup.
+  const ensureLoopThreadReady = useCallback(
+    async (titleSeed: string): Promise<boolean> => {
+      const api = readNativeApi();
+      if (!api || !activeProject || !activeThread) {
+        return false;
+      }
+      if (isServerThread) {
+        return true;
+      }
+      try {
+        const result = await promoteThreadCreate(
+          {
+            type: "thread.create",
+            commandId: newCommandId(),
+            threadId,
+            projectId: activeProject.id,
+            title: buildPromptThreadTitleFallback(titleSeed),
+            modelSelection: selectedModelSelection,
+            runtimeMode,
+            interactionMode,
+            envMode: activeThread.envMode ?? "local",
+            branch: activeThread.branch,
+            worktreePath: activeThread.worktreePath,
+            associatedWorktreePath: activeThread.associatedWorktreePath ?? null,
+            associatedWorktreeBranch: activeThread.associatedWorktreeBranch ?? null,
+            associatedWorktreeRef: activeThread.associatedWorktreeRef ?? null,
+            lastKnownPr: activeThread.lastKnownPr ?? null,
+            createdAt: new Date().toISOString(),
+          },
+          api,
+          { force: true },
+        );
+        return result !== "unavailable";
+      } catch {
+        return false;
+      }
+    },
+    [
+      activeProject,
+      activeThread,
+      interactionMode,
+      isServerThread,
+      runtimeMode,
+      selectedModelSelection,
+      threadId,
+    ],
+  );
+
+  const loopComposer = useLoopComposerMode({
+    threadId,
+    activeLoop: activeThread?.loop ?? null,
+    hasUnsupportedContext: loopUnsupportedContext,
+    getObjective: () => promptRef.current,
+    setObjective: setComposerPromptValue,
+    clearObjective: clearComposerSlashDraft,
+    focusEditor: scheduleComposerFocus,
+    syncServerShellSnapshot: async () => {
+      const api = readNativeApi();
+      if (api) {
+        syncServerShellSnapshot(await api.orchestration.getShellSnapshot());
+      }
+    },
+    ensureThreadReady: ensureLoopThreadReady,
+  });
+  const loopComposerModeOpen = loopComposer.mode.kind !== "closed";
+
   const {
     handleForkTargetSelection,
     handleReviewTargetSelection,
@@ -9032,6 +9111,9 @@ export default function ChatView({
     runtimeMode,
     interactionMode,
     threadId,
+    openLoopSetup: loopComposer.openCreate,
+    openLoopEdit: loopComposer.openEdit,
+    ensureLoopThreadReady,
     syncServerShellSnapshot,
     navigateToThread: (nextThreadId, options) =>
       navigate({
@@ -9948,7 +10030,25 @@ export default function ChatView({
       >
         <form
           ref={composerFormRef}
-          onSubmit={onSend}
+          onSubmit={
+            loopComposerModeOpen
+              ? (event) => {
+                  event.preventDefault();
+                  void loopComposer.submit();
+                }
+              : onSend
+          }
+          onKeyDownCapture={
+            loopComposerModeOpen
+              ? (event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    loopComposer.cancel();
+                  }
+                }
+              : undefined
+          }
           className="relative z-10 w-full overflow-visible"
           data-chat-composer-form="true"
           data-chat-pane-scope={paneScopeId}
@@ -10084,10 +10184,21 @@ export default function ChatView({
                       : null
                   }
                 />
+                {loopComposer.mode.kind !== "closed" && !isComposerApprovalState ? (
+                  <LoopComposerModeHeader
+                    mode={loopComposer.mode}
+                    isDispatching={loopComposer.isDispatching}
+                    isLoopTurnRunning={hasLiveTurn}
+                    inlineError={loopComposer.inlineError}
+                    isUnsupportedContext={loopComposer.isUnsupportedContext}
+                    onBudgetChange={loopComposer.setBudget}
+                  />
+                ) : null}
                 <div
                   className={cn(
                     COMPOSER_EDITOR_PADDING_CLASS_NAME,
                     composerMenuOpen && !isComposerApprovalState && "overflow-visible",
+                    loopComposerModeOpen && "min-h-[112px]",
                   )}
                 >
                   {composerMenuOpen && !isComposerApprovalState ? (
@@ -10108,6 +10219,7 @@ export default function ChatView({
                           items={composerMenuItems}
                           resolvedTheme={resolvedTheme}
                           isLoading={isComposerMenuLoading}
+                          isLoopActive={activeThread?.loop?.active === true}
                           triggerKind={
                             composerCommandPicker !== null
                               ? "slash-command"
@@ -10173,19 +10285,21 @@ export default function ChatView({
                           ? activePendingProgress.activeQuestion?.options.length === 0
                             ? "Type your answer to continue"
                             : "Type your own answer, or leave this blank to use the selected option"
-                          : showPlanFollowUpPrompt && activeProposedPlan
-                            ? "Add feedback to refine the plan, or leave this blank to implement it"
-                            : activeThread?.loop?.active
-                              ? activeThread.loop.prompt.trim().length === 0
-                                ? "Your next message starts the loop"
-                                : "Your next message replaces the loop prompt"
-                              : activeThread?.parentThreadId
-                                ? "Message this subagent while it works"
-                                : hasLiveTurn
-                                  ? "Ask for follow-up changes"
-                                  : phase === "disconnected"
-                                    ? "Ask for follow-up changes or attach images"
-                                    : "Ask anything, @tag files/folders, or use / to show available commands"
+                          : loopComposerModeOpen
+                            ? "What should Synara keep working on?"
+                            : showPlanFollowUpPrompt && activeProposedPlan
+                              ? "Add feedback to refine the plan, or leave this blank to implement it"
+                              : activeThread?.loop?.active
+                                ? activeThread.loop.prompt.trim().length === 0
+                                  ? "Your next message starts the loop"
+                                  : "Your next message replaces the loop prompt"
+                                : activeThread?.parentThreadId
+                                  ? "Message this subagent while it works"
+                                  : hasLiveTurn
+                                    ? "Ask for follow-up changes"
+                                    : phase === "disconnected"
+                                      ? "Ask for follow-up changes or attach images"
+                                      : "Ask anything, @tag files/folders, or use / to show available commands"
                     }
                     disabled={isComposerEditorDisabled}
                   />
@@ -10340,7 +10454,18 @@ export default function ChatView({
                       ) : pendingUserInputs.length === 0 &&
                         !isVoiceRecording &&
                         !isVoiceTranscribing ? (
-                        showPlanFollowUpPrompt ? (
+                        loopComposer.mode.kind !== "closed" ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10.5px] text-muted-foreground/50">
+                              Esc to cancel
+                            </span>
+                            <LoopComposerModeCta
+                              mode={loopComposer.mode}
+                              isDispatching={loopComposer.isDispatching}
+                              startDisabled={loopComposer.startDisabled}
+                            />
+                          </div>
+                        ) : showPlanFollowUpPrompt ? (
                           prompt.trim().length > 0 ? (
                             <Button
                               type="submit"

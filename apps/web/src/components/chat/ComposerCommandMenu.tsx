@@ -23,6 +23,7 @@ import {
   GitForkIcon,
   InfoIcon,
   ListTodoIcon,
+  LoopIcon,
   type LucideIcon,
   MessageCircleIcon,
   Minimize2,
@@ -59,6 +60,7 @@ function humanizeProviderCommandName(command: string): string {
 
 function commandMenuTitle(
   item: Extract<ComposerCommandItem, { type: "slash-command" | "provider-native-command" }>,
+  isLoopActive: boolean,
 ): string {
   switch (item.command) {
     case "clear":
@@ -86,7 +88,9 @@ function commandMenuTitle(
     case "feedback":
       return "Feedback Synara";
     case "loop":
-      return "Loop";
+      // Selecting the entry never unexpectedly stops a running loop: active
+      // selection opens Edit Loop mode instead of toggling.
+      return isLoopActive ? "Edit Loop" : "Start Loop";
     default:
       return humanizeProviderCommandName(item.command);
   }
@@ -296,6 +300,7 @@ export function ComposerCommandMenu(props: {
   items: ComposerCommandItem[];
   resolvedTheme: "light" | "dark";
   isLoading: boolean;
+  isLoopActive?: boolean;
   triggerKind: ComposerTriggerKind | null;
   groupSlashCommandSections?: boolean;
   emptyStateText?: string;
@@ -346,6 +351,7 @@ export function ComposerCommandMenu(props: {
                     key={item.id}
                     item={item}
                     resolvedTheme={props.resolvedTheme}
+                    isLoopActive={props.isLoopActive ?? false}
                     isActive={props.activeItemId === item.id}
                     itemRef={(node) => storeCommandItemNode(itemRefs, item.id, node)}
                     onHighlight={props.onHighlightedItemChange}
@@ -427,6 +433,7 @@ const SLASH_COMMAND_ICONS: Record<string, LucideIcon> = {
   subagents: BotIcon,
   feedback: BugIcon,
   automation: ClockIcon,
+  loop: LoopIcon,
 };
 
 function commandMenuSlashGlyph(command: string, fallback: LucideIcon): ReactNode {
@@ -503,6 +510,7 @@ function ComposerCommandItemIcon(props: {
 const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
   item: ComposerCommandItem;
   resolvedTheme: "light" | "dark";
+  isLoopActive: boolean;
   isActive: boolean;
   itemRef: (node: HTMLElement | null) => void;
   onHighlight: (itemId: string | null) => void;
@@ -538,7 +546,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
         <div className="min-w-0 flex flex-1 items-center gap-1.5 overflow-hidden">
           <span className="shrink-0 text-[11.5px] font-medium text-foreground/80">
             {props.item.type === "slash-command" || props.item.type === "provider-native-command"
-              ? commandMenuTitle(props.item)
+              ? commandMenuTitle(props.item, props.isLoopActive)
               : props.item.label}
           </span>
           {secondaryText ? (

@@ -1,5 +1,4 @@
 import {
-  type ClientOrchestrationCommand,
   type ModelSelection,
   type OrchestrationShellSnapshot,
   type ProviderInteractionMode,
@@ -9,16 +8,16 @@ import {
   type RuntimeMode,
   type ThreadId,
 } from "@synara/contracts";
+import { buildPromptThreadTitleFallback } from "@synara/shared/chatThreads";
+import { type LoopBudget, type LoopParseErrorReason } from "@synara/shared/loop";
 import {
-  buildPromptThreadTitleFallback,
-  GENERIC_CHAT_THREAD_TITLE,
-} from "@synara/shared/chatThreads";
-import { parseLoopCommand, type LoopParseErrorReason } from "@synara/shared/loop";
+  interpretLoopInvocation,
+  type LoopBudgetChoice,
+} from "../components/chat/useLoopComposerMode";
 import { deriveAssociatedWorktreeMetadata } from "@synara/shared/threadWorkspace";
 import { useCallback, useEffect, useState } from "react";
 import { newCommandId, newMessageId, newThreadId } from "../lib/utils";
 import { readNativeApi } from "../nativeApi";
-import { promoteThreadCreate } from "../lib/threadCreatePromotion";
 import type { Project, Thread } from "../types";
 import type { ComposerTrigger } from "../composer-logic";
 import { extendReplacementRangeForTrailingSpace } from "../composerTriggerInsertion";
@@ -43,8 +42,6 @@ import { registerSidechatCreator } from "../lib/sidechatCreatorRegistry";
 import { downloadUrlAsBlob } from "../lib/browserDownload";
 import { resolveWsHttpUrl } from "../lib/wsHttpUrl";
 import { useFeedbackDialogStore } from "../feedbackDialogStore";
-
-type ThreadCreateCommand = Extract<ClientOrchestrationCommand, { type: "thread.create" }>;
 
 type ComposerSnapshot = {
   value: string;
@@ -96,6 +93,13 @@ export function useComposerSlashCommands(input: {
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
   threadId: ThreadId;
+  openLoopSetup: (options: {
+    budget: LoopBudgetChoice;
+    objective: string;
+    note: "choose-budget" | "invalid-budget" | null;
+  }) => void;
+  openLoopEdit: () => void;
+  ensureLoopThreadReady: (titleSeed: string) => Promise<boolean>;
   syncServerShellSnapshot: (snapshot: OrchestrationShellSnapshot) => void;
   navigateToThread: (threadId: ThreadId, options?: { splitViewId?: SplitViewId }) => Promise<void>;
   handleClearConversation: () => Promise<void> | void;
@@ -148,6 +152,9 @@ export function useComposerSlashCommands(input: {
     runtimeMode,
     interactionMode,
     threadId,
+    openLoopSetup,
+    openLoopEdit,
+    ensureLoopThreadReady,
     syncServerShellSnapshot,
     navigateToThread,
     handleClearConversation,
@@ -628,6 +635,91 @@ export function useComposerSlashCommands(input: {
     });
   }, [canOfferExportCommand, threadId]);
 
+  // Active bare `/loop` retains the backend toggle shortcut: disable future
+  // iterations while letting a currently running turn finish.
+  const toggleActiveLoop = useCallback(
+    async (trimmed: string) => {
+      const api = readNativeApi();
+      if (!api || !activeThread) {
+        return;
+      }
+      editorActions.clearComposerSlashDraft();
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.loop.toggle",
+          commandId: newCommandId(),
+          threadId,
+          createdAt: new Date().toISOString(),
+        });
+        const snapshot = await api.orchestration.getShellSnapshot();
+        syncServerShellSnapshot(snapshot);
+      } catch (error) {
+        editorActions.setComposerPromptValue(trimmed);
+        toastManager.add({
+          type: "error",
+          title: "Could not stop loop",
+          description:
+            error instanceof Error ? error.message : "An error occurred while toggling the loop.",
+        });
+      }
+    },
+    [activeThread, editorActions, syncServerShellSnapshot, threadId],
+  );
+
+  // Power-user fast path: `/loop 5 fix the tests` starts immediately after
+  // validation, reusing new-chat thread promotion via ensureLoopThreadReady.
+  const startLoopDirect = useCallback(
+    async (trimmed: string, budget: LoopBudget, prompt: string) => {
+      const api = readNativeApi();
+      if (!api) {
+        return;
+      }
+      if (hasComposerAttachments) {
+        toastManager.add({
+          type: "warning",
+          title: "Loop is unavailable",
+          description: "Remove attachments before starting or reconfiguring a loop.",
+        });
+        return;
+      }
+
+      const ready = await ensureLoopThreadReady(prompt);
+      if (!ready) {
+        return;
+      }
+
+      editorActions.clearComposerSlashDraft();
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.loop.set",
+          commandId: newCommandId(),
+          threadId,
+          prompt,
+          maxIterations: budget.kind === "count" ? budget.value : null,
+          durationSeconds: budget.kind === "duration" ? budget.seconds : null,
+          createdAt: new Date().toISOString(),
+        });
+        const snapshot = await api.orchestration.getShellSnapshot();
+        syncServerShellSnapshot(snapshot);
+      } catch (error) {
+        editorActions.setComposerPromptValue(trimmed);
+        toastManager.add({
+          type: "error",
+          title: "Could not start loop",
+          description:
+            error instanceof Error ? error.message : "An error occurred while starting the loop.",
+        });
+      }
+    },
+    [
+      editorActions,
+      ensureLoopThreadReady,
+      hasComposerAttachments,
+      syncServerShellSnapshot,
+      threadId,
+    ],
+  );
+
   const runLoopSlashCommand = useCallback(
     async (trimmed: string) => {
       const api = readNativeApi();
@@ -648,146 +740,37 @@ export function useComposerSlashCommands(input: {
         return;
       }
 
-      const parsed = parseLoopCommand(trimmed);
-      if (parsed === null) {
-        return;
-      }
-      if (parsed.kind === "invalid") {
-        toastManager.add({
-          type: "warning",
-          title: "Invalid /loop command",
-          description: formatLoopParseError(parsed.reason),
-        });
-        return;
-      }
-      const isBareToggle = parsed.budget === null && parsed.prompt === null;
-
-      if (!isServerThread) {
-        const titleSeed = parsed.prompt ?? "";
-        const createCommand: ThreadCreateCommand = {
-          type: "thread.create",
-          commandId: newCommandId(),
-          threadId,
-          projectId: activeProject.id,
-          title: buildPromptThreadTitleFallback(titleSeed),
-          modelSelection: selectedModelSelection,
-          runtimeMode,
-          interactionMode,
-          envMode: activeThread.envMode ?? "local",
-          branch: activeThread.branch,
-          worktreePath: activeThread.worktreePath,
-          associatedWorktreePath: activeThread.associatedWorktreePath ?? null,
-          associatedWorktreeBranch: activeThread.associatedWorktreeBranch ?? null,
-          associatedWorktreeRef: activeThread.associatedWorktreeRef ?? null,
-          lastKnownPr: activeThread.lastKnownPr ?? null,
-          createdAt: new Date().toISOString(),
-        };
-        try {
-          const result = await promoteThreadCreate(createCommand, api, { force: true });
-          if (result === "unavailable") {
-            toastManager.add({
-              type: "error",
-              title: "Could not start loop",
-              description: "Unable to connect to the app server.",
-            });
-            return;
-          }
-        } catch (error) {
-          editorActions.setComposerPromptValue(trimmed);
-          toastManager.add({
-            type: "error",
-            title: "Could not start loop",
-            description:
-              error instanceof Error ? error.message : "An error occurred while starting the loop.",
-          });
+      const interpretation = interpretLoopInvocation(trimmed, {
+        loopActive: activeThread.loop?.active === true,
+      });
+      switch (interpretation.kind) {
+        case "not-loop":
           return;
-        }
-      }
-
-      if (isBareToggle) {
-        if (activeThread.loop?.active !== true && hasComposerAttachments) {
-          editorActions.clearComposerSlashDraft();
+        case "reject":
           toastManager.add({
             type: "warning",
-            title: "Loop is unavailable",
-            description: "Remove attachments before starting a loop.",
+            title: "Invalid /loop command",
+            description: formatLoopParseError(interpretation.reason),
           });
           return;
-        }
-
-        editorActions.clearComposerSlashDraft();
-        try {
-          await api.orchestration.dispatchCommand({
-            type: "thread.loop.toggle",
-            commandId: newCommandId(),
-            threadId,
-            createdAt: new Date().toISOString(),
-          });
-          const snapshot = await api.orchestration.getShellSnapshot();
-          syncServerShellSnapshot(snapshot);
+        case "toggle-off":
+          await toggleActiveLoop(trimmed);
           return;
-        } catch (error) {
-          editorActions.setComposerPromptValue(trimmed);
-          toastManager.add({
-            type: "error",
-            title:
-              activeThread.loop?.active === true ? "Could not stop loop" : "Could not start loop",
-            description:
-              error instanceof Error ? error.message : "An error occurred while toggling the loop.",
+        case "start-direct":
+          await startLoopDirect(trimmed, interpretation.budget, interpretation.prompt);
+          return;
+        case "open-setup":
+          openLoopSetup({
+            budget: interpretation.budget,
+            objective: interpretation.objective,
+            note: interpretation.note,
           });
           return;
-        }
-      }
-
-      if (hasComposerAttachments) {
-        editorActions.clearComposerSlashDraft();
-        toastManager.add({
-          type: "warning",
-          title: "Loop is unavailable",
-          description: "Remove attachments before starting or reconfiguring a loop.",
-        });
-        return;
-      }
-
-      const maxIterations = parsed.budget?.kind === "count" ? parsed.budget.value : null;
-      const durationSeconds = parsed.budget?.kind === "duration" ? parsed.budget.seconds : null;
-
-      editorActions.clearComposerSlashDraft();
-      try {
-        await api.orchestration.dispatchCommand({
-          type: "thread.loop.set",
-          commandId: newCommandId(),
-          threadId,
-          prompt: parsed.prompt,
-          maxIterations,
-          durationSeconds,
-          createdAt: new Date().toISOString(),
-        });
-        const snapshot = await api.orchestration.getShellSnapshot();
-        syncServerShellSnapshot(snapshot);
-        return;
-      } catch (error) {
-        editorActions.setComposerPromptValue(trimmed);
-        toastManager.add({
-          type: "error",
-          title: "Could not start loop",
-          description:
-            error instanceof Error ? error.message : "An error occurred while starting the loop.",
-        });
+        default:
+          return interpretation satisfies never;
       }
     },
-    [
-      activeProject,
-      activeThread,
-      editorActions,
-      hasComposerAttachments,
-      isServerThread,
-      runtimeMode,
-      interactionMode,
-      selectedModelSelection,
-      syncServerShellSnapshot,
-      threadId,
-    ],
+    [activeProject, activeThread, openLoopSetup, startLoopDirect, toggleActiveLoop],
   );
 
   const openFeedbackDialog = useCallback(() => {
@@ -953,7 +936,8 @@ export function useComposerSlashCommands(input: {
         return true;
       }
       if (slashInvocation.command === "loop") {
-        editorActions.clearComposerSlashDraft();
+        // Draft handling is owned by the loop helpers: guided setup replaces
+        // the slash text with the objective; toggle/direct paths clear it.
         await runLoopSlashCommand(trimmed);
         return true;
       }
@@ -1075,21 +1059,20 @@ export function useComposerSlashCommands(input: {
       }
 
       if (item.command === "loop") {
-        const replacement = "/loop ";
-        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
-          snapshot.value,
-          trigger.rangeEnd,
-          replacement,
-        );
-        const applied = editorActions.applyPromptReplacement(
-          trigger.rangeStart,
-          replacementRangeEnd,
-          replacement,
-          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
-        );
+        const applied = clearSlashCommandFromComposer();
         if (wasPromptReplacementApplied(applied)) {
           editorActions.setComposerHighlightedItemId(null);
-          editorActions.scheduleComposerFocus();
+          // Selecting Loop while a loop is active opens Edit Loop mode; it
+          // never stops the running loop. Inactive selection opens setup.
+          if (activeThread?.loop?.active === true) {
+            openLoopEdit();
+          } else {
+            openLoopSetup({
+              budget: { kind: "count", turns: 5 },
+              objective: "",
+              note: null,
+            });
+          }
         }
         return;
       }
@@ -1215,7 +1198,9 @@ export function useComposerSlashCommands(input: {
       supportsTextNativeReviewCommand,
       runExportSlashCommand,
       runFastSlashCommand,
-      runLoopSlashCommand,
+      activeThread,
+      openLoopEdit,
+      openLoopSetup,
     ],
   );
 
