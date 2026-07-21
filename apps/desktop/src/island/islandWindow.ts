@@ -26,7 +26,8 @@ export const ISLAND_GLOBAL_SHORTCUT = "CommandOrControl+Shift+I";
 // Linux click-through: setIgnoreMouseEvents has no `forward` there, so the
 // main process polls the cursor against the current surface rect instead.
 export const LINUX_CURSOR_POLL_MS = 100;
-export const LINUX_CURSOR_EXIT_GRACE_MS = 40;
+// Must exceed the poll interval or the grace window can never elapse a poll.
+export const LINUX_CURSOR_EXIT_GRACE_MS = 250;
 
 const decodeIslandSettings = Schema.decodeUnknownSync(DesktopIslandSettings);
 
@@ -41,7 +42,10 @@ export function readStoredIslandEnabled(settingsPath: string): boolean | null {
 
 export function writeStoredIslandEnabled(settingsPath: string, enabled: boolean): void {
   FS.mkdirSync(Path.dirname(settingsPath), { recursive: true });
-  FS.writeFileSync(settingsPath, `${JSON.stringify({ enabled }, null, 2)}\n`);
+  // Atomic replace so a crash mid-write cannot leave a truncated settings file.
+  const tempPath = `${settingsPath}.tmp`;
+  FS.writeFileSync(tempPath, `${JSON.stringify({ enabled }, null, 2)}\n`);
+  FS.renameSync(tempPath, settingsPath);
 }
 
 export interface IslandWindowManagerOptions {
@@ -148,6 +152,18 @@ export class IslandWindowManager {
     window.setIgnoreMouseEvents(true, this.isLinux ? undefined : { forward: true });
     if (this.isLinux) this.#startCursorPoll();
 
+    // The overlay only ever renders the bundled island route: deny popups,
+    // block navigation elsewhere, and reload after a renderer crash.
+    window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    window.webContents.on("will-navigate", (event, url) => {
+      if (url !== this.#options.url) event.preventDefault();
+    });
+    window.webContents.on("render-process-gone", () => {
+      if (this.#window === window && !window.isDestroyed()) {
+        void window.loadURL(this.#options.url);
+      }
+    });
+
     window.once("ready-to-show", () => {
       window.showInactive();
     });
@@ -170,6 +186,8 @@ export class IslandWindowManager {
     this.#detachDisplayListeners?.();
     this.#detachDisplayListeners = null;
     this.#stopCursorPoll();
+    this.#state = "collapsed";
+    this.#sessionCount = 0;
     const window = this.#window;
     this.#window = null;
     if (window && !window.isDestroyed()) {

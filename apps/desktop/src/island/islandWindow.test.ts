@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as FS from "node:fs";
+import * as OS from "node:os";
+import * as Path from "node:path";
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const globalShortcutMock = vi.hoisted(() => ({
   register: vi.fn<(accelerator: string, callback: () => void) => boolean>(() => true),
@@ -19,7 +23,7 @@ vi.mock("electron", () => {
     destroy = vi.fn();
     setBounds = vi.fn();
     getBounds = vi.fn(() => ({ x: 0, y: 0, width: 100, height: 100 }));
-    webContents = { send: vi.fn() };
+    webContents = { send: vi.fn(), setWindowOpenHandler: vi.fn(), on: vi.fn() };
   }
   return {
     BrowserWindow: FakeBrowserWindow,
@@ -36,7 +40,12 @@ vi.mock("electron", () => {
   };
 });
 
-import { ISLAND_GLOBAL_SHORTCUT, IslandWindowManager } from "./islandWindow";
+import {
+  ISLAND_GLOBAL_SHORTCUT,
+  IslandWindowManager,
+  readStoredIslandEnabled,
+  writeStoredIslandEnabled,
+} from "./islandWindow";
 
 function createManager() {
   return new IslandWindowManager({
@@ -79,5 +88,35 @@ describe("IslandWindowManager global shortcut ownership", () => {
     manager.create();
     manager.destroy();
     expect(globalShortcutMock.unregister).not.toHaveBeenCalled();
+  });
+});
+
+describe("island settings persistence", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = FS.mkdtempSync(Path.join(OS.tmpdir(), "island-settings-"));
+  });
+
+  afterEach(() => {
+    FS.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("round-trips the enabled flag without leaving a temp file", () => {
+    const settingsPath = Path.join(dir, "island.json");
+    writeStoredIslandEnabled(settingsPath, true);
+    expect(readStoredIslandEnabled(settingsPath)).toBe(true);
+    writeStoredIslandEnabled(settingsPath, false);
+    expect(readStoredIslandEnabled(settingsPath)).toBe(false);
+    expect(FS.existsSync(`${settingsPath}.tmp`)).toBe(false);
+  });
+
+  it("returns null for missing, corrupted, or invalid settings files", () => {
+    const settingsPath = Path.join(dir, "island.json");
+    expect(readStoredIslandEnabled(settingsPath)).toBeNull();
+    FS.writeFileSync(settingsPath, "{ not json");
+    expect(readStoredIslandEnabled(settingsPath)).toBeNull();
+    FS.writeFileSync(settingsPath, JSON.stringify({ enabled: "yes" }));
+    expect(readStoredIslandEnabled(settingsPath)).toBeNull();
   });
 });
