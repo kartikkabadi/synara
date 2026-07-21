@@ -1201,6 +1201,7 @@ function applyOrchestrationEvent(
     case "thread.loop-set":
     case "thread.loop-off":
     case "thread.loop-continued":
+    case "thread.loop-wait-noted":
       return applyThreadUpdate(
         state,
         event.payload.threadId,

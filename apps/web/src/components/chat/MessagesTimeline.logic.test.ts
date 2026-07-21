@@ -1,5 +1,6 @@
 import {
   CheckpointRef,
+  LoopActivationId,
   MessageId,
   OrchestrationProposedPlanId,
   type ThreadLoop,
@@ -1266,7 +1267,7 @@ describe("deriveMessagesTimelineRows", () => {
     hardCap: 100,
     consecutiveErrors: 0,
     lastStopReason: "budget_iterations",
-    activationId: "activation-1",
+    activationId: LoopActivationId.makeUnsafe("activation-1"),
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:10:00Z",
     ...overrides,
@@ -1287,7 +1288,7 @@ describe("deriveMessagesTimelineRows", () => {
       turnId: opts.turnId != null ? TurnId.makeUnsafe(opts.turnId) : null,
       purpose: {
         kind: "loop-iteration",
-        activationId: opts.activationId ?? "activation-1",
+        activationId: LoopActivationId.makeUnsafe(opts.activationId ?? "activation-1"),
         iteration: opts.iteration ?? 3,
       },
       createdAt,
@@ -1344,11 +1345,15 @@ describe("deriveMessagesTimelineRows", () => {
   it("does not label assistant rows from a stale activation", () => {
     const rows = deriveMessagesTimelineRows({
       ...baseInput,
-      loop: makeLoop({ active: true, lastStopReason: null, activationId: "activation-2" }),
+      loop: makeLoop({
+        active: true,
+        lastStopReason: null,
+        activationId: LoopActivationId.makeUnsafe("activation-2"),
+      }),
       timelineEntries: [
         loopUserEntry("loop-user", "2026-01-01T00:00:00Z", {
           turnId: "t-loop",
-          activationId: "activation-1",
+          activationId: LoopActivationId.makeUnsafe("activation-1"),
         }),
         assistantEntry("loop-assistant", "2026-01-01T00:00:05Z", {
           turnId: "t-loop",
@@ -1374,17 +1379,17 @@ describe("deriveMessagesTimelineRows", () => {
         userEntry("u1", "2026-01-01T00:00:00Z"),
         loopUserEntry("loop-user-1", "2026-01-01T00:01:00Z", {
           turnId: "t1",
-          activationId: "activation-0",
+          activationId: LoopActivationId.makeUnsafe("activation-0"),
           iteration: 1,
         }),
         loopUserEntry("loop-user-2", "2026-01-01T00:02:00Z", {
           turnId: "t2",
-          activationId: "activation-0",
+          activationId: LoopActivationId.makeUnsafe("activation-0"),
           iteration: 2,
         }),
         loopUserEntry("loop-user-3", "2026-01-01T00:03:00Z", {
           turnId: "turn-3",
-          activationId: "activation-1",
+          activationId: LoopActivationId.makeUnsafe("activation-1"),
           iteration: 1,
         }),
       ],
@@ -1459,8 +1464,12 @@ describe("deriveMessagesTimelineRows", () => {
 
     expect(rowsFor(makeLoop()).at(-1)?.id).toBe("loop-end:activation-1:2026-01-01T00:10:00Z");
     expect(
-      rowsFor(makeLoop({ activationId: "activation-2", updatedAt: "2026-01-01T00:20:00Z" })).at(-1)
-        ?.id,
+      rowsFor(
+        makeLoop({
+          activationId: LoopActivationId.makeUnsafe("activation-2"),
+          updatedAt: "2026-01-01T00:20:00Z",
+        }),
+      ).at(-1)?.id,
     ).toBe("loop-end:activation-2:2026-01-01T00:20:00Z");
   });
 
