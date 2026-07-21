@@ -144,10 +144,22 @@ const make = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("ThreadCompactionOperation.listUnsettled")),
     );
 
+  const listSettled: ThreadCompactionOperationRepositoryShape["listSettled"] = () =>
+    sql<ThreadCompactionOperationRow>`
+      SELECT ${columns(sql)}
+      FROM thread_compaction_operations
+      WHERE status IN ('completed', 'failed', 'uncertain')
+      ORDER BY thread_id ASC
+    `.pipe(
+      Effect.map((rows) => rows.map(fromRow)),
+      Effect.mapError(toPersistenceSqlError("ThreadCompactionOperation.listSettled")),
+    );
+
   return {
     upsert,
     getByThreadId,
     listUnsettled,
+    listSettled,
   } satisfies ThreadCompactionOperationRepositoryShape;
 });
 

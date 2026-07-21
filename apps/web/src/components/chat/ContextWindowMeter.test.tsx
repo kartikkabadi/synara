@@ -6,7 +6,10 @@
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { ProviderCompactionCapabilities } from "@synara/contracts";
+import type {
+  ProviderCompactionCapabilities,
+  ThreadCompactionRuntimeStatus,
+} from "@synara/contracts";
 
 import type { ContextWindowSnapshot } from "~/lib/contextWindow";
 import { ContextWindowMeterDetails } from "./ContextWindowMeter";
@@ -75,7 +78,7 @@ describe("ContextWindowMeterDetails", () => {
     const markup = renderToStaticMarkup(
       <ContextWindowMeterDetails usage={usage} compaction={unsupportedCompaction} />,
     );
-    expect(markup).toContain("Context compaction is unavailable.");
+    expect(markup).toContain("Compaction unavailable.");
     expect(markup).not.toContain("Automatically compacts its context when needed.");
   });
 
@@ -83,6 +86,58 @@ describe("ContextWindowMeterDetails", () => {
     const markup = renderToStaticMarkup(
       <ContextWindowMeterDetails usage={usage} compaction={null} />,
     );
+    expect(markup).not.toContain("Automatically compacts its context when needed.");
+  });
+
+  it("renders the runtime status trigger for provider-auto compaction", () => {
+    const runtimeStatus: ThreadCompactionRuntimeStatus = {
+      owner: "provider",
+      providerAutoEnabled: true,
+      manualAvailability: { available: true },
+      trigger: { kind: "percent", percent: 85 },
+    };
+    const markup = renderToStaticMarkup(
+      <ContextWindowMeterDetails
+        usage={usage}
+        compaction={nativeAutoCompaction}
+        compactionRuntimeStatus={runtimeStatus}
+      />,
+    );
+    expect(markup).toContain("Auto-compacts at 85%");
+    expect(markup).not.toContain("Automatically compacts its context when needed.");
+  });
+
+  it("renders the compact-now affordance for manual-only compaction", () => {
+    const runtimeStatus: ThreadCompactionRuntimeStatus = {
+      owner: "none",
+      providerAutoEnabled: false,
+      manualAvailability: { available: true },
+    };
+    const markup = renderToStaticMarkup(
+      <ContextWindowMeterDetails
+        usage={usage}
+        compaction={unsupportedCompaction}
+        compactionRuntimeStatus={runtimeStatus}
+      />,
+    );
+    expect(markup).toContain("Compact now");
+    expect(markup).not.toContain("Compaction unavailable.");
+  });
+
+  it("renders unavailable when the runtime status rules out compaction", () => {
+    const runtimeStatus: ThreadCompactionRuntimeStatus = {
+      owner: "none",
+      providerAutoEnabled: false,
+      manualAvailability: { available: false, reason: "Unsupported" },
+    };
+    const markup = renderToStaticMarkup(
+      <ContextWindowMeterDetails
+        usage={usage}
+        compaction={nativeAutoCompaction}
+        compactionRuntimeStatus={runtimeStatus}
+      />,
+    );
+    expect(markup).toContain("Compaction unavailable.");
     expect(markup).not.toContain("Automatically compacts its context when needed.");
   });
 });

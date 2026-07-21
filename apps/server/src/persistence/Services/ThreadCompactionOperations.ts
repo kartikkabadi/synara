@@ -55,6 +55,12 @@ export interface ThreadCompactionOperationRepositoryShape {
     ReadonlyArray<ThreadCompactionOperation>,
     PersistenceSqlError
   >;
+
+  /** List settled operations (completed/failed/uncertain) for status hydration. */
+  readonly listSettled: () => Effect.Effect<
+    ReadonlyArray<ThreadCompactionOperation>,
+    PersistenceSqlError
+  >;
 }
 
 export class ThreadCompactionOperationRepository extends ServiceMap.Service<
