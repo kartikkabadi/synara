@@ -463,6 +463,7 @@ import { ComposerInputBanners } from "./chat/ComposerInputBanners";
 import { LoopComposerModeCta, LoopComposerModeHeader } from "./chat/LoopComposerMode";
 import { isLoopOwnedTurnRunning, LOOP_ACTIVE_COMPOSER_PLACEHOLDER } from "./chat/loopPresentation";
 import { isUnsupportedLoopContext, useLoopComposerMode } from "./chat/useLoopComposerMode";
+import { useLoopStopErrorToast } from "./chat/useLoopStopErrorToast";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerVoiceButton } from "./chat/ComposerVoiceButton";
 import { ComposerVoiceRecorderBar } from "./chat/ComposerVoiceRecorderBar";
@@ -4457,6 +4458,21 @@ export default function ChatView({
       });
     }
   }, [activeThread, syncServerShellSnapshot]);
+
+  // One error toast for exceptional loop auto-stops (repeated errors, invalid
+  // saved objective, unavailable thread); routine stops stay toast-free.
+  const addLoopStopErrorToast = useCallback(
+    (toast: { title: string; description: string; threadId: ThreadId | null }) => {
+      toastManager.add({
+        type: "error",
+        title: toast.title,
+        description: toast.description,
+        data: { threadId: toast.threadId },
+      });
+    },
+    [],
+  );
+  useLoopStopErrorToast(activeThreadId ?? null, activeThread?.loop ?? null, addLoopStopErrorToast);
 
   const {
     handoffBusy,
@@ -10731,7 +10747,7 @@ export default function ChatView({
                               ? "Add feedback to refine the plan, or leave this blank to implement it"
                               : activeThread?.loop?.active
                                 ? activeThread.loop.prompt.trim().length === 0
-                                  ? "Your next message starts the loop"
+                                  ? "What should Synara keep working on?"
                                   : LOOP_ACTIVE_COMPOSER_PLACEHOLDER
                                 : activeThread?.parentThreadId
                                   ? "Message this subagent while it works"
