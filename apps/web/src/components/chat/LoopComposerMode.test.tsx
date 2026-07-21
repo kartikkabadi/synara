@@ -9,7 +9,8 @@ import { describe, expect, it } from "vitest";
 import { LoopBudgetPicker, LoopComposerModeHeader, loopBudgetRadioValue } from "./LoopComposerMode";
 import {
   LOOP_BUDGET_COUNT_ERROR,
-  LOOP_BUDGET_DURATION_ERROR,
+  LOOP_BUDGET_DURATION_MAX_ERROR,
+  LOOP_BUDGET_DURATION_MIN_ERROR,
   LOOP_CHOOSE_BUDGET_NOTE,
   LOOP_UNSUPPORTED_CONTEXT_MESSAGE,
   validateLoopBudgetChoice,
@@ -17,7 +18,11 @@ import {
 
 describe("LoopComposerModeHeader", () => {
   const baseProps = {
-    mode: { kind: "create", budget: { kind: "count", turns: 5 }, sourceDraft: "" } as const,
+    mode: {
+      kind: "create",
+      budget: { kind: "count", turns: 5 },
+      sourceDraft: "",
+    } as const,
     isDispatching: false,
     isLoopTurnRunning: false,
     isUnsupportedContext: false,
@@ -119,7 +124,7 @@ describe("LoopBudgetPicker", () => {
         error={validateLoopBudgetChoice(budget)}
       />,
     );
-    expect(markup).toContain(LOOP_BUDGET_DURATION_ERROR);
+    expect(markup).toContain(LOOP_BUDGET_DURATION_MAX_ERROR);
   });
 
   it("shows no validation message for a valid budget", () => {
@@ -131,7 +136,8 @@ describe("LoopBudgetPicker", () => {
       />,
     );
     expect(markup).not.toContain(LOOP_BUDGET_COUNT_ERROR);
-    expect(markup).not.toContain(LOOP_BUDGET_DURATION_ERROR);
+    expect(markup).not.toContain(LOOP_BUDGET_DURATION_MIN_ERROR);
+    expect(markup).not.toContain(LOOP_BUDGET_DURATION_MAX_ERROR);
     expect(markup).toContain("Stop after 5 turns");
   });
 });

@@ -13,8 +13,9 @@ import {
   deriveLoopProgress,
   formatLoopRemainingTime,
   formatLoopStopReason,
-  getLoopAriaValueText,
+  formatLoopStopReasonShort,
   getLoopTickIntervalMs,
+  loopDurationMinutes,
 } from "./loopPresentation";
 
 const NOW = new Date("2026-01-01T12:00:00.000Z").getTime();
@@ -61,7 +62,6 @@ function derive(
   return deriveLoopPresentationState({
     loop: makeLoop(),
     latestTurn: null,
-    session: null,
     interactionMode: "default",
     hasPendingApprovals: false,
     hasPendingUserInput: false,
@@ -99,7 +99,7 @@ describe("deriveLoopPresentationState", () => {
     const presentation = derive({ latestTurn: makeRunningLoopTurn() });
     expect(presentation?.state).toEqual({ kind: "running", iteration: 2 });
     expect(presentation?.label).toBe("Loop running");
-    expect(presentation?.detail).toBe("2 / 5");
+    expect(presentation?.detail).toBe("2/5");
     expect(presentation?.color).toBe("running");
   });
 
@@ -203,19 +203,19 @@ describe("deriveLoopProgress", () => {
     const progress = deriveLoopProgress(makeLoop({ iteration: 2, maxIterations: 5 }), NOW);
     expect(progress.kind).toBe("count");
     expect(progress.segments).toEqual([1, 1, 0, 0, 0]);
-    expect(progress.counterText).toBe("2 / 5");
+    expect(progress.counterText).toBe("2/5");
     expect(progress.ariaValueMin).toBe(0);
     expect(progress.ariaValueMax).toBe(5);
     expect(progress.ariaValueNow).toBe(2);
-    expect(progress.ariaValueText).toBe("2 of 5 loop turns started");
+    expect(progress.ariaValueText).toBe("Turn 2 of 5");
     expect(progress.tickIntervalMs).toBeNull();
   });
 
   it("normalizes count budgets above eight to five segments", () => {
     const progress = deriveLoopProgress(makeLoop({ iteration: 17, maxIterations: 50 }), NOW);
     expect(progress.segments).toEqual([1, 1, 0, 0, 0]);
-    expect(progress.counterText).toBe("17 / 50");
-    expect(progress.ariaValueText).toBe("17 of 50 loop turns started");
+    expect(progress.counterText).toBe("17/50");
+    expect(progress.ariaValueText).toBe("Turn 17 of 50");
   });
 
   it("derives duration progress from elapsed time", () => {
@@ -337,26 +337,35 @@ describe("adaptive time formatting", () => {
   });
 });
 
-describe("getLoopAriaValueText", () => {
-  it("describes each state for screen readers", () => {
-    expect(getLoopAriaValueText({ kind: "armed" })).toBe("Loop ready. Add a prompt to start.");
-    expect(getLoopAriaValueText({ kind: "starting" })).toBe("Starting loop.");
-    expect(getLoopAriaValueText({ kind: "running", iteration: 2 })).toBe("Loop running. Turn 2.");
-    expect(getLoopAriaValueText({ kind: "ready" })).toBe("Loop on. Starting the next turn.");
-    expect(getLoopAriaValueText({ kind: "waiting-approval" })).toBe("Loop waiting for approval.");
-    expect(getLoopAriaValueText({ kind: "waiting-input" })).toBe("Loop waiting for your input.");
-    expect(getLoopAriaValueText({ kind: "waiting-plan" })).toBe(
-      "Loop waiting. Plan mode is active.",
-    );
-    expect(getLoopAriaValueText({ kind: "ending", iteration: 2 })).toBe(
-      "Loop will stop after the current turn.",
-    );
-    expect(getLoopAriaValueText({ kind: "stopping", iteration: 2 })).toBe("Stopping loop.");
-    expect(getLoopAriaValueText({ kind: "ended", reason: "budget_iterations" })).toBe(
-      "Loop completed. Budget reached.",
-    );
-    expect(getLoopAriaValueText({ kind: "ended", reason: "prompt_invalid" })).toBe(
-      "Loop stopped. The saved objective was invalid.",
-    );
+describe("loopDurationMinutes", () => {
+  it("returns whole minutes for a duration budget and null otherwise", () => {
+    expect(
+      loopDurationMinutes(
+        makeLoop({
+          createdAt: new Date(NOW - 30 * 60_000).toISOString(),
+          endsAt: new Date(NOW).toISOString(),
+        }),
+      ),
+    ).toBe(30);
+    expect(loopDurationMinutes(makeLoop({ endsAt: null }))).toBeNull();
+  });
+});
+
+describe("formatLoopStopReasonShort", () => {
+  it("provides context-free copy for exceptional stops only", () => {
+    expect(formatLoopStopReasonShort("consecutive_errors")).toEqual({
+      title: "Loop stopped after repeated errors",
+      description: "Review the latest error before restarting.",
+    });
+    expect(formatLoopStopReasonShort("prompt_invalid")).toEqual({
+      title: "Loop stopped",
+      description: "The saved objective was invalid.",
+    });
+    expect(formatLoopStopReasonShort("thread_unrunnable")).toEqual({
+      title: "Loop stopped",
+      description: "This thread is not available.",
+    });
+    expect(formatLoopStopReasonShort("user_stop")).toBeNull();
+    expect(formatLoopStopReasonShort("budget_iterations")).toBeNull();
   });
 });

@@ -9,6 +9,7 @@ import {
   ThreadId,
   type ThreadLoop,
   type ThreadMarker,
+  type ThreadTurnPurpose,
   type TurnId,
 } from "@synara/contracts";
 import { resolveLatestTailUserMessageEditTarget } from "@synara/shared/conversationEdit";
@@ -370,6 +371,7 @@ interface MessagesTimelineProps {
   onUndoTurnFiles?: (turnCounts: readonly number[]) => void;
   onEditUserMessage?: (messageId: MessageId, text: string) => boolean | Promise<boolean>;
   activeTurnId?: TurnId | null;
+  activeTurnPurpose?: ThreadTurnPurpose | null;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onIsAtEndChange?: (isAtEnd: boolean) => void;
@@ -429,6 +431,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onUndoTurnFiles,
   onEditUserMessage,
   activeTurnId,
+  activeTurnPurpose = null,
   isRevertingCheckpoint,
   onImageExpand,
   onIsAtEndChange,
@@ -552,6 +555,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         turnDiffSummaryByAssistantMessageId,
         revertTurnCountByUserMessageId,
         loop,
+        activeTurnPurpose,
       }),
     [
       timelineEntries,
@@ -559,6 +563,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       presentedWorktreeSetup,
       activeTurnInProgress,
       activeTurnId,
+      activeTurnPurpose,
       activeTurnStartedAt,
       turnDiffSummaryByAssistantMessageId,
       revertTurnCountByUserMessageId,
@@ -1563,7 +1568,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                       />
                     ) : null}
                     {assistantLoopMeta.length > 0 ? (
-                      <p className="flex items-center gap-1 tabular-nums">
+                      <p className="flex items-center gap-1 text-muted-foreground/70 tabular-nums">
                         <LoopIcon className="size-3" aria-hidden />
                         {assistantLoopMeta}
                       </p>

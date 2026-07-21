@@ -10,7 +10,6 @@ import {
   type TurnId,
 } from "@synara/contracts";
 import { type TimelineEntry, type WorkLogEntry, formatElapsed } from "../../session-logic";
-import { formatLoopStartLabel } from "./loopPresentation";
 import { normalizeCompactToolLabel as normalizeCompactToolLabelValue } from "../../lib/toolCallLabel";
 import {
   type ChatMessage,
@@ -337,6 +336,10 @@ export function deriveMessagesTimelineRows(input: {
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
   loop?: ThreadLoop | null | undefined;
+  // Purpose of the active turn when known; the originating loop user message
+  // may not be in the timeline yet (fresh load), so the completion record
+  // suppression also consults this.
+  activeTurnPurpose?: ThreadTurnPurpose | null | undefined;
 }): MessagesTimelineRow[] {
   const nextRows: MessagesTimelineRow[] = [];
   const timelineMessages = input.timelineEntries.flatMap((entry) =>
@@ -448,10 +451,7 @@ export function deriveMessagesTimelineRows(input: {
         nextRows.push({
           kind: "loop-start",
           id: `loop-start:${message.purpose.activationId}`,
-          label:
-            input.loop != null && input.loop.activationId === message.purpose.activationId
-              ? formatLoopStartLabel(input.loop)
-              : "Loop started",
+          label: "Loop started",
         });
       }
     }
@@ -561,10 +561,15 @@ export function deriveMessagesTimelineRows(input: {
   // the final turn's output.
   if (input.loop && !input.loop.active && input.loop.lastStopReason != null) {
     const loopActivationId = input.loop.activationId;
+    const activeTurnLoopActivationId =
+      input.activeTurnId != null
+        ? (purposeByTurnId.get(input.activeTurnId)?.activationId ??
+          (input.activeTurnPurpose?.kind === "loop-iteration"
+            ? input.activeTurnPurpose.activationId
+            : undefined))
+        : undefined;
     const matchingLoopTurnRunning =
-      input.activeTurnInProgress === true &&
-      input.activeTurnId != null &&
-      purposeByTurnId.get(input.activeTurnId)?.activationId === loopActivationId;
+      input.activeTurnInProgress === true && activeTurnLoopActivationId === loopActivationId;
     if (!matchingLoopTurnRunning) {
       nextRows.push({
         kind: "loop-end",

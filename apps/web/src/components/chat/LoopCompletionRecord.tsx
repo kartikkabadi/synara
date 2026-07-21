@@ -5,15 +5,11 @@
 // Layer: Chat transcript UI
 
 import type { ThreadLoop } from "@synara/contracts";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import {
-  CheckCircle2Icon,
-  CircleAlertIcon,
-  ClockIcon,
-  StopIcon,
-  type LucideIcon,
-} from "~/lib/icons";
+import { CircleAlertIcon, ClockIcon, LoopIcon, StopIcon, type LucideIcon } from "~/lib/icons";
+import { disclosureContentClassName } from "~/lib/disclosureMotion";
+import { cn } from "~/lib/utils";
 import { DisclosureChevron } from "../ui/DisclosureChevron";
 import { DisclosureRegion } from "../ui/DisclosureRegion";
 import { formatLoopStopReason, type LoopStopReasonCopy } from "./loopPresentation";
@@ -22,24 +18,34 @@ interface LoopCompletionRecordProps {
   loop: ThreadLoop;
 }
 
-function outcomeIcon(reason: NonNullable<ThreadLoop["lastStopReason"]>): LucideIcon {
+function outcomeIcon(reason: NonNullable<ThreadLoop["lastStopReason"]>): {
+  Icon: LucideIcon;
+  destructive: boolean;
+} {
   switch (reason) {
     case "budget_iterations":
-      return CheckCircle2Icon;
+      return { Icon: LoopIcon, destructive: false };
     case "budget_duration":
-      return ClockIcon;
+      return { Icon: ClockIcon, destructive: false };
     case "consecutive_errors":
     case "prompt_invalid":
     case "thread_unrunnable":
-      return CircleAlertIcon;
+      return { Icon: CircleAlertIcon, destructive: true };
     default:
-      return StopIcon;
+      return { Icon: StopIcon, destructive: false };
   }
 }
 
+const RECORD_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  day: "numeric",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
 function formatRecordTimestamp(iso: string): string {
   const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? iso : RECORD_TIMESTAMP_FORMATTER.format(date);
 }
 
 function budgetLabel(loop: ThreadLoop): string {
@@ -51,7 +57,7 @@ function budgetLabel(loop: ThreadLoop): string {
     const minutes = Math.max(1, Math.round(totalMs / 60_000));
     return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
   }
-  return `None (safety limit ${loop.hardCap})`;
+  return `Until stopped (safety limit ${loop.hardCap} turns)`;
 }
 
 function detailRows(loop: ThreadLoop, copy: LoopStopReasonCopy): Array<[string, string]> {
@@ -71,23 +77,41 @@ function detailRows(loop: ThreadLoop, copy: LoopStopReasonCopy): Array<[string, 
 
 export function LoopCompletionRecord({ loop }: LoopCompletionRecordProps) {
   const [expanded, setExpanded] = useState(false);
+  // Enter animation: mount closed, then open on the next frame so the card
+  // fades in and drifts up with the shared disclosure motion.
+  const [entered, setEntered] = useState(false);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
   const reason = loop.lastStopReason;
   if (reason == null) {
     return null;
   }
 
   const copy = formatLoopStopReason(reason, loop, loop.iteration);
-  const Icon = outcomeIcon(reason);
+  const { Icon, destructive } = outcomeIcon(reason);
 
   return (
-    <div className="my-3 overflow-hidden rounded-[0.65rem] border border-[color:var(--color-border-light)] bg-[var(--color-background-elevated-primary)] font-system-ui">
+    <div
+      className={cn(
+        "my-3 overflow-hidden rounded-[0.65rem] border border-[color:var(--color-border-light)] bg-[var(--color-background-elevated-primary)] font-system-ui",
+        disclosureContentClassName(entered),
+      )}
+    >
       <button
         type="button"
         aria-expanded={expanded}
         onClick={() => setExpanded((open) => !open)}
         className="flex w-full items-center gap-3 px-3.5 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-border)]"
       >
-        <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <Icon
+          className={cn(
+            "size-4 shrink-0",
+            destructive ? "text-destructive" : "text-muted-foreground",
+          )}
+          aria-hidden
+        />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-[13px] font-medium text-foreground">{copy.title}</span>
           <span className="truncate text-[11px] text-muted-foreground">

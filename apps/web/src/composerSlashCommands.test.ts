@@ -487,7 +487,7 @@ describe("loop slash command routing", () => {
       openCalls.push(options),
     );
     expect(toast.type).toBe("warning");
-    expect(toast.title).toBe("Invalid /loop command");
+    expect(toast.title).toBe("Invalid Loop budget");
     expect(toast.description).toBe(formatLoopParseError("prompt_starts_with_slash"));
     expect(toast.actionProps.children).toBe("Configure Loop");
     toast.actionProps.onClick();

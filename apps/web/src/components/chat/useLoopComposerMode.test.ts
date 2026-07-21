@@ -4,23 +4,22 @@ import { CommandId, LoopActivationId, ThreadId, type ThreadLoop } from "@synara/
 
 import {
   LOOP_BUDGET_COUNT_ERROR,
-  LOOP_BUDGET_DURATION_ERROR,
+  LOOP_BUDGET_DURATION_MAX_ERROR,
+  LOOP_BUDGET_DURATION_MIN_ERROR,
+  LOOP_BUDGET_INVALID_ERROR,
   LOOP_CHOOSE_BUDGET_NOTE,
-  LOOP_EDIT_STALE_ERROR,
   LOOP_DEFAULT_BUDGET_CHOICE,
   LOOP_UNSUPPORTED_CONTEXT_MESSAGE,
-  createLoopComposerCore,
   formatLoopBudgetChoiceLabel,
   interpretLoopInvocation,
   isUnsupportedLoopContext,
-  loopBudgetChoiceFromInvalidToken,
   loopBudgetChoiceFromLoop,
   loopBudgetChoiceFromParsed,
   loopBudgetChoiceToDispatchFields,
+  loopSetupNoticeFor,
   performLoopSetupSubmit,
   validateLoopBudgetChoice,
   validateLoopObjective,
-  type LoopComposerCoreEnv,
   type LoopSetupDispatchDeps,
 } from "./useLoopComposerMode";
 
@@ -92,7 +91,9 @@ describe("interpretLoopInvocation", () => {
   });
 
   it("prefills the objective for a missing-budget prompt", () => {
-    const result = interpretLoopInvocation("/loop fix the tests", { loopActive: false });
+    const result = interpretLoopInvocation("/loop fix the tests", {
+      loopActive: false,
+    });
     expect(result).toEqual({
       kind: "open-setup",
       budget: LOOP_DEFAULT_BUDGET_CHOICE,
@@ -102,7 +103,9 @@ describe("interpretLoopInvocation", () => {
   });
 
   it("starts immediately for a valid budget plus prompt", () => {
-    const result = interpretLoopInvocation("/loop 5 fix the tests", { loopActive: false });
+    const result = interpretLoopInvocation("/loop 5 fix the tests", {
+      loopActive: false,
+    });
     expect(result).toEqual({
       kind: "start-direct",
       budget: { kind: "count", value: 5 },
@@ -116,44 +119,35 @@ describe("interpretLoopInvocation", () => {
     });
   });
 
-  it("keeps the invalid budget value and opens setup with validation for a malformed budget", () => {
+  it("drops the malformed budget token and opens setup with an inline error", () => {
     expect(interpretLoopInvocation("/loop 0", { loopActive: false })).toEqual({
       kind: "open-setup",
-      budget: { kind: "count", turns: 0 },
+      budget: LOOP_DEFAULT_BUDGET_CHOICE,
       objective: "",
       note: "invalid-budget",
     });
     expect(interpretLoopInvocation("/loop 200 fix the tests", { loopActive: false })).toEqual({
       kind: "open-setup",
-      budget: { kind: "count", turns: 200 },
+      budget: LOOP_DEFAULT_BUDGET_CHOICE,
       objective: "fix the tests",
       note: "invalid-budget",
     });
     expect(interpretLoopInvocation("/loop 25h ship it", { loopActive: false })).toEqual({
       kind: "open-setup",
-      budget: { kind: "duration", seconds: 25 * 3600 },
+      budget: LOOP_DEFAULT_BUDGET_CHOICE,
       objective: "ship it",
       note: "invalid-budget",
     });
   });
 
-  it("maps malformed budget tokens to best-effort choices", () => {
-    expect(loopBudgetChoiceFromInvalidToken("0")).toEqual({ kind: "count", turns: 0 });
-    expect(loopBudgetChoiceFromInvalidToken("101")).toEqual({ kind: "count", turns: 101 });
-    expect(loopBudgetChoiceFromInvalidToken("90m")).toEqual({
-      kind: "duration",
-      seconds: 90 * 60,
-    });
-    expect(loopBudgetChoiceFromInvalidToken("25h")).toEqual({
-      kind: "duration",
-      seconds: 25 * 3600,
-    });
-    expect(loopBudgetChoiceFromInvalidToken("abc")).toBeNull();
-  });
-
   it("rejects a prompt starting with a slash", () => {
-    const result = interpretLoopInvocation("/loop 5 /clear", { loopActive: false });
-    expect(result).toEqual({ kind: "reject", reason: "prompt_starts_with_slash" });
+    const result = interpretLoopInvocation("/loop 5 /clear", {
+      loopActive: false,
+    });
+    expect(result).toEqual({
+      kind: "reject",
+      reason: "prompt_starts_with_slash",
+    });
   });
 
   it("returns not-loop for other commands", () => {
@@ -198,12 +192,32 @@ describe("budget choices", () => {
     expect(validateLoopBudgetChoice({ kind: "count", turns: 101 })).toBe(LOOP_BUDGET_COUNT_ERROR);
   });
 
-  it("validates duration up to 24 hours", () => {
+  it("validates duration between 1 minute and 24 hours", () => {
+    expect(validateLoopBudgetChoice({ kind: "duration", seconds: 60 })).toBeNull();
     expect(validateLoopBudgetChoice({ kind: "duration", seconds: 24 * 3600 })).toBeNull();
+    expect(validateLoopBudgetChoice({ kind: "duration", seconds: 59 })).toBe(
+      LOOP_BUDGET_DURATION_MIN_ERROR,
+    );
     expect(validateLoopBudgetChoice({ kind: "duration", seconds: 24 * 3600 + 1 })).toBe(
-      LOOP_BUDGET_DURATION_ERROR,
+      LOOP_BUDGET_DURATION_MAX_ERROR,
     );
     expect(validateLoopBudgetChoice({ kind: "until-stopped" })).toBeNull();
+  });
+
+  it("maps open-setup notes to their header hint/error copy", () => {
+    expect(loopSetupNoticeFor("choose-budget")).toEqual({
+      note: LOOP_CHOOSE_BUDGET_NOTE,
+      error: null,
+    });
+    expect(loopSetupNoticeFor("invalid-budget")).toEqual({
+      note: null,
+      error: LOOP_BUDGET_INVALID_ERROR,
+    });
+    expect(loopSetupNoticeFor("unsupported-context")).toEqual({
+      note: null,
+      error: LOOP_UNSUPPORTED_CONTEXT_MESSAGE,
+    });
+    expect(loopSetupNoticeFor(null)).toEqual({ note: null, error: null });
   });
 
   it("formats trigger labels", () => {
@@ -302,7 +316,9 @@ describe("performLoopSetupSubmit", () => {
       expectedActivationId: LoopActivationId.makeUnsafe("activation-1"),
     });
     expect(result).toEqual({ ok: true });
-    expect(dispatched[0]).toMatchObject({ expectedActivationId: "activation-1" });
+    expect(dispatched[0]).toMatchObject({
+      expectedActivationId: "activation-1",
+    });
   });
 
   it("omits expectedActivationId when not provided", async () => {
@@ -325,242 +341,5 @@ describe("performLoopSetupSubmit", () => {
       budget: LOOP_DEFAULT_BUDGET_CHOICE,
     });
     expect(result).toEqual({ ok: false, message: "server down" });
-  });
-});
-
-function makeCoreHarness(
-  overrides: {
-    objective?: string;
-    activeLoop?: ThreadLoop | null | (() => ThreadLoop | null);
-    hasUnsupportedContext?: boolean;
-    ensureThreadReady?: (titleSeed: string) => Promise<boolean>;
-    dispatchCommand?: LoopSetupDispatchDeps["dispatchCommand"];
-    getDispatchDeps?: LoopComposerCoreEnv["getDispatchDeps"];
-  } = {},
-) {
-  let objective = overrides.objective ?? "";
-  const dispatched: unknown[] = [];
-  const calls: string[] = [];
-  const env: LoopComposerCoreEnv = {
-    getThreadId: () => THREAD_ID,
-    getActiveLoop: () =>
-      (typeof overrides.activeLoop === "function"
-        ? overrides.activeLoop()
-        : overrides.activeLoop) ?? null,
-    hasUnsupportedContext: () => overrides.hasUnsupportedContext ?? false,
-    getObjective: () => objective,
-    setObjective: (value) => {
-      objective = value;
-    },
-    clearObjective: () => {
-      objective = "";
-    },
-    focusEditor: () => {},
-    syncServerShellSnapshot: () => {
-      calls.push("sync");
-      return Promise.resolve();
-    },
-    ensureThreadReady: (titleSeed) => {
-      calls.push(`ensure:${titleSeed}`);
-      return overrides.ensureThreadReady?.(titleSeed) ?? Promise.resolve(true);
-    },
-    getDispatchDeps:
-      overrides.getDispatchDeps ??
-      (() => ({
-        dispatchCommand: (command) => {
-          calls.push("dispatch");
-          dispatched.push(command);
-          return overrides.dispatchCommand?.(command) ?? Promise.resolve();
-        },
-        newCommandId: () => CommandId.makeUnsafe("cmd-1"),
-        now: () => "2026-01-01T12:00:00.000Z",
-      })),
-  };
-  const core = createLoopComposerCore(env);
-  return {
-    core,
-    dispatched,
-    calls,
-    getObjective: () => objective,
-  };
-}
-
-describe("createLoopComposerCore", () => {
-  it("enters setup from the menu with the default budget and no messages", () => {
-    const { core, getObjective } = makeCoreHarness({ objective: "draft text" });
-    core.openCreate();
-    expect(core.getState()).toEqual({
-      mode: { kind: "create", budget: LOOP_DEFAULT_BUDGET_CHOICE, sourceDraft: "draft text" },
-      note: null,
-      error: null,
-      isDispatching: false,
-    });
-    expect(getObjective()).toBe("draft text");
-  });
-
-  it("shows a quiet note (not an error) for a missing budget", () => {
-    const { core } = makeCoreHarness();
-    core.openCreate({ objective: "fix tests", note: "choose-budget" });
-    expect(core.getState().note).toBe(LOOP_CHOOSE_BUDGET_NOTE);
-    expect(core.getState().error).toBeNull();
-  });
-
-  it("shows the matching validation error and keeps the invalid budget", () => {
-    const { core } = makeCoreHarness();
-    core.openCreate({ budget: { kind: "count", turns: 0 }, note: "invalid-budget" });
-    expect(core.getState().error).toBe(LOOP_BUDGET_COUNT_ERROR);
-    expect(core.getState().mode).toMatchObject({ budget: { kind: "count", turns: 0 } });
-
-    core.openCreate({ budget: { kind: "duration", seconds: 25 * 3600 }, note: "invalid-budget" });
-    expect(core.getState().error).toBe(LOOP_BUDGET_DURATION_ERROR);
-  });
-
-  it("shows the text-only contract error for unsupported context setup", () => {
-    const { core } = makeCoreHarness();
-    core.openCreate({ objective: "fix tests", note: "unsupported-context" });
-    expect(core.getState().error).toBe(LOOP_UNSUPPORTED_CONTEXT_MESSAGE);
-    expect(core.getState().note).toBeNull();
-  });
-
-  it("prefills edit mode from the active loop", () => {
-    const { core, getObjective } = makeCoreHarness({
-      objective: "draft text",
-      activeLoop: makeLoop({ maxIterations: 10 }),
-    });
-    core.openEdit();
-    expect(core.getState().mode).toEqual({
-      kind: "edit",
-      budget: { kind: "count", turns: 10 },
-      sourceDraft: "draft text",
-      activationId: LoopActivationId.makeUnsafe("activation-1"),
-    });
-    expect(getObjective()).toBe("Keep fixing tests");
-  });
-
-  it("cancel keeps the create objective and restores the edit source draft", () => {
-    const create = makeCoreHarness({ objective: "keep me" });
-    create.core.openCreate();
-    create.core.cancel();
-    expect(create.core.getState().mode).toEqual({ kind: "closed" });
-    expect(create.getObjective()).toBe("keep me");
-
-    const edit = makeCoreHarness({ objective: "draft text", activeLoop: makeLoop() });
-    edit.core.openEdit();
-    edit.core.cancel();
-    expect(edit.getObjective()).toBe("draft text");
-  });
-
-  it("clears note and error when a budget is chosen", () => {
-    const { core } = makeCoreHarness({ objective: "fix tests" });
-    core.openCreate({ note: "choose-budget" });
-    core.setBudget({ kind: "count", turns: 10 });
-    expect(core.getState()).toMatchObject({
-      mode: { budget: { kind: "count", turns: 10 } },
-      note: null,
-      error: null,
-    });
-  });
-
-  it("preserves setup state and objective on submit failure", async () => {
-    const { core, getObjective } = makeCoreHarness({
-      objective: "fix tests",
-      dispatchCommand: () => Promise.reject(new Error("server down")),
-    });
-    core.openCreate();
-    await core.submit();
-    expect(core.getState()).toMatchObject({
-      mode: { kind: "create" },
-      error: "server down",
-      isDispatching: false,
-    });
-    expect(getObjective()).toBe("fix tests");
-  });
-
-  it("clears the objective and closes only after an authoritative success", async () => {
-    const { core, dispatched, getObjective } = makeCoreHarness({ objective: "fix tests" });
-    core.openCreate();
-    await core.submit();
-    expect(dispatched).toHaveLength(1);
-    expect(core.getState().mode).toEqual({ kind: "closed" });
-    expect(getObjective()).toBe("");
-  });
-
-  it("blocks submit for unsupported context with the text-only error", async () => {
-    const { core, dispatched } = makeCoreHarness({
-      objective: "fix tests",
-      hasUnsupportedContext: true,
-    });
-    core.openCreate();
-    await core.submit();
-    expect(core.getState().error).toBe(LOOP_UNSUPPORTED_CONTEXT_MESSAGE);
-    expect(dispatched).toHaveLength(0);
-  });
-
-  it("prevents a double submit while dispatch is in flight", async () => {
-    let releaseReady: (ready: boolean) => void = () => {};
-    const { core, dispatched } = makeCoreHarness({
-      objective: "fix tests",
-      ensureThreadReady: () =>
-        new Promise((resolve) => {
-          releaseReady = resolve;
-        }),
-    });
-    core.openCreate();
-    const first = core.submit();
-    const second = core.submit();
-    releaseReady(true);
-    await Promise.all([first, second]);
-    expect(dispatched).toHaveLength(1);
-  });
-
-  it("sends expectedActivationId on edit submits", async () => {
-    const { core, dispatched } = makeCoreHarness({
-      objective: "draft text",
-      activeLoop: makeLoop(),
-    });
-    core.openEdit();
-    await core.submit();
-    expect(dispatched).toHaveLength(1);
-    expect(dispatched[0]).toMatchObject({ expectedActivationId: "activation-1" });
-    expect(core.getState().mode).toEqual({ kind: "closed" });
-  });
-
-  it("blocks a stale edit save when the loop ended while editing", async () => {
-    let activeLoop: ThreadLoop | null = makeLoop();
-    const { core, dispatched } = makeCoreHarness({
-      objective: "draft text",
-      activeLoop: () => activeLoop,
-    });
-    core.openEdit();
-    activeLoop = null;
-    await core.submit();
-    expect(dispatched).toHaveLength(0);
-    expect(core.getState()).toMatchObject({
-      mode: { kind: "edit" },
-      error: LOOP_EDIT_STALE_ERROR,
-    });
-  });
-
-  it("blocks a stale edit save when the activation was replaced while editing", async () => {
-    let activeLoop: ThreadLoop | null = makeLoop();
-    const { core, dispatched } = makeCoreHarness({
-      objective: "draft text",
-      activeLoop: () => activeLoop,
-    });
-    core.openEdit();
-    activeLoop = makeLoop({ activationId: LoopActivationId.makeUnsafe("activation-2") });
-    await core.submit();
-    expect(dispatched).toHaveLength(0);
-    expect(core.getState()).toMatchObject({
-      mode: { kind: "edit" },
-      error: LOOP_EDIT_STALE_ERROR,
-    });
-  });
-
-  it("promotes the new-chat thread before dispatching and syncing", async () => {
-    const { core, calls } = makeCoreHarness({ objective: "fix tests" });
-    core.openCreate();
-    await core.submit();
-    expect(calls).toEqual(["ensure:fix tests", "dispatch", "sync"]);
   });
 });

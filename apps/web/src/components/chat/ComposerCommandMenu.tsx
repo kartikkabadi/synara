@@ -118,6 +118,10 @@ function commandMenuTrailingMeta(item: ComposerCommandItem): string | null {
   }
 
   if (item.type === "slash-command" || item.type === "provider-native-command") {
+    // Power-user syntax hint: /loop supports an inline budget and prompt.
+    if (item.command === "loop") {
+      return "/loop 10 <prompt> or /loop 30m <prompt>";
+    }
     return `/${item.command}`;
   }
 
