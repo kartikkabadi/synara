@@ -122,6 +122,7 @@ function LoopProgressSegments({
           // Position is the identity of a segment; the list never reorders.
           // oxlint-disable-next-line no-array-index-key
           key={index}
+          data-testid="loop-progress-segment"
           className={cn(
             "h-1 flex-1 rounded-full transition-[background-color,opacity] duration-200 motion-reduce:transition-none",
             fill > 0 ? filledSegmentClassName(color) : "bg-muted/60",
@@ -335,7 +336,12 @@ export function LoopRuntimeRail({
 
   const status = (
     <>
-      <LoopIcon aria-hidden className={iconClassName(color, spinning)} />
+      <LoopIcon
+        aria-hidden
+        className={iconClassName(color, spinning)}
+        data-spinning={spinning || undefined}
+        data-testid="loop-rail-icon"
+      />
       {/* Only the status copy lives in the live region so screen readers are
           not re-announced by progress ticks or control swaps. */}
       <span

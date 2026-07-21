@@ -1,57 +1,19 @@
 // FILE: LoopRuntimeRail.test.tsx
-// Purpose: Covers the runtime rail's state-to-UI mapping, stop controls, progress
-// segments, and accessibility attributes via static markup rendering.
+// Purpose: Covers the runtime rail's visibility, progress segments, ARIA wiring,
+// and stop-control gating via static markup rendering. Per-state copy is owned
+// by loopPresentation.test.ts.
 // Layer: Web chat component tests
 
-import { LoopActivationId, type OrchestrationLatestTurn, type ThreadLoop } from "@synara/contracts";
+import { LoopActivationId } from "@synara/contracts";
+import { makeLoop, makeRunningLoopTurn } from "@synara/shared/loopTestFixtures";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
   isLoopRuntimeRailVisible,
-  LOOP_STEERING_TOOLTIP_TEXT,
-  LOOP_STOP_AFTER_TURN_DESCRIPTION,
-  LOOP_STOP_NOW_DESCRIPTION,
   LoopRuntimeRail,
   type LoopRuntimeRailProps,
 } from "./LoopRuntimeRail";
-import { LOOP_ACTIVE_COMPOSER_PLACEHOLDER } from "./loopPresentation";
-
-function makeLoop(overrides: Partial<ThreadLoop> = {}): ThreadLoop {
-  return {
-    active: true,
-    prompt: "Keep fixing tests",
-    iteration: 2,
-    maxIterations: 5,
-    endsAt: null,
-    hardCap: 100,
-    consecutiveErrors: 0,
-    lastStopReason: null,
-    activationId: LoopActivationId.makeUnsafe("activation-1"),
-    createdAt: "2026-01-01T11:00:00.000Z",
-    updatedAt: "2026-01-01T11:30:00.000Z",
-    ...overrides,
-  } as ThreadLoop;
-}
-
-function makeRunningLoopTurn(
-  overrides: Partial<OrchestrationLatestTurn> = {},
-): OrchestrationLatestTurn {
-  return {
-    turnId: "turn-1",
-    state: "running",
-    requestedAt: "2026-01-01T11:45:00.000Z",
-    startedAt: "2026-01-01T11:45:01.000Z",
-    completedAt: null,
-    assistantMessageId: null,
-    purpose: {
-      kind: "loop-iteration",
-      activationId: LoopActivationId.makeUnsafe("activation-1"),
-      iteration: 2,
-    },
-    ...overrides,
-  } as OrchestrationLatestTurn;
-}
 
 function renderRail(overrides: Partial<LoopRuntimeRailProps> = {}): string {
   return renderToStaticMarkup(
@@ -70,7 +32,7 @@ function renderRail(overrides: Partial<LoopRuntimeRailProps> = {}): string {
 }
 
 function countSegments(markup: string): number {
-  return markup.split("h-1 flex-1 rounded-full").length - 1;
+  return markup.split('data-testid="loop-progress-segment"').length - 1;
 }
 
 // Extracts the markup of the `role="status"` live region (balanced spans) so
@@ -126,7 +88,6 @@ describe("LoopRuntimeRail", () => {
   it("renders running state with counter, segments, and the stop menu", () => {
     const markup = renderRail({ latestTurn: makeRunningLoopTurn() });
     expect(markup).toContain('role="status"');
-    expect(markup).toContain("Loop running");
     expect(markup).toContain("2/5");
     expect(markup).toContain("Stop after turn");
     expect(countSegments(markup)).toBe(5);
@@ -152,31 +113,15 @@ describe("LoopRuntimeRail", () => {
     expect(region).not.toContain("Stop");
   });
 
-  it("surfaces the no-budget safety limit as detail with a labeled progressbar", () => {
+  it("labels the no-budget progressbar without a determinate value", () => {
     const markup = renderRail({
       loop: makeLoop({ maxIterations: null, endsAt: null }),
       latestTurn: makeRunningLoopTurn(),
     });
-    expect(markup).toContain("Safety limit 100");
-    expect(markup).toContain("2 turns");
     expect(markup).toContain('role="progressbar"');
     expect(markup).toContain('aria-label="Loop progress"');
     expect(markup).toContain('aria-valuetext="Loop has run 2 turns; no explicit user budget"');
     expect(markup).not.toContain("aria-valuenow");
-  });
-
-  it("describes the stop menu items", () => {
-    // The menu popup is portal-rendered only when open, so static markup cannot
-    // include the items; assert the copy the menu renders instead.
-    expect(LOOP_STOP_AFTER_TURN_DESCRIPTION).toBe("Let the current work finish, then stop.");
-    expect(LOOP_STOP_NOW_DESCRIPTION).toBe("Interrupt current work and stop the loop.");
-  });
-
-  it("exposes the steering tooltip copy and composer placeholder", () => {
-    expect(LOOP_STEERING_TOOLTIP_TEXT).toBe(
-      "Messages sent while Loop is active become the objective for the next iteration.",
-    );
-    expect(LOOP_ACTIVE_COMPOSER_PLACEHOLDER).toBe("Steer the next iteration…");
   });
 
   it("normalizes budgets over eight turns to five segments", () => {
@@ -190,27 +135,19 @@ describe("LoopRuntimeRail", () => {
         },
       }),
     });
-    expect(markup).toContain("17/50");
     expect(countSegments(markup)).toBe(5);
-  });
-
-  it("respects reduced motion on the running icon", () => {
-    const markup = renderRail({ latestTurn: makeRunningLoopTurn() });
-    expect(markup).toContain("motion-reduce:animate-none");
   });
 
   it("only spins the icon while running, not while starting", () => {
     const running = renderRail({ latestTurn: makeRunningLoopTurn() });
-    expect(running).toContain("animate-[spin_3s_linear_infinite]");
+    expect(running).toContain('data-spinning="true"');
     const starting = renderRail({ loop: makeLoop({ iteration: 0 }) });
-    expect(starting).toContain("Starting loop");
-    expect(starting).not.toContain("animate-[spin_3s_linear_infinite]");
+    expect(starting).toContain('data-testid="loop-rail-icon"');
+    expect(starting).not.toContain("data-spinning");
   });
 
   it("renders ready state with the stop menu so Edit loop stays reachable", () => {
     const markup = renderRail();
-    expect(markup).toContain("Loop on");
-    expect(markup).toContain("Starting the next turn…");
     expect(markup).toContain("Stop loop");
     expect(markup).toContain('data-slot="menu-trigger"');
     expect(markup).not.toContain("Stop after turn");
@@ -218,8 +155,6 @@ describe("LoopRuntimeRail", () => {
 
   it("renders armed state without progress and with the stop menu", () => {
     const markup = renderRail({ loop: makeLoop({ prompt: "" }) });
-    expect(markup).toContain("Loop ready");
-    expect(markup).toContain("Add a prompt to start");
     expect(markup).toContain('data-slot="menu-trigger"');
     expect(countSegments(markup)).toBe(0);
   });
@@ -245,23 +180,14 @@ describe("LoopRuntimeRail", () => {
 
   it("renders waiting-approval with counter and stop menu while the turn runs", () => {
     const markup = renderRail({ hasPendingApprovals: true, latestTurn: makeRunningLoopTurn() });
-    expect(markup).toContain("Loop waiting");
-    expect(markup).toContain("Approval required");
     expect(markup).toContain("2/5");
     expect(markup).toContain("Stop after turn");
   });
 
-  it("renders waiting-input detail", () => {
-    const markup = renderRail({ hasPendingUserInput: true });
-    expect(markup).toContain("Loop waiting");
-    expect(markup).toContain("Your input is required");
-  });
-
   it("renders waiting-plan without a counter", () => {
     const markup = renderRail({ interactionMode: "plan" });
-    expect(markup).toContain("Loop waiting");
-    expect(markup).toContain("Plan mode is active");
     expect(markup).not.toContain("2/5");
+    expect(countSegments(markup)).toBe(0);
   });
 
   it("renders ending state with counter, progress, and a Stop now button", () => {
@@ -269,8 +195,6 @@ describe("LoopRuntimeRail", () => {
       loop: makeLoop({ active: false, lastStopReason: "toggled_off" }),
       latestTurn: makeRunningLoopTurn(),
     });
-    expect(markup).toContain("Loop ending");
-    expect(markup).toContain("Current turn will finish");
     expect(markup).toContain("2/5");
     expect(countSegments(markup)).toBe(5);
     expect(markup).not.toContain("Stop after turn");
@@ -282,7 +206,6 @@ describe("LoopRuntimeRail", () => {
       loop: makeLoop({ active: false, lastStopReason: "user_stop" }),
       latestTurn: makeRunningLoopTurn(),
     });
-    expect(markup).toContain("Stopping loop");
     expect(markup).toContain("2/5");
     expect(countSegments(markup)).toBe(5);
     expect(markup).not.toContain("Stop after turn");

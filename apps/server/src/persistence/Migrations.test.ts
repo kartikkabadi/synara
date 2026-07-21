@@ -266,15 +266,11 @@ managedAttachmentsLegacyLayer("managed attachment migration after private migrat
         [70, "AgentGatewayOperations"],
         [71, "ProjectionThreadsGatewayProvenance"],
         [72, "AgentGatewayOperationRetention"],
-        [73, "ProjectionThreadLoop"],
-        [74, "ProjectionThreadMessagePurpose"],
-        [75, "ProjectionTurnPurpose"],
-        [76, "QueuedTurnPromotionLoopIdentity"],
-        [77, "DropProjectionThreadLoopUpdatedAtIndex"],
+        [73, "Loop"],
       ]);
 
       const tracker = yield* trackerRows(sql);
-      assert.deepStrictEqual(tracker.slice(-24), [
+      assert.deepStrictEqual(tracker.slice(-20), [
         { migration_id: 54, name: "DurableProviderCommandDelivery" },
         { migration_id: 55, name: "ManagedAttachments" },
         { migration_id: 56, name: "CommandReceiptFingerprints" },
@@ -294,11 +290,7 @@ managedAttachmentsLegacyLayer("managed attachment migration after private migrat
         { migration_id: 70, name: "AgentGatewayOperations" },
         { migration_id: 71, name: "ProjectionThreadsGatewayProvenance" },
         { migration_id: 72, name: "AgentGatewayOperationRetention" },
-        { migration_id: 73, name: "ProjectionThreadLoop" },
-        { migration_id: 74, name: "ProjectionThreadMessagePurpose" },
-        { migration_id: 75, name: "ProjectionTurnPurpose" },
-        { migration_id: 76, name: "QueuedTurnPromotionLoopIdentity" },
-        { migration_id: 77, name: "DropProjectionThreadLoopUpdatedAtIndex" },
+        { migration_id: 73, name: "Loop" },
       ]);
       const preserved = yield* sql<{ readonly count: number }>`
         SELECT COUNT(*) AS count FROM orchestration_consumer_state
@@ -363,11 +355,7 @@ agentGatewayRetentionLegacyLayer(
         const executed = yield* runMigrations();
         assert.deepStrictEqual(executed, [
           [72, "AgentGatewayOperationRetention"],
-          [73, "ProjectionThreadLoop"],
-          [74, "ProjectionThreadMessagePurpose"],
-          [75, "ProjectionTurnPurpose"],
-          [76, "QueuedTurnPromotionLoopIdentity"],
-          [77, "DropProjectionThreadLoopUpdatedAtIndex"],
+          [73, "Loop"],
         ]);
 
         const columns = yield* sql<{ readonly name: string }>`

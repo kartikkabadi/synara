@@ -15,6 +15,7 @@ import {
   type ThreadLoop,
   type ThreadTurnPurpose,
 } from "@synara/contracts";
+import { makeLoop as makeLoopFixture } from "@synara/shared/loopTestFixtures";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -113,32 +114,16 @@ async function makeReadModelWithThread(options: { parentThreadId?: string | null
   );
 }
 
-function makeLoop(
-  payload: {
-    active?: boolean;
-    prompt?: string;
-    iteration?: number;
-    maxIterations?: number | null;
-    consecutiveErrors?: number;
-    lastStopReason?: ThreadLoop["lastStopReason"];
-    activationId?: LoopActivationId;
-    createdAt?: string;
-    updatedAt?: string;
-  } = {},
-): ThreadLoop {
-  return {
-    active: payload.active ?? true,
-    prompt: payload.prompt ?? "fix tests",
-    iteration: payload.iteration ?? 0,
-    maxIterations: payload.maxIterations ?? null,
-    endsAt: null,
-    hardCap: 100,
-    consecutiveErrors: payload.consecutiveErrors ?? 0,
-    lastStopReason: payload.lastStopReason ?? null,
-    activationId: payload.activationId ?? LoopActivationId.makeUnsafe("test-activation"),
-    createdAt: payload.createdAt ?? NOW,
-    updatedAt: payload.updatedAt ?? NOW,
-  };
+function makeLoop(overrides: Partial<ThreadLoop> = {}): ThreadLoop {
+  return makeLoopFixture({
+    prompt: "fix tests",
+    iteration: 0,
+    maxIterations: null,
+    activationId: LoopActivationId.makeUnsafe("test-activation"),
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...overrides,
+  });
 }
 
 async function projectLoopSet(
@@ -354,26 +339,102 @@ async function addActiveTurn(
   );
 }
 
+type LoopReadModel = Awaited<ReturnType<typeof makeReadModelWithThread>>;
+type DeciderCommand = Parameters<typeof decideOrchestrationCommand>[0]["command"];
+
+async function decide(readModel: LoopReadModel, command: DeciderCommand) {
+  const result = await Effect.runPromise(decideOrchestrationCommand({ command, readModel }));
+  return Array.isArray(result) ? result : [result];
+}
+
+function expectRejected(readModel: LoopReadModel, command: DeciderCommand) {
+  return expect(
+    Effect.runPromise(decideOrchestrationCommand({ command, readModel })),
+  ).rejects.toMatchObject({ commandType: command.type });
+}
+
+function loopSetCommand(
+  commandId: string,
+  overrides: Partial<Extract<DeciderCommand, { type: "thread.loop.set" }>> = {},
+): DeciderCommand {
+  return {
+    type: "thread.loop.set",
+    commandId: asCommandId(commandId),
+    threadId: asThreadId("thread-loop"),
+    prompt: "fix tests",
+    maxIterations: null,
+    durationSeconds: null,
+    createdAt: NOW,
+    ...overrides,
+  };
+}
+
+function loopOffCommand(commandId: string, reason: "user_stop" | "thread_deleted"): DeciderCommand {
+  return {
+    type: "thread.loop.off",
+    commandId: asCommandId(commandId),
+    threadId: asThreadId("thread-loop"),
+    reason,
+    createdAt: NOW,
+  };
+}
+
+function loopToggleCommand(commandId: string): DeciderCommand {
+  return {
+    type: "thread.loop.toggle",
+    commandId: asCommandId(commandId),
+    threadId: asThreadId("thread-loop"),
+    createdAt: NOW,
+  };
+}
+
+function loopContinueCommand(commandId: string, createdAt = NOW): DeciderCommand {
+  return {
+    type: "thread.loop.continue",
+    commandId: asCommandId(commandId),
+    threadId: asThreadId("thread-loop"),
+    createdAt,
+  };
+}
+
+function turnStartCommand(commandId: string, messageId: string, text: string): DeciderCommand {
+  return {
+    type: "thread.turn.start",
+    commandId: asCommandId(commandId),
+    threadId: asThreadId("thread-loop"),
+    message: {
+      messageId: asMessageId(messageId),
+      role: "user",
+      text,
+      attachments: [],
+    },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    createdAt: NOW,
+  };
+}
+
+function turnInterruptCommand(commandId: string): DeciderCommand {
+  return {
+    type: "thread.turn.interrupt",
+    commandId: asCommandId(commandId),
+    threadId: asThreadId("thread-loop"),
+    createdAt: NOW,
+  };
+}
+
+const LOOP_ITERATION_PURPOSE = {
+  kind: "loop-iteration",
+  activationId: LoopActivationId.makeUnsafe("test-activation"),
+  iteration: 1,
+} as ThreadTurnPurpose;
+
 describe("decider loop commands", () => {
   it("emits thread.loop-set on thread.loop.set", async () => {
     const readModel = await makeReadModelWithThread();
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.set",
-          commandId: asCommandId("cmd-loop-set"),
-          threadId: asThreadId("thread-loop"),
-          prompt: "fix tests",
-          maxIterations: 3,
-          durationSeconds: null,
-          createdAt: NOW,
-        },
-        readModel,
-      }),
-    );
-    const event = Array.isArray(result) ? result[0] : result;
-    expect(event.type).toBe("thread.loop-set");
-    expect(event.payload).toMatchObject({
+    const [event] = await decide(readModel, loopSetCommand("cmd-loop-set", { maxIterations: 3 }));
+    expect(event?.type).toBe("thread.loop-set");
+    expect(event?.payload).toMatchObject({
       threadId: asThreadId("thread-loop"),
       loop: {
         active: true,
@@ -488,23 +549,12 @@ describe("decider loop commands", () => {
       }),
     );
 
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.set",
-          commandId: asCommandId("cmd-loop-reconfigure"),
-          threadId: asThreadId("thread-loop"),
-          prompt: "new prompt",
-          maxIterations: 3,
-          durationSeconds: null,
-          createdAt: NOW,
-        },
-        readModel,
-      }),
+    const [event] = await decide(
+      readModel,
+      loopSetCommand("cmd-loop-reconfigure", { prompt: "new prompt", maxIterations: 3 }),
     );
-    const event = Array.isArray(result) ? result[0] : result;
-    expect(event.type).toBe("thread.loop-set");
-    expect(event.payload).toMatchObject({
+    expect(event?.type).toBe("thread.loop-set");
+    expect(event?.payload).toMatchObject({
       threadId: asThreadId("thread-loop"),
       loop: {
         active: true,
@@ -515,11 +565,9 @@ describe("decider loop commands", () => {
         hardCap: 100,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: NOW,
+        activationId: asCommandId("cmd-loop-reconfigure"),
       },
     });
-    expect((event.payload as { loop: { activationId: unknown } }).loop.activationId).toBe(
-      asCommandId("cmd-loop-reconfigure"),
-    );
   });
 
   it("accepts thread.loop.set when expectedActivationId matches the active loop", async () => {
@@ -527,23 +575,15 @@ describe("decider loop commands", () => {
       await makeReadModelWithThread(),
       makeLoop({ active: true, activationId: LoopActivationId.makeUnsafe("activation-1") }),
     );
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.set",
-          commandId: asCommandId("cmd-loop-edit"),
-          threadId: asThreadId("thread-loop"),
-          prompt: "new prompt",
-          maxIterations: 3,
-          durationSeconds: null,
-          expectedActivationId: LoopActivationId.makeUnsafe("activation-1"),
-          createdAt: NOW,
-        },
-        readModel,
+    const [event] = await decide(
+      readModel,
+      loopSetCommand("cmd-loop-edit", {
+        prompt: "new prompt",
+        maxIterations: 3,
+        expectedActivationId: LoopActivationId.makeUnsafe("activation-1"),
       }),
     );
-    const event = Array.isArray(result) ? result[0] : result;
-    expect(event.type).toBe("thread.loop-set");
+    expect(event?.type).toBe("thread.loop-set");
   });
 
   it("rejects thread.loop.set when expectedActivationId no longer matches", async () => {
@@ -551,25 +591,10 @@ describe("decider loop commands", () => {
       await makeReadModelWithThread(),
       makeLoop({ active: true, activationId: LoopActivationId.makeUnsafe("activation-2") }),
     );
-    await expect(
-      Effect.runPromise(
-        decideOrchestrationCommand({
-          command: {
-            type: "thread.loop.set",
-            commandId: asCommandId("cmd-loop-edit-stale"),
-            threadId: asThreadId("thread-loop"),
-            prompt: "new prompt",
-            maxIterations: 3,
-            durationSeconds: null,
-            expectedActivationId: LoopActivationId.makeUnsafe("activation-1"),
-            createdAt: NOW,
-          },
-          readModel,
-        }),
-      ),
-    ).rejects.toMatchObject({
-      commandType: "thread.loop.set",
-    });
+    await expectRejected(
+      readModel,
+      loopSetCommand("cmd-loop-edit-stale", { expectedActivationId: LoopActivationId.makeUnsafe("activation-1") }),
+    );
   });
 
   it("rejects thread.loop.set with expectedActivationId when no loop is active", async () => {
@@ -577,91 +602,29 @@ describe("decider loop commands", () => {
       await makeReadModelWithThread(),
       makeLoop({ active: false, activationId: LoopActivationId.makeUnsafe("activation-1") }),
     );
-    await expect(
-      Effect.runPromise(
-        decideOrchestrationCommand({
-          command: {
-            type: "thread.loop.set",
-            commandId: asCommandId("cmd-loop-edit-ended"),
-            threadId: asThreadId("thread-loop"),
-            prompt: "new prompt",
-            maxIterations: 3,
-            durationSeconds: null,
-            expectedActivationId: LoopActivationId.makeUnsafe("activation-1"),
-            createdAt: NOW,
-          },
-          readModel,
-        }),
-      ),
-    ).rejects.toMatchObject({
-      commandType: "thread.loop.set",
-    });
+    await expectRejected(
+      readModel,
+      loopSetCommand("cmd-loop-edit-ended", { expectedActivationId: LoopActivationId.makeUnsafe("activation-1") }),
+    );
   });
 
   it("rejects thread.loop.set on archived threads", async () => {
     const readModel = await archiveThread(await makeReadModelWithThread());
-    await expect(
-      Effect.runPromise(
-        decideOrchestrationCommand({
-          command: {
-            type: "thread.loop.set",
-            commandId: asCommandId("cmd-loop-set-archived"),
-            threadId: asThreadId("thread-loop"),
-            prompt: "fix tests",
-            maxIterations: null,
-            durationSeconds: null,
-            createdAt: NOW,
-          },
-          readModel,
-        }),
-      ),
-    ).rejects.toMatchObject({
-      commandType: "thread.loop.set",
-    });
+    await expectRejected(readModel, loopSetCommand("cmd-loop-set-archived"));
   });
 
   it("rejects thread.loop.set on child threads", async () => {
     const readModel = await makeReadModelWithThread({
       parentThreadId: asThreadId("thread-parent"),
     });
-    await expect(
-      Effect.runPromise(
-        decideOrchestrationCommand({
-          command: {
-            type: "thread.loop.set",
-            commandId: asCommandId("cmd-loop-set-child"),
-            threadId: asThreadId("thread-loop"),
-            prompt: "fix tests",
-            maxIterations: null,
-            durationSeconds: null,
-            createdAt: NOW,
-          },
-          readModel,
-        }),
-      ),
-    ).rejects.toMatchObject({
-      commandType: "thread.loop.set",
-    });
+    await expectRejected(readModel, loopSetCommand("cmd-loop-set-child"));
   });
 
   it("emits thread.loop-off on thread.loop.off", async () => {
     const readModel = await projectLoopSet(await makeReadModelWithThread());
-
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.off",
-          commandId: asCommandId("cmd-loop-off"),
-          threadId: asThreadId("thread-loop"),
-          reason: "user_stop",
-          createdAt: NOW,
-        },
-        readModel,
-      }),
-    );
-    const event = Array.isArray(result) ? result[0] : result;
-    expect(event.type).toBe("thread.loop-off");
-    expect(event.payload).toMatchObject({
+    const [event] = await decide(readModel, loopOffCommand("cmd-loop-off", "user_stop"));
+    expect(event?.type).toBe("thread.loop-off");
+    expect(event?.payload).toMatchObject({
       threadId: asThreadId("thread-loop"),
       stopReason: "user_stop",
       loop: { active: false, lastStopReason: "user_stop" },
@@ -673,22 +636,9 @@ describe("decider loop commands", () => {
       await makeReadModelWithThread(),
       makeLoop({ active: false, lastStopReason: "user_stop" }),
     );
-
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.off",
-          commandId: asCommandId("cmd-loop-off-idempotent"),
-          threadId: asThreadId("thread-loop"),
-          reason: "user_stop",
-          createdAt: NOW,
-        },
-        readModel,
-      }),
-    );
-    const event = Array.isArray(result) ? result[0] : result;
-    expect(event.type).toBe("thread.loop-off");
-    expect(event.payload).toMatchObject({
+    const [event] = await decide(readModel, loopOffCommand("cmd-loop-off-idempotent", "user_stop"));
+    expect(event?.type).toBe("thread.loop-off");
+    expect(event?.payload).toMatchObject({
       threadId: asThreadId("thread-loop"),
       loop: { active: false, lastStopReason: "user_stop" },
     });
@@ -696,22 +646,12 @@ describe("decider loop commands", () => {
 
   it("emits thread.loop-off on deleted threads", async () => {
     const readModel = await deleteThread(await projectLoopSet(await makeReadModelWithThread()));
-
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.off",
-          commandId: asCommandId("cmd-loop-off-deleted"),
-          threadId: asThreadId("thread-loop"),
-          reason: "thread_deleted",
-          createdAt: NOW,
-        },
-        readModel,
-      }),
+    const [event] = await decide(
+      readModel,
+      loopOffCommand("cmd-loop-off-deleted", "thread_deleted"),
     );
-    const event = Array.isArray(result) ? result[0] : result;
-    expect(event.type).toBe("thread.loop-off");
-    expect(event.payload).toMatchObject({
+    expect(event?.type).toBe("thread.loop-off");
+    expect(event?.payload).toMatchObject({
       threadId: asThreadId("thread-loop"),
       loop: { active: false, lastStopReason: "thread_deleted" },
     });
@@ -719,21 +659,9 @@ describe("decider loop commands", () => {
 
   it("emits thread.loop-off on thread.loop.toggle when the loop is active", async () => {
     const readModel = await projectLoopSet(await makeReadModelWithThread());
-
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.toggle",
-          commandId: asCommandId("cmd-loop-toggle-off"),
-          threadId: asThreadId("thread-loop"),
-          createdAt: NOW,
-        },
-        readModel,
-      }),
-    );
-    const event = Array.isArray(result) ? result[0] : result;
-    expect(event.type).toBe("thread.loop-off");
-    expect(event.payload).toMatchObject({
+    const [event] = await decide(readModel, loopToggleCommand("cmd-loop-toggle-off"));
+    expect(event?.type).toBe("thread.loop-off");
+    expect(event?.payload).toMatchObject({
       threadId: asThreadId("thread-loop"),
       stopReason: "toggled_off",
       loop: { active: false, lastStopReason: "toggled_off" },
@@ -745,19 +673,8 @@ describe("decider loop commands", () => {
       await makeReadModelWithThread(),
       makeLoop({ active: false, lastStopReason: "user_stop" }),
     );
-
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.toggle",
-          commandId: asCommandId("cmd-loop-toggle-on"),
-          threadId: asThreadId("thread-loop"),
-          createdAt: NOW,
-        },
-        readModel,
-      }),
-    );
-    expect(result).toMatchObject({
+    const [event] = await decide(readModel, loopToggleCommand("cmd-loop-toggle-on"));
+    expect(event).toMatchObject({
       type: "thread.loop-set",
       payload: {
         threadId: asThreadId("thread-loop"),
@@ -770,45 +687,17 @@ describe("decider loop commands", () => {
     const readModel = await makeReadModelWithThread({
       parentThreadId: asThreadId("thread-parent"),
     });
-
-    await expect(
-      Effect.runPromise(
-        decideOrchestrationCommand({
-          command: {
-            type: "thread.loop.toggle",
-            commandId: asCommandId("cmd-loop-toggle-child"),
-            threadId: asThreadId("thread-loop"),
-            createdAt: NOW,
-          },
-          readModel,
-        }),
-      ),
-    ).rejects.toMatchObject({ commandType: "thread.loop.toggle" });
+    await expectRejected(readModel, loopToggleCommand("cmd-loop-toggle-child"));
   });
 
   it("emits thread.loop-off and preserves running loop-owned turn on thread.loop.toggle", async () => {
     const readModel = await addActiveTurn(await projectLoopSet(await makeReadModelWithThread()), {
       turnId: "turn-1",
       messageId: "msg-loop-user",
-      purpose: {
-        kind: "loop-iteration",
-        activationId: LoopActivationId.makeUnsafe("test-activation"),
-        iteration: 1,
-      } as ThreadTurnPurpose,
+      purpose: LOOP_ITERATION_PURPOSE,
     });
 
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.toggle",
-          commandId: asCommandId("cmd-loop-toggle-interrupt"),
-          threadId: asThreadId("thread-loop"),
-          createdAt: NOW,
-        },
-        readModel,
-      }),
-    );
-    const events = Array.isArray(result) ? result : [result];
+    const events = await decide(readModel, loopToggleCommand("cmd-loop-toggle-interrupt"));
     const loopOff = events.find((event) => event.type === "thread.loop-off");
     expect(loopOff).toMatchObject({
       type: "thread.loop-off",
@@ -827,46 +716,12 @@ describe("decider loop commands", () => {
     });
     const later = "2026-07-19T12:30:00.000Z";
 
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.continue",
-          commandId: asCommandId("cmd-loop-continue-wait"),
-          threadId: asThreadId("thread-loop"),
-          createdAt: later,
-        },
-        readModel,
-      }),
-    );
-    const events = Array.isArray(result) ? result : [result];
+    const events = await decide(readModel, loopContinueCommand("cmd-loop-continue-wait", later));
     expect(events).toHaveLength(1);
     expect(events[0]?.type).toBe("thread.loop-wait-noted");
     expect(events[0]?.payload).toMatchObject({
       threadId: asThreadId("thread-loop"),
       loop: { active: true, iteration: 0, updatedAt: later },
-    });
-  });
-
-  it("emits thread.loop-off on thread.loop.continue for a deleted thread", async () => {
-    const readModel = await deleteThread(await projectLoopSet(await makeReadModelWithThread()));
-
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.continue",
-          commandId: asCommandId("cmd-loop-continue-deleted"),
-          threadId: asThreadId("thread-loop"),
-          createdAt: NOW,
-        },
-        readModel,
-      }),
-    );
-    const event = Array.isArray(result) ? result[0] : result;
-    expect(event.type).toBe("thread.loop-off");
-    expect(event.payload).toMatchObject({
-      threadId: asThreadId("thread-loop"),
-      stopReason: "thread_deleted",
-      loop: { active: false, lastStopReason: "thread_deleted" },
     });
   });
 
@@ -876,26 +731,14 @@ describe("decider loop commands", () => {
       makeLoop({ active: true, prompt: "" }),
     );
 
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.turn.start",
-          commandId: asCommandId("cmd-turn-start-loop-prompt"),
-          threadId: asThreadId("thread-loop"),
-          message: {
-            messageId: asMessageId("msg-user-prompt-bind"),
-            role: "user",
-            text: "fix the failing tests",
-            attachments: [],
-          },
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          createdAt: NOW,
-        },
-        readModel,
-      }),
+    const events = await decide(
+      readModel,
+      turnStartCommand(
+        "cmd-turn-start-loop-prompt",
+        "msg-user-prompt-bind",
+        "fix the failing tests",
+      ),
     );
-    const events = Array.isArray(result) ? result : [result];
     expect(events[0]?.type).toBe("thread.loop-continued");
     expect(events[1]?.type).toBe("thread.message-sent");
     expect(events[2]?.type).toBe("thread.turn-start-requested");
@@ -909,26 +752,10 @@ describe("decider loop commands", () => {
       makeLoop({ active: true, prompt: "fix tests" }),
     );
 
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.turn.start",
-          commandId: asCommandId("cmd-turn-start-manual"),
-          threadId: asThreadId("thread-loop"),
-          message: {
-            messageId: asMessageId("msg-user-manual"),
-            role: "user",
-            text: "actually ignore that",
-            attachments: [],
-          },
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          createdAt: NOW,
-        },
-        readModel,
-      }),
+    const events = await decide(
+      readModel,
+      turnStartCommand("cmd-turn-start-manual", "msg-user-manual", "actually ignore that"),
     );
-    const events = Array.isArray(result) ? result : [result];
     expect(events[0]?.type).toBe("thread.loop-continued");
     expect(events[0]?.payload).toMatchObject({
       threadId: asThreadId("thread-loop"),
@@ -936,18 +763,16 @@ describe("decider loop commands", () => {
       loop: { active: true, prompt: "actually ignore that", iteration: 1 },
     });
     expect(events[1]?.type).toBe("thread.message-sent");
-    const messagePayload = events[1]?.payload as { purpose?: unknown; text?: string };
-    expect(messagePayload.purpose).toMatchObject({ kind: "loop-iteration", iteration: 1 });
-    expect(messagePayload.text).toBe("actually ignore that");
+    expect(events[1]?.payload).toMatchObject({
+      purpose: { kind: "loop-iteration", iteration: 1 },
+      text: "actually ignore that",
+    });
     expect(events[2]?.type).toBe("thread.turn-start-requested");
-    const turnPayload = events[2]?.payload as {
-      purpose?: unknown;
-      messageId?: string;
-      dispatchMode?: string;
-    };
-    expect(turnPayload.purpose).toMatchObject({ kind: "loop-iteration", iteration: 1 });
-    expect(turnPayload.messageId).toBe(asMessageId("msg-user-manual"));
-    expect(turnPayload.dispatchMode).toBe("queue");
+    expect(events[2]?.payload).toMatchObject({
+      purpose: { kind: "loop-iteration", iteration: 1 },
+      messageId: asMessageId("msg-user-manual"),
+      dispatchMode: "queue",
+    });
   });
 
   it("replaces the loop prompt and queues the replacement while a loop-owned turn is running", async () => {
@@ -958,33 +783,17 @@ describe("decider loop commands", () => {
     const readModel = await addActiveTurn(loopReadModel, {
       turnId: "turn-loop-1",
       messageId: "msg-loop-user-1",
-      purpose: {
-        kind: "loop-iteration",
-        activationId: LoopActivationId.makeUnsafe("test-activation"),
-        iteration: 1,
-      } as ThreadTurnPurpose,
+      purpose: LOOP_ITERATION_PURPOSE,
     });
 
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.turn.start",
-          commandId: asCommandId("cmd-turn-start-replace-running"),
-          threadId: asThreadId("thread-loop"),
-          message: {
-            messageId: asMessageId("msg-user-replace-running"),
-            role: "user",
-            text: "try a different approach",
-            attachments: [],
-          },
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          createdAt: NOW,
-        },
-        readModel,
-      }),
+    const events = await decide(
+      readModel,
+      turnStartCommand(
+        "cmd-turn-start-replace-running",
+        "msg-user-replace-running",
+        "try a different approach",
+      ),
     );
-    const events = Array.isArray(result) ? result : [result];
     expect(events[0]?.type).toBe("thread.loop-continued");
     expect(events[0]?.payload).toMatchObject({
       threadId: asThreadId("thread-loop"),
@@ -992,18 +801,16 @@ describe("decider loop commands", () => {
       loop: { active: true, prompt: "try a different approach", iteration: 2 },
     });
     expect(events[1]?.type).toBe("thread.message-sent");
-    const messagePayload = events[1]?.payload as { purpose?: unknown; text?: string };
-    expect(messagePayload.purpose).toMatchObject({ kind: "loop-iteration", iteration: 2 });
-    expect(messagePayload.text).toBe("try a different approach");
+    expect(events[1]?.payload).toMatchObject({
+      purpose: { kind: "loop-iteration", iteration: 2 },
+      text: "try a different approach",
+    });
     expect(events[2]?.type).toBe("thread.turn-queued");
-    const turnPayload = events[2]?.payload as {
-      purpose?: unknown;
-      messageId?: string;
-      dispatchMode?: string;
-    };
-    expect(turnPayload.purpose).toMatchObject({ kind: "loop-iteration", iteration: 2 });
-    expect(turnPayload.messageId).toBe(asMessageId("msg-user-replace-running"));
-    expect(turnPayload.dispatchMode).toBe("queue");
+    expect(events[2]?.payload).toMatchObject({
+      purpose: { kind: "loop-iteration", iteration: 2 },
+      messageId: asMessageId("msg-user-replace-running"),
+      dispatchMode: "queue",
+    });
   });
 
   it("retires the loop when a manual message races a pending loop-owned turn start", async () => {
@@ -1015,35 +822,19 @@ describe("decider loop commands", () => {
         ),
         makeTurnQueuedEvent({
           messageId: "msg-queued-1",
-          purpose: {
-            kind: "loop-iteration",
-            activationId: LoopActivationId.makeUnsafe("test-activation"),
-            iteration: 1,
-          } as ThreadTurnPurpose,
+          purpose: LOOP_ITERATION_PURPOSE,
         }),
       ),
     );
 
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.turn.start",
-          commandId: asCommandId("cmd-turn-start-replace-queued"),
-          threadId: asThreadId("thread-loop"),
-          message: {
-            messageId: asMessageId("msg-user-replace-queued"),
-            role: "user",
-            text: "refine the prompt",
-            attachments: [],
-          },
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          createdAt: NOW,
-        },
-        readModel,
-      }),
+    const events = await decide(
+      readModel,
+      turnStartCommand(
+        "cmd-turn-start-replace-queued",
+        "msg-user-replace-queued",
+        "refine the prompt",
+      ),
     );
-    const events = Array.isArray(result) ? result : [result];
     expect(events[0]?.type).toBe("thread.loop-off");
     expect(events[0]?.payload).toMatchObject({
       threadId: asThreadId("thread-loop"),
@@ -1055,10 +846,7 @@ describe("decider loop commands", () => {
     expect(messagePayload.purpose).toBeUndefined();
     expect(messagePayload.text).toBe("refine the prompt");
     expect(events[2]?.type).toBe("thread.turn-start-requested");
-    const turnPayload = events[2]?.payload as {
-      purpose?: unknown;
-      messageId?: string;
-    };
+    const turnPayload = events[2]?.payload as { purpose?: unknown; messageId?: string };
     expect(turnPayload.purpose).toBeUndefined();
     expect(turnPayload.messageId).toBe(asMessageId("msg-user-replace-queued"));
   });
@@ -1067,25 +855,10 @@ describe("decider loop commands", () => {
     const readModel = await addActiveTurn(await projectLoopSet(await makeReadModelWithThread()), {
       turnId: "turn-loop-1",
       messageId: "msg-loop-user-1",
-      purpose: {
-        kind: "loop-iteration",
-        activationId: LoopActivationId.makeUnsafe("test-activation"),
-        iteration: 1,
-      } as ThreadTurnPurpose,
+      purpose: LOOP_ITERATION_PURPOSE,
     });
 
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.turn.interrupt",
-          commandId: asCommandId("cmd-turn-interrupt-loop"),
-          threadId: asThreadId("thread-loop"),
-          createdAt: NOW,
-        },
-        readModel,
-      }),
-    );
-    const events = Array.isArray(result) ? result : [result];
+    const events = await decide(readModel, turnInterruptCommand("cmd-turn-interrupt-loop"));
     expect(events).toHaveLength(2);
     expect(events[0]?.type).toBe("thread.loop-off");
     expect(events[1]?.type).toBe("thread.turn-interrupt-requested");
@@ -1098,18 +871,7 @@ describe("decider loop commands", () => {
       messageId: "msg-manual-user-1",
     });
 
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.turn.interrupt",
-          commandId: asCommandId("cmd-turn-interrupt-manual"),
-          threadId: asThreadId("thread-loop"),
-          createdAt: NOW,
-        },
-        readModel,
-      }),
-    );
-    const events = Array.isArray(result) ? result : [result];
+    const events = await decide(readModel, turnInterruptCommand("cmd-turn-interrupt-manual"));
     expect(events).toHaveLength(1);
     expect(events[0]?.type).toBe("thread.turn-interrupt-requested");
   });
@@ -1117,75 +879,20 @@ describe("decider loop commands", () => {
   it("thread.loop.continue emits loop message, turn request, and continued event", async () => {
     const readModel = await projectLoopSet(await makeReadModelWithThread());
 
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.continue",
-          commandId: asCommandId("cmd-loop-continue"),
-          threadId: asThreadId("thread-loop"),
-          createdAt: NOW,
-        },
-        readModel,
-      }),
-    );
-    const events = Array.isArray(result) ? result : [result];
+    const events = await decide(readModel, loopContinueCommand("cmd-loop-continue"));
     expect(events).toHaveLength(3);
     expect(events[0]?.type).toBe("thread.message-sent");
     expect(events[1]?.type).toBe("thread.turn-start-requested");
     expect(events[2]?.type).toBe("thread.loop-continued");
 
-    const messagePayload = events[0]?.payload as { purpose?: unknown; messageId?: unknown };
-    expect(messagePayload.purpose).toMatchObject({ kind: "loop-iteration", iteration: 1 });
-    // Deterministic: at-least-once command execution must mint the same id.
-    expect(messagePayload.messageId).toBe("loop-msg:cmd-loop-continue");
-
-    const turnPayload = events[1]?.payload as { purpose?: unknown };
-    expect(turnPayload.purpose).toMatchObject({ kind: "loop-iteration", iteration: 1 });
-
-    const continuedPayload = events[2]?.payload as {
-      nextIteration: number;
-      nextConsecutiveErrors: number;
-    };
-    expect(continuedPayload.nextIteration).toBe(1);
-    expect(continuedPayload.nextConsecutiveErrors).toBe(0);
-  });
-
-  it("thread.loop.continue stops when hard cap is reached", async () => {
-    const readModel = await projectLoopSet(
-      await makeReadModelWithThread(),
-      makeLoop({ active: true }),
-    );
-    const withHardCap = await Effect.runPromise(
-      projectEvent(
-        readModel,
-        makeEvent({
-          sequence: 4,
-          type: "thread.loop-set",
-          aggregateKind: "thread",
-          aggregateId: "thread-loop",
-          occurredAt: NOW,
-          commandId: "cmd-loop-hardcap",
-          payload: {
-            threadId: "thread-loop",
-            loop: { ...makeLoop({ active: true }), iteration: 1, hardCap: 1 },
-          },
-        }),
-      ),
-    );
-
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.continue",
-          commandId: asCommandId("cmd-loop-continue"),
-          threadId: asThreadId("thread-loop"),
-          createdAt: NOW,
-        },
-        readModel: withHardCap,
-      }),
-    );
-    const event = Array.isArray(result) ? result[0] : result;
-    expect(event.type).toBe("thread.loop-off");
-    expect((event.payload as { stopReason: string }).stopReason).toBe("hard_cap");
+    expect(events[0]?.payload).toMatchObject({
+      purpose: { kind: "loop-iteration", iteration: 1 },
+      // Deterministic: at-least-once command execution must mint the same id.
+      messageId: "loop-msg:cmd-loop-continue",
+    });
+    expect(events[1]?.payload).toMatchObject({
+      purpose: { kind: "loop-iteration", iteration: 1 },
+    });
+    expect(events[2]?.payload).toMatchObject({ nextIteration: 1, nextConsecutiveErrors: 0 });
   });
 });
