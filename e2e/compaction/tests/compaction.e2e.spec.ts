@@ -117,7 +117,6 @@ async function openWorkspace(page: Page): Promise<void> {
 }
 
 async function selectProvider(page: Page, spec: ProviderSpec): Promise<void> {
-<<<<<<< HEAD
   // The composer renders either a combined model+effort picker (aria-label
   // "Change model and reasoning") or a standalone provider/model picker whose
   // Base UI menu trigger carries data-slot="menu-trigger".
