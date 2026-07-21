@@ -4,35 +4,9 @@
 // Routine lifecycle stops (budget, user stop, toggle) stay toast-free; the
 // runtime rail and transcript record communicate those.
 
-import type { LoopStopReason, ThreadId, ThreadLoop } from "@synara/contracts";
+import type { ThreadId, ThreadLoop } from "@synara/contracts";
 import { useEffect, useRef } from "react";
-
-export interface LoopStopErrorToastCopy {
-  title: string;
-  description: string;
-}
-
-export function getLoopStopErrorToastCopy(reason: LoopStopReason): LoopStopErrorToastCopy | null {
-  switch (reason) {
-    case "consecutive_errors":
-      return {
-        title: "Loop stopped after repeated errors",
-        description: "Review the latest error before restarting.",
-      };
-    case "prompt_invalid":
-      return {
-        title: "Loop stopped",
-        description: "The saved objective was invalid.",
-      };
-    case "thread_unrunnable":
-      return {
-        title: "Loop stopped",
-        description: "This thread is no longer available.",
-      };
-    default:
-      return null;
-  }
-}
+import { formatLoopStopReasonShort } from "./loopPresentation";
 
 interface LoopStopSnapshot {
   activationId: string;
@@ -69,7 +43,7 @@ export function useLoopStopErrorToast(
       snapshot: loop == null ? null : { activationId: loop.activationId, active: loop.active },
     };
     if (!shouldToastLoopStop(previous, loop)) return;
-    const copy = loop?.lastStopReason ? getLoopStopErrorToastCopy(loop.lastStopReason) : null;
+    const copy = loop?.lastStopReason ? formatLoopStopReasonShort(loop.lastStopReason) : null;
     if (copy === null) return;
     addToast({ ...copy, threadId });
   }, [threadId, loop, addToast]);
