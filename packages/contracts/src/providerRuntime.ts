@@ -334,6 +334,43 @@ export const ThreadTokenUsageSnapshot = Schema.Struct({
 });
 export type ThreadTokenUsageSnapshot = typeof ThreadTokenUsageSnapshot.Type;
 
+// How a compaction pass is (or would be) triggered for a thread.
+export const CompactionTrigger = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("percent"), percent: Schema.Number }),
+  Schema.Struct({ kind: Schema.Literal("remaining-tokens"), reserveTokens: Schema.Number }),
+  Schema.Struct({ kind: Schema.Literal("absolute-used-tokens"), usedTokens: Schema.Number }),
+  Schema.Struct({ kind: Schema.Literal("opaque") }),
+]);
+export type CompactionTrigger = typeof CompactionTrigger.Type;
+
+export const CompactionOperationSummary = Schema.Struct({
+  requestId: Schema.optional(TrimmedNonEmptyStringSchema),
+  owner: Schema.Literals(["provider", "synara"]),
+  trigger: Schema.Literals(["manual", "provider-auto", "synara-auto"]),
+  result: Schema.Literals(["completed", "failed"]),
+  sessionEffect: Schema.Literals(["same-session", "session-rollover", "runtime-restart"]),
+  startedAt: Schema.optional(TrimmedNonEmptyStringSchema),
+  completedAt: Schema.optional(TrimmedNonEmptyStringSchema),
+  beforeUsage: Schema.optional(ThreadTokenUsageSnapshot),
+  afterUsage: Schema.optional(ThreadTokenUsageSnapshot),
+  failureDetail: Schema.optional(TrimmedNonEmptyStringSchema),
+});
+export type CompactionOperationSummary = typeof CompactionOperationSummary.Type;
+
+// Per-thread runtime view of compaction: who owns it, whether manual
+// compaction is currently available, and what the last pass did.
+export const ThreadCompactionRuntimeStatus = Schema.Struct({
+  owner: Schema.Literals(["provider", "synara", "none"]),
+  providerAutoEnabled: Schema.NullOr(Schema.Boolean),
+  manualAvailability: Schema.Struct({
+    available: Schema.Boolean,
+    reason: Schema.optional(TrimmedNonEmptyStringSchema),
+  }),
+  trigger: Schema.optional(CompactionTrigger),
+  lastCompaction: Schema.optional(CompactionOperationSummary),
+});
+export type ThreadCompactionRuntimeStatus = typeof ThreadCompactionRuntimeStatus.Type;
+
 const ThreadTokenUsageUpdatedPayload = Schema.Struct({
   usage: ThreadTokenUsageSnapshot,
 });
