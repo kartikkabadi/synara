@@ -7,7 +7,7 @@ import {
   islandCollapsedSize,
   islandExpandedSize,
   islandHoverSize,
-  islandStateBounds,
+  islandSurfaceRect,
   islandWindowBounds,
   resolveIslandEnabled,
   type IslandDisplayMetrics,
@@ -81,28 +81,33 @@ describe("island sizes", () => {
 });
 
 describe("island anchoring", () => {
-  it("pre-sizes the window to the expanded bounds, flush with the screen top in notch mode", () => {
+  it("pre-sizes the window past the max surface, flush with the screen top in notch mode", () => {
     const notch = detectNotch("darwin", notchedDisplay);
     expect(islandWindowBounds(notchedDisplay, notch)).toEqual({
-      x: 476,
+      x: 428,
       y: 0,
-      width: 560,
-      height: 320,
+      width: 656,
+      height: 376,
     });
+  });
+
+  it("widens the window for a housing wider than the max surface", () => {
+    const wideNotch = { width: 620, height: 38 };
+    expect(islandWindowBounds(notchedDisplay, wideNotch).width).toBe(620 + 60 + 96);
   });
 
   it("floats below the work area top without a notch", () => {
     expect(islandWindowBounds(plainDisplay, null)).toEqual({
-      x: 680,
+      x: 632,
       y: 31,
-      width: 560,
-      height: 320,
+      width: 656,
+      height: 376,
     });
   });
 
   it("anchors to displays with non-zero origins", () => {
     const bounds = islandWindowBounds(secondaryDisplay, null);
-    expect(bounds.x).toBe(1920 + (1920 - 560) / 2);
+    expect(bounds.x).toBe(1920 + (1920 - 656) / 2);
     expect(bounds.y).toBe(-175 + 6);
   });
 
@@ -119,28 +124,30 @@ describe("island anchoring", () => {
     expect(islandWindowBounds(autoHideDisplay, null, "win32").y).toBe(6);
   });
 
-  it("sizes Linux state bounds per window state", () => {
-    expect(islandStateBounds("collapsed", windowsDisplay, null)).toMatchObject({
+  it("centers the surface rect at the window top per state", () => {
+    expect(islandSurfaceRect("collapsed", windowsDisplay, null)).toEqual({
+      x: (2560 - 180) / 2,
+      y: 6,
       width: 180,
       height: 32,
-      y: 6,
     });
-    expect(islandStateBounds("hover", windowsDisplay, null)).toMatchObject({
+    expect(islandSurfaceRect("hover", windowsDisplay, null)).toMatchObject({
       width: 420,
       height: 104,
+      y: 6,
     });
-    expect(islandStateBounds("expanded", windowsDisplay, null)).toMatchObject({
+    expect(islandSurfaceRect("expanded", windowsDisplay, null)).toMatchObject({
       width: 560,
       height: 320,
     });
   });
 
-  it("sizes Linux state bounds from the session count", () => {
-    expect(islandStateBounds("collapsed", windowsDisplay, null, "linux", 0)).toMatchObject({
+  it("sizes the surface rect from the session count", () => {
+    expect(islandSurfaceRect("collapsed", windowsDisplay, null, "linux", 0)).toMatchObject({
       width: 64,
       height: 30,
     });
-    expect(islandStateBounds("expanded", windowsDisplay, null, "linux", 2)).toMatchObject({
+    expect(islandSurfaceRect("expanded", windowsDisplay, null, "linux", 2)).toMatchObject({
       width: 560,
       height: 164,
     });

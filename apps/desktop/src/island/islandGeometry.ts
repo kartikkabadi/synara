@@ -5,7 +5,8 @@
 import type { IslandNotchInfo, IslandWindowState } from "@synara/contracts";
 import {
   DEFAULT_NOTCH_WIDTH,
-  ISLAND_EXPANDED_SIZE,
+  ISLAND_WINDOW_MARGIN,
+  ISLAND_WINDOW_SIZE,
   islandStateSize,
   type IslandSize,
 } from "@synara/shared/islandGeometry";
@@ -13,6 +14,8 @@ import {
 export {
   DEFAULT_NOTCH_WIDTH,
   ISLAND_EXPANDED_SIZE,
+  ISLAND_WINDOW_MARGIN,
+  ISLAND_WINDOW_SIZE,
   ISLAND_EXPANDED_EMPTY_SIZE,
   ISLAND_FLOATING_COLLAPSED_SIZE,
   ISLAND_HOVER_HEIGHT,
@@ -81,31 +84,42 @@ function islandAnchoredBounds(
   return { x: centerX, y, width: size.width, height: size.height };
 }
 
-// macOS/Windows: the window is pre-sized to the max expanded bounds and the
-// renderer animates an inner container, so setBounds never animates.
+// Every platform: the window is pre-sized to the max surface plus shadow
+// margin and never resizes per state — the renderer morphs an inner surface,
+// so setBounds only ever runs on display changes.
 export function islandWindowBounds(
   metrics: IslandDisplayMetrics,
   notch: IslandNotchInfo | null,
   platform?: NodeJS.Platform,
 ): IslandRect {
-  return islandAnchoredBounds(ISLAND_EXPANDED_SIZE, metrics, notch, platform);
+  const width = notch
+    ? Math.max(ISLAND_WINDOW_SIZE.width, notch.width + 60 + ISLAND_WINDOW_MARGIN.x * 2)
+    : ISLAND_WINDOW_SIZE.width;
+  return islandAnchoredBounds(
+    { width, height: ISLAND_WINDOW_SIZE.height },
+    metrics,
+    notch,
+    platform,
+  );
 }
 
-// Linux (no click-through forwarding): the window only spans the current
-// state's bounds and resizes between states without animation.
-export function islandStateBounds(
+// Screen-space rect of the visible surface (top-center of the window) for the
+// Linux cursor-poll click-through model.
+export function islandSurfaceRect(
   state: IslandWindowState,
   metrics: IslandDisplayMetrics,
   notch: IslandNotchInfo | null,
   platform?: NodeJS.Platform,
   sessionCount?: number,
 ): IslandRect {
-  return islandAnchoredBounds(
-    islandStateSize(state, notch, sessionCount),
-    metrics,
-    notch,
-    platform,
-  );
+  const window = islandWindowBounds(metrics, notch, platform);
+  const size = islandStateSize(state, notch, sessionCount);
+  return {
+    x: window.x + Math.round((window.width - size.width) / 2),
+    y: window.y,
+    width: size.width,
+    height: size.height,
+  };
 }
 
 // null means "use the platform default": on for macOS/Windows, off for Linux.

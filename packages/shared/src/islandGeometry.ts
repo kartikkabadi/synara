@@ -15,6 +15,15 @@ export interface IslandSize {
 export const DEFAULT_NOTCH_WIDTH = 180;
 
 export const ISLAND_EXPANDED_SIZE: IslandSize = { width: 560, height: 320 };
+
+// The BrowserWindow is pre-sized to the maximum surface plus room for the
+// ambient shadow + glow so nothing clips at the window edge; the top edge
+// stays flush with the anchor so the surface can fuse with the screen top.
+export const ISLAND_WINDOW_MARGIN = { x: 48, bottom: 56 } as const;
+export const ISLAND_WINDOW_SIZE: IslandSize = {
+  width: ISLAND_EXPANDED_SIZE.width + ISLAND_WINDOW_MARGIN.x * 2,
+  height: ISLAND_EXPANDED_SIZE.height + ISLAND_WINDOW_MARGIN.bottom,
+};
 export const ISLAND_EXPANDED_EMPTY_SIZE: IslandSize = { width: 560, height: 180 };
 export const ISLAND_FLOATING_COLLAPSED_SIZE: IslandSize = { width: 180, height: 32 };
 // With zero sessions the floating pill shrinks to just the seated orb.

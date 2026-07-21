@@ -16,12 +16,17 @@ import {
 import { ISLAND_IPC_CHANNELS } from "../ipcChannels";
 import {
   detectNotch,
-  islandStateBounds,
+  islandSurfaceRect,
   islandWindowBounds,
   type IslandDisplayMetrics,
 } from "./islandGeometry";
 
 export const ISLAND_GLOBAL_SHORTCUT = "CommandOrControl+Shift+I";
+
+// Linux click-through: setIgnoreMouseEvents has no `forward` there, so the
+// main process polls the cursor against the current surface rect instead.
+export const LINUX_CURSOR_POLL_MS = 100;
+export const LINUX_CURSOR_EXIT_GRACE_MS = 40;
 
 const decodeIslandSettings = Schema.decodeUnknownSync(DesktopIslandSettings);
 
@@ -56,6 +61,9 @@ export class IslandWindowManager {
   #state: IslandWindowState = "collapsed";
   #sessionCount = 0;
   #detachDisplayListeners: (() => void) | null = null;
+  #cursorPoll: ReturnType<typeof setInterval> | null = null;
+  #cursorInteractive = false;
+  #cursorExitAt: number | null = null;
 
   constructor(options: IslandWindowManagerOptions) {
     this.#options = options;
@@ -90,12 +98,12 @@ export class IslandWindowManager {
 
     const metrics = primaryDisplayMetrics();
     const notch = this.#detectNotch();
-    const bounds = this.isLinux
-      ? islandStateBounds(this.#state, metrics, notch, this.#options.platform, this.#sessionCount)
-      : islandWindowBounds(metrics, notch, this.#options.platform);
+    const bounds = islandWindowBounds(metrics, notch, this.#options.platform);
 
     const window = new BrowserWindow({
       ...bounds,
+      // X11 treats toolbar windows as undecorated utility surfaces.
+      ...(this.isLinux ? { type: "toolbar" } : {}),
       frame: false,
       transparent: true,
       hasShadow: false,
@@ -134,10 +142,10 @@ export class IslandWindowManager {
     // At rest the window ignores mouse events so it never blocks clicks on
     // whatever sits underneath. `forward` (macOS/Windows only) still delivers
     // move events so the renderer can toggle interactivity on hover. On Linux
-    // the window only ever spans the pill, so click-through is skipped.
-    if (!this.isLinux) {
-      window.setIgnoreMouseEvents(true, { forward: true });
-    }
+    // forwarding is unsupported, so a main-process cursor poll toggles
+    // interactivity against the current surface rect instead.
+    window.setIgnoreMouseEvents(true, this.isLinux ? undefined : { forward: true });
+    if (this.isLinux) this.#startCursorPoll();
 
     window.once("ready-to-show", () => {
       window.showInactive();
@@ -157,6 +165,7 @@ export class IslandWindowManager {
     globalShortcut.unregister(ISLAND_GLOBAL_SHORTCUT);
     this.#detachDisplayListeners?.();
     this.#detachDisplayListeners = null;
+    this.#stopCursorPoll();
     const window = this.#window;
     this.#window = null;
     if (window && !window.isDestroyed()) {
@@ -172,21 +181,11 @@ export class IslandWindowManager {
     window.setIgnoreMouseEvents(ignore, ignore ? { forward: true } : undefined);
   }
 
+  // Pure bookkeeping: the window never resizes per state; state + sessionCount
+  // only feed the Linux cursor-rect math.
   setState(state: IslandWindowState, sessionCount?: number): void {
     this.#state = state;
     if (sessionCount !== undefined) this.#sessionCount = sessionCount;
-    if (!this.isLinux) return;
-    const window = this.#window;
-    if (!window || window.isDestroyed()) return;
-    window.setBounds(
-      islandStateBounds(
-        state,
-        primaryDisplayMetrics(),
-        this.#detectNotch(),
-        this.#options.platform,
-        this.#sessionCount,
-      ),
-    );
   }
 
   toggleExpanded(): void {
@@ -203,11 +202,57 @@ export class IslandWindowManager {
     if (!window || window.isDestroyed()) return;
     const metrics = primaryDisplayMetrics();
     const notch = this.#detectNotch();
-    window.setBounds(
-      this.isLinux
-        ? islandStateBounds(this.#state, metrics, notch, this.#options.platform, this.#sessionCount)
-        : islandWindowBounds(metrics, notch, this.#options.platform),
+    // Single setBounds call (never setPosition alone) so WMs that re-clamp
+    // size on move cannot drift the window.
+    window.setBounds(islandWindowBounds(metrics, notch, this.#options.platform));
+  }
+
+  #startCursorPoll(): void {
+    if (this.#cursorPoll) return;
+    this.#cursorPoll = setInterval(() => this.#pollCursor(), LINUX_CURSOR_POLL_MS);
+  }
+
+  #stopCursorPoll(): void {
+    if (this.#cursorPoll) clearInterval(this.#cursorPoll);
+    this.#cursorPoll = null;
+    this.#cursorInteractive = false;
+    this.#cursorExitAt = null;
+  }
+
+  #pollCursor(): void {
+    const window = this.#window;
+    if (!window || window.isDestroyed() || !window.isVisible()) return;
+    const rect = islandSurfaceRect(
+      this.#state,
+      primaryDisplayMetrics(),
+      this.#detectNotch(),
+      this.#options.platform,
+      this.#sessionCount,
     );
+    const cursor = screen.getCursorScreenPoint();
+    const inside =
+      cursor.x >= rect.x &&
+      cursor.x < rect.x + rect.width &&
+      cursor.y >= rect.y &&
+      cursor.y < rect.y + rect.height;
+    if (inside) {
+      this.#cursorExitAt = null;
+      if (!this.#cursorInteractive) {
+        this.#cursorInteractive = true;
+        window.setIgnoreMouseEvents(false);
+      }
+      return;
+    }
+    if (!this.#cursorInteractive) return;
+    const now = Date.now();
+    if (this.#cursorExitAt === null) {
+      this.#cursorExitAt = now;
+      return;
+    }
+    if (now - this.#cursorExitAt < LINUX_CURSOR_EXIT_GRACE_MS) return;
+    this.#cursorExitAt = null;
+    this.#cursorInteractive = false;
+    window.setIgnoreMouseEvents(true);
   }
 
   #registerShortcut(): void {
