@@ -200,6 +200,17 @@
   opacity: 0.45;
 }
 
+/* Expanded empty state centers its hero orb, so the interior wash must be
+   symmetric around it — the collapsed/hover left-anchored wash would read as a
+   stray off-center light patch. */
+.island-surface[data-island-state="expanded"][data-island-empty="true"] .island-state-wash {
+  background: radial-gradient(
+    140px 90px at 50% 55%,
+    color-mix(in oklab, hsl(var(--island-hue, 225) 90% 60%) 16%, transparent),
+    transparent 75%
+  );
+}
+
 /* ---- Content choreography -------------------------------------------- */
 
 /* Cross-fade swap: both layers stay mounted — the outgoing overlay fades over
@@ -214,6 +225,27 @@
 .island-enter-body {
   animation: island-enter calc(var(--island-morph-ms, 180ms) * 0.5) ease-out
     calc(var(--island-morph-ms, 180ms) * 0.3) both;
+}
+
+/* Close morph gets a tighter hand-off: the outgoing layer is fully faded by
+   45% of the morph before the incoming collapsed content enters at 50%, so no
+   frame double-exposes the rows over the pill. */
+.island-surface[data-island-state="collapsed"] .island-leave {
+  animation-duration: calc(var(--island-morph-ms, 180ms) * 0.45);
+}
+
+.island-surface[data-island-state="collapsed"] .island-enter-header,
+.island-surface[data-island-state="collapsed"] .island-enter-body {
+  animation-duration: calc(var(--island-morph-ms, 180ms) * 0.5);
+  animation-delay: calc(var(--island-morph-ms, 180ms) * 0.5);
+}
+
+/* The leaving layer's orb blooms ride the layer fade only: their own breathe
+   curve would let the warm glow outlive the row and smear the shrinking
+   capsule. */
+.island-leave .island-orb::before {
+  animation: none;
+  opacity: 0.55;
 }
 
 /* Row choreography: each expanded row rises + scales in on a ~30ms stagger
@@ -387,6 +419,48 @@
 
 .island-orb[data-orb-state="idle"] {
   animation: island-orb-idle-breathe 2.4s ease-in-out infinite;
+}
+
+/* Idle keeps the shared 50%/42% specular origin but swaps the fast sweep for
+   a static, subtler lower-right rim glint plus a very slow hue drift — calm,
+   yet clearly the same lamp family as the active states. */
+.island-orb[data-orb-state="idle"]::after {
+  animation: none;
+  background: conic-gradient(
+    from 90deg,
+    transparent 0 55%,
+    hsl(var(--island-hue, 225) 90% 78% / 0.55) 70%,
+    transparent 85%
+  );
+  -webkit-mask: radial-gradient(circle, transparent 56%, #000 58%, #000 62%, transparent 64%);
+  mask: radial-gradient(circle, transparent 56%, #000 58%, #000 62%, transparent 64%);
+}
+
+.island-orb[data-orb-state="idle"] .island-orb-core {
+  animation: island-orb-idle-drift 10s ease-in-out infinite;
+}
+
+@keyframes island-orb-idle-drift {
+  0%,
+  100% {
+    filter: hue-rotate(-14deg);
+  }
+  50% {
+    filter: hue-rotate(14deg);
+  }
+}
+
+/* Collapsed idle carries a faint cool exterior glow so the pill never reads
+   as completely off. */
+.island-surface[data-island-state="collapsed"][data-island-status="idle"]:not(
+    .island-surface-notch
+  ) {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset 0 -20px 30px rgba(0, 0, 0, 0.45),
+    0 8px 24px rgba(0, 0, 0, 0.35),
+    0 2px 6px rgba(0, 0, 0, 0.25),
+    0 0 14px hsl(225 80% 60% / 0.12);
 }
 
 /* Active states scale the whole orb 1.15x (composited transform) so a state
