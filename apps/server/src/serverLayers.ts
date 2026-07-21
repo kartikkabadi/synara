@@ -10,6 +10,7 @@ import { AutomationServiceLive } from "./automation/Layers/AutomationService";
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery";
 import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
+import { CompactionReactorLive } from "./orchestration/compaction/CompactionReactor";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor";
 import { StudioOutputReactorLive } from "./orchestration/Layers/StudioOutputReactor";
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor";
@@ -89,6 +90,9 @@ export function makeServerRuntimeServicesLayer(
   const checkpointReactorLayer = CheckpointReactorLive.pipe(
     Layer.provideMerge(runtimeServicesLayer),
   );
+  const compactionReactorLayer = CompactionReactorLive.pipe(
+    Layer.provideMerge(runtimeServicesLayer),
+  );
   const profileStatsArchiveLayer = ProfileStatsArchiveLive.pipe(
     Layer.provideMerge(checkpointStoreLayer),
   );
@@ -96,6 +100,7 @@ export function makeServerRuntimeServicesLayer(
     Layer.provideMerge(runtimeIngestionLayer),
     Layer.provideMerge(providerCommandReactorLayer),
     Layer.provideMerge(checkpointReactorLayer),
+    Layer.provideMerge(compactionReactorLayer),
     Layer.provideMerge(studioOutputReactorLayer),
   );
   const threadDeletionReactorLayer = ThreadDeletionReactorLive.pipe(
