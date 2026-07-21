@@ -2047,6 +2047,57 @@ describe("thread checkpoint control", () => {
     resolveRequest?.();
     await compactPromise;
   });
+
+  it("tags the compacting notification with the active turn id and lifecycle generation", async () => {
+    const { manager, context, sendRequest, emitEvent } = createThreadControlHarness();
+    context.session.activeTurnId = "turn_active";
+    sendRequest.mockResolvedValue({});
+
+    await manager.compactThread(asThreadId("thread_1"));
+
+    expect(emitEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "thread/compacting",
+        turnId: "turn_active",
+        lifecycleGeneration: "generation-request-a",
+      }),
+    );
+  });
+
+  it("keeps the session running after thread/compact/start resolves", async () => {
+    const { manager, context, sendRequest, updateSession } = createThreadControlHarness();
+    sendRequest.mockResolvedValue({});
+
+    await manager.compactThread(asThreadId("thread_1"));
+
+    expect(updateSession).toHaveBeenCalledTimes(1);
+    expect(updateSession).toHaveBeenCalledWith(context, {
+      status: "running",
+    });
+  });
+
+  it("marks the session errored and rethrows when thread/compact/start times out", async () => {
+    const { manager, context, sendRequest, updateSession, emitEvent } =
+      createThreadControlHarness();
+    sendRequest.mockRejectedValue(new Error("Timed out waiting for thread/compact/start."));
+
+    await expect(manager.compactThread(asThreadId("thread_1"))).rejects.toThrow(
+      "Timed out waiting for thread/compact/start.",
+    );
+
+    expect(emitEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "thread/compacting",
+      }),
+    );
+    expect(updateSession).toHaveBeenNthCalledWith(1, context, {
+      status: "running",
+    });
+    expect(updateSession).toHaveBeenNthCalledWith(2, context, {
+      status: "error",
+      lastError: "Timed out waiting for thread/compact/start.",
+    });
+  });
 });
 
 describe("respondToRequest", () => {
