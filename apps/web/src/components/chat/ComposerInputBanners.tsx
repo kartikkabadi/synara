@@ -66,7 +66,6 @@ export function ComposerInputBanners({
         onEditLoop={onEditLoop}
         onStopAfterTurn={onStopLoopAfterTurn}
         onStopNow={onStopLoopNow}
-        session={thread?.session ?? null}
       />,
     );
   }

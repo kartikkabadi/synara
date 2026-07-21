@@ -10,14 +10,12 @@ import type {
   ProviderInteractionMode,
   ThreadLoop,
 } from "@synara/contracts";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ChevronDownIcon, LoopIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
-import type { ThreadSession } from "../../types";
 import { Menu, MenuItem, MenuPopupBase, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { LoopProgressSegments } from "./LoopProgressSegments";
 import {
   deriveLoopPresentationState,
   isLoopOwnedTurnRunning,
@@ -27,7 +25,6 @@ import {
 export interface LoopRuntimeRailProps {
   loop: ThreadLoop;
   latestTurn: OrchestrationLatestTurn | null | undefined;
-  session: ThreadSession | null;
   interactionMode: ProviderInteractionMode;
   hasPendingApprovals: boolean;
   hasPendingUserInput: boolean;
@@ -88,16 +85,53 @@ const RAIL_BUTTON_CLASS_NAME =
 
 const MENU_ITEM_DESCRIPTION_CLASS_NAME = "text-[10.5px] text-muted-foreground/60";
 
-// The rail's stop control is always the menu while the loop is live; "Stop
-// now" only makes sense when a loop-owned turn is running, so it is disabled
-// otherwise and the trigger label reflects what the primary action does.
-export function deriveLoopStopControl(loopTurnRunning: boolean): {
-  triggerLabel: string;
-  stopNowDisabled: boolean;
-} {
-  return loopTurnRunning
-    ? { triggerLabel: "Stop after turn", stopNowDisabled: false }
-    : { triggerLabel: "Stop loop", stopNowDisabled: true };
+function filledSegmentClassName(color: LoopSemanticColor): string {
+  switch (color) {
+    case "waiting":
+      return "bg-warning";
+    case "error":
+      return "bg-destructive";
+    case "running":
+    case "neutral":
+      return "bg-foreground/80";
+    default:
+      return color satisfies never;
+  }
+}
+
+// Decorative segmented strip (`aria-hidden`); the host owns the ARIA progress
+// attributes. While the loop is running, the most recent filled segment pulses.
+function LoopProgressSegments({
+  segments,
+  color,
+  pulsing,
+}: {
+  // Per-segment fill in [0, 1]; > 0 renders as filled.
+  segments: number[];
+  color: LoopSemanticColor;
+  pulsing: boolean;
+}) {
+  if (segments.length === 0) {
+    return null;
+  }
+  const pulseIndex = pulsing ? segments.findLastIndex((fill) => fill > 0) : -1;
+  return (
+    <div aria-hidden className="flex w-full max-w-36 items-center gap-1">
+      {segments.map((fill, index) => (
+        <span
+          // Position is the identity of a segment; the list never reorders.
+          // oxlint-disable-next-line no-array-index-key
+          key={index}
+          className={cn(
+            "h-1 flex-1 rounded-full transition-[background-color,opacity] duration-200 motion-reduce:transition-none",
+            fill > 0 ? filledSegmentClassName(color) : "bg-muted/60",
+            index === pulseIndex &&
+              "animate-[pulse_2s_ease-in-out_infinite] motion-reduce:animate-none",
+          )}
+        />
+      ))}
+    </div>
+  );
 }
 
 function LoopStopMenu({
@@ -108,28 +142,37 @@ function LoopStopMenu({
 }: Pick<LoopRuntimeRailProps, "onStopAfterTurn" | "onStopNow" | "onEditLoop"> & {
   loopTurnRunning: boolean;
 }) {
-  const { triggerLabel, stopNowDisabled } = deriveLoopStopControl(loopTurnRunning);
   return (
     <Menu>
       <MenuTrigger className={RAIL_BUTTON_CLASS_NAME}>
-        {triggerLabel}
+        {loopTurnRunning ? "Stop after turn" : "Stop loop"}
         <ChevronDownIcon className="size-3" />
       </MenuTrigger>
       <MenuPopupBase align="end">
-        <MenuItem onClick={onStopAfterTurn}>
-          <span className="flex flex-col items-start">
-            <span>Stop after this turn</span>
-            <span className={MENU_ITEM_DESCRIPTION_CLASS_NAME}>
-              {LOOP_STOP_AFTER_TURN_DESCRIPTION}
-            </span>
-          </span>
-        </MenuItem>
-        <MenuItem disabled={stopNowDisabled} onClick={onStopNow} variant="destructive">
-          <span className="flex flex-col items-start">
-            <span>Stop now</span>
-            <span className={MENU_ITEM_DESCRIPTION_CLASS_NAME}>{LOOP_STOP_NOW_DESCRIPTION}</span>
-          </span>
-        </MenuItem>
+        {loopTurnRunning ? (
+          <>
+            <MenuItem onClick={onStopAfterTurn}>
+              <span className="flex flex-col items-start">
+                <span>Stop after this turn</span>
+                <span className={MENU_ITEM_DESCRIPTION_CLASS_NAME}>
+                  {LOOP_STOP_AFTER_TURN_DESCRIPTION}
+                </span>
+              </span>
+            </MenuItem>
+            <MenuItem onClick={onStopNow} variant="destructive">
+              <span className="flex flex-col items-start">
+                <span>Stop now</span>
+                <span className={MENU_ITEM_DESCRIPTION_CLASS_NAME}>
+                  {LOOP_STOP_NOW_DESCRIPTION}
+                </span>
+              </span>
+            </MenuItem>
+          </>
+        ) : (
+          <MenuItem onClick={onStopAfterTurn} variant="destructive">
+            Stop loop
+          </MenuItem>
+        )}
         <MenuSeparator />
         <MenuItem onClick={onEditLoop}>Edit loop…</MenuItem>
       </MenuPopupBase>
@@ -148,7 +191,13 @@ function useCrossfadedStatusCopy(
   const [fading, setFading] = useState(false);
 
   useEffect(() => {
-    if (label === display.label && detail === display.detail) return;
+    if (label === display.label && detail === display.detail) {
+      // Copy reverted to what is already displayed (e.g. a quick ready ->
+      // running bounce); cancel any in-flight fade so the rail is not stuck
+      // transparent.
+      setFading(false);
+      return;
+    }
     let fadeId: ReturnType<typeof setTimeout> | undefined;
     const startCrossfade = () => {
       setFading(true);
@@ -171,7 +220,6 @@ function useCrossfadedStatusCopy(
 export function LoopRuntimeRail({
   loop,
   latestTurn,
-  session,
   interactionMode,
   hasPendingApprovals,
   hasPendingUserInput,
@@ -182,15 +230,18 @@ export function LoopRuntimeRail({
 }: LoopRuntimeRailProps) {
   const [now, setNow] = useState(() => Date.now());
 
-  const presentation = deriveLoopPresentationState({
-    loop,
-    latestTurn,
-    session,
-    interactionMode,
-    hasPendingApprovals,
-    hasPendingUserInput,
-    now,
-  });
+  const presentation = useMemo(
+    () =>
+      deriveLoopPresentationState({
+        loop,
+        latestTurn,
+        interactionMode,
+        hasPendingApprovals,
+        hasPendingUserInput,
+        now,
+      }),
+    [loop, latestTurn, interactionMode, hasPendingApprovals, hasPendingUserInput, now],
+  );
 
   // Presentation-only adaptive ticker: only duration budgets tick, and only at
   // the cadence the presentation model asks for.
@@ -204,8 +255,17 @@ export function LoopRuntimeRail({
   const stateKind = presentation?.state.kind ?? null;
   const label = presentation?.label ?? "";
   const loopTurnRunning = isLoopOwnedTurnRunning(loop, latestTurn);
-  const showControl = stateKind !== null && stateKind !== "ending" && stateKind !== "stopping";
-  const controlKind = showControl ? "menu" : "none";
+  // Only `stopping` is control-free: the stop is already dispatched. `ending`
+  // keeps "Stop now" so the user can still interrupt the final turn.
+  const controlKind: "menu" | "stop-now" | "none" =
+    stateKind === null || stateKind === "stopping"
+      ? "none"
+      : stateKind === "ending"
+        ? "stop-now"
+        : "menu";
+  // The steering claim is only true while the loop is live between/within
+  // iterations; waiting/ending states route input elsewhere.
+  const showSteeringTooltip = stateKind === "running" || stateKind === "ready";
 
   // The stop control mounts/unmounts as the loop settles; keep keyboard focus
   // on the control across the swap instead of dropping to body.
@@ -234,7 +294,9 @@ export function LoopRuntimeRail({
     stateKind === "ready",
   );
 
-  if (presentation === null || presentation.state.kind === "ended") {
+  // `ended` is unreachable here: isLoopRuntimeRailVisible hides the rail once
+  // the loop is off with no owned turn running.
+  if (presentation === null) {
     return null;
   }
 
@@ -254,7 +316,7 @@ export function LoopRuntimeRail({
   const showProgressbar = showCounter;
 
   let control: React.ReactNode = null;
-  if (showControl) {
+  if (controlKind === "menu") {
     control = (
       <LoopStopMenu
         loopTurnRunning={loopTurnRunning}
@@ -263,54 +325,82 @@ export function LoopRuntimeRail({
         onStopNow={onStopNow}
       />
     );
+  } else if (controlKind === "stop-now") {
+    control = (
+      <button className={RAIL_BUTTON_CLASS_NAME} onClick={onStopNow} type="button">
+        Stop now
+      </button>
+    );
   }
+
+  const status = (
+    <>
+      <LoopIcon aria-hidden className={iconClassName(color, spinning)} />
+      {/* Only the status copy lives in the live region so screen readers are
+          not re-announced by progress ticks or control swaps. */}
+      <span
+        className={cn(
+          "flex min-w-0 items-baseline gap-2.5 transition-opacity duration-150 motion-reduce:transition-none",
+          fading ? "opacity-0" : "opacity-100",
+        )}
+        role="status"
+      >
+        <span className={cn("shrink-0 text-xs font-medium", labelClassName(color))}>
+          {displayLabel}
+        </span>
+        {displayDetail !== null ? (
+          <span className="truncate text-[11px] text-muted-foreground">{displayDetail}</span>
+        ) : null}
+      </span>
+    </>
+  );
+
+  const progressbar = showProgressbar ? (
+    <div
+      aria-label="Loop progress"
+      aria-valuemax={progress.ariaValueMax ?? undefined}
+      aria-valuemin={progress.ariaValueMin}
+      aria-valuenow={progress.ariaValueNow ?? undefined}
+      aria-valuetext={progress.ariaValueText}
+      className="flex min-w-0 flex-1 justify-start"
+      role="progressbar"
+    >
+      {showSegments ? (
+        <LoopProgressSegments color={color} pulsing={spinning} segments={progress.segments} />
+      ) : null}
+    </div>
+  ) : (
+    <div className="flex-1" />
+  );
 
   return (
     <div className={cn("flex min-h-10 items-center gap-2.5 px-4 py-1.5", className)}>
-      <Tooltip>
-        <TooltipTrigger render={<span className="flex min-w-0 items-center gap-2.5" />}>
-          <LoopIcon aria-hidden className={iconClassName(color, spinning)} />
-          {/* Only the status copy lives in the live region so screen readers are
-              not re-announced by progress ticks or control swaps. */}
-          <span
-            className={cn(
-              "flex min-w-0 items-baseline gap-2.5 transition-opacity duration-150 motion-reduce:transition-none",
-              fading ? "opacity-0" : "opacity-100",
-            )}
-            role="status"
+      {showSteeringTooltip ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={<span className="flex min-w-0 items-center gap-2.5" tabIndex={0} />}
           >
-            <span className={cn("shrink-0 text-xs font-medium", labelClassName(color))}>
-              {displayLabel}
-            </span>
-            {displayDetail !== null ? (
-              <span className="truncate text-[11px] text-muted-foreground">{displayDetail}</span>
-            ) : null}
-          </span>
-        </TooltipTrigger>
-        <TooltipPopup className="max-w-64">{LOOP_STEERING_TOOLTIP_TEXT}</TooltipPopup>
-      </Tooltip>
+            {status}
+          </TooltipTrigger>
+          <TooltipPopup className="max-w-64">{LOOP_STEERING_TOOLTIP_TEXT}</TooltipPopup>
+        </Tooltip>
+      ) : (
+        <span className="flex min-w-0 items-center gap-2.5">{status}</span>
+      )}
       {showCounter ? (
         <span className="shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">
           {progress.counterText}
         </span>
       ) : null}
-      {showProgressbar ? (
-        <div
-          aria-label="Loop progress"
-          aria-valuemax={progress.ariaValueMax ?? undefined}
-          aria-valuemin={progress.ariaValueMin}
-          aria-valuenow={progress.ariaValueNow ?? undefined}
-          aria-valuetext={progress.ariaValueText}
-          className="flex min-w-0 flex-1 justify-start"
-          role="progressbar"
-          {...(progress.tooltipText !== null ? { title: progress.tooltipText } : {})}
-        >
-          {showSegments ? (
-            <LoopProgressSegments color={color} segments={progress.segments} />
-          ) : null}
-        </div>
+      {progress?.tooltipText != null && showProgressbar ? (
+        <Tooltip>
+          <TooltipTrigger render={<span className="flex min-w-0 flex-1" tabIndex={0} />}>
+            {progressbar}
+          </TooltipTrigger>
+          <TooltipPopup>{progress.tooltipText}</TooltipPopup>
+        </Tooltip>
       ) : (
-        <div className="flex-1" />
+        progressbar
       )}
       <span
         onBlurCapture={(event) => {
