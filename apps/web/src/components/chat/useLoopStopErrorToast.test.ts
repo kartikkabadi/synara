@@ -2,10 +2,63 @@
 // Purpose: Guards the exceptional-stop toast policy (spec §14) — errors toast, routine stops don't.
 // Layer: Pure logic tests
 
-import type { ThreadLoop } from "@synara/contracts";
-import { describe, expect, it } from "vitest";
+import type { LoopStopReason, ThreadId, ThreadLoop } from "@synara/contracts";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getLoopStopErrorToastCopy, shouldToastLoopStop } from "./useLoopStopErrorToast";
+const reactHarness = vi.hoisted(() => {
+  interface HookSlot {
+    value?: unknown;
+    deps?: readonly unknown[];
+    cleanup?: (() => void) | undefined;
+  }
+
+  let slots: HookSlot[] = [];
+  let cursor = 0;
+
+  const nextSlot = () => {
+    const index = cursor;
+    cursor += 1;
+    slots[index] ??= {};
+    return slots[index]!;
+  };
+  const depsEqual = (left: readonly unknown[] | undefined, right: readonly unknown[]) =>
+    left !== undefined &&
+    left.length === right.length &&
+    left.every((value, index) => Object.is(value, right[index]));
+
+  return {
+    beginRender() {
+      cursor = 0;
+    },
+    reset() {
+      slots = [];
+      cursor = 0;
+    },
+    useEffect(effect: () => void | (() => void), deps: readonly unknown[]) {
+      const slot = nextSlot();
+      if (depsEqual(slot.deps, deps)) return;
+      slot.cleanup?.();
+      slot.deps = deps;
+      slot.cleanup = effect() ?? undefined;
+    },
+    useRef<T>(initialValue: T) {
+      const slot = nextSlot();
+      slot.value ??= { current: initialValue };
+      return slot.value as { current: T };
+    },
+  };
+});
+
+vi.mock("react", () => ({
+  useEffect: reactHarness.useEffect,
+  useRef: reactHarness.useRef,
+}));
+
+import {
+  getLoopStopErrorToastCopy,
+  shouldToastLoopStop,
+  useLoopStopErrorToast,
+} from "./useLoopStopErrorToast";
 
 function makeLoop(overrides: Partial<ThreadLoop>): ThreadLoop {
   return {
@@ -40,6 +93,7 @@ describe("getLoopStopErrorToastCopy", () => {
     expect(getLoopStopErrorToastCopy("user_stop")).toBeNull();
     expect(getLoopStopErrorToastCopy("toggled_off")).toBeNull();
     expect(getLoopStopErrorToastCopy("hard_cap")).toBeNull();
+    expect(getLoopStopErrorToastCopy("replaced_by_manual_policy")).toBeNull();
   });
 });
 
@@ -72,5 +126,88 @@ describe("shouldToastLoopStop", () => {
       ),
     ).toBe(false);
     expect(shouldToastLoopStop({ activationId: "act-1", active: true }, null)).toBe(false);
+  });
+});
+
+describe("useLoopStopErrorToast", () => {
+  const threadId = "thread-1" as ThreadId;
+
+  beforeEach(() => {
+    reactHarness.reset();
+  });
+
+  function render(
+    currentThreadId: ThreadId | null,
+    loop: ThreadLoop | null,
+    addToast: (toast: { title: string; description: string; threadId: ThreadId | null }) => void,
+  ) {
+    reactHarness.beginRender();
+    useLoopStopErrorToast(currentThreadId, loop, addToast);
+  }
+
+  it.each(["consecutive_errors", "prompt_invalid", "thread_unrunnable"] as LoopStopReason[])(
+    "toasts when an active loop stops with %s",
+    (reason) => {
+      const addToast = vi.fn();
+      render(threadId, makeLoop({ active: true }), addToast);
+      render(threadId, makeLoop({ active: false, lastStopReason: reason }), addToast);
+      expect(addToast).toHaveBeenCalledTimes(1);
+      expect(addToast).toHaveBeenCalledWith({
+        ...getLoopStopErrorToastCopy(reason),
+        threadId,
+      });
+    },
+  );
+
+  it.each([
+    "user_stop",
+    "toggled_off",
+    "budget_iterations",
+    "budget_duration",
+    "hard_cap",
+    "replaced_by_manual_policy",
+  ] as LoopStopReason[])("stays quiet when an active loop stops with %s", (reason) => {
+    const addToast = vi.fn();
+    render(threadId, makeLoop({ active: true }), addToast);
+    render(threadId, makeLoop({ active: false, lastStopReason: reason }), addToast);
+    expect(addToast).not.toHaveBeenCalled();
+  });
+
+  it("stays quiet for a loop already stopped on first render", () => {
+    const addToast = vi.fn();
+    render(threadId, makeLoop({ active: false, lastStopReason: "consecutive_errors" }), addToast);
+    expect(addToast).not.toHaveBeenCalled();
+  });
+
+  it("stays quiet when switching to a thread whose loop already stopped", () => {
+    const addToast = vi.fn();
+    render(threadId, makeLoop({ active: true }), addToast);
+    render(
+      "thread-2" as ThreadId,
+      makeLoop({ active: false, lastStopReason: "consecutive_errors" }),
+      addToast,
+    );
+    expect(addToast).not.toHaveBeenCalled();
+  });
+
+  it("stays quiet when a new activation appears already stopped", () => {
+    const addToast = vi.fn();
+    render(threadId, makeLoop({ active: true, activationId: "act-1" }), addToast);
+    render(
+      threadId,
+      makeLoop({ active: false, activationId: "act-2", lastStopReason: "consecutive_errors" }),
+      addToast,
+    );
+    expect(addToast).not.toHaveBeenCalled();
+  });
+
+  it("toasts once per stop, not on subsequent renders", () => {
+    const addToast = vi.fn();
+    render(threadId, makeLoop({ active: true }), addToast);
+    const stopped = makeLoop({ active: false, lastStopReason: "consecutive_errors" });
+    render(threadId, stopped, addToast);
+    render(threadId, stopped, addToast);
+    render(threadId, makeLoop({ active: false, lastStopReason: "consecutive_errors" }), addToast);
+    expect(addToast).toHaveBeenCalledTimes(1);
   });
 });
