@@ -22,23 +22,17 @@ ARTIFACT_DIR="$HERE/artifacts/$(date +%Y%m%d-%H%M%S)"
 SERVER_LOG="$HERE/server.log"
 WEB_LOG="$HERE/web.log"
 
-port_free() {
-  ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
-}
-
+# Free ports before starting — kill any process listening on them.
 for port in "$SERVER_PORT" "$WEB_PORT"; do
-  if ! port_free "$port"; then
-    echo "error: port $port is already in use. Set SYNARA_E2E_PORT / SYNARA_E2E_WEB_PORT to free ports." >&2
-    exit 1
-  fi
+  fuser -k "$port/tcp" 2>/dev/null || true
 done
 
-# OpenCode/Kilo accept OPENCODE_API_KEY; map the alternate names if only they
-# are set (newest key first).
-if [[ -z "${OPENCODE_API_KEY:-}" && -n "${NEW_OPENCODE_GO_API_KEY:-}" ]]; then
+# OpenCode/Kilo accept both OPENCODE_API_KEY and OPENCODE_GO_API_KEY. Map
+# the newest available key to both variables.
+if [[ -n "${NEW_OPENCODE_GO_API_KEY:-}" ]]; then
   export OPENCODE_API_KEY="$NEW_OPENCODE_GO_API_KEY"
-fi
-if [[ -z "${OPENCODE_API_KEY:-}" && -n "${OPENCODE_GO_API_KEY:-}" ]]; then
+  export OPENCODE_GO_API_KEY="$NEW_OPENCODE_GO_API_KEY"
+elif [[ -n "${OPENCODE_GO_API_KEY:-}" ]]; then
   export OPENCODE_API_KEY="$OPENCODE_GO_API_KEY"
 fi
 if [[ -z "${OPENAI_API_KEY:-}" && -n "${CODEX_API_KEY:-}" ]]; then
@@ -70,7 +64,8 @@ fi
 # folders of $HOME (the isolated SYNARA_HOME's HOME stays the real one), so we
 # create/symlink a scratch repo at ~/<name>.
 if [[ -n "${SYNARA_E2E_WORKSPACE_NAME:-}" ]]; then
-  # Caller names an existing picker entry directly; no scratch repo is created.
+  # Caller names an existing picker entry directly; no scratch repo is needed
+  # (e.g. "Home" from the seeded project event).
   WORKSPACE_NAME="$SYNARA_E2E_WORKSPACE_NAME"
   WORKSPACE_LINK=""
 else
@@ -84,7 +79,7 @@ else
   fi
 fi
 
-mkdir -p "$SYNARA_HOME_DIR" "$ARTIFACT_DIR"
+mkdir -p "$SYNARA_HOME_DIR/dev" "$ARTIFACT_DIR"
 
 SERVER_PID=""
 WEB_PID=""
@@ -105,6 +100,11 @@ cleanup() {
   exit "$code"
 }
 trap cleanup EXIT INT TERM
+
+# Seed a project.created event before the server starts so the projection
+# pipeline picks it up on boot and creates the "Home" project.
+echo "==> seeding project.created event"
+SYNARA_HOME="$SYNARA_HOME_DIR" bun "$HERE/seed-project.ts"
 
 echo "==> starting server on :$SERVER_PORT (SYNARA_HOME=$SYNARA_HOME_DIR)"
 env -u SYNARA_AUTH_TOKEN \
