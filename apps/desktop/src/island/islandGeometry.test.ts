@@ -166,3 +166,20 @@ describe("resolveIslandEnabled", () => {
     expect(resolveIslandEnabled(false, "darwin")).toBe(false);
   });
 });
+
+describe("surface/window sizing invariant", () => {
+  it("never renders a surface wider than the pre-sized window", () => {
+    const notches = [null, { width: DEFAULT_NOTCH_WIDTH, height: 38 }];
+    const states = ["collapsed", "hover", "expanded"] as const;
+    for (const notch of notches) {
+      const window = islandWindowBounds(notchedDisplay, notch, "darwin");
+      for (const state of states) {
+        for (const sessionCount of [undefined, 0, 1, 3, 8, 20]) {
+          const surface = islandSurfaceRect(state, notchedDisplay, notch, "darwin", sessionCount);
+          expect(surface.width).toBeLessThanOrEqual(window.width);
+          expect(surface.height).toBeLessThanOrEqual(window.height);
+        }
+      }
+    }
+  });
+});
