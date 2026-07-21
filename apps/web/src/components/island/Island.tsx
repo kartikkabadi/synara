@@ -324,6 +324,7 @@ export function Island() {
           aggregate === "done" && !isNotch && "island-surface-glow-done",
         )}
       >
+        <div className="island-state-wash pointer-events-none absolute inset-0" />
         {renderIslandContent(renderedState, false)}
         {leavingState !== null && leavingState !== renderedState ? (
           <div className="pointer-events-none absolute inset-0 flex flex-col overflow-hidden">
@@ -371,7 +372,7 @@ export function Island() {
               <>
                 <div className="flex items-center gap-2.5">
                   <IslandOrb state={headline.status} size={16} />
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-white/90">
+                  <span className="min-w-0 flex-1 truncate font-mono text-sm font-medium text-white/90">
                     {headline.title}
                   </span>
                   <span
