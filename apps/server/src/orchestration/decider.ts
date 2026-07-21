@@ -4,17 +4,12 @@ import type {
   OrchestrationEvent,
   OrchestrationReadModel,
   ProjectKind,
+  ThreadId,
   ThreadLoop,
   ThreadMarker,
   ThreadTurnPurpose,
 } from "@synara/contracts";
 import {
-  DEFAULT_TURN_DISPATCH_MODE,
-  LOOP_DEFAULT_HARD_CAP,
-  LOOP_MAX_COUNT_BUDGET,
-  LOOP_MAX_DURATION_SECONDS,
-  LOOP_PROMPT_MAX_INPUT_CHARS,
-  LoopPrompt,
   MAX_PINNED_PROJECTS,
   PINNED_MESSAGES_MAX_COUNT,
   THREAD_MARKERS_MAX_COUNT,
@@ -35,11 +30,11 @@ import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import { hasNativeHandoffMessages } from "./handoff.ts";
 import { resolveStableMessageTurnId } from "./messageTurnId.ts";
 import {
-  buildLoopContinuationThreadView,
-  chooseStopReason,
-  decideLoopContinuation,
-  effectiveCap,
-} from "./loopDecision.ts";
+  decideInterruptLoopOff,
+  decideLoopCommand,
+  decideManualMessageWhileLoopActive,
+  type LoopEventDraft,
+} from "./loopDecider.ts";
 import { isLoopOwnedTurn } from "./loopOwnership.ts";
 import {
   listActiveProjectsByWorkspaceRoot,
@@ -91,6 +86,29 @@ function withEventBase(
     correlationId: input.commandId,
     metadata: input.metadata ?? {},
   };
+}
+
+// Materializes loop event drafts from loopDecider into full events, chaining
+// each event's causation to the previous one in the batch.
+function materializeLoopEvents(
+  command: Pick<OrchestrationCommand, "commandId"> & { threadId: ThreadId; createdAt: string },
+  drafts: ReadonlyArray<LoopEventDraft>,
+): Array<Omit<OrchestrationEvent, "sequence">> {
+  const out: Array<Omit<OrchestrationEvent, "sequence">> = [];
+  for (const draft of drafts) {
+    const previous = out.at(-1);
+    out.push({
+      ...withEventBase({
+        aggregateKind: "thread",
+        aggregateId: command.threadId,
+        occurredAt: command.createdAt,
+        commandId: command.commandId,
+      }),
+      ...(previous !== undefined ? { causationEventId: previous.eventId } : {}),
+      ...draft,
+    });
+  }
+  return out;
 }
 
 function omitNullUserInputAnswers(
@@ -1164,95 +1182,32 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
 
       const loop = targetThread.loop;
-      const hasAttachments = command.message.attachments.length > 0;
-      const hasStructuredReferences =
-        (command.message.skills?.length ?? 0) > 0 || (command.message.mentions?.length ?? 0) > 0;
-      const nowMs = Date.now();
       let loopContinuedEvent: Omit<OrchestrationEvent, "sequence"> | undefined;
       let loopOffEvent: Omit<OrchestrationEvent, "sequence"> | undefined;
       let purpose: ThreadTurnPurpose | undefined;
 
       if (loop?.active === true) {
-        const makeLoopOffEvent = (
-          stopReason: NonNullable<ThreadLoop["lastStopReason"]>,
-        ): Omit<OrchestrationEvent, "sequence"> => ({
-          ...withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt: command.createdAt,
-            commandId: command.commandId,
-          }),
-          type: "thread.loop-off",
-          payload: {
-            threadId: command.threadId,
-            stopReason,
-            loop: {
-              ...loop,
-              active: false,
-              lastStopReason: stopReason,
-              updatedAt: command.createdAt,
-            },
+        const manualDecision = decideManualMessageWhileLoopActive({
+          loop,
+          thread: targetThread,
+          message: {
+            text: command.message.text,
+            hasAttachments: command.message.attachments.length > 0,
+            hasStructuredReferences:
+              (command.message.skills?.length ?? 0) > 0 ||
+              (command.message.mentions?.length ?? 0) > 0,
           },
+          createdAt: command.createdAt,
         });
-        const pendingLoopStart =
-          targetThread.pendingTurnStart?.purpose?.kind === "loop-iteration" &&
-          targetThread.pendingTurnStart.purpose.activationId === loop.activationId;
-
-        if (hasAttachments || hasStructuredReferences) {
-          // Text-only v1: loop prompts cannot carry attachments, skill
-          // references, or mentions.
-          loopOffEvent = makeLoopOffEvent("attachments_not_supported");
-        } else if (loop.endsAt !== null && nowMs >= new Date(loop.endsAt).getTime()) {
-          // Duration budget has expired: stop the loop, but let the user's manual
-          // message continue as a normal turn.
-          loopOffEvent = makeLoopOffEvent("budget_duration");
-        } else if (loop.iteration >= effectiveCap(loop)) {
-          // Budget already exhausted: stop the loop, but let the user's manual
-          // message continue as a normal turn.
-          loopOffEvent = makeLoopOffEvent(chooseStopReason(loop));
-        } else if (pendingLoopStart) {
-          // A loop-owned turn start is already pending; a racing manual message
-          // wins and retires the loop rather than fighting the pending start.
-          loopOffEvent = makeLoopOffEvent("replaced_by_manual_policy");
-        } else {
-          // A manual user message while the loop is active becomes (or replaces)
-          // the loop prompt and doubles as the next loop-owned iteration.
-          let manualPrompt: LoopPrompt | undefined;
-          try {
-            manualPrompt = Schema.decodeUnknownSync(LoopPrompt)(command.message.text);
-          } catch {
-            loopOffEvent = makeLoopOffEvent("prompt_invalid");
-          }
-          if (manualPrompt !== undefined) {
-            const nextIteration = loop.iteration + 1;
-            const updatedLoop: ThreadLoop = {
-              ...loop,
-              prompt: manualPrompt,
-              iteration: nextIteration,
-              lastStopReason: null,
-              updatedAt: command.createdAt,
-            };
-            purpose = {
-              kind: "loop-iteration",
-              activationId: loop.activationId,
-              iteration: nextIteration,
-            };
-            loopContinuedEvent = {
-              ...withEventBase({
-                aggregateKind: "thread",
-                aggregateId: command.threadId,
-                occurredAt: command.createdAt,
-                commandId: command.commandId,
-              }),
-              type: "thread.loop-continued",
-              payload: {
-                threadId: command.threadId,
-                nextIteration,
-                nextConsecutiveErrors: loop.consecutiveErrors,
-                loop: updatedLoop,
-              },
-            };
-          }
+        if (manualDecision.kind === "loop-off") {
+          [loopOffEvent] = materializeLoopEvents(command, [
+            { type: "thread.loop-off", payload: manualDecision.payload },
+          ]);
+        } else if (manualDecision.kind === "loop-continued") {
+          purpose = manualDecision.purpose;
+          [loopContinuedEvent] = materializeLoopEvents(command, [
+            { type: "thread.loop-continued", payload: manualDecision.payload },
+          ]);
         }
       }
 
@@ -1403,7 +1358,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         threadId: command.threadId,
       });
       const turnInterruptEvents: Array<Omit<OrchestrationEvent, "sequence">> = [];
-      const loop = turnInterruptThread.loop;
 
       // Determine which turn is being interrupted and whether it is loop-owned.
       const interruptTurnId: TurnId | undefined =
@@ -1418,27 +1372,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       // Stop/Esc turns the loop off and interrupts a currently running loop-owned turn
       // — including one from a stale activation after a reconfigure. Interrupting a
       // manual turn while the loop is armed does not affect the loop.
-      if (loop?.active === true && isLoopOwnedInterrupt) {
-        const loopOff: ThreadLoop = {
-          ...loop,
-          active: false,
-          lastStopReason: "user_stop",
-          updatedAt: command.createdAt,
-        };
-        turnInterruptEvents.push({
-          ...withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt: command.createdAt,
-            commandId: command.commandId,
-          }),
-          type: "thread.loop-off",
-          payload: {
-            threadId: command.threadId,
-            stopReason: "user_stop",
-            loop: loopOff,
-          },
-        });
+      const interruptLoopOff = decideInterruptLoopOff({
+        thread: turnInterruptThread,
+        interruptTurnId,
+        isLoopOwnedInterrupt,
+        createdAt: command.createdAt,
+      });
+      if (interruptLoopOff !== null) {
+        turnInterruptEvents.push(
+          ...materializeLoopEvents(command, [
+            { type: "thread.loop-off", payload: interruptLoopOff },
+          ]),
+        );
       }
 
       if (interruptTurnId !== undefined) {
@@ -1979,410 +1924,29 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
-    case "thread.loop.set": {
-      const thread = yield* requireThread({
-        readModel,
-        command,
-        threadId: command.threadId,
-      });
-      if (thread.parentThreadId !== null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Loops are only allowed on top-level threads.`,
-        });
-      }
-      if (thread.deletedAt !== null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Thread '${thread.id}' is deleted.`,
-        });
-      }
-      if (thread.archivedAt !== null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Thread '${thread.id}' is archived.`,
-        });
-      }
-      if (command.maxIterations !== null && command.durationSeconds !== null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Cannot set both a count and a duration budget.`,
-        });
-      }
-      if (
-        command.maxIterations !== null &&
-        (command.maxIterations < 1 || command.maxIterations > LOOP_MAX_COUNT_BUDGET)
-      ) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `maxIterations must be between 1 and ${LOOP_MAX_COUNT_BUDGET}.`,
-        });
-      }
-      if (
-        command.durationSeconds !== null &&
-        (command.durationSeconds < 1 || command.durationSeconds > LOOP_MAX_DURATION_SECONDS)
-      ) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `durationSeconds must be between 1 and ${LOOP_MAX_DURATION_SECONDS}.`,
-        });
-      }
-
-      const existingLoop = thread.loop?.active === true ? thread.loop : null;
-      if (
-        command.expectedActivationId !== undefined &&
-        existingLoop?.activationId !== command.expectedActivationId
-      ) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Loop activation '${command.expectedActivationId}' is no longer active.`,
-        });
-      }
-      const isReconfigure = existingLoop !== null;
-      // Duration budget is anchored from server time so a stale client clock cannot
-      // artificially extend or shorten a loop run.
-      const endsAt =
-        command.durationSeconds !== null
-          ? new Date(Date.now() + command.durationSeconds * 1000).toISOString()
-          : null;
-
-      let prompt: string;
-      if (command.prompt !== null && command.prompt.length > 0) {
-        try {
-          prompt = Schema.decodeUnknownSync(LoopPrompt)(command.prompt);
-        } catch {
-          return yield* new OrchestrationCommandInvariantError({
-            commandType: command.type,
-            detail: `Loop prompt must be 1-${LOOP_PROMPT_MAX_INPUT_CHARS} characters, not whitespace-only, and cannot start with a slash command.`,
-          });
-        }
-      } else if (command.prompt !== null && command.prompt.length === 0) {
-        prompt = "";
-      } else {
-        prompt = isReconfigure ? existingLoop.prompt : "";
-      }
-      const maxIterations = command.maxIterations;
-
-      // Locked reconfigure rule: any successful set while active starts a new
-      // activation window — counters reset, new activationId, original createdAt.
-      const loop: ThreadLoop = {
-        active: true,
-        prompt,
-        iteration: 0,
-        maxIterations,
-        endsAt,
-        hardCap: LOOP_DEFAULT_HARD_CAP,
-        consecutiveErrors: 0,
-        lastStopReason: null,
-        activationId: String(command.commandId),
-        createdAt: isReconfigure ? existingLoop.createdAt : command.createdAt,
-        updatedAt: command.createdAt,
-      };
-      return {
-        ...withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        }),
-        type: "thread.loop-set",
-        payload: {
-          threadId: command.threadId,
-          loop,
-        },
-      };
-    }
-
-    case "thread.loop.off": {
-      const thread = findThreadById(readModel, command.threadId);
-      if (thread === undefined) {
-        return yield* Effect.fail(
-          new OrchestrationCommandInvariantError({
-            commandType: command.type,
-            detail: `Thread '${command.threadId}' does not exist for command '${command.type}'.`,
-          }),
-        );
-      }
-
-      const baseLoop: ThreadLoop = thread.loop ?? {
-        active: false,
-        prompt: "",
-        iteration: 0,
-        maxIterations: null,
-        endsAt: null,
-        hardCap: LOOP_DEFAULT_HARD_CAP,
-        consecutiveErrors: 0,
-        lastStopReason: null,
-        activationId: String(command.commandId),
-        createdAt: command.createdAt,
-        updatedAt: command.createdAt,
-      };
-      const stopReason = command.reason ?? "user_stop";
-      const loop = baseLoop.active
-        ? {
-            ...baseLoop,
-            active: false,
-            lastStopReason: stopReason,
-            updatedAt: command.createdAt,
-          }
-        : baseLoop;
-      const loopOffEvent: Omit<OrchestrationEvent, "sequence"> = {
-        ...withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        }),
-        type: "thread.loop-off",
-        payload: {
-          threadId: command.threadId,
-          stopReason,
-          loop,
-        },
-      };
-
-      return loopOffEvent;
-    }
-
-    case "thread.loop.toggle": {
-      const thread = findThreadById(readModel, command.threadId);
-      if (thread === undefined) {
-        return yield* Effect.fail(
-          new OrchestrationCommandInvariantError({
-            commandType: command.type,
-            detail: `Thread '${command.threadId}' does not exist for command '${command.type}'.`,
-          }),
-        );
-      }
-
-      if (thread.loop?.active === true) {
-        // Bare `/loop` while active toggles future iterations off but leaves a
-        // currently running loop-owned turn alone to settle on its own.
-        const loop: ThreadLoop = {
-          ...thread.loop,
-          active: false,
-          lastStopReason: "toggled_off",
-          updatedAt: command.createdAt,
-        };
-        return {
-          ...withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt: command.createdAt,
-            commandId: command.commandId,
-          }),
-          type: "thread.loop-off",
-          payload: {
-            threadId: command.threadId,
-            stopReason: "toggled_off",
-            loop,
-          },
-        };
-      }
-
-      if (thread.parentThreadId !== null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Loops are only allowed on top-level threads.`,
-        });
-      }
-      if (thread.deletedAt !== null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Thread '${thread.id}' is deleted.`,
-        });
-      }
-      if (thread.archivedAt !== null) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: `Thread '${thread.id}' is archived.`,
-        });
-      }
-
-      const loop: ThreadLoop = {
-        active: true,
-        prompt: "",
-        iteration: 0,
-        maxIterations: null,
-        endsAt: null,
-        hardCap: LOOP_DEFAULT_HARD_CAP,
-        consecutiveErrors: 0,
-        lastStopReason: null,
-        activationId: String(command.commandId),
-        createdAt: command.createdAt,
-        updatedAt: command.createdAt,
-      };
-      return {
-        ...withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        }),
-        type: "thread.loop-set",
-        payload: {
-          threadId: command.threadId,
-          loop,
-        },
-      };
-    }
-
+    case "thread.loop.set":
+    case "thread.loop.off":
+    case "thread.loop.toggle":
     case "thread.loop.continue": {
+      // findThreadById, not requireThread: continuation/off must still be able
+      // to observe a deleted thread and settle the loop (thread_deleted).
       const thread = findThreadById(readModel, command.threadId);
       if (thread === undefined) {
-        return yield* Effect.fail(
-          new OrchestrationCommandInvariantError({
-            commandType: command.type,
-            detail: `Thread '${command.threadId}' does not exist for command '${command.type}'.`,
-          }),
-        );
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' does not exist for command '${command.type}'.`,
+        });
       }
-      if (thread.loop?.active !== true) {
-        return [];
+      const decision = decideLoopCommand(command, thread);
+      if (decision.kind === "invalid") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: decision.detail,
+        });
       }
-      if (
-        command.expectedUpdatedAt !== undefined &&
-        thread.loop.updatedAt !== command.expectedUpdatedAt
-      ) {
-        return [];
-      }
-      if (
-        command.expectedActivationId !== undefined &&
-        thread.loop.activationId !== command.expectedActivationId
-      ) {
-        return [];
-      }
-      const decision = decideLoopContinuation({
-        loop: thread.loop,
-        nowMs: Date.now(),
-        thread: buildLoopContinuationThreadView(thread),
-      });
-
-      if (decision.type === "wait") {
-        // Waits persist no accounting, but must still produce an event: a
-        // zero-event command is rejected with a durable receipt, permanently
-        // burning this deterministic commandId. Re-emitting the unchanged loop
-        // with a bumped updatedAt rotates the next continuation commandId so a
-        // later signal can retry.
-        const loop: ThreadLoop = {
-          ...thread.loop,
-          updatedAt: command.createdAt,
-        };
-        return {
-          ...withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt: command.createdAt,
-            commandId: command.commandId,
-          }),
-          type: "thread.loop-set",
-          payload: {
-            threadId: command.threadId,
-            loop,
-          },
-        };
-      }
-      if (decision.type === "off") {
-        const loop: ThreadLoop = {
-          ...thread.loop,
-          active: false,
-          lastStopReason: decision.reason,
-          consecutiveErrors: decision.nextConsecutiveErrors,
-          updatedAt: command.createdAt,
-        };
-        return {
-          ...withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt: command.createdAt,
-            commandId: command.commandId,
-          }),
-          type: "thread.loop-off",
-          payload: {
-            threadId: command.threadId,
-            stopReason: decision.reason,
-            loop,
-          },
-        };
-      }
-      const prompt = thread.loop.prompt;
-      if (prompt === "") {
-        // Unreachable: the decision policy waits on a missing prompt.
-        return [];
-      }
-      const messageId = crypto.randomUUID() as MessageId;
-      const nextIteration = decision.nextIteration;
-      const loop = {
-        ...thread.loop,
-        iteration: nextIteration,
-        consecutiveErrors: decision.nextConsecutiveErrors,
-        lastStopReason: null,
-        updatedAt: command.createdAt,
-      } satisfies ThreadLoop;
-      const purpose: ThreadTurnPurpose = {
-        kind: "loop-iteration",
-        activationId: loop.activationId,
-        iteration: nextIteration,
-      };
-      const messageEvent: Omit<OrchestrationEvent, "sequence"> = {
-        ...withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        }),
-        type: "thread.message-sent",
-        payload: {
-          threadId: command.threadId,
-          messageId,
-          role: "user",
-          text: prompt,
-          dispatchMode: DEFAULT_TURN_DISPATCH_MODE,
-          turnId: null,
-          streaming: false,
-          source: "native",
-          purpose,
-          createdAt: command.createdAt,
-          updatedAt: command.createdAt,
-        },
-      };
-      const turnStartEvent: Omit<OrchestrationEvent, "sequence"> = {
-        ...withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        }),
-        causationEventId: messageEvent.eventId,
-        type: "thread.turn-start-requested",
-        payload: {
-          threadId: command.threadId,
-          messageId,
-          assistantDeliveryMode: DEFAULT_ASSISTANT_DELIVERY_MODE,
-          dispatchMode: DEFAULT_TURN_DISPATCH_MODE,
-          runtimeMode: thread.runtimeMode,
-          interactionMode: thread.interactionMode,
-          purpose,
-          createdAt: command.createdAt,
-        },
-      };
-      const continuedEvent: Omit<OrchestrationEvent, "sequence"> = {
-        ...withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        }),
-        causationEventId: turnStartEvent.eventId,
-        type: "thread.loop-continued",
-        payload: {
-          threadId: command.threadId,
-          nextIteration,
-          nextConsecutiveErrors: decision.nextConsecutiveErrors,
-          loop,
-        },
-      };
-      return [messageEvent, turnStartEvent, continuedEvent];
+      const loopEvents = materializeLoopEvents(command, decision.events);
+      const [single] = loopEvents;
+      return loopEvents.length === 1 && single !== undefined ? single : loopEvents;
     }
 
     default: {
