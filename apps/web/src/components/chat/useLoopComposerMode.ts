@@ -39,6 +39,8 @@ export const LOOP_BUDGET_DURATION_ERROR = "Duration cannot exceed 24 hours.";
 export const LOOP_CHOOSE_BUDGET_NOTE = "Choose how long the loop should run.";
 export const LOOP_UNSUPPORTED_CONTEXT_MESSAGE =
   "Loop prompts are text-only. Remove attachments and selected tools to continue.";
+export const LOOP_EDIT_STALE_ERROR =
+  "This loop ended while you were editing. Start a new loop to continue.";
 
 export function loopBudgetChoiceFromParsed(budget: LoopBudget | null): LoopBudgetChoice {
   if (budget === null) return LOOP_DEFAULT_BUDGET_CHOICE;
@@ -248,7 +250,12 @@ export type LoopSetupSubmitResult = { ok: true } | { ok: false; message: string 
 
 export async function performLoopSetupSubmit(
   deps: LoopSetupDispatchDeps,
-  input: { threadId: ThreadId; objective: string; budget: LoopBudgetChoice },
+  input: {
+    threadId: ThreadId;
+    objective: string;
+    budget: LoopBudgetChoice;
+    expectedActivationId?: string;
+  },
 ): Promise<LoopSetupSubmitResult> {
   const fields = loopBudgetChoiceToDispatchFields(input.budget);
   try {
@@ -259,6 +266,9 @@ export async function performLoopSetupSubmit(
       prompt: input.objective.trim(),
       maxIterations: fields.maxIterations,
       durationSeconds: fields.durationSeconds,
+      ...(input.expectedActivationId !== undefined
+        ? { expectedActivationId: input.expectedActivationId }
+        : {}),
       createdAt: deps.now(),
     });
     return { ok: true };
@@ -430,6 +440,15 @@ export function createLoopComposerCore(
       return;
     }
 
+    // Edit saves must target the activation the user opened; if the loop
+    // ended or was replaced meanwhile, surface it instead of silently
+    // starting a brand-new loop.
+    if (mode.kind === "edit" && env.getActiveLoop()?.activationId !== mode.activationId) {
+      setState({ note: null, error: LOOP_EDIT_STALE_ERROR });
+      env.focusEditor();
+      return;
+    }
+
     const dispatchDeps = env.getDispatchDeps();
     if (!dispatchDeps) {
       setState({ note: null, error: "Unable to connect to the app server." });
@@ -449,6 +468,7 @@ export function createLoopComposerCore(
         threadId: env.getThreadId(),
         objective,
         budget: mode.budget,
+        ...(mode.kind === "edit" ? { expectedActivationId: mode.activationId } : {}),
       });
       if (!result.ok) {
         setState({ error: result.message });
