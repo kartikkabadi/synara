@@ -448,14 +448,10 @@ import { ComposerExtrasMenu } from "./chat/ComposerExtrasMenu";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { ComposerInputBanners } from "./chat/ComposerInputBanners";
 import { LoopComposerModeCta, LoopComposerModeHeader } from "./chat/LoopComposerMode";
-import { isLoopOwnedTurnRunning, LOOP_ACTIVE_COMPOSER_PLACEHOLDER } from "./chat/loopPresentation";
-import {
-  isUnsupportedLoopContext,
-  LOOP_OBJECTIVE_PLACEHOLDER,
-  LOOP_SETUP_COMPOSER_PLACEHOLDER,
-  useLoopComposerMode,
-} from "./chat/useLoopComposerMode";
-import { useLoopStopErrorToast } from "./chat/useLoopStopErrorToast";
+import { deriveLoopComposerPlaceholder, isLoopOwnedTurnRunning } from "./chat/loopPresentation";
+import { isUnsupportedLoopContext } from "~/lib/loop";
+import { useLoopComposerMode } from "./chat/useLoopComposerMode";
+import { useLoopActions } from "../hooks/useLoopActions";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerVoiceButton } from "./chat/ComposerVoiceButton";
 import { ComposerVoiceRecorderBar } from "./chat/ComposerVoiceRecorderBar";
@@ -4208,96 +4204,20 @@ export default function ChatView({
     });
   }, [activeThread, isServerThread]);
 
-  // Guards both stop controls so repeated clicks dispatch a single command.
-  const stopLoopDispatchInFlightRef = useRef(false);
-
-  // Stop after this turn: disable future iterations; the running turn finishes.
-  const handleStopLoopAfterTurn = useCallback(async () => {
-    const api = readNativeApi();
-    if (!api || !activeThread || activeThread.loop?.active !== true) {
-      return;
-    }
-    if (stopLoopDispatchInFlightRef.current) {
-      return;
-    }
-    stopLoopDispatchInFlightRef.current = true;
-    try {
-      await api.orchestration.dispatchCommand({
-        type: "thread.loop.off",
-        commandId: newCommandId(),
-        threadId: activeThread.id,
-        createdAt: new Date().toISOString(),
-      });
-      const snapshot = await api.orchestration.getShellSnapshot();
-      syncServerShellSnapshot(snapshot);
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Could not stop Loop",
-        description:
-          error instanceof Error ? error.message : "An error occurred while stopping the loop.",
-      });
-    } finally {
-      stopLoopDispatchInFlightRef.current = false;
-    }
-  }, [activeThread, syncServerShellSnapshot]);
-
-  // Stop now: interrupt the running loop-owned turn (the decider atomically
-  // turns the loop off); fall back to a plain loop-off when no concrete turn exists.
-  const handleStopLoopNow = useCallback(async () => {
-    const api = readNativeApi();
-    const loop = activeThread?.loop;
-    if (!api || !activeThread || loop == null) {
-      return;
-    }
-    if (stopLoopDispatchInFlightRef.current) {
-      return;
-    }
-    stopLoopDispatchInFlightRef.current = true;
-    try {
-      if (isLoopOwnedTurnRunning(loop, activeThread.latestTurn)) {
-        await api.orchestration.dispatchCommand({
-          type: "thread.turn.interrupt",
-          commandId: newCommandId(),
-          threadId: activeThread.id,
-          createdAt: new Date().toISOString(),
-        });
-      } else if (loop.active) {
-        await api.orchestration.dispatchCommand({
-          type: "thread.loop.off",
-          commandId: newCommandId(),
-          threadId: activeThread.id,
-          createdAt: new Date().toISOString(),
-        });
-      }
-      const snapshot = await api.orchestration.getShellSnapshot();
-      syncServerShellSnapshot(snapshot);
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Could not stop Loop",
-        description:
-          error instanceof Error ? error.message : "An error occurred while stopping the loop.",
-      });
-    } finally {
-      stopLoopDispatchInFlightRef.current = false;
-    }
-  }, [activeThread, syncServerShellSnapshot]);
-
-  // One error toast for exceptional loop auto-stops (repeated errors, invalid
-  // saved objective, unavailable thread); routine stops stay toast-free.
-  const addLoopStopErrorToast = useCallback(
-    (toast: { title: string; description: string; threadId: ThreadId | null }) => {
-      toastManager.add({
-        type: "error",
-        title: toast.title,
-        description: toast.description,
-        data: { threadId: toast.threadId },
-      });
-    },
-    [],
-  );
-  useLoopStopErrorToast(activeThreadId ?? null, activeThread?.loop ?? null, addLoopStopErrorToast);
+  const {
+    stopAfterTurn: handleStopLoopAfterTurn,
+    stopNow: handleStopLoopNow,
+    ensureLoopThreadReady,
+  } = useLoopActions({
+    threadId,
+    activeThread,
+    activeProject,
+    isServerThread,
+    selectedModelSelection,
+    runtimeMode,
+    interactionMode,
+    syncServerShellSnapshot,
+  });
 
   const {
     handoffBusy,
@@ -9084,56 +9004,6 @@ export default function ChatView({
     assistantSelectionCount: composerAssistantSelections.length,
   });
 
-  // Promotes a local new-chat draft to a server thread before a loop can be
-  // set on it. Shared by direct `/loop 5 fix tests` starts and guided setup.
-  const ensureLoopThreadReady = useCallback(
-    async (titleSeed: string): Promise<boolean> => {
-      const api = readNativeApi();
-      if (!api || !activeProject || !activeThread) {
-        return false;
-      }
-      if (isServerThread) {
-        return true;
-      }
-      try {
-        const result = await promoteThreadCreate(
-          {
-            type: "thread.create",
-            commandId: newCommandId(),
-            threadId,
-            projectId: activeProject.id,
-            title: buildPromptThreadTitleFallback(titleSeed),
-            modelSelection: selectedModelSelection,
-            runtimeMode,
-            interactionMode,
-            envMode: activeThread.envMode ?? "local",
-            branch: activeThread.branch,
-            worktreePath: activeThread.worktreePath,
-            associatedWorktreePath: activeThread.associatedWorktreePath ?? null,
-            associatedWorktreeBranch: activeThread.associatedWorktreeBranch ?? null,
-            associatedWorktreeRef: activeThread.associatedWorktreeRef ?? null,
-            lastKnownPr: activeThread.lastKnownPr ?? null,
-            createdAt: new Date().toISOString(),
-          },
-          api,
-          { force: true },
-        );
-        return result !== "unavailable";
-      } catch {
-        return false;
-      }
-    },
-    [
-      activeProject,
-      activeThread,
-      interactionMode,
-      isServerThread,
-      runtimeMode,
-      selectedModelSelection,
-      threadId,
-    ],
-  );
-
   const loopComposer = useLoopComposerMode({
     threadId,
     activeLoop: activeThread?.loop ?? null,
@@ -9167,6 +9037,35 @@ export default function ChatView({
   const isLoopOwnedTurnActive =
     activeThread?.loop != null &&
     isLoopOwnedTurnRunning(activeThread.loop, activeThread.latestTurn);
+
+  const composerPlaceholder = useMemo(
+    () =>
+      deriveLoopComposerPlaceholder({
+        isApprovalState: isComposerApprovalState,
+        pendingProgressQuestion: activePendingProgress
+          ? activePendingProgress.activeQuestion?.options.length === 0
+            ? "free-form"
+            : "with-options"
+          : null,
+        loopSetupOpen: loopComposerModeOpen,
+        showPlanFollowUp: showPlanFollowUpPrompt && activeProposedPlan != null,
+        loop: activeThread?.loop ?? null,
+        isSubagentThread: activeThread?.parentThreadId != null,
+        hasLiveTurn,
+        isDisconnected: phase === "disconnected",
+      }),
+    [
+      isComposerApprovalState,
+      activePendingProgress,
+      loopComposerModeOpen,
+      showPlanFollowUpPrompt,
+      activeProposedPlan,
+      activeThread?.loop,
+      activeThread?.parentThreadId,
+      hasLiveTurn,
+      phase,
+    ],
+  );
 
   const {
     handleForkTargetSelection,
@@ -10384,29 +10283,7 @@ export default function ChatView({
                     {...(canCollapsePastedTextToDraft
                       ? { onCollapsePastedText: addPastedTextToDraft }
                       : {})}
-                    placeholder={
-                      isComposerApprovalState
-                        ? "Resolve this approval request to continue"
-                        : activePendingProgress
-                          ? activePendingProgress.activeQuestion?.options.length === 0
-                            ? "Type your answer to continue"
-                            : "Type your own answer, or leave this blank to use the selected option"
-                          : loopComposerModeOpen
-                            ? LOOP_SETUP_COMPOSER_PLACEHOLDER
-                            : showPlanFollowUpPrompt && activeProposedPlan
-                              ? "Add feedback to refine the plan, or leave this blank to implement it"
-                              : activeThread?.loop?.active
-                                ? activeThread.loop.prompt.trim().length === 0
-                                  ? LOOP_OBJECTIVE_PLACEHOLDER
-                                  : LOOP_ACTIVE_COMPOSER_PLACEHOLDER
-                                : activeThread?.parentThreadId
-                                  ? "Message this subagent while it works"
-                                  : hasLiveTurn
-                                    ? "Ask for follow-up changes"
-                                    : phase === "disconnected"
-                                      ? "Ask for follow-up changes or attach images"
-                                      : "Ask anything, @tag files/folders, or use / to show available commands"
-                    }
+                    placeholder={composerPlaceholder}
                     disabled={isComposerEditorDisabled}
                   />
                 </div>

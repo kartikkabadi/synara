@@ -22,7 +22,7 @@ import {
   validateLoopBudgetChoice,
   validateLoopObjective,
   type LoopSetupDispatchDeps,
-} from "./useLoopComposerMode";
+} from "./loop";
 
 const THREAD_ID = ThreadId.makeUnsafe("thread-1");
 
