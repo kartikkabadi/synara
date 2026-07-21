@@ -12,7 +12,7 @@ import type {
   ThreadTurnPurpose,
   TurnId,
 } from "@synara/contracts";
-import { LOOP_DEFAULT_HARD_CAP } from "@synara/contracts";
+import { LOOP_DEFAULT_HARD_CAP, LoopActivationId } from "@synara/contracts";
 import { describe, expect, it } from "vitest";
 import { Effect, Exit, Layer, ManagedRuntime, Option, Queue, Ref, Scope, Stream } from "effect";
 
@@ -71,7 +71,7 @@ function makeLoop(overrides?: Partial<ThreadLoop>): ThreadLoop {
     hardCap: LOOP_DEFAULT_HARD_CAP,
     consecutiveErrors: 0,
     lastStopReason: null,
-    activationId: "loop-activation",
+    activationId: LoopActivationId.makeUnsafe("loop-activation"),
     createdAt: now,
     updatedAt: now,
     ...overrides,
@@ -133,6 +133,17 @@ function makeLoopSetEvent(loop: ThreadLoop): OrchestrationEvent {
   return {
     ...makeBaseEventFields(),
     type: "thread.loop-set",
+    payload: {
+      threadId: asThreadId("thread-1"),
+      loop,
+    },
+  } as unknown as OrchestrationEvent;
+}
+
+function makeLoopWaitNotedEvent(loop: ThreadLoop): OrchestrationEvent {
+  return {
+    ...makeBaseEventFields(),
+    type: "thread.loop-wait-noted",
     payload: {
       threadId: asThreadId("thread-1"),
       loop,
@@ -409,7 +420,7 @@ describe("LoopReactor", () => {
           turnId: "turn-1",
           purpose: {
             kind: "loop-iteration",
-            activationId: "loop-activation",
+            activationId: LoopActivationId.makeUnsafe("loop-activation"),
             iteration: 1,
           },
         }),
@@ -421,7 +432,7 @@ describe("LoopReactor", () => {
         state: "completed",
         purpose: {
           kind: "loop-iteration",
-          activationId: "loop-activation",
+          activationId: LoopActivationId.makeUnsafe("loop-activation"),
           iteration: 1,
         },
       }),
@@ -469,7 +480,7 @@ describe("LoopReactor", () => {
           role: "user",
           purpose: {
             kind: "loop-iteration",
-            activationId: "loop-activation",
+            activationId: LoopActivationId.makeUnsafe("loop-activation"),
             iteration: 1,
           },
         }),
@@ -484,7 +495,7 @@ describe("LoopReactor", () => {
         assistantMessageId: asMessageId("missing-assistant"),
         purpose: {
           kind: "loop-iteration",
-          activationId: "loop-activation",
+          activationId: LoopActivationId.makeUnsafe("loop-activation"),
           iteration: 1,
         },
       },
@@ -673,7 +684,7 @@ describe("LoopReactor", () => {
           turnId: turnId as unknown as string,
           purpose: {
             kind: "loop-iteration",
-            activationId: "loop-activation",
+            activationId: LoopActivationId.makeUnsafe("loop-activation"),
             iteration: 1,
           },
         }),
@@ -685,7 +696,7 @@ describe("LoopReactor", () => {
         state: "interrupted",
         purpose: {
           kind: "loop-iteration",
-          activationId: "loop-activation",
+          activationId: LoopActivationId.makeUnsafe("loop-activation"),
           iteration: 1,
         },
       }),
@@ -737,20 +748,24 @@ describe("LoopReactor", () => {
     await Effect.runPromise(Queue.offer(eventQueue, makeLoopSetEvent(loop)));
     await Effect.runPromise(Effect.sleep("50 millis"));
 
-    // Blocked on approval: the arm-time pre-check waits, so nothing dispatches
-    // before expiry.
+    // Arm-time dispatch goes through; the decider (not the reactor) settles the
+    // approval-blocked wait. The reactor no longer pre-evaluates policy.
     let commands = await Effect.runPromise(Ref.get(dispatchLog));
-    expect(commands.filter((command) => command.type === "thread.loop.continue")).toHaveLength(0);
+    const armContinues = commands.filter((command) => command.type === "thread.loop.continue");
+    expect(armContinues).toHaveLength(1);
 
     await Effect.runPromise(Effect.sleep("300 millis"));
 
     commands = await Effect.runPromise(Ref.get(dispatchLog));
     const loopContinues = commands.filter((command) => command.type === "thread.loop.continue");
-    expect(loopContinues).toHaveLength(1);
-    expect(loopContinues[0]).toMatchObject({
+    // The expiry timer issues a second dispatch carrying the same deterministic
+    // commandId, which the engine's receipt dedupe collapses.
+    expect(loopContinues).toHaveLength(2);
+    expect(loopContinues[1]).toMatchObject({
       threadId: thread.id,
       expectedUpdatedAt: loop.updatedAt,
       expectedActivationId: loop.activationId,
+      commandId: loopContinues[0]?.commandId,
     });
 
     await Effect.runPromise(Scope.close(scope, Exit.void));
@@ -775,8 +790,10 @@ describe("LoopReactor", () => {
     );
     await Effect.runPromise(Effect.sleep("300 millis"));
 
+    // Only the arm-time dispatch happens; the cancelled timer must not add a
+    // second one after endsAt.
     const commands = await Effect.runPromise(Ref.get(dispatchLog));
-    expect(commands.filter((command) => command.type === "thread.loop.continue")).toHaveLength(0);
+    expect(commands.filter((command) => command.type === "thread.loop.continue")).toHaveLength(1);
 
     await Effect.runPromise(Scope.close(scope, Exit.void));
     await runtime.dispose();
@@ -792,26 +809,27 @@ describe("LoopReactor", () => {
     await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
     await Effect.runPromise(reactor.restoreActiveLoops);
 
-    // Restore pre-check waits (approval pending, endsAt not reached), so the
-    // only dispatch must come from the timer firing at endsAt.
+    // Restore dispatches once immediately (the decider settles the wait), then
+    // the timer fires a second dispatch with the same deterministic commandId.
     let commands = await Effect.runPromise(Ref.get(dispatchLog));
-    expect(commands.filter((command) => command.type === "thread.loop.continue")).toHaveLength(0);
+    expect(commands.filter((command) => command.type === "thread.loop.continue")).toHaveLength(1);
 
     await Effect.runPromise(Effect.sleep("300 millis"));
 
     commands = await Effect.runPromise(Ref.get(dispatchLog));
     const loopContinues = commands.filter((command) => command.type === "thread.loop.continue");
-    expect(loopContinues).toHaveLength(1);
-    expect(loopContinues[0]).toMatchObject({
+    expect(loopContinues).toHaveLength(2);
+    expect(loopContinues[1]).toMatchObject({
       threadId: thread.id,
       expectedActivationId: loop.activationId,
+      commandId: loopContinues[0]?.commandId,
     });
 
     await Effect.runPromise(Scope.close(scope, Exit.void));
     await runtime.dispose();
   });
 
-  it("does not dispatch continue while a queued turn start is pending", async () => {
+  it("dispatches continue even while a queued turn start is pending (decider settles waits)", async () => {
     const loop = makeLoop({ iteration: 2, consecutiveErrors: 1 });
     const thread = makeThread({
       loop,
@@ -821,7 +839,7 @@ describe("LoopReactor", () => {
           turnId: "turn-1",
           purpose: {
             kind: "loop-iteration",
-            activationId: "loop-activation",
+            activationId: LoopActivationId.makeUnsafe("loop-activation"),
             iteration: 1,
           },
         }),
@@ -833,7 +851,7 @@ describe("LoopReactor", () => {
         state: "error",
         purpose: {
           kind: "loop-iteration",
-          activationId: "loop-activation",
+          activationId: LoopActivationId.makeUnsafe("loop-activation"),
           iteration: 1,
         },
       }),
@@ -861,7 +879,32 @@ describe("LoopReactor", () => {
 
     const commands = await Effect.runPromise(Ref.get(dispatchLog));
     const continueCommand = commands.find((command) => command.type === "thread.loop.continue");
-    expect(continueCommand).toBeUndefined();
+    // The reactor no longer pre-evaluates the continuation policy; it forwards
+    // the deterministic continue and the decider settles the pending-start wait
+    // with a non-triggering thread.loop-wait-noted event.
+    expect(continueCommand).toBeDefined();
+
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    await runtime.dispose();
+  });
+
+  it("ignores thread.loop-wait-noted (no continuation feedback)", async () => {
+    const loop = makeLoop();
+    const thread = makeThread({ loop });
+    const { runtime, eventQueue, dispatchLog } = makeRuntime(
+      makeSnapshot(thread),
+      Option.some(thread),
+    );
+
+    const reactor = await runtime.runPromise(Effect.service(LoopReactor));
+    const scope = await Effect.runPromise(Scope.make("sequential"));
+    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
+
+    await Effect.runPromise(Queue.offer(eventQueue, makeLoopWaitNotedEvent(loop)));
+    await Effect.runPromise(Effect.sleep("50 millis"));
+
+    const commands = await Effect.runPromise(Ref.get(dispatchLog));
+    expect(commands.filter((command) => command.type === "thread.loop.continue")).toHaveLength(0);
 
     await Effect.runPromise(Scope.close(scope, Exit.void));
     await runtime.dispose();

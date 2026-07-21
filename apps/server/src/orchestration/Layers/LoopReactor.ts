@@ -10,10 +10,9 @@ import {
   type OrchestrationThreadShell,
   type ThreadLoop,
 } from "@synara/contracts";
-import { Effect, Layer, Option, Queue, Ref, Stream } from "effect";
+import { Effect, Layer, Option, Queue, Ref, Schedule, Stream } from "effect";
 
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
-import { buildLoopContinuationThreadView, decideLoopContinuation } from "../loopDecision.ts";
 import { ProjectionThreadLoopRepository } from "../../persistence/Services/ProjectionThreadLoop.ts";
 import {
   OrchestrationEngineService,
@@ -42,29 +41,21 @@ function makeLoopContinueCommandId(
   return CommandId.makeUnsafe(`loop-continue:${threadId}:${loop.updatedAt}:${loop.iteration}`);
 }
 
+// Dispatches the deterministic continuation command. The decider is the single
+// evaluation point: a wait outcome settles as a non-triggering
+// `thread.loop-wait-noted` event rather than being pre-filtered here.
+// Returns whether the dispatch succeeded so callers can re-arm/retry.
 function dispatchLoopContinue(options: {
   orchestrationEngine: OrchestrationEngineShape;
   thread: OrchestrationThreadShell;
   loop: ThreadLoop;
   createdAt: string;
-}): Effect.Effect<void, never> {
+}): Effect.Effect<boolean, never> {
   const { orchestrationEngine, thread, loop, createdAt } = options;
   const threadId = thread.id;
 
   if (!loop.active) {
-    return Effect.void;
-  }
-
-  // Pre-evaluate the pure policy against the same shell state. A wait outcome
-  // must not reach the engine: a command that produces no events is rejected
-  // with a durable receipt, burning this deterministic commandId.
-  const decision = decideLoopContinuation({
-    loop,
-    nowMs: Date.parse(createdAt) || Date.now(),
-    thread: buildLoopContinuationThreadView(thread),
-  });
-  if (decision.type === "wait") {
-    return Effect.void;
+    return Effect.succeed(true);
   }
 
   const command = {
@@ -77,15 +68,22 @@ function dispatchLoopContinue(options: {
   } satisfies Extract<OrchestrationCommand, { type: "thread.loop.continue" }>;
 
   return orchestrationEngine.dispatch(command).pipe(
+    Effect.as(true),
     Effect.catch((error) =>
       Effect.logWarning("loop continuation dispatch failed", {
         threadId,
         error: String(error),
-      }),
+      }).pipe(Effect.as(false)),
     ),
-    Effect.asVoid,
   );
 }
+
+// Failed duration-expiry dispatches re-arm with a short backoff instead of
+// dropping the deadline permanently.
+const EXPIRY_RETRY_BACKOFF_MS = 30_000;
+
+const RESTORE_SNAPSHOT_RETRY_SCHEDULE = Schedule.exponential("250 millis").pipe(Schedule.take(3));
+const RESTORE_DISPATCH_RETRY_SCHEDULE = Schedule.exponential("250 millis").pipe(Schedule.take(3));
 
 const makeLoopReactor = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -98,6 +96,28 @@ const makeLoopReactor = Effect.gen(function* () {
   // single timer fiber sleeps until min(endsAt) and re-arms on every change.
   const durationDeadlinesRef = yield* Ref.make(new Map<OrchestrationThreadShell["id"], number>());
   const timerWakeQueue = yield* Queue.unbounded<void>();
+
+  // In-memory index of threads with an active loop so per-event triggers skip
+  // the SQLite shell read for the (common) threads without loops. Loop events
+  // keep it current; restoreActiveLoops seeds it from the projection. Until
+  // seeded, membership is unknown and continueThread falls through to the read.
+  const activeLoopThreadsRef = yield* Ref.make(new Set<OrchestrationThreadShell["id"]>());
+  const activeLoopsSeededRef = yield* Ref.make(false);
+
+  const trackLoopState = (threadId: OrchestrationThreadShell["id"], loop: ThreadLoop | null) =>
+    Ref.update(activeLoopThreadsRef, (current) => {
+      const active = loop?.active === true;
+      if (current.has(threadId) === active) {
+        return current;
+      }
+      const next = new Set(current);
+      if (active) {
+        next.add(threadId);
+      } else {
+        next.delete(threadId);
+      }
+      return next;
+    });
 
   const syncDurationDeadline = (
     threadId: OrchestrationThreadShell["id"],
@@ -123,39 +143,69 @@ const makeLoopReactor = Effect.gen(function* () {
       yield* Queue.offer(timerWakeQueue, undefined);
     });
 
+  // Returns whether the continuation is settled: false means a transient
+  // failure (missing shell row or failed dispatch) that callers may retry.
   const continueThread = (threadId: OrchestrationThreadShell["id"], createdAt: string) =>
     Effect.gen(function* () {
+      const seeded = yield* Ref.get(activeLoopsSeededRef);
+      if (seeded) {
+        const activeLoopThreads = yield* Ref.get(activeLoopThreadsRef);
+        if (!activeLoopThreads.has(threadId)) {
+          return true;
+        }
+      }
       const threadOption = yield* projectionSnapshotQuery.getThreadShellById(threadId);
       if (Option.isNone(threadOption)) {
-        return;
+        return false;
       }
       const loop = threadOption.value.loop;
-      if (loop?.active === true) {
-        yield* dispatchLoopContinue({
-          orchestrationEngine,
-          thread: threadOption.value,
-          loop,
-          createdAt,
-        });
+      if (loop?.active !== true) {
+        return true;
       }
+      return yield* dispatchLoopContinue({
+        orchestrationEngine,
+        thread: threadOption.value,
+        loop,
+        createdAt,
+      });
     });
 
   const restoreActiveLoops: LoopReactorShape["restoreActiveLoops"] = Effect.gen(function* () {
     // Projection/query infrastructure failures must propagate: silently
     // treating them as an empty snapshot would skip loop restoration and
-    // strand active loops after a restart.
-    const readModel = yield* projectionSnapshotQuery.getShellSnapshot().pipe(Effect.orDie);
+    // strand active loops after a restart. A bounded retry absorbs transient
+    // read failures before giving up.
+    const readModel = yield* projectionSnapshotQuery
+      .getShellSnapshot()
+      .pipe(Effect.retry(RESTORE_SNAPSHOT_RETRY_SCHEDULE), Effect.orDie);
+    const activeThreads = readModel.threads.filter((thread) => thread.loop?.active === true);
+    yield* Ref.set(activeLoopThreadsRef, new Set(activeThreads.map((thread) => thread.id)));
+    yield* Ref.set(activeLoopsSeededRef, true);
     const now = new Date().toISOString();
-    for (const thread of readModel.threads) {
-      if (thread.loop?.active === true) {
-        yield* syncDurationDeadline(thread.id, thread.loop);
-        yield* dispatchLoopContinue({
-          orchestrationEngine,
-          thread,
-          loop: thread.loop,
-          createdAt: now,
-        });
+    for (const thread of activeThreads) {
+      const loop = thread.loop;
+      if (loop?.active !== true) {
+        continue;
       }
+      yield* syncDurationDeadline(thread.id, loop);
+      // A failed restore dispatch strands the loop until the next unrelated
+      // trigger; retry with bounded backoff before giving up.
+      yield* dispatchLoopContinue({
+        orchestrationEngine,
+        thread,
+        loop,
+        createdAt: now,
+      }).pipe(
+        Effect.flatMap((dispatched) =>
+          dispatched ? Effect.succeed(true) : Effect.fail(new Error("restore dispatch failed")),
+        ),
+        Effect.retry(RESTORE_DISPATCH_RETRY_SCHEDULE),
+        Effect.catch(() =>
+          Effect.logWarning("loop restore dispatch failed after retries", {
+            threadId: thread.id,
+          }).pipe(Effect.as(false)),
+        ),
+      );
     }
   });
 
@@ -197,14 +247,26 @@ const makeLoopReactor = Effect.gen(function* () {
         return next;
       });
       for (const [threadId] of expired) {
-        yield* continueThread(threadId, nowIso).pipe(
+        const settled = yield* continueThread(threadId, nowIso).pipe(
           Effect.catch((error) =>
             Effect.logWarning("loop duration expiry continue failed", {
               threadId,
               error: String(error),
-            }),
+            }).pipe(Effect.as(false)),
           ),
         );
+        if (!settled) {
+          // Re-arm with a short backoff so a transient dispatch failure does
+          // not permanently drop the deadline for a still-live loop.
+          yield* Ref.update(durationDeadlinesRef, (current) => {
+            const next = new Map(current);
+            if (!next.has(threadId)) {
+              next.set(threadId, Date.now() + EXPIRY_RETRY_BACKOFF_MS);
+            }
+            return next;
+          });
+          yield* Queue.offer(timerWakeQueue, undefined);
+        }
       }
     }
   });
@@ -215,12 +277,23 @@ const makeLoopReactor = Effect.gen(function* () {
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) =>
         Effect.gen(function* () {
           if (event.type === "thread.loop-set") {
+            yield* trackLoopState(event.payload.threadId, event.payload.loop);
             yield* syncDurationDeadline(event.payload.threadId, event.payload.loop);
             yield* continueThread(event.payload.threadId, event.occurredAt);
             return;
           }
 
           if (event.type === "thread.loop-continued" || event.type === "thread.loop-off") {
+            yield* trackLoopState(event.payload.threadId, event.payload.loop);
+            yield* syncDurationDeadline(event.payload.threadId, event.payload.loop);
+            return;
+          }
+
+          if (event.type === "thread.loop-wait-noted") {
+            // Deliberately non-triggering: a wait outcome must not feed back
+            // into another continuation dispatch. Only the tracked loop state
+            // (updatedAt rotation) is kept current.
+            yield* trackLoopState(event.payload.threadId, event.payload.loop);
             yield* syncDurationDeadline(event.payload.threadId, event.payload.loop);
             return;
           }
@@ -257,6 +330,7 @@ const makeLoopReactor = Effect.gen(function* () {
           }
 
           if (event.type === "thread.archived" || event.type === "thread.deleted") {
+            yield* trackLoopState(event.payload.threadId, null);
             yield* syncDurationDeadline(event.payload.threadId, null);
             const loopOption = yield* projectionThreadLoopRepository.getByThreadId({
               threadId: event.payload.threadId,
