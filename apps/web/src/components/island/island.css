@@ -174,25 +174,40 @@
   }
 }
 
-/* ---- Content crossfade ---------------------------------------------- */
+/* ---- Content choreography -------------------------------------------- */
 
-.island-crossfade {
-  animation: island-crossfade-in 160ms ease-out 60ms both;
+/* Two-phase swap: outgoing content fades over the first ~35% of the surface
+   morph; incoming content enters after a ~25% delay, header and body settling
+   from slightly different offsets so the panel reads as unfurling. */
+.island-leave {
+  animation: island-leave 90ms ease-out both;
 }
 
-/* Expanded -> collapsed: the pill content must be there when the shrink lands. */
-.island-crossfade-nodelay {
-  animation-delay: 0ms;
+.island-enter-header {
+  animation: island-enter-h 170ms ease-out 65ms both;
 }
 
-@keyframes island-crossfade-in {
+.island-enter-body {
+  animation: island-enter-b 170ms ease-out 65ms both;
+}
+
+@keyframes island-leave {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes island-enter-h {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(-4px);
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+}
+
+@keyframes island-enter-b {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
   }
 }
 
@@ -379,7 +394,9 @@
     animation: none !important;
   }
 
-  .island-crossfade {
+  .island-leave,
+  .island-enter-header,
+  .island-enter-body {
     animation: none;
   }
 

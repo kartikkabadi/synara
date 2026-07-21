@@ -85,6 +85,17 @@ export function aggregateIslandStatus(
   return aggregate;
 }
 
+// Compact relative time for expanded rows: "now", "2m", "3h", "1d".
+export function islandRelativeTime(lastActivityAt: string, nowMs: number): string {
+  const elapsedMs = nowMs - Date.parse(lastActivityAt);
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 60_000) return "now";
+  const minutes = Math.floor(elapsedMs / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
 // Detects transitions that should auto-pop the island: a session newly needing
 // approval or a working session finishing its turn.
 export function findPopTransition(

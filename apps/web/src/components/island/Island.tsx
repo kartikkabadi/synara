@@ -20,6 +20,7 @@ import {
   aggregateIslandStatus,
   deriveIslandSessions,
   findPopTransition,
+  islandRelativeTime,
   type IslandSession,
   type IslandSessionStatus,
 } from "~/lib/islandSessionTracker";
@@ -31,6 +32,9 @@ import "./island.css";
 
 const AUTO_POP_MS = 4_000;
 const EXPANDED_IDLE_COLLAPSE_MS = 8_000;
+// Outgoing content fades over the first ~35% of the 260ms surface morph, then
+// the incoming content mounts and enters on its own 65ms-delayed keyframes.
+const CONTENT_LEAVE_MS = 90;
 
 // The window is pre-sized to the expanded bounds (except Linux) and only this
 // inner container animates, using the same sizing as the Electron window.
@@ -58,7 +62,7 @@ const STATUS_LABEL: Record<IslandSessionStatus, string> = {
 // main process is authoritative, with the browser platform as a pre-load
 // fallback. Only an explicit mac signal yields ⌘ — Windows/Linux must never
 // show mac glyphs.
-function shortcutHint(context: IslandDisplayContext | null): string {
+export function shortcutHint(context: IslandDisplayContext | null): string {
   let isMac = false;
   if (context) {
     isMac = context.platform === "macos";
@@ -211,10 +215,28 @@ export function Island() {
 
   const effectiveState: IslandWindowState = uiState === "collapsed" && popped ? "hover" : uiState;
 
-  // Every displayed state change gets the spring overshoot alongside the 220ms
-  // size transition, so the surface always feels alive, not just on pops.
+  // Two-phase content swap: the surface morph starts immediately while the
+  // outgoing content fades for CONTENT_LEAVE_MS, then the incoming content
+  // mounts and runs its delayed enter keyframes.
+  const [renderedState, setRenderedState] = useState<IslandWindowState>(effectiveState);
+  const [contentLeaving, setContentLeaving] = useState(false);
+  useEffect(() => {
+    if (effectiveState === renderedState) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setRenderedState(effectiveState);
+      return;
+    }
+    setContentLeaving(true);
+    const timer = setTimeout(() => {
+      setRenderedState(effectiveState);
+      setContentLeaving(false);
+    }, CONTENT_LEAVE_MS);
+    return () => clearTimeout(timer);
+  }, [effectiveState, renderedState]);
+
+  // Every displayed state change gets the spring overshoot alongside the
+  // surface morph, so the island always feels alive, not just on pops.
   const previousStateRef = useRef<IslandWindowState | null>(null);
-  const wasExpanded = previousStateRef.current === "expanded";
   useEffect(() => {
     const previous = previousStateRef.current;
     previousStateRef.current = effectiveState;
@@ -263,15 +285,15 @@ export function Island() {
           aggregate === "done" && !isNotch && "island-surface-glow-done",
         )}
       >
-        {effectiveState === "collapsed" ? (
+        {renderedState === "collapsed" ? (
           <button
             key="collapsed"
             type="button"
             onClick={() => applyState("expanded")}
             className={cn(
-              "island-crossfade flex h-full w-full items-center text-xs font-medium tracking-wide text-white/80",
+              "island-enter-body flex h-full w-full items-center text-xs font-medium tracking-wide text-white/80",
               sessions.length > 0 ? "gap-2 pl-2.5 pr-3" : "justify-center px-3",
-              wasExpanded && "island-crossfade-nodelay",
+              contentLeaving && "island-leave",
             )}
             aria-label="Expand agent sessions island"
           >
@@ -288,12 +310,15 @@ export function Island() {
               </>
             ) : null}
           </button>
-        ) : effectiveState === "hover" ? (
+        ) : renderedState === "hover" ? (
           <button
             key="hover"
             type="button"
             onClick={() => applyState("expanded")}
-            className="island-crossfade flex h-full w-full flex-col items-stretch justify-center gap-1.5 px-4 py-3 text-left"
+            className={cn(
+              "island-enter-body flex h-full w-full flex-col items-stretch justify-center gap-1.5 px-4 py-3 text-left",
+              contentLeaving && "island-leave",
+            )}
             aria-label="Expand agent sessions island"
           >
             {headline ? (
@@ -326,11 +351,11 @@ export function Island() {
         ) : (
           <div
             key="expanded"
-            className="island-crossfade relative flex h-full flex-col"
+            className={cn("relative flex h-full flex-col", contentLeaving && "island-leave")}
             onPointerMove={armIdleTimer}
           >
             <div className="island-panel-vignette pointer-events-none absolute inset-0" />
-            <div className="flex items-center justify-between border-b border-white/6 px-4 py-2.5">
+            <div className="island-enter-header flex items-center justify-between border-b border-white/6 px-4 py-2.5">
               <span className="text-xs font-medium text-white/60">Sessions</span>
               <div className="flex items-center gap-2">
                 <span className="rounded border border-white/10 bg-white/5 px-1 text-[10px] text-white/40">
@@ -346,7 +371,7 @@ export function Island() {
                 </button>
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto px-2 pb-2">
+            <div className="island-enter-body flex-1 overflow-y-auto px-2 pb-2">
               {sessions.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center gap-2 px-2">
                   <IslandOrb state="idle" size={28} />
@@ -368,6 +393,9 @@ export function Island() {
                     <span className="flex shrink-0 items-center gap-2 group-hover:hidden">
                       <span className="rounded-md border border-white/10 bg-white/8 px-1.5 py-0.5 text-[10px] text-white/60">
                         {providerLabel(session.provider)}
+                      </span>
+                      <span className="text-[10px] text-white/40">
+                        {islandRelativeTime(session.lastActivityAt, Date.now())}
                       </span>
                       <span
                         className={cn("text-[10px] font-medium", STATUS_TEXT_CLASS[session.status])}

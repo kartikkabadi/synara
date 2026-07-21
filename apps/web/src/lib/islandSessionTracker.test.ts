@@ -7,6 +7,7 @@ import {
   deriveIslandSessions,
   findPopTransition,
   ISLAND_DONE_RETENTION_MS,
+  islandRelativeTime,
   type IslandSession,
 } from "./islandSessionTracker";
 
@@ -164,5 +165,16 @@ describe("findPopTransition", () => {
     ).toBeNull();
     // A session that appears already-done (e.g. initial snapshot) must not pop.
     expect(findPopTransition([], [makeSession({ status: "done" })])).toBeNull();
+  });
+});
+
+describe("islandRelativeTime", () => {
+  it("formats compact relative times", () => {
+    const now = Date.parse("2026-01-01T12:00:00Z");
+    expect(islandRelativeTime("2026-01-01T11:59:40Z", now)).toBe("now");
+    expect(islandRelativeTime("2026-01-01T11:58:00Z", now)).toBe("2m");
+    expect(islandRelativeTime("2026-01-01T09:00:00Z", now)).toBe("3h");
+    expect(islandRelativeTime("2025-12-30T12:00:00Z", now)).toBe("2d");
+    expect(islandRelativeTime("not-a-date", now)).toBe("now");
   });
 });
