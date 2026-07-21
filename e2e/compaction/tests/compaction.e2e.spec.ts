@@ -113,15 +113,47 @@ async function openWorkspace(page: Page): Promise<void> {
 }
 
 async function selectProvider(page: Page, spec: ProviderSpec): Promise<void> {
-  // The provider/model picker lives in the composer footer. Open it and pick
-  // the provider by its display name.
-  const picker = page
-    .getByRole("button", { name: /model|provider/i })
-    .or(page.locator("[data-testid='provider-model-picker']"))
-    .first();
-  await picker.click();
-  await page.getByText(spec.label, { exact: true }).first().click();
-  await page.keyboard.press("Escape").catch(() => {});
+  // The composer renders either a combined model+effort picker (aria-label
+  // "Change model and reasoning") or a standalone provider/model picker whose
+  // Base UI menu trigger carries data-slot="menu-trigger".
+  const combinedTrigger = page.getByRole("button", { name: "Change model and reasoning" });
+  const trigger =
+    (await combinedTrigger.count()) > 0
+      ? combinedTrigger.first()
+      : page.locator("button[data-slot='menu-trigger']").first();
+  await trigger.click();
+  const menu = page.getByRole("menu").first();
+  await menu.waitFor({ timeout: 15_000 });
+
+  // Available providers render as submenu triggers (role=menuitem, accessible
+  // name is exactly the provider label). Disabled providers append a status
+  // ("Sign in"/"Checking"/"Coming soon") to the name, so an exact match only
+  // hits a selectable provider entry.
+  const providerItem = page.getByRole("menuitem", { name: spec.label, exact: true });
+  try {
+    // Give live provider status a moment to resolve ("Checking" renders a
+    // disabled item whose accessible name includes the status suffix).
+    await providerItem.first().waitFor({ timeout: 10_000 });
+  } catch {
+    // Combined picker nests the provider list behind the current-model
+    // submenu trigger; open it and retry.
+    await page.locator("[data-slot='menu-sub-trigger']").last().click();
+    await providerItem.first().waitFor({ timeout: 15_000 });
+  }
+  await providerItem.first().click();
+
+  // Selecting a provider only opens its model submenu; committing the switch
+  // requires picking a model (menuitemradio) from that submenu.
+  const modelItems = page.getByRole("menuitemradio");
+  await modelItems.first().waitFor({ timeout: 30_000 });
+  const preferred = spec.preferModel
+    ? page.getByRole("menuitemradio", { name: new RegExp(spec.preferModel, "i") })
+    : modelItems;
+  const target = (await preferred.count()) > 0 ? preferred.first() : modelItems.first();
+  await target.click();
+  await menu.waitFor({ state: "hidden", timeout: 15_000 }).catch(async () => {
+    await page.keyboard.press("Escape");
+  });
 }
 
 function composer(page: Page) {
