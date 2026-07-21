@@ -165,6 +165,7 @@ export function decideLoopSet(
     iteration: 0,
     maxIterations,
     endsAt,
+    durationSeconds: command.durationSeconds,
     hardCap: LOOP_DEFAULT_HARD_CAP,
     consecutiveErrors: 0,
     lastStopReason: null,
@@ -247,6 +248,7 @@ export function decideLoopToggle(
     // Toggle-armed loops carry the safe default count budget, not hardCap-only.
     maxIterations: LOOP_DEFAULT_ARMED_MAX_ITERATIONS,
     endsAt: null,
+    durationSeconds: null,
     hardCap: LOOP_DEFAULT_HARD_CAP,
     consecutiveErrors: 0,
     lastStopReason: null,

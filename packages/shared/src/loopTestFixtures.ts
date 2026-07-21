@@ -13,6 +13,7 @@ export function makeLoop(overrides: Partial<ThreadLoop> = {}): ThreadLoop {
     iteration: 2,
     maxIterations: 5,
     endsAt: null,
+    durationSeconds: null,
     hardCap: 100,
     consecutiveErrors: 0,
     lastStopReason: null,

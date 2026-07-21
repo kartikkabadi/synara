@@ -20,8 +20,8 @@ export type LoopPresentationState =
   | { kind: "waiting-approval" }
   | { kind: "waiting-input" }
   | { kind: "waiting-plan" }
-  | { kind: "ending"; iteration: number }
-  | { kind: "stopping"; iteration: number }
+  | { kind: "ending" }
+  | { kind: "stopping" }
   | { kind: "ended"; reason: LoopStopReason };
 
 export interface LoopProgress {
@@ -146,11 +146,10 @@ export function deriveLoopProgress(loop: ThreadLoop, now: number): LoopProgress 
     };
   }
 
-  if (loop.endsAt !== null) {
+  if (loop.endsAt !== null && loop.durationSeconds != null) {
     const endsAtMs = new Date(loop.endsAt).getTime();
-    const createdAtMs = new Date(loop.createdAt).getTime();
-    const totalMs = Math.max(1, endsAtMs - createdAtMs);
-    const elapsedMs = Math.min(totalMs, Math.max(0, now - createdAtMs));
+    const totalMs = Math.max(1, loop.durationSeconds * 1000);
+    const elapsedMs = Math.min(totalMs, Math.max(0, totalMs - (endsAtMs - now)));
     const remainingSeconds = Math.max(0, (endsAtMs - now) / 1000);
     return {
       kind: "duration",
@@ -191,21 +190,19 @@ export interface LoopStopReasonCopy {
 
 export interface LoopStopReasonContext {
   readonly maxIterations: number | null;
-  readonly endsAt: string | null;
-  readonly createdAt: string;
+  readonly durationSeconds?: number | null;
   readonly hardCap: number;
   readonly consecutiveErrors: number;
 }
 
-// Whole-minute duration budget derived from creation and end timestamps; null
-// for loops without a duration budget.
+// Whole-minute duration budget from the configured budget; null for loops
+// without one. Never derived from endsAt - createdAt: endsAt re-anchors on
+// reconfigure while createdAt keeps the original activation start.
 export function loopDurationMinutes(loop: {
-  readonly endsAt: string | null;
-  readonly createdAt: string;
+  readonly durationSeconds?: number | null;
 }): number | null {
-  if (loop.endsAt === null) return null;
-  const totalMs = new Date(loop.endsAt).getTime() - new Date(loop.createdAt).getTime();
-  return Math.max(1, Math.round(totalMs / 60_000));
+  if (loop.durationSeconds == null) return null;
+  return Math.max(1, Math.round(loop.durationSeconds / 60));
 }
 
 export function formatLoopStopReason(
@@ -343,7 +340,7 @@ export function deriveLoopPresentationState(
     if (loopTurnRunning) {
       if (loop.lastStopReason === "user_stop") {
         return {
-          state: { kind: "stopping", iteration: loop.iteration },
+          state: { kind: "stopping" },
           label: "Stopping loop",
           detail: null,
           color: "neutral",
@@ -351,9 +348,12 @@ export function deriveLoopPresentationState(
         };
       }
       return {
-        state: { kind: "ending", iteration: loop.iteration },
+        state: { kind: "ending" },
         label: "Loop ending",
-        detail: "Current turn will finish",
+        detail:
+          loop.lastStopReason === "budget_duration"
+            ? "Time budget reached · current turn finishing"
+            : "Current turn will finish",
         color: "neutral",
         progress,
       };

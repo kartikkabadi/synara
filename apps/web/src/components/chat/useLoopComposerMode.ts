@@ -61,12 +61,8 @@ export function loopBudgetChoiceFromParsed(budget: LoopBudget | null): LoopBudge
 
 export function loopBudgetChoiceFromLoop(loop: ThreadLoop): LoopBudgetChoice {
   if (loop.maxIterations !== null) return { kind: "count", turns: loop.maxIterations };
-  if (loop.endsAt !== null) {
-    const totalMs = new Date(loop.endsAt).getTime() - new Date(loop.createdAt).getTime();
-    return {
-      kind: "duration",
-      seconds: Math.max(60, Math.round(totalMs / 1000)),
-    };
+  if (loop.durationSeconds != null) {
+    return { kind: "duration", seconds: Math.max(60, loop.durationSeconds) };
   }
   return { kind: "until-stopped" };
 }
