@@ -6,6 +6,7 @@ import {
   LOOP_BUDGET_COUNT_ERROR,
   LOOP_BUDGET_DURATION_ERROR,
   LOOP_CHOOSE_BUDGET_NOTE,
+  LOOP_EDIT_STALE_ERROR,
   LOOP_DEFAULT_BUDGET_CHOICE,
   LOOP_UNSUPPORTED_CONTEXT_MESSAGE,
   createLoopComposerCore,
@@ -292,6 +293,28 @@ describe("performLoopSetupSubmit", () => {
     ]);
   });
 
+  it("includes expectedActivationId when provided", async () => {
+    const { deps, dispatched } = makeDeps();
+    const result = await performLoopSetupSubmit(deps, {
+      threadId: THREAD_ID,
+      objective: "fix the tests",
+      budget: { kind: "count", turns: 10 },
+      expectedActivationId: "activation-1",
+    });
+    expect(result).toEqual({ ok: true });
+    expect(dispatched[0]).toMatchObject({ expectedActivationId: "activation-1" });
+  });
+
+  it("omits expectedActivationId when not provided", async () => {
+    const { deps, dispatched } = makeDeps();
+    await performLoopSetupSubmit(deps, {
+      threadId: THREAD_ID,
+      objective: "fix the tests",
+      budget: { kind: "count", turns: 10 },
+    });
+    expect(dispatched[0]).not.toHaveProperty("expectedActivationId");
+  });
+
   it("returns the failure message and dispatches nothing extra on error", async () => {
     const { deps } = makeDeps({
       dispatchCommand: () => Promise.reject(new Error("server down")),
@@ -308,7 +331,7 @@ describe("performLoopSetupSubmit", () => {
 function makeCoreHarness(
   overrides: {
     objective?: string;
-    activeLoop?: ThreadLoop | null;
+    activeLoop?: ThreadLoop | null | (() => ThreadLoop | null);
     hasUnsupportedContext?: boolean;
     ensureThreadReady?: (titleSeed: string) => Promise<boolean>;
     dispatchCommand?: LoopSetupDispatchDeps["dispatchCommand"];
@@ -320,7 +343,10 @@ function makeCoreHarness(
   const calls: string[] = [];
   const env: LoopComposerCoreEnv = {
     getThreadId: () => THREAD_ID,
-    getActiveLoop: () => overrides.activeLoop ?? null,
+    getActiveLoop: () =>
+      (typeof overrides.activeLoop === "function"
+        ? overrides.activeLoop()
+        : overrides.activeLoop) ?? null,
     hasUnsupportedContext: () => overrides.hasUnsupportedContext ?? false,
     getObjective: () => objective,
     setObjective: (value) => {
@@ -485,6 +511,50 @@ describe("createLoopComposerCore", () => {
     releaseReady(true);
     await Promise.all([first, second]);
     expect(dispatched).toHaveLength(1);
+  });
+
+  it("sends expectedActivationId on edit submits", async () => {
+    const { core, dispatched } = makeCoreHarness({
+      objective: "draft text",
+      activeLoop: makeLoop(),
+    });
+    core.openEdit();
+    await core.submit();
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]).toMatchObject({ expectedActivationId: "activation-1" });
+    expect(core.getState().mode).toEqual({ kind: "closed" });
+  });
+
+  it("blocks a stale edit save when the loop ended while editing", async () => {
+    let activeLoop: ThreadLoop | null = makeLoop();
+    const { core, dispatched } = makeCoreHarness({
+      objective: "draft text",
+      activeLoop: () => activeLoop,
+    });
+    core.openEdit();
+    activeLoop = null;
+    await core.submit();
+    expect(dispatched).toHaveLength(0);
+    expect(core.getState()).toMatchObject({
+      mode: { kind: "edit" },
+      error: LOOP_EDIT_STALE_ERROR,
+    });
+  });
+
+  it("blocks a stale edit save when the activation was replaced while editing", async () => {
+    let activeLoop: ThreadLoop | null = makeLoop();
+    const { core, dispatched } = makeCoreHarness({
+      objective: "draft text",
+      activeLoop: () => activeLoop,
+    });
+    core.openEdit();
+    activeLoop = makeLoop({ activationId: "activation-2" });
+    await core.submit();
+    expect(dispatched).toHaveLength(0);
+    expect(core.getState()).toMatchObject({
+      mode: { kind: "edit" },
+      error: LOOP_EDIT_STALE_ERROR,
+    });
   });
 
   it("promotes the new-chat thread before dispatching and syncing", async () => {
