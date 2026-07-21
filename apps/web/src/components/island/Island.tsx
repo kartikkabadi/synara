@@ -18,6 +18,7 @@ import { islandStateSize } from "@synara/shared/islandGeometry";
 import { ensureNativeApi } from "~/nativeApi";
 import {
   aggregateIslandStatus,
+  createShellThreadStore,
   deriveIslandSessions,
   findPopTransition,
   islandRelativeTime,
@@ -35,6 +36,14 @@ const EXPANDED_IDLE_COLLAPSE_MS = 8_000;
 // Outgoing content fades over the first ~35% of the 260ms surface morph, then
 // the incoming content mounts and enters on its own 65ms-delayed keyframes.
 const CONTENT_LEAVE_MS = 90;
+// Drives done-session pruning and relative timestamps between shell events.
+const CLOCK_TICK_MS = 30_000;
+
+let reducedMotionQuery: MediaQueryList | null = null;
+function prefersReducedMotion(): boolean {
+  reducedMotionQuery ??= window.matchMedia("(prefers-reduced-motion: reduce)");
+  return reducedMotionQuery.matches;
+}
 
 // The window is pre-sized to the expanded bounds (except Linux) and only this
 // inner container animates, using the same sizing as the Electron window.
@@ -102,7 +111,13 @@ export function Island() {
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
 
-  const sessions = useMemo(() => deriveIslandSessions(threads, Date.now()), [threads]);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), CLOCK_TICK_MS);
+    return () => clearInterval(timer);
+  }, []);
+
+  const sessions = useMemo(() => deriveIslandSessions(threads, nowMs), [threads, nowMs]);
   const aggregate = aggregateIslandStatus(sessions);
 
   useEffect(() => {
@@ -111,7 +126,7 @@ export function Island() {
   }, []);
 
   useEffect(() => {
-    void window.islandBridge?.getContext().then(setContext);
+    void window.islandBridge?.getContext().then((value) => setContext(value ?? null));
   }, []);
 
   useEffect(() => {
@@ -123,28 +138,15 @@ export function Island() {
 
   useEffect(() => {
     const api = ensureNativeApi();
-    const threadsById = new Map<string, OrchestrationThreadShell>();
-    const applyThreads = () => setThreads([...threadsById.values()]);
+    const store = createShellThreadStore();
     const disposeShellEvents = api.orchestration.onShellEvent(
       (item: OrchestrationShellStreamItem) => {
-        if (item.kind === "snapshot") {
-          threadsById.clear();
-          for (const thread of item.snapshot.threads) threadsById.set(thread.id, thread);
-        } else if (item.kind === "thread-upserted") {
-          threadsById.set(item.thread.id, item.thread);
-        } else if (item.kind === "thread-removed") {
-          threadsById.delete(item.threadId);
-        } else {
-          return;
-        }
-        applyThreads();
+        if (store.handleStreamItem(item)) setThreads(store.threads());
       },
     );
     void api.orchestration.subscribeShell();
     void api.orchestration.getShellSnapshot().then((snapshot) => {
-      threadsById.clear();
-      for (const thread of snapshot.threads) threadsById.set(thread.id, thread);
-      applyThreads();
+      if (store.applySnapshot(snapshot.threads)) setThreads(store.threads());
     });
     return () => {
       disposeShellEvents();
@@ -164,7 +166,7 @@ export function Island() {
     setPopped(true);
     if (popTimerRef.current) clearTimeout(popTimerRef.current);
     popTimerRef.current = setTimeout(() => setPopped(false), AUTO_POP_MS);
-    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (!prefersReducedMotion()) {
       surfaceRef.current?.animate(
         { transform: ["scale(1)", "scale(1.035)", "scale(1)"] },
         { duration: 280, easing: "cubic-bezier(0.34,1.56,0.64,1)" },
@@ -222,7 +224,7 @@ export function Island() {
   const [contentLeaving, setContentLeaving] = useState(false);
   useEffect(() => {
     if (effectiveState === renderedState) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (prefersReducedMotion()) {
       setRenderedState(effectiveState);
       return;
     }
@@ -241,7 +243,7 @@ export function Island() {
     const previous = previousStateRef.current;
     previousStateRef.current = effectiveState;
     if (previous === null || previous === effectiveState) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (prefersReducedMotion()) return;
     surfaceRef.current?.animate(
       { transform: ["scale(1)", "scale(1.02)", "scale(1)"] },
       { duration: 260, easing: "cubic-bezier(0.34,1.56,0.64,1)" },
@@ -264,7 +266,7 @@ export function Island() {
   const restSummary = summarizeRest(sessions.slice(1));
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-transparent">
+    <div className="pointer-events-none relative h-screen w-screen overflow-hidden bg-transparent">
       <div
         ref={surfaceRef}
         data-island-state={effectiveState}
@@ -395,7 +397,7 @@ export function Island() {
                         {providerLabel(session.provider)}
                       </span>
                       <span className="text-[10px] text-white/40">
-                        {islandRelativeTime(session.lastActivityAt, Date.now())}
+                        {islandRelativeTime(session.lastActivityAt, nowMs)}
                       </span>
                       <span
                         className={cn("text-[10px] font-medium", STATUS_TEXT_CLASS[session.status])}
