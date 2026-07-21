@@ -1443,6 +1443,9 @@ const ThreadLoopSetCommand = Schema.Struct({
   prompt: Schema.NullOr(LoopPrompt),
   maxIterations: Schema.NullOr(PositiveInt),
   durationSeconds: Schema.NullOr(PositiveInt),
+  // Edit-save guard: when supplied, the command only applies while the loop
+  // activation with this id is still active; otherwise it is rejected.
+  expectedActivationId: Schema.optional(Schema.String),
   createdAt: IsoDateTime,
 });
 
