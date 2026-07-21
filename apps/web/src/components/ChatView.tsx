@@ -462,7 +462,12 @@ import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { ComposerInputBanners } from "./chat/ComposerInputBanners";
 import { LoopComposerModeCta, LoopComposerModeHeader } from "./chat/LoopComposerMode";
 import { isLoopOwnedTurnRunning, LOOP_ACTIVE_COMPOSER_PLACEHOLDER } from "./chat/loopPresentation";
-import { isUnsupportedLoopContext, useLoopComposerMode } from "./chat/useLoopComposerMode";
+import {
+  isUnsupportedLoopContext,
+  LOOP_OBJECTIVE_PLACEHOLDER,
+  LOOP_SETUP_COMPOSER_PLACEHOLDER,
+  useLoopComposerMode,
+} from "./chat/useLoopComposerMode";
 import { useLoopStopErrorToast } from "./chat/useLoopStopErrorToast";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerVoiceButton } from "./chat/ComposerVoiceButton";
@@ -4398,12 +4403,19 @@ export default function ChatView({
     });
   }, [activeThread, isServerThread]);
 
+  // Guards both stop controls so repeated clicks dispatch a single command.
+  const stopLoopDispatchInFlightRef = useRef(false);
+
   // Stop after this turn: disable future iterations; the running turn finishes.
   const handleStopLoopAfterTurn = useCallback(async () => {
     const api = readNativeApi();
     if (!api || !activeThread || activeThread.loop?.active !== true) {
       return;
     }
+    if (stopLoopDispatchInFlightRef.current) {
+      return;
+    }
+    stopLoopDispatchInFlightRef.current = true;
     try {
       await api.orchestration.dispatchCommand({
         type: "thread.loop.off",
@@ -4420,6 +4432,8 @@ export default function ChatView({
         description:
           error instanceof Error ? error.message : "An error occurred while stopping the loop.",
       });
+    } finally {
+      stopLoopDispatchInFlightRef.current = false;
     }
   }, [activeThread, syncServerShellSnapshot]);
 
@@ -4431,6 +4445,10 @@ export default function ChatView({
     if (!api || !activeThread || loop == null) {
       return;
     }
+    if (stopLoopDispatchInFlightRef.current) {
+      return;
+    }
+    stopLoopDispatchInFlightRef.current = true;
     try {
       if (isLoopOwnedTurnRunning(loop, activeThread.latestTurn)) {
         await api.orchestration.dispatchCommand({
@@ -4456,6 +4474,8 @@ export default function ChatView({
         description:
           error instanceof Error ? error.message : "An error occurred while stopping the loop.",
       });
+    } finally {
+      stopLoopDispatchInFlightRef.current = false;
     }
   }, [activeThread, syncServerShellSnapshot]);
 
@@ -9478,6 +9498,21 @@ export default function ChatView({
     ensureThreadReady: ensureLoopThreadReady,
   });
   const loopComposerModeOpen = loopComposer.mode.kind !== "closed";
+  const loopComposerReset = loopComposer.reset;
+  // Loop setup/edit is per-thread state: close it when the thread changes so
+  // a mode opened on one thread never dispatches against another.
+  useEffect(() => {
+    loopComposerReset();
+  }, [threadId, loopComposerReset]);
+  // The approval composer takes over the surface; close loop setup rather
+  // than leaving it hidden-but-armed behind the approval flow.
+  useEffect(() => {
+    if (isComposerApprovalState) {
+      loopComposerReset();
+    }
+  }, [isComposerApprovalState, loopComposerReset]);
+  const isLoopOwnedTurnActive =
+    activeThread?.loop != null && isLoopOwnedTurnRunning(activeThread.loop, activeThread.latestTurn);
 
   const {
     handleForkTargetSelection,
@@ -10494,11 +10529,25 @@ export default function ChatView({
           onKeyDownCapture={
             loopComposerModeOpen
               ? (event) => {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    loopComposer.cancel();
+                  if (
+                    event.key !== "Escape" ||
+                    event.defaultPrevented ||
+                    event.nativeEvent.isComposing
+                  ) {
+                    return;
                   }
+                  // Escape inside the budget picker's custom inputs dismisses
+                  // that control, not the whole setup mode.
+                  const target = event.target;
+                  if (
+                    target instanceof HTMLElement &&
+                    target.closest("input[type='number'], [data-slot='menu-popup']") !== null
+                  ) {
+                    return;
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                  loopComposer.cancel();
                 }
               : undefined
           }
@@ -10643,7 +10692,7 @@ export default function ChatView({
                   <LoopComposerModeHeader
                     mode={loopComposer.mode}
                     isDispatching={loopComposer.isDispatching}
-                    isLoopTurnRunning={hasLiveTurn}
+                    isLoopTurnRunning={isLoopOwnedTurnActive}
                     note={loopComposer.note}
                     error={loopComposer.error}
                     isUnsupportedContext={loopComposer.isUnsupportedContext}
@@ -10742,12 +10791,12 @@ export default function ChatView({
                             ? "Type your answer to continue"
                             : "Type your own answer, or leave this blank to use the selected option"
                           : loopComposerModeOpen
-                            ? "What should Synara keep working on?"
+                            ? LOOP_SETUP_COMPOSER_PLACEHOLDER
                             : showPlanFollowUpPrompt && activeProposedPlan
                               ? "Add feedback to refine the plan, or leave this blank to implement it"
                               : activeThread?.loop?.active
                                 ? activeThread.loop.prompt.trim().length === 0
-                                  ? "What should Synara keep working on?"
+                                  ? LOOP_OBJECTIVE_PLACEHOLDER
                                   : LOOP_ACTIVE_COMPOSER_PLACEHOLDER
                                 : activeThread?.parentThreadId
                                   ? "Message this subagent while it works"
