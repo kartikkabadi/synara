@@ -117,14 +117,13 @@ async function openWorkspace(page: Page): Promise<void> {
 }
 
 async function selectProvider(page: Page, spec: ProviderSpec): Promise<void> {
-  // The composer renders either a combined model+effort picker (aria-label
-  // "Change model and reasoning") or a standalone provider/model picker whose
-  // Base UI menu trigger carries data-slot="menu-trigger".
+  // The composer renders either a standalone provider/model picker (tagged
+  // data-testid="provider-model-picker") or a combined model+effort picker
+  // (aria-label "Change model and reasoning").
+  const standaloneTrigger = page.locator("[data-testid='provider-model-picker']");
   const combinedTrigger = page.getByRole("button", { name: "Change model and reasoning" });
   const trigger =
-    (await combinedTrigger.count()) > 0
-      ? combinedTrigger.first()
-      : page.locator("button[data-slot='menu-trigger']").first();
+    (await standaloneTrigger.count()) > 0 ? standaloneTrigger.first() : combinedTrigger.first();
   await trigger.click();
   const menu = page.getByRole("menu").first();
   await menu.waitFor({ timeout: 15_000 });
