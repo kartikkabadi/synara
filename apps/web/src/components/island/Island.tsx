@@ -385,9 +385,12 @@ export function Island() {
             type="button"
             onClick={() => applyState("expanded")}
             className={cn(
-              "island-enter-body flex h-full w-full items-center justify-center text-xs font-medium tracking-wide text-white/80",
+              // Enter keyframes only on the incoming copy: replaying them on the
+              // remounted leaving copy would hide it (delayed `both` fill) and
+              // leave the capsule blank mid-morph.
+              leaving ? "island-leave" : "island-enter-body",
+              "flex h-full w-full items-center justify-center text-xs font-medium tracking-wide text-white/80",
               sessions.length > 0 ? "gap-2 pl-2.5 pr-3" : "px-3",
-              leaving && "island-leave",
             )}
             aria-label="Expand agent sessions island"
           >
@@ -409,8 +412,8 @@ export function Island() {
         type="button"
         onClick={() => applyState("expanded")}
         className={cn(
-          "island-enter-body flex h-full w-full flex-col items-stretch justify-center gap-1.5 px-5 py-3 text-left",
-          leaving && "island-leave",
+          leaving ? "island-leave" : "island-enter-body",
+          "flex h-full w-full flex-col items-stretch justify-center gap-1.5 px-5 py-3 text-left",
         )}
         aria-label="Expand agent sessions island"
       >
@@ -445,7 +448,12 @@ export function Island() {
         onPointerMove={armIdleTimer}
       >
         <div className="island-panel-vignette pointer-events-none absolute inset-0" />
-        <div className="island-enter-header flex items-center justify-between border-b border-white/6 px-4 py-2.5">
+        <div
+          className={cn(
+            !leaving && "island-enter-header",
+            "flex items-center justify-between border-b border-white/6 px-4 py-2.5",
+          )}
+        >
           <span className="text-xs font-medium text-white/60">Sessions</span>
           <div className="flex items-center gap-2">
             <span className="island-chip px-1.5 py-0.5 text-[10px] text-white/50">
@@ -461,7 +469,7 @@ export function Island() {
             </button>
           </div>
         </div>
-        <div className="island-enter-body flex-1 overflow-y-auto px-2 pb-2">
+        <div className={cn(!leaving && "island-enter-body", "flex-1 overflow-y-auto px-2 pb-2")}>
           {sessions.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-2.5 px-2">
               <IslandOrb state="idle" size={32} />
@@ -476,12 +484,15 @@ export function Island() {
                 onClick={() => focusThread(session.threadId)}
                 style={
                   {
-                    animationDelay: `${150 + index * 30}ms`,
+                    ...(leaving ? {} : { animationDelay: `${150 + index * 30}ms` }),
                     // Hover edge uses the row's own state hue, not the surface's.
                     "--island-hue": orbHue(orbStateForStatus(session.status)),
                   } as CSSProperties
                 }
-                className="island-row island-enter-row group flex h-11 w-full items-center gap-2.5 rounded-lg px-2.5 text-left hover:bg-white/6"
+                className={cn(
+                  !leaving && "island-enter-row",
+                  "island-row group flex h-11 w-full items-center gap-2.5 rounded-lg px-2.5 text-left hover:bg-white/6",
+                )}
               >
                 <IslandOrb state={session.status} size={20} />
                 <span className="min-w-0 flex-1 truncate font-mono text-[13px] font-bold text-white/90">
