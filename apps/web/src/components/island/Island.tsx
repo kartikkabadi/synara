@@ -4,7 +4,7 @@
 // Why: Runs in its own transparent BrowserWindow (see apps/desktop/src/island/), so it keeps its
 //      own WebSocket shell subscription instead of relying on the main app shell.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   PROVIDER_DISPLAY_NAMES,
   type IslandDisplayContext,
@@ -201,7 +201,13 @@ export function Island() {
         data-island-state={effectiveState}
         onPointerEnter={onPointerEnter}
         onPointerLeave={onPointerLeave}
-        style={{ width: size.width, height: size.height, "--island-hue": orbHue(orbState) }}
+        style={
+          {
+            width: size.width,
+            height: size.height,
+            "--island-hue": orbHue(orbState),
+          } as CSSProperties
+        }
         className={cn(
           "island-surface pointer-events-auto flex flex-col overflow-hidden text-white",
           "transition-[width,height,border-radius] duration-220 ease-out motion-reduce:transition-none",
@@ -224,9 +230,7 @@ export function Island() {
             aria-label="Expand agent sessions island"
           >
             <IslandOrb state={orbState} />
-            {sessions.length > 0 ? (
-              <span className="tabular-nums">{sessions.length}</span>
-            ) : null}
+            {sessions.length > 0 ? <span className="tabular-nums">{sessions.length}</span> : null}
           </button>
         ) : effectiveState === "hover" ? (
           <button
@@ -264,7 +268,11 @@ export function Island() {
             )}
           </button>
         ) : (
-          <div key="expanded" className="island-crossfade flex h-full flex-col" onPointerMove={armIdleTimer}>
+          <div
+            key="expanded"
+            className="island-crossfade flex h-full flex-col"
+            onPointerMove={armIdleTimer}
+          >
             <div className="flex items-center justify-between px-4 py-2.5">
               <span className="text-[11px] uppercase tracking-widest text-white/40">Sessions</span>
               <div className="flex items-center gap-2">
@@ -302,10 +310,7 @@ export function Island() {
                         {providerLabel(session.provider)}
                       </span>
                       <span
-                        className={cn(
-                          "text-[10px] font-medium",
-                          STATUS_TEXT_CLASS[session.status],
-                        )}
+                        className={cn("text-[10px] font-medium", STATUS_TEXT_CLASS[session.status])}
                       >
                         {STATUS_LABEL[session.status]}
                       </span>
