@@ -146,12 +146,35 @@ async function selectProvider(page: Page, spec: ProviderSpec): Promise<void> {
   await providerItem.first().click();
 
   const search = page.getByRole("searchbox", { name: /search models/i });
-  if (spec.preferModel && (await search.isVisible().catch(() => false))) {
-    await search.fill(spec.preferModel);
+  if (spec.preferModel) {
+    const searchReady = await search
+      .waitFor({ timeout: 10_000 })
+      .then(() => true)
+      .catch(() => false);
+    if (searchReady) {
+      await search.fill(spec.preferModel);
+    }
   }
 
+  // Long model lists collapse provider groups by default, which hides every
+  // radio item; expand the groups if no item shows up on its own.
   const modelItems = page.getByRole("menuitemradio");
-  await modelItems.first().waitFor({ timeout: 30_000 });
+  const modelItemsAppeared = await modelItems
+    .first()
+    .waitFor({ timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!modelItemsAppeared) {
+    const groupTriggers = page
+      .getByRole("menu")
+      .last()
+      .locator("[data-slot='collapsible-trigger']");
+    const triggerCount = await groupTriggers.count();
+    for (let index = 0; index < triggerCount; index += 1) {
+      await groupTriggers.nth(index).click();
+    }
+    await modelItems.first().waitFor({ timeout: 30_000 });
+  }
   const preferred = spec.preferModel
     ? page.getByRole("menuitemradio", { name: new RegExp(spec.preferModel, "i") })
     : modelItems;
@@ -205,24 +228,27 @@ function workLogTrigger(page: Page) {
 
 async function waitForCompactionRow(page: Page, timeout = 180_000): Promise<void> {
   const text = compactionText(page);
-  const trigger = workLogTrigger(page);
-
   const deadline = Date.now() + timeout;
-  await expect(async () => {
-    const textVisible = await text.isVisible().catch(() => false);
-    const triggerVisible = await trigger.isVisible().catch(() => false);
-    if (!textVisible && !triggerVisible) {
-      throw new Error(
-        "neither the compaction text nor a collapsed work-log disclosure appeared in the timeline",
-      );
+
+  // The row can appear inside a disclosure that starts collapsed (and can
+  // re-collapse on re-render), so keep expanding the latest one while polling.
+  while (Date.now() < deadline) {
+    if (await text.isVisible().catch(() => false)) return;
+
+    const trigger = workLogTrigger(page);
+    if (await trigger.isVisible().catch(() => false)) {
+      const expanded = await trigger.getAttribute("aria-expanded").catch(() => null);
+      if (expanded !== "true") {
+        await trigger.click().catch(() => {});
+      }
     }
-  }).toPass({ timeout });
+    await page.waitForTimeout(1_000);
+  }
 
-  if (await text.isVisible().catch(() => false)) return;
-
-  await trigger.click();
-  const remaining = Math.max(deadline - Date.now(), 10_000);
-  await expect(text).toBeVisible({ timeout: remaining });
+  throw new Error(
+    `timed out after ${timeout}ms waiting for the "Context compacted" timeline row ` +
+      "(neither the compaction text nor an expandable work-log disclosure revealed it)",
+  );
 }
 
 for (const spec of PROVIDERS) {
