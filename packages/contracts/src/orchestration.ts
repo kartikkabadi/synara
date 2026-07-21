@@ -1455,22 +1455,14 @@ const ThreadLoopSetCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
-// Internal/server dispatch shape: lifecycle and policy paths supply the
-// authoritative stop reason.
+// Lifecycle and policy paths supply the authoritative stop reason. Clients may
+// send this command but their `reason` is stripped at the dispatch boundary: a
+// client-initiated off is always a user action.
 const ThreadLoopOffCommand = Schema.Struct({
   type: Schema.Literal("thread.loop.off"),
   commandId: CommandId,
   threadId: ThreadId,
   reason: Schema.optional(LoopStopReason),
-  createdAt: IsoDateTime,
-});
-
-// Client shape: no diagnostic reason. A client-initiated off is always a user
-// action; any client-supplied reason is dropped at the boundary.
-const ClientThreadLoopOffCommand = Schema.Struct({
-  type: Schema.Literal("thread.loop.off"),
-  commandId: CommandId,
-  threadId: ThreadId,
   createdAt: IsoDateTime,
 });
 
@@ -1578,7 +1570,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadActivityAppendCommand,
   ThreadSessionStopCommand,
   ThreadLoopSetCommand,
-  ClientThreadLoopOffCommand,
+  ThreadLoopOffCommand,
   ThreadLoopToggleCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;

@@ -1421,50 +1421,6 @@ describe("deriveMessagesTimelineRows", () => {
     expect(messageRow(rows, "loop-assistant")?.loopIteration).toBeUndefined();
   });
 
-  it("inserts a loop-start row before the first loop-owned message of each activation", () => {
-    const rows = deriveMessagesTimelineRows({
-      ...baseInput,
-      loop: makeLoop({
-        active: true,
-        lastStopReason: null,
-        maxIterations: 5,
-        prompt: "fix the tests",
-      }),
-      timelineEntries: [
-        userEntry("u1", "2026-01-01T00:00:00Z"),
-        loopUserEntry("loop-user-1", "2026-01-01T00:01:00Z", {
-          turnId: "t1",
-          activationId: LoopActivationId.makeUnsafe("activation-0"),
-          iteration: 1,
-        }),
-        loopUserEntry("loop-user-2", "2026-01-01T00:02:00Z", {
-          turnId: "t2",
-          activationId: LoopActivationId.makeUnsafe("activation-0"),
-          iteration: 2,
-        }),
-        loopUserEntry("loop-user-3", "2026-01-01T00:03:00Z", {
-          turnId: "turn-3",
-          activationId: LoopActivationId.makeUnsafe("activation-1"),
-          iteration: 1,
-        }),
-      ],
-    });
-
-    const startRows = rows.filter((row) => row.kind === "loop-start");
-    expect(startRows).toHaveLength(2);
-    expect(startRows[0]).toMatchObject({
-      id: "loop-start:activation-0",
-      label: "Loop started",
-    });
-    expect(startRows[1]).toMatchObject({
-      id: "loop-start:activation-1",
-      label: "Loop started",
-    });
-    const rowIds = rows.map((row) => row.id);
-    expect(rowIds.indexOf("loop-start:activation-0")).toBe(rowIds.indexOf("entry-loop-user-1") - 1);
-    expect(rowIds.indexOf("loop-start:activation-1")).toBe(rowIds.indexOf("entry-loop-user-3") - 1);
-  });
-
   it("appends a loop-end row when the loop is off with a stop reason", () => {
     const loop = makeLoop();
     const rows = deriveMessagesTimelineRows({

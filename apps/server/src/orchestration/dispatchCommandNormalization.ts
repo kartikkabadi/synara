@@ -180,6 +180,13 @@ export function makeDispatchCommandNormalizer<E>(options: DispatchCommandNormali
       };
     }
 
+    if (input.command.type === "thread.loop.off") {
+      // A client-initiated loop off is always a user action; the diagnostic
+      // stop reason is reserved for server lifecycle and policy paths.
+      const { reason: _reason, ...command } = input.command;
+      return { command, prepareWorkspaceRoot: null };
+    }
+
     if (input.command.type !== "thread.turn.start") {
       return {
         command: input.command as OrchestrationCommand,

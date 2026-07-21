@@ -11,27 +11,13 @@ import {
   type ThreadTurnPurpose,
 } from "@synara/contracts";
 
-export type LoopWaitReason =
-  | "loop_inactive"
-  | "missing_prompt"
-  | "turn_in_flight"
-  | "turn_start_pending"
-  | "approval_pending"
-  | "user_input_pending"
-  | "plan_mode"
-  | "session_unavailable";
-
 export type LoopDecision =
   | {
       type: "off";
       reason: LoopStopReason;
       nextConsecutiveErrors: number;
     }
-  | {
-      type: "wait";
-      why: LoopWaitReason;
-      nextConsecutiveErrors: number;
-    }
+  | { type: "wait" }
   | {
       type: "continue";
       nextIteration: number;
@@ -107,7 +93,7 @@ export function decideLoopContinuation(input: {
   const unchanged = { nextConsecutiveErrors: loop.consecutiveErrors };
 
   if (!loop.active) {
-    return { type: "wait", why: "loop_inactive", ...unchanged };
+    return { type: "wait" };
   }
   if (thread.deletedAt !== null) {
     return { type: "off", reason: "thread_deleted", ...unchanged };
@@ -129,7 +115,7 @@ export function decideLoopContinuation(input: {
     return { type: "off", reason: chooseStopReason(loop), ...unchanged };
   }
   if (loop.prompt === "") {
-    return { type: "wait", why: "missing_prompt", ...unchanged };
+    return { type: "wait" };
   }
 
   // Error accounting from the latest loop-owned terminal turn of this
@@ -158,30 +144,21 @@ export function decideLoopContinuation(input: {
       }
     }
   }
-  const settledState = { nextConsecutiveErrors };
-
-  if (thread.sessionActiveTurnId !== null || thread.latestTurnState === "running") {
-    return { type: "wait", why: "turn_in_flight", ...settledState };
-  }
-  if (thread.hasQueuedTurnStart) {
-    return { type: "wait", why: "turn_start_pending", ...settledState };
-  }
-  if (thread.hasPendingApproval) {
-    return { type: "wait", why: "approval_pending", ...settledState };
-  }
-  if (thread.hasPendingUserInput) {
-    return { type: "wait", why: "user_input_pending", ...settledState };
-  }
-  if (thread.interactionMode === "plan") {
-    return { type: "wait", why: "plan_mode", ...settledState };
-  }
-  if (thread.sessionStatus !== null && RUNNING_SESSION_STATUSES.has(thread.sessionStatus)) {
-    return { type: "wait", why: "session_unavailable", ...settledState };
+  if (
+    thread.sessionActiveTurnId !== null ||
+    thread.latestTurnState === "running" ||
+    thread.hasQueuedTurnStart ||
+    thread.hasPendingApproval ||
+    thread.hasPendingUserInput ||
+    thread.interactionMode === "plan" ||
+    (thread.sessionStatus !== null && RUNNING_SESSION_STATUSES.has(thread.sessionStatus))
+  ) {
+    return { type: "wait" };
   }
 
   return {
     type: "continue",
     nextIteration: loop.iteration + 1,
-    ...settledState,
+    nextConsecutiveErrors,
   };
 }
