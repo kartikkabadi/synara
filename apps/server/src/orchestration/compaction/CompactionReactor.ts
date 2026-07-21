@@ -14,6 +14,8 @@ import {
   THREAD_COMPACTION_RUNTIME_STATUS_ACTIVITY_KIND,
   ThreadId,
   type CommandId as CommandIdType,
+  type CompactionOperationSummary,
+  type ProviderCompactionCapabilities,
   type ProviderCompactionRequest,
   type ProviderCompactionResult,
   type ProviderRuntimeEvent,
@@ -43,6 +45,10 @@ import {
   type CompactionControlState,
   type CompactionLifecycleInput,
 } from "./compactionState.ts";
+import {
+  compactionSummaryFromOperation,
+  deriveThreadCompactionRuntimeStatus,
+} from "./compactionRuntimeStatus.ts";
 
 const COMPACTION_REACTOR_CAPACITY = 256;
 
@@ -85,6 +91,8 @@ const make = Effect.gen(function* () {
 
   const states = new Map<string, CompactionControlState>();
   const latestUsage = new Map<string, ThreadTokenUsageSnapshot>();
+  const lastCompactions = new Map<string, CompactionOperationSummary>();
+  const capabilitiesCache = new Map<string, ProviderCompactionCapabilities | null>();
   const pendingWaiters = new Map<string, PendingWaiter>();
   const inFlight = new Map<
     string,
@@ -95,27 +103,70 @@ const make = Effect.gen(function* () {
   const getState = (threadId: string): CompactionControlState =>
     states.get(threadId) ?? IDLE_COMPACTION_STATE;
 
+  const lookupProviderName = (threadId: ThreadId) =>
+    projectionSnapshotQuery.getThreadDetailById(threadId).pipe(
+      Effect.map((threadOption) => {
+        const providerName = Option.getOrUndefined(threadOption)?.session?.providerName ?? null;
+        return providerName !== null && isProviderDiscoveryKind(providerName) ? providerName : null;
+      }),
+      Effect.catch(() => Effect.succeed(null)),
+    );
+
+  const lookupCapabilities = (provider: (typeof ProviderDiscoveryKind.Type & string) | null) =>
+    Effect.gen(function* () {
+      if (provider === null) {
+        return null;
+      }
+      const cached = capabilitiesCache.get(provider);
+      if (cached !== undefined) {
+        return cached;
+      }
+      const capabilities = yield* providerDiscoveryService
+        .getComposerCapabilities({ provider })
+        .pipe(
+          Effect.map((result) => result.compaction),
+          Effect.catch(() => Effect.succeed(null)),
+        );
+      if (capabilities !== null) {
+        capabilitiesCache.set(provider, capabilities);
+      }
+      return capabilities;
+    });
+
+  const buildRuntimeStatus = (threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const provider = yield* lookupProviderName(threadId);
+      const capabilities = yield* lookupCapabilities(provider);
+      return deriveThreadCompactionRuntimeStatus({
+        provider,
+        capabilities,
+        contextWindowMaxTokens: latestUsage.get(threadId)?.maxTokens ?? null,
+        lastCompaction: lastCompactions.get(threadId),
+      });
+    });
+
   const publishStatus = (threadId: ThreadId, state: CompactionControlState) =>
-    orchestrationEngine
-      .dispatch({
-        type: "thread.activity.append",
-        commandId: serverCommandId("compaction-status"),
-        threadId,
-        activity: {
-          id: EventId.makeUnsafe(crypto.randomUUID()),
-          tone: state.status === "uncertain" || state.status === "suspended" ? "error" : "info",
-          kind: THREAD_COMPACTION_RUNTIME_STATUS_ACTIVITY_KIND,
-          summary: `Compaction ${state.status}`,
-          payload: JSON.parse(JSON.stringify(state)),
-          turnId: null,
+    buildRuntimeStatus(threadId).pipe(
+      Effect.flatMap((status) =>
+        orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId: serverCommandId("compaction-status"),
+          threadId,
+          activity: {
+            id: EventId.makeUnsafe(crypto.randomUUID()),
+            tone: state.status === "uncertain" || state.status === "suspended" ? "error" : "info",
+            kind: THREAD_COMPACTION_RUNTIME_STATUS_ACTIVITY_KIND,
+            summary: `Compaction ${state.status}`,
+            payload: JSON.parse(JSON.stringify(status)),
+            turnId: null,
+            createdAt: new Date().toISOString(),
+          },
           createdAt: new Date().toISOString(),
-        },
-        createdAt: new Date().toISOString(),
-      })
-      .pipe(
-        Effect.catch(() => Effect.void),
-        Effect.asVoid,
-      );
+        }),
+      ),
+      Effect.catch(() => Effect.void),
+      Effect.asVoid,
+    );
 
   const persistOperation = (
     threadId: string,
@@ -207,6 +258,7 @@ const make = Effect.gen(function* () {
           ),
         );
       }
+      return row;
     });
 
   const applyEvent = (threadId: ThreadId, event: CompactionLifecycleInput) =>
@@ -214,7 +266,11 @@ const make = Effect.gen(function* () {
       const previous = getState(threadId);
       const next = compactionReducer(previous, event);
       states.set(threadId, next);
-      yield* persistOperation(threadId, next, event, previous);
+      const row = yield* persistOperation(threadId, next, event, previous);
+      const summary = row === null ? null : compactionSummaryFromOperation(row);
+      if (summary !== null) {
+        lastCompactions.set(threadId, summary);
+      }
       yield* publishStatus(threadId, next);
       return next;
     });
@@ -466,6 +522,17 @@ const make = Effect.gen(function* () {
   // retried automatically; interrupted pending requests never reached the
   // provider and settle as retryable failures.
   const reconcile = Effect.gen(function* () {
+    // Hydrate lastCompaction from settled durable rows so the first status
+    // emission after a restart carries the previous pass.
+    const settled = yield* operations
+      .listSettled()
+      .pipe(Effect.catch(() => Effect.succeed([] as ReadonlyArray<ThreadCompactionOperation>)));
+    for (const operation of settled) {
+      const summary = compactionSummaryFromOperation(operation);
+      if (summary !== null) {
+        lastCompactions.set(operation.threadId, summary);
+      }
+    }
     const unsettled = yield* operations
       .listUnsettled()
       .pipe(Effect.catch(() => Effect.succeed([] as ReadonlyArray<ThreadCompactionOperation>)));

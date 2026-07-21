@@ -232,12 +232,25 @@ describe("CompactionReactor", () => {
     expect(row.owner).toBe("synara");
     expect(row.trigger).toBe("manual");
     // Running was persisted before completion, and the status projection saw both.
-    const statuses = harness.dispatched.map(
+    const payloads = harness.dispatched.map(
       (command) =>
-        (command as unknown as { activity: { payload: { status: string } } }).activity.payload
-          .status,
+        (command as unknown as { activity: { payload: Record<string, unknown> } }).activity.payload,
     );
-    expect(statuses).toEqual(["running", "idle"]);
+    expect(payloads).toHaveLength(2);
+    expect(payloads[0]).toMatchObject({ owner: "provider", providerAutoEnabled: true });
+    expect(payloads[0]?.lastCompaction).toBeUndefined();
+    expect(payloads[1]).toMatchObject({
+      owner: "provider",
+      trigger: { kind: "opaque" },
+      manualAvailability: { available: true },
+      lastCompaction: {
+        requestId: "req-1",
+        owner: "synara",
+        trigger: "manual",
+        result: "completed",
+        sessionEffect: "same-session",
+      },
+    });
   });
 
   it("returns the existing operation for a duplicate request id", async () => {
@@ -305,6 +318,15 @@ describe("CompactionReactor", () => {
     expect(row.owner).toBe("provider");
     expect(row.trigger).toBe("provider-auto");
     expect(harness.compactThread).not.toHaveBeenCalled();
+    const lastPayload = (
+      harness.dispatched.at(-1) as unknown as {
+        activity: { payload: Record<string, unknown> };
+      }
+    ).activity.payload;
+    expect(lastPayload).toMatchObject({
+      owner: "provider",
+      lastCompaction: { owner: "provider", trigger: "provider-auto", result: "completed" },
+    });
   });
 
   it("rejects a request carrying a stale lifecycle generation", async () => {
@@ -404,5 +426,14 @@ describe("CompactionReactor", () => {
     const state = await runtime.runPromise(reactor.getControlState(THREAD_ID));
     expect(state).toMatchObject({ status: "uncertain", requestId: "req-crashed" });
     expect(harness.compactThread).not.toHaveBeenCalled();
+    // The reconciled outcome is surfaced as the thread's last compaction.
+    const lastPayload = (
+      harness.dispatched.at(-1) as unknown as {
+        activity: { payload: Record<string, unknown> };
+      }
+    ).activity.payload;
+    expect(lastPayload).toMatchObject({
+      lastCompaction: { requestId: "req-crashed", result: "failed" },
+    });
   });
 });
