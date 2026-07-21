@@ -5,9 +5,54 @@
 
 import { describe, expect, it } from "vitest";
 
-import { LOOP_MAX_COUNT_BUDGET, LOOP_PROMPT_MAX_INPUT_CHARS } from "@synara/contracts";
+import {
+  LOOP_MAX_COUNT_BUDGET,
+  LOOP_MAX_DURATION_SECONDS,
+  LOOP_PROMPT_MAX_INPUT_CHARS,
+} from "@synara/contracts";
 
-import { parseLoopCommand } from "./loop";
+import { parseLoopCommand, validateLoopBudget } from "./loop";
+
+describe("validateLoopBudget", () => {
+  it("accepts a budget-less loop", () => {
+    expect(validateLoopBudget({ maxIterations: null, durationSeconds: null })).toBeNull();
+  });
+
+  it("accepts in-range count and duration budgets", () => {
+    expect(validateLoopBudget({ maxIterations: 1, durationSeconds: null })).toBeNull();
+    expect(
+      validateLoopBudget({ maxIterations: LOOP_MAX_COUNT_BUDGET, durationSeconds: null }),
+    ).toBeNull();
+    expect(validateLoopBudget({ maxIterations: null, durationSeconds: 1 })).toBeNull();
+    expect(
+      validateLoopBudget({ maxIterations: null, durationSeconds: LOOP_MAX_DURATION_SECONDS }),
+    ).toBeNull();
+  });
+
+  it("rejects setting both budgets", () => {
+    expect(validateLoopBudget({ maxIterations: 3, durationSeconds: 60 })).toEqual({
+      field: "budget",
+      reason: "both_set",
+    });
+  });
+
+  it("rejects out-of-range budgets", () => {
+    expect(validateLoopBudget({ maxIterations: 0, durationSeconds: null })).toEqual({
+      field: "maxIterations",
+      reason: "too_small",
+    });
+    expect(
+      validateLoopBudget({ maxIterations: LOOP_MAX_COUNT_BUDGET + 1, durationSeconds: null }),
+    ).toEqual({ field: "maxIterations", reason: "too_large" });
+    expect(validateLoopBudget({ maxIterations: null, durationSeconds: 0 })).toEqual({
+      field: "durationSeconds",
+      reason: "too_small",
+    });
+    expect(
+      validateLoopBudget({ maxIterations: null, durationSeconds: LOOP_MAX_DURATION_SECONDS + 1 }),
+    ).toEqual({ field: "durationSeconds", reason: "too_large" });
+  });
+});
 
 describe("parseLoopCommand", () => {
   it("returns null for text that is not a /loop command", () => {

@@ -24,6 +24,41 @@ export type LoopCommandParseResult =
   | { kind: "valid"; budget: LoopBudget | null; prompt: string | null }
   | { kind: "invalid"; reason: LoopParseErrorReason };
 
+export type LoopBudgetValidationError =
+  | { field: "budget"; reason: "both_set" }
+  | { field: "maxIterations"; reason: "too_small" | "too_large" }
+  | { field: "durationSeconds"; reason: "too_small" | "too_large" };
+
+/**
+ * Canonical server/web bounds for explicit loop budgets: count 1..100,
+ * duration 1s..24h, and at most one of the two. Returns null when valid.
+ */
+export function validateLoopBudget(input: {
+  maxIterations: number | null;
+  durationSeconds: number | null;
+}): LoopBudgetValidationError | null {
+  if (input.maxIterations !== null && input.durationSeconds !== null) {
+    return { field: "budget", reason: "both_set" };
+  }
+  if (input.maxIterations !== null) {
+    if (input.maxIterations < 1) {
+      return { field: "maxIterations", reason: "too_small" };
+    }
+    if (input.maxIterations > LOOP_MAX_COUNT_BUDGET) {
+      return { field: "maxIterations", reason: "too_large" };
+    }
+  }
+  if (input.durationSeconds !== null) {
+    if (input.durationSeconds < 1) {
+      return { field: "durationSeconds", reason: "too_small" };
+    }
+    if (input.durationSeconds > LOOP_MAX_DURATION_SECONDS) {
+      return { field: "durationSeconds", reason: "too_large" };
+    }
+  }
+  return null;
+}
+
 const COUNT_RE = /^[1-9][0-9]*$/;
 const DURATION_RE = /^([1-9][0-9]*)(s|m|min|mins|h|hr|hrs)$/i;
 
