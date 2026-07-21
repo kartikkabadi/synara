@@ -194,6 +194,12 @@
   transition: opacity 300ms ease;
 }
 
+/* Idle has no work to announce — the wash drops to a faint ember so the
+   collapsed pill reads as glass, not a flat blue slab. */
+.island-surface[data-island-status="idle"] .island-state-wash {
+  opacity: 0.45;
+}
+
 /* ---- Content choreography -------------------------------------------- */
 
 /* Cross-fade swap: both layers stay mounted — the outgoing overlay fades over
@@ -265,8 +271,8 @@
   background: linear-gradient(
     90deg,
     transparent,
-    rgba(255, 255, 255, 0.09) 20%,
-    rgba(255, 255, 255, 0.09) 80%,
+    rgba(255, 255, 255, 0.14) 15%,
+    rgba(255, 255, 255, 0.14) 85%,
     transparent
   );
 }

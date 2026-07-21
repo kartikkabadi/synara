@@ -465,8 +465,8 @@ export function Island() {
           {sessions.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-2.5 px-2">
               <IslandOrb state="idle" size={32} />
-              <span className="text-sm font-medium text-white/70">All quiet</span>
-              <span className="text-xs text-white/35">New agent turns will appear here</span>
+              <span className="text-sm font-medium text-white/70">No active sessions</span>
+              <span className="text-xs text-white/35">Agent sessions will appear here</span>
             </div>
           ) : (
             sessions.map((session, index) => (
@@ -474,30 +474,37 @@ export function Island() {
                 key={session.threadId}
                 type="button"
                 onClick={() => focusThread(session.threadId)}
-                style={{ animationDelay: `${150 + index * 30}ms` }}
+                style={
+                  {
+                    animationDelay: `${150 + index * 30}ms`,
+                    // Hover edge uses the row's own state hue, not the surface's.
+                    "--island-hue": orbHue(orbStateForStatus(session.status)),
+                  } as CSSProperties
+                }
                 className="island-row island-enter-row group flex h-11 w-full items-center gap-2.5 rounded-lg px-2.5 text-left hover:bg-white/6"
               >
                 <IslandOrb state={session.status} size={20} />
                 <span className="min-w-0 flex-1 truncate font-mono text-[13px] font-bold text-white/90">
                   {session.title}
                 </span>
-                <span className="flex shrink-0 items-center gap-2 group-hover:hidden">
-                  <span
-                    className={cn(
-                      "island-chip px-1.5 py-0.5 text-[10px]",
-                      STATUS_TEXT_CLASS[session.status],
-                    )}
-                  >
-                    {providerLabel(session.provider)} ·{" "}
-                    {islandRelativeTime(session.lastActivityAt, nowMs)}
-                  </span>
-                  <span
-                    className={cn("text-[10px] font-medium", STATUS_TEXT_CLASS[session.status])}
-                  >
-                    {STATUS_LABEL[session.status]}
-                  </span>
+                <span
+                  className={cn(
+                    "island-chip shrink-0 px-1.5 py-0.5 text-[10px]",
+                    STATUS_TEXT_CLASS[session.status],
+                  )}
+                >
+                  {providerLabel(session.provider)} ·{" "}
+                  {islandRelativeTime(session.lastActivityAt, nowMs)}
                 </span>
-                <span className="hidden shrink-0 text-[10px] font-medium text-white/70 group-hover:inline">
+                <span
+                  className={cn(
+                    "w-20 shrink-0 text-right text-[10px] font-medium group-hover:hidden",
+                    STATUS_TEXT_CLASS[session.status],
+                  )}
+                >
+                  {STATUS_LABEL[session.status]}
+                </span>
+                <span className="hidden w-20 shrink-0 text-right text-[10px] font-medium text-white/70 group-hover:inline">
                   Open
                 </span>
               </button>
