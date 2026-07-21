@@ -74,6 +74,7 @@ import { Open, resolveAvailableEditors } from "./open";
 import { makeDispatchCommandNormalizer } from "./orchestration/dispatchCommandNormalization";
 import { makeImportThreadHandler } from "./orchestration/importThreadRoute";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
+import { CompactionReactor } from "./orchestration/Services/CompactionReactor";
 import { ProviderCommandReactor } from "./orchestration/Services/ProviderCommandReactor";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { shouldPublishThreadShellForEvent } from "./orchestration/threadShellEvents";
@@ -279,6 +280,7 @@ const makeWsRpcHandlersLayer = () =>
       const keybindings = yield* Keybindings;
       const open = yield* Open;
       const orchestrationEngine = yield* OrchestrationEngineService;
+      const compactionReactor = yield* CompactionReactor;
       const providerCommandReactor = yield* ProviderCommandReactor;
       const path = yield* Path.Path;
       const pullRequests = yield* PullRequestService;
@@ -1362,7 +1364,7 @@ const makeWsRpcHandlersLayer = () =>
             "Failed to get composer capabilities",
           ),
         [WS_METHODS.providerCompactThread]: (input) =>
-          rpcEffect(providerService.compactThread(input), "Failed to compact thread"),
+          rpcEffect(compactionReactor.request(input), "Failed to compact thread"),
         [WS_METHODS.providerListCommands]: (input) =>
           rpcEffect(providerDiscoveryService.listCommands(input), "Failed to list commands"),
         [WS_METHODS.providerListSkills]: (input) =>
