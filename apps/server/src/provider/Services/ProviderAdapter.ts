@@ -27,6 +27,7 @@ import type {
   ProviderListSkillsResult,
   ProviderListSkillsInput,
   ProviderStartReviewInput,
+  CompactionTrigger,
   ProviderCompactionRequest,
   ProviderCompactionResult,
   ProviderUserInputAnswers,
@@ -211,6 +212,15 @@ export interface ProviderAdapterShape<TError> {
   readonly compactThread?: (
     input: ProviderCompactionRequest,
   ) => Effect.Effect<ProviderCompactionResult, TError>;
+
+  /**
+   * Report the provider-native automatic compaction trigger for a thread when
+   * the provider exposes one. Resolves to undefined when the trigger is not
+   * observable for the thread.
+   */
+  readonly getNativeCompactionTrigger?: (
+    threadId: ThreadId,
+  ) => Effect.Effect<CompactionTrigger | undefined, TError>;
 
   /**
    * Fork one provider thread into another persisted thread cursor when supported.
