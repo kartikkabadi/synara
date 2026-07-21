@@ -23,14 +23,6 @@ import {
   type ProjectionSnapshotQueryShape,
 } from "../Services/ProjectionSnapshotQuery.ts";
 import {
-  ProjectionTurnRepository,
-  type ProjectionTurnRepositoryShape,
-} from "../../persistence/Services/ProjectionTurns.ts";
-import {
-  QueuedTurnPromotionRepository,
-  type QueuedTurnPromotionRepositoryShape,
-} from "../../persistence/Services/QueuedTurnPromotions.ts";
-import {
   ProjectionThreadLoopRepository,
   type ProjectionThreadLoopRepositoryShape,
 } from "../../persistence/Services/ProjectionThreadLoop.ts";
@@ -266,71 +258,20 @@ function makeFakes(snapshot: OrchestrationReadModel, thread: Option.Option<Orche
   const eventQueue = Effect.runSync(Queue.unbounded<OrchestrationEvent>());
   const dispatchLog = Effect.runSync(Ref.make<OrchestrationCommand[]>([]));
 
+  // Fakes implement only the members LoopReactor consumes.
   const fakeEngine: OrchestrationEngineShape = {
-    quiesce: Effect.void,
-    drain: Effect.void,
-    stop: Effect.void,
-    getCatchUpStatus: Effect.succeed({
-      state: "healthy",
-      inFlight: false,
-      retryAttempts: 0,
-      lastFailure: null,
-    } as const),
     dispatch: (command: OrchestrationCommand) =>
       Ref.update(dispatchLog, (commands) => [...commands, command]).pipe(
         Effect.as({ sequence: 1 }),
       ),
-    refreshCommandReadModel: () =>
-      Effect.succeed({ threads: [] } as unknown as OrchestrationReadModel),
     streamDomainEvents: Stream.fromQueue(eventQueue),
   } as unknown as OrchestrationEngineShape;
 
   const fakeSnapshotQuery: ProjectionSnapshotQueryShape = {
-    getCommandReadModel: () => Effect.succeed({ threads: [] } as unknown as OrchestrationReadModel),
     getSnapshot: () => Effect.succeed(snapshot),
-    getCounts: () => Effect.succeed({ threadCount: 0, projectCount: 0 } as unknown as never),
-    getSnapshotSequence: () => Effect.succeed({ sequence: 0, updatedAt: now } as unknown as never),
-    getShellSnapshot: () =>
-      Effect.succeed({
-        threads: snapshot.threads as unknown as ReadonlyArray<OrchestrationThreadShell>,
-        snapshotSequence: { sequence: 0, updatedAt: now },
-      } as unknown as never),
-    getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-    getProjectShellById: () => Effect.succeed(Option.none()),
-    getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-    getThreadCheckpointContext: () => Effect.succeed(Option.none()),
-    listGeneratedImageActivitiesByTurn: () => Effect.succeed([]),
-    getFullThreadDiffContext: () => Effect.succeed(Option.none()),
     getThreadShellById: () =>
       Effect.succeed(thread as unknown as Option.Option<OrchestrationThreadShell>),
-    findSyntheticSubagentParentThread: () => Effect.succeed(Option.none()),
-    getThreadDetailById: () => Effect.succeed(thread),
-    getThreadDetailSnapshotById: () => Effect.succeed(Option.none()),
-    getThreadDetailForExportById: () => Effect.succeed(Option.none()),
   } as unknown as ProjectionSnapshotQueryShape;
-
-  const fakeProjectionTurnRepository: ProjectionTurnRepositoryShape = {
-    upsertByTurnId: () => Effect.void,
-    replacePendingTurnStart: () => Effect.void,
-    getPendingTurnStartByThreadId: () => Effect.succeed(Option.none()),
-    deletePendingTurnStartByThreadId: () => Effect.void,
-    listByThreadId: () => Effect.succeed([]),
-    getByTurnId: () => Effect.succeed(Option.none()),
-    clearCheckpointTurnConflict: () => Effect.void,
-    deleteByThreadId: () => Effect.void,
-  } as unknown as ProjectionTurnRepositoryShape;
-
-  const fakeQueuedTurnPromotionRepository: QueuedTurnPromotionRepositoryShape = {
-    getBySequence: () => Effect.succeed(Option.none()),
-    enqueue: () => Effect.void,
-    claimNext: () => Effect.succeed(Option.none()),
-    markPromoted: () => Effect.succeed(true),
-    releaseClaim: () => Effect.succeed(true),
-    cancelMessage: () => Effect.succeed(true),
-    cancelThread: () => Effect.void,
-    hasPendingMessage: () => Effect.succeed(false),
-    listPendingThreadIds: () => Effect.succeed([]),
-  } as unknown as QueuedTurnPromotionRepositoryShape;
 
   const fakeProjectionThreadLoopRepository: ProjectionThreadLoopRepositoryShape = {
     upsert: () => Effect.void,
@@ -352,8 +293,6 @@ function makeFakes(snapshot: OrchestrationReadModel, thread: Option.Option<Orche
     dispatchLog,
     fakeEngine,
     fakeSnapshotQuery,
-    fakeProjectionTurnRepository,
-    fakeQueuedTurnPromotionRepository,
     fakeProjectionThreadLoopRepository,
   };
 }
@@ -375,15 +314,8 @@ async function withReactor(
   body: (scenario: ReactorScenario) => Promise<void>,
   options: { start?: boolean } = {},
 ): Promise<void> {
-  const {
-    eventQueue,
-    dispatchLog,
-    fakeEngine,
-    fakeSnapshotQuery,
-    fakeProjectionTurnRepository,
-    fakeQueuedTurnPromotionRepository,
-    fakeProjectionThreadLoopRepository,
-  } = makeFakes(makeSnapshot(thread), Option.some(thread));
+  const { eventQueue, dispatchLog, fakeEngine, fakeSnapshotQuery, fakeProjectionThreadLoopRepository } =
+    makeFakes(makeSnapshot(thread), Option.some(thread));
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
       Layer.provide(
@@ -391,8 +323,6 @@ async function withReactor(
         Layer.mergeAll(
           Layer.succeed(OrchestrationEngineService, fakeEngine),
           Layer.succeed(ProjectionSnapshotQuery, fakeSnapshotQuery),
-          Layer.succeed(ProjectionTurnRepository, fakeProjectionTurnRepository),
-          Layer.succeed(QueuedTurnPromotionRepository, fakeQueuedTurnPromotionRepository),
           Layer.succeed(ProjectionThreadLoopRepository, fakeProjectionThreadLoopRepository),
         ),
       ),
@@ -513,27 +443,15 @@ describe("LoopReactor", () => {
     });
   });
 
-  it("dispatches thread.loop.off with thread_archived on thread.archived", async () => {
+  it.each([
+    ["thread_archived", makeArchivedEvent()],
+    ["thread_deleted", makeDeletedEvent()],
+  ] as const)("dispatches thread.loop.off with %s on lifecycle events", async (reason, event) => {
     const thread = makeThread({ loop: makeLoop() });
     await withReactor(thread, async ({ offer, advance, expectLastDispatched }) => {
-      await offer(makeArchivedEvent());
+      await offer(event);
       await advance(50);
-      await expectLastDispatched("thread.loop.off", {
-        threadId: thread.id,
-        reason: "thread_archived",
-      });
-    });
-  });
-
-  it("dispatches thread.loop.off with thread_deleted on thread.deleted", async () => {
-    const thread = makeThread({ loop: makeLoop() });
-    await withReactor(thread, async ({ offer, advance, expectLastDispatched }) => {
-      await offer(makeDeletedEvent());
-      await advance(50);
-      await expectLastDispatched("thread.loop.off", {
-        threadId: thread.id,
-        reason: "thread_deleted",
-      });
+      await expectLastDispatched("thread.loop.off", { threadId: thread.id, reason });
     });
   });
 

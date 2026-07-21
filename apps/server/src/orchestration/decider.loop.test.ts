@@ -34,26 +34,30 @@ const modelSelection: ModelSelection = {
   model: "gpt-5-codex",
 };
 
+let nextSequence = 1;
+
 function makeEvent(input: {
-  sequence: number;
   type: OrchestrationEvent["type"];
-  occurredAt: string;
-  aggregateKind: OrchestrationEvent["aggregateKind"];
-  aggregateId: string;
-  commandId: string | null;
+  aggregateKind?: OrchestrationEvent["aggregateKind"];
+  aggregateId?: string;
+  occurredAt?: string;
+  commandId?: string;
   payload: unknown;
 }): OrchestrationEvent {
+  const sequence = nextSequence++;
+  const aggregateKind = input.aggregateKind ?? "thread";
+  const aggregateId = input.aggregateId ?? "thread-loop";
   return {
-    sequence: input.sequence,
-    eventId: EventId.makeUnsafe(`event-${input.sequence}`),
+    sequence,
+    eventId: EventId.makeUnsafe(`event-${sequence}`),
     type: input.type,
-    aggregateKind: input.aggregateKind,
+    aggregateKind,
     aggregateId:
-      input.aggregateKind === "project"
-        ? ProjectId.makeUnsafe(input.aggregateId)
-        : ThreadId.makeUnsafe(input.aggregateId),
-    occurredAt: input.occurredAt,
-    commandId: input.commandId === null ? null : CommandId.makeUnsafe(input.commandId),
+      aggregateKind === "project"
+        ? ProjectId.makeUnsafe(aggregateId)
+        : ThreadId.makeUnsafe(aggregateId),
+    occurredAt: input.occurredAt ?? NOW,
+    commandId: CommandId.makeUnsafe(input.commandId ?? `cmd-${sequence}`),
     causationEventId: null,
     correlationId: null,
     metadata: {},
@@ -61,57 +65,53 @@ function makeEvent(input: {
   } as OrchestrationEvent;
 }
 
+type LoopReadModel = Awaited<ReturnType<typeof makeReadModelWithThread>>;
+
+async function projectAll(
+  readModel: ReturnType<typeof createEmptyReadModel>,
+  events: ReadonlyArray<OrchestrationEvent>,
+) {
+  let current = readModel;
+  for (const event of events) {
+    current = await Effect.runPromise(projectEvent(current, event));
+  }
+  return current;
+}
+
 async function makeReadModelWithThread(options: { parentThreadId?: string | null } = {}) {
-  const empty = createEmptyReadModel(NOW);
-  const withProject = await Effect.runPromise(
-    projectEvent(
-      empty,
-      makeEvent({
-        sequence: 1,
-        type: "project.created",
-        aggregateKind: "project",
-        aggregateId: "project-loop",
-        occurredAt: NOW,
-        commandId: "cmd-project-create",
-        payload: {
-          projectId: "project-loop",
-          kind: "project",
-          title: "Loop Project",
-          workspaceRoot: "/tmp/loop",
-          defaultModelSelection: null,
-          scripts: [],
-          isPinned: false,
-          createdAt: NOW,
-          updatedAt: NOW,
-        },
-      }),
-    ),
-  );
-  return await Effect.runPromise(
-    projectEvent(
-      withProject,
-      makeEvent({
-        sequence: 2,
-        type: "thread.created",
-        aggregateKind: "thread",
-        aggregateId: "thread-loop",
-        occurredAt: NOW,
-        commandId: "cmd-thread-create",
-        payload: {
-          threadId: "thread-loop",
-          projectId: "project-loop",
-          title: "Loop Thread",
-          modelSelection,
-          runtimeMode: "full-access",
-          branch: null,
-          worktreePath: null,
-          parentThreadId: options.parentThreadId ?? null,
-          createdAt: NOW,
-          updatedAt: NOW,
-        },
-      }),
-    ),
-  );
+  return await projectAll(createEmptyReadModel(NOW), [
+    makeEvent({
+      type: "project.created",
+      aggregateKind: "project",
+      aggregateId: "project-loop",
+      payload: {
+        projectId: "project-loop",
+        kind: "project",
+        title: "Loop Project",
+        workspaceRoot: "/tmp/loop",
+        defaultModelSelection: null,
+        scripts: [],
+        isPinned: false,
+        createdAt: NOW,
+        updatedAt: NOW,
+      },
+    }),
+    makeEvent({
+      type: "thread.created",
+      payload: {
+        threadId: "thread-loop",
+        projectId: "project-loop",
+        title: "Loop Thread",
+        modelSelection,
+        runtimeMode: "full-access",
+        branch: null,
+        worktreePath: null,
+        parentThreadId: options.parentThreadId ?? null,
+        createdAt: NOW,
+        updatedAt: NOW,
+      },
+    }),
+  ]);
 }
 
 function makeLoop(overrides: Partial<ThreadLoop> = {}): ThreadLoop {
@@ -126,51 +126,30 @@ function makeLoop(overrides: Partial<ThreadLoop> = {}): ThreadLoop {
   });
 }
 
-async function projectLoopSet(
-  readModel: Awaited<ReturnType<typeof makeReadModelWithThread>>,
-  loop: ThreadLoop = makeLoop(),
-) {
-  return await Effect.runPromise(
-    projectEvent(
-      readModel,
-      makeEvent({
-        sequence: 3,
-        type: "thread.loop-set",
-        aggregateKind: "thread",
-        aggregateId: "thread-loop",
-        occurredAt: NOW,
-        commandId: "cmd-loop-set",
-        payload: {
-          threadId: "thread-loop",
-          loop,
-        },
-      }),
-    ),
-  );
+async function projectLoopSet(readModel: LoopReadModel, loop: ThreadLoop = makeLoop()) {
+  return await projectAll(readModel, [
+    makeEvent({
+      type: "thread.loop-set",
+      payload: { threadId: "thread-loop", loop },
+    }),
+  ]);
 }
 
 function makeMessageSentEvent(options: {
-  sequence?: number;
   messageId: string;
-  role: "user" | "assistant";
-  turnId?: string | null;
   purpose?: ThreadTurnPurpose;
   createdAt?: string;
 }): OrchestrationEvent {
   const occurredAt = options.createdAt ?? NOW;
   return makeEvent({
-    sequence: options.sequence ?? 4,
     type: "thread.message-sent",
-    aggregateKind: "thread",
-    aggregateId: "thread-loop",
     occurredAt,
-    commandId: "cmd-message-sent",
     payload: {
       threadId: "thread-loop",
       messageId: options.messageId,
-      role: options.role,
+      role: "user",
       text: "x",
-      turnId: options.turnId ?? null,
+      turnId: null,
       streaming: false,
       source: "native",
       ...(options.purpose ? { purpose: options.purpose } : {}),
@@ -180,25 +159,38 @@ function makeMessageSentEvent(options: {
   });
 }
 
+function makeTurnSignalEvent(options: {
+  type: "thread.turn-queued" | "thread.turn-start-requested";
+  messageId: string;
+  purpose?: ThreadTurnPurpose;
+  createdAt?: string;
+}): OrchestrationEvent {
+  const occurredAt = options.createdAt ?? NOW;
+  return makeEvent({
+    type: options.type,
+    occurredAt,
+    payload: {
+      threadId: "thread-loop",
+      messageId: options.messageId,
+      purpose: options.purpose,
+      createdAt: occurredAt,
+    },
+  });
+}
+
 function makeSessionSetEvent(options: {
-  sequence?: number;
   activeTurnId: string;
-  status?: string;
   updatedAt?: string;
 }): OrchestrationEvent {
   const updatedAt = options.updatedAt ?? NOW;
   return makeEvent({
-    sequence: options.sequence ?? 5,
     type: "thread.session-set",
-    aggregateKind: "thread",
-    aggregateId: "thread-loop",
     occurredAt: updatedAt,
-    commandId: "cmd-session-set",
     payload: {
       threadId: "thread-loop",
       session: {
         threadId: asThreadId("thread-loop"),
-        status: options.status ?? "running",
+        status: "running",
         providerName: null,
         runtimeMode: "full-access",
         activeTurnId: asTurnId(options.activeTurnId),
@@ -209,137 +201,42 @@ function makeSessionSetEvent(options: {
   });
 }
 
-function makeTurnQueuedEvent(options: {
-  sequence?: number;
-  messageId: string;
-  purpose?: ThreadTurnPurpose;
-  createdAt?: string;
-}): OrchestrationEvent {
-  const occurredAt = options.createdAt ?? NOW;
-  return makeEvent({
-    sequence: options.sequence ?? 4,
-    type: "thread.turn-queued",
-    aggregateKind: "thread",
-    aggregateId: "thread-loop",
-    occurredAt,
-    commandId: "cmd-turn-queued",
-    payload: {
-      threadId: "thread-loop",
-      messageId: options.messageId,
-      purpose: options.purpose,
-      createdAt: occurredAt,
-    },
-  });
+async function archiveThread(readModel: LoopReadModel) {
+  return await projectAll(readModel, [
+    makeEvent({
+      type: "thread.archived",
+      payload: { threadId: "thread-loop", archivedAt: NOW, updatedAt: NOW },
+    }),
+  ]);
 }
 
-function makeTurnStartRequestedEvent(options: {
-  sequence?: number;
-  messageId: string;
-  purpose?: ThreadTurnPurpose;
-  createdAt?: string;
-}): OrchestrationEvent {
-  const occurredAt = options.createdAt ?? NOW;
-  return makeEvent({
-    sequence: options.sequence ?? 4,
-    type: "thread.turn-start-requested",
-    aggregateKind: "thread",
-    aggregateId: "thread-loop",
-    occurredAt,
-    commandId: "cmd-turn-start-requested",
-    payload: {
-      threadId: "thread-loop",
-      messageId: options.messageId,
-      purpose: options.purpose,
-      createdAt: occurredAt,
-    },
-  });
-}
-
-async function archiveThread(readModel: Awaited<ReturnType<typeof makeReadModelWithThread>>) {
-  return await Effect.runPromise(
-    projectEvent(
-      readModel,
-      makeEvent({
-        sequence: 3,
-        type: "thread.archived",
-        aggregateKind: "thread",
-        aggregateId: "thread-loop",
-        occurredAt: NOW,
-        commandId: "cmd-archive",
-        payload: {
-          threadId: "thread-loop",
-          archivedAt: NOW,
-          updatedAt: NOW,
-        },
-      }),
-    ),
-  );
-}
-
-async function deleteThread(
-  readModel: Awaited<ReturnType<typeof makeReadModelWithThread>>,
-  sequence = 4,
-) {
-  return await Effect.runPromise(
-    projectEvent(
-      readModel,
-      makeEvent({
-        sequence,
-        type: "thread.deleted",
-        aggregateKind: "thread",
-        aggregateId: "thread-loop",
-        occurredAt: NOW,
-        commandId: "cmd-delete",
-        payload: {
-          threadId: "thread-loop",
-          deletedAt: NOW,
-          updatedAt: NOW,
-        },
-      }),
-    ),
-  );
+async function deleteThread(readModel: LoopReadModel) {
+  return await projectAll(readModel, [
+    makeEvent({
+      type: "thread.deleted",
+      payload: { threadId: "thread-loop", deletedAt: NOW, updatedAt: NOW },
+    }),
+  ]);
 }
 
 async function addActiveTurn(
-  readModel: Awaited<ReturnType<typeof makeReadModelWithThread>>,
-  options: {
-    turnId: string;
-    messageId: string;
-    purpose?: ThreadTurnPurpose;
-    messageTimestamp?: string;
-  },
+  readModel: LoopReadModel,
+  options: { turnId: string; messageId: string; purpose?: ThreadTurnPurpose },
 ) {
-  const messageTimestamp = options.messageTimestamp ?? NOW;
-  const withMessage = await Effect.runPromise(
-    projectEvent(
-      readModel,
-      makeMessageSentEvent({
-        messageId: options.messageId,
-        role: "user",
-        ...(options.purpose ? { purpose: options.purpose } : {}),
-        createdAt: messageTimestamp,
-      }),
-    ),
-  );
-  const withStart = await Effect.runPromise(
-    projectEvent(
-      withMessage,
-      makeTurnStartRequestedEvent({
-        messageId: options.messageId,
-        ...(options.purpose ? { purpose: options.purpose } : {}),
-        createdAt: messageTimestamp,
-      }),
-    ),
-  );
-  return await Effect.runPromise(
-    projectEvent(
-      withStart,
-      makeSessionSetEvent({ activeTurnId: options.turnId, updatedAt: messageTimestamp }),
-    ),
-  );
+  return await projectAll(readModel, [
+    makeMessageSentEvent({
+      messageId: options.messageId,
+      ...(options.purpose ? { purpose: options.purpose } : {}),
+    }),
+    makeTurnSignalEvent({
+      type: "thread.turn-start-requested",
+      messageId: options.messageId,
+      ...(options.purpose ? { purpose: options.purpose } : {}),
+    }),
+    makeSessionSetEvent({ activeTurnId: options.turnId }),
+  ]);
 }
 
-type LoopReadModel = Awaited<ReturnType<typeof makeReadModelWithThread>>;
 type DeciderCommand = Parameters<typeof decideOrchestrationCommand>[0]["command"];
 
 async function decide(readModel: LoopReadModel, command: DeciderCommand) {
@@ -441,32 +338,60 @@ describe("decider loop commands", () => {
         prompt: "fix tests",
         iteration: 0,
         maxIterations: 3,
+        durationSeconds: null,
         consecutiveErrors: 0,
         hardCap: 100,
       },
     });
   });
 
-  it("defaults budget-less thread.loop.set to the 5-turn safe default", async () => {
+  it("stores durationSeconds and derives endsAt for duration budgets", async () => {
     const readModel = await makeReadModelWithThread();
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.set",
-          commandId: asCommandId("cmd-loop-set-budgetless"),
-          threadId: asThreadId("thread-loop"),
-          prompt: "fix tests",
-          maxIterations: null,
-          durationSeconds: null,
-          createdAt: NOW,
-        },
-        readModel,
+    const [event] = await decide(
+      readModel,
+      loopSetCommand("cmd-loop-set-duration", { durationSeconds: 30 * 60 }),
+    );
+    expect(event?.type).toBe("thread.loop-set");
+    expect(event?.payload).toMatchObject({
+      loop: {
+        maxIterations: null,
+        durationSeconds: 30 * 60,
+        endsAt: new Date(Date.parse(NOW) + 30 * 60 * 1000).toISOString(),
+      },
+    });
+  });
+
+  it("re-anchors endsAt to the new budget when reconfiguring a duration loop", async () => {
+    const originalCreatedAt = "2026-01-01T00:00:00.000Z";
+    const readModel = await projectLoopSet(
+      await makeReadModelWithThread(),
+      makeLoop({
+        active: true,
+        durationSeconds: 30 * 60,
+        endsAt: "2026-01-01T00:30:00.000Z",
+        createdAt: originalCreatedAt,
       }),
     );
-    const event = Array.isArray(result) ? result[0] : result;
-    expect(event.type).toBe("thread.loop-set");
-    expect(event.payload).toMatchObject({
-      loop: { maxIterations: 5, endsAt: null },
+    const [event] = await decide(
+      readModel,
+      loopSetCommand("cmd-loop-reconfigure-duration", { durationSeconds: 45 * 60 }),
+    );
+    expect(event?.payload).toMatchObject({
+      loop: {
+        durationSeconds: 45 * 60,
+        endsAt: new Date(Date.parse(NOW) + 45 * 60 * 1000).toISOString(),
+        // createdAt keeps the original activation start for the Started row.
+        createdAt: originalCreatedAt,
+      },
+    });
+  });
+
+  it("defaults budget-less thread.loop.set to the 5-turn safe default", async () => {
+    const readModel = await makeReadModelWithThread();
+    const [event] = await decide(readModel, loopSetCommand("cmd-loop-set-budgetless"));
+    expect(event?.type).toBe("thread.loop-set");
+    expect(event?.payload).toMatchObject({
+      loop: { maxIterations: 5, endsAt: null, durationSeconds: null },
     });
   });
 
@@ -475,23 +400,12 @@ describe("decider loop commands", () => {
       await makeReadModelWithThread(),
       makeLoop({ active: true, prompt: "keep me" }),
     );
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.set",
-          commandId: asCommandId("cmd-loop-set-null-prompt"),
-          threadId: asThreadId("thread-loop"),
-          prompt: null,
-          maxIterations: 3,
-          durationSeconds: null,
-          createdAt: NOW,
-        },
-        readModel,
-      }),
+    const [event] = await decide(
+      readModel,
+      loopSetCommand("cmd-loop-set-null-prompt", { prompt: null, maxIterations: 3 }),
     );
-    const event = Array.isArray(result) ? result[0] : result;
-    expect(event.type).toBe("thread.loop-set");
-    expect(event.payload).toMatchObject({ loop: { prompt: "keep me" } });
+    expect(event?.type).toBe("thread.loop-set");
+    expect(event?.payload).toMatchObject({ loop: { prompt: "keep me" } });
   });
 
   it("rejects thread.loop.set clearing an active prompt with an empty string", async () => {
@@ -499,41 +413,16 @@ describe("decider loop commands", () => {
       await makeReadModelWithThread(),
       makeLoop({ active: true, prompt: "keep me" }),
     );
-    await expect(
-      Effect.runPromise(
-        decideOrchestrationCommand({
-          command: {
-            type: "thread.loop.set",
-            commandId: asCommandId("cmd-loop-set-empty-prompt"),
-            threadId: asThreadId("thread-loop"),
-            prompt: "",
-            maxIterations: 3,
-            durationSeconds: null,
-            createdAt: NOW,
-          },
-          readModel,
-        }),
-      ),
-    ).rejects.toMatchObject({
-      commandType: "thread.loop.set",
-    });
+    await expectRejected(
+      readModel,
+      loopSetCommand("cmd-loop-set-empty-prompt", { prompt: "", maxIterations: 3 }),
+    );
   });
 
   it("returns no events for thread.loop.off on a thread without a loop", async () => {
     const readModel = await makeReadModelWithThread();
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.off",
-          commandId: asCommandId("cmd-loop-off-no-loop"),
-          threadId: asThreadId("thread-loop"),
-          reason: "user_stop",
-          createdAt: NOW,
-        },
-        readModel,
-      }),
-    );
-    expect(result).toEqual([]);
+    const events = await decide(readModel, loopOffCommand("cmd-loop-off-no-loop", "user_stop"));
+    expect(events).toEqual([]);
   });
 
   it("resets iteration and consecutiveErrors on thread.loop.set reconfigure", async () => {
@@ -682,7 +571,7 @@ describe("decider loop commands", () => {
       type: "thread.loop-set",
       payload: {
         threadId: asThreadId("thread-loop"),
-        loop: { active: true, prompt: "" },
+        loop: { active: true, prompt: "", durationSeconds: null },
       },
     });
   });
@@ -818,17 +707,18 @@ describe("decider loop commands", () => {
   });
 
   it("retires the loop when a manual message races a pending loop-owned turn start", async () => {
-    const readModel = await Effect.runPromise(
-      projectEvent(
-        await projectLoopSet(
-          await makeReadModelWithThread(),
-          makeLoop({ active: true, prompt: "fix tests", iteration: 1 }),
-        ),
-        makeTurnQueuedEvent({
+    const readModel = await projectAll(
+      await projectLoopSet(
+        await makeReadModelWithThread(),
+        makeLoop({ active: true, prompt: "fix tests", iteration: 1 }),
+      ),
+      [
+        makeTurnSignalEvent({
+          type: "thread.turn-queued",
           messageId: "msg-queued-1",
           purpose: LOOP_ITERATION_PURPOSE,
         }),
-      ),
+      ],
     );
 
     const events = await decide(
