@@ -288,6 +288,13 @@ describe("composerSlashCommands", () => {
     expect(shouldHideProviderNativeCommandFromComposerMenu("claudeAgent", "feedback")).toBe(true);
   });
 
+  it("describes /loop as a discovery entry, not a syntax reference", () => {
+    const [entry] = filterComposerSlashCommands("loop");
+    expect(entry?.command).toBe("loop");
+    expect(entry?.label).toBe("/loop");
+    expect(entry?.description).toBe("Keep working on a prompt after every completed turn");
+  });
+
   it("keeps app-level /loop available even if a provider exposes a native collision", () => {
     const availableCommands = getAvailableComposerSlashCommands({
       provider: "claudeAgent",
