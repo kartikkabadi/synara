@@ -24,7 +24,7 @@ import {
   type IslandSessionStatus,
 } from "~/lib/islandSessionTracker";
 import { XIcon } from "~/lib/icons";
-import { cn } from "~/lib/utils";
+import { cn, isMacPlatform } from "~/lib/utils";
 
 import { IslandOrb, orbHue, orbStateForStatus } from "./IslandOrb";
 import "./island.css";
@@ -49,6 +49,15 @@ const STATUS_LABEL: Record<IslandSessionStatus, string> = {
   "needs-approval": "Needs approval",
   done: "Done",
 };
+
+// Global-shortcut hint for the expanded header; the display context from the
+// main process is authoritative, with navigator.platform as a pre-load fallback.
+function shortcutHint(context: IslandDisplayContext | null): string {
+  const isMac = context
+    ? context.platform === "macos"
+    : isMacPlatform(typeof navigator === "undefined" ? "" : navigator.platform);
+  return isMac ? "\u2318\u21e7I" : "Ctrl\u21e7I";
+}
 
 function providerLabel(provider: string): string {
   return PROVIDER_DISPLAY_NAMES[provider as ProviderKind] ?? provider;
@@ -89,6 +98,13 @@ export function Island() {
 
   useEffect(() => {
     void window.islandBridge?.getContext().then(setContext);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (popTimerRef.current) clearTimeout(popTimerRef.current);
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -276,7 +292,7 @@ export function Island() {
             <div className="flex items-center justify-between px-4 py-2.5">
               <span className="text-[11px] uppercase tracking-widest text-white/40">Sessions</span>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] text-white/25">⌘⇧I</span>
+                <span className="text-[10px] text-white/25">{shortcutHint(context)}</span>
                 <button
                   type="button"
                   onClick={() => applyState("collapsed")}
