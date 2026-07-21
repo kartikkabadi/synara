@@ -105,9 +105,12 @@ function longContextPrompt(): string {
 
 async function openWorkspace(page: Page): Promise<void> {
   await page.goto("/");
-  // The project picker lists top-level folders in $HOME; clicking one selects
-  // it as the workspace immediately.
-  const folder = page.getByText(workspaceName, { exact: true }).first();
+  // The New Chat composer exposes a "Work in a project" combobox whose dialog
+  // lists top-level folders in $HOME.
+  const projectPicker = page.getByRole("combobox").filter({ hasText: /work in a project/i });
+  await projectPicker.waitFor({ timeout: 30_000 });
+  await projectPicker.click();
+  const folder = page.getByRole("option", { name: workspaceName, exact: true }).first();
   await folder.waitFor({ timeout: 30_000 });
   await folder.click();
 }
