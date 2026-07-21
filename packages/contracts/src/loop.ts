@@ -66,8 +66,13 @@ export const ThreadLoop = Schema.Struct({
   // Explicit user count budget; null means none.
   maxIterations: Schema.NullOr(PositiveInt),
 
-  // Absolute expiry instant for duration budget; null means none.
+  // Absolute expiry instant for duration budget; null means none. Re-anchored
+  // to server-now + durationSeconds on reconfigure.
   endsAt: Schema.NullOr(IsoDateTime),
+
+  // Canonical configured duration budget in seconds; null means no duration
+  // budget. Budget copy derives from this, never from endsAt - createdAt.
+  durationSeconds: Schema.optional(Schema.NullOr(PositiveInt)),
 
   // Always present. Default 100.
   hardCap: PositiveInt,

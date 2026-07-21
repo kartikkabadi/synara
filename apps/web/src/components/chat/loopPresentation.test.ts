@@ -115,18 +115,18 @@ describe("deriveLoopPresentationState", () => {
       loop: makeLoop({ active: false, lastStopReason: "toggled_off" }),
       latestTurn: makeRunningLoopTurn(),
     });
-    expect(presentation?.state).toEqual({ kind: "ending", iteration: 2 });
+    expect(presentation?.state).toEqual({ kind: "ending" });
     expect(presentation?.label).toBe("Loop ending");
     expect(presentation?.detail).toBe("Current turn will finish");
   });
 
-  it("uses the same ending detail when the duration expired mid-turn", () => {
+  it("calls out a duration expiry while the current turn finishes", () => {
     const presentation = derive({
       loop: makeLoop({ active: false, lastStopReason: "budget_duration" }),
       latestTurn: makeRunningLoopTurn(),
     });
-    expect(presentation?.state).toEqual({ kind: "ending", iteration: 2 });
-    expect(presentation?.detail).toBe("Current turn will finish");
+    expect(presentation?.state).toEqual({ kind: "ending" });
+    expect(presentation?.detail).toBe("Time budget reached · current turn finishing");
   });
 
   it("returns stopping while a matching turn outlives a user stop", () => {
@@ -134,7 +134,7 @@ describe("deriveLoopPresentationState", () => {
       loop: makeLoop({ active: false, lastStopReason: "user_stop" }),
       latestTurn: makeRunningLoopTurn(),
     });
-    expect(presentation?.state).toEqual({ kind: "stopping", iteration: 2 });
+    expect(presentation?.state).toEqual({ kind: "stopping" });
     expect(presentation?.label).toBe("Stopping loop");
     expect(presentation?.detail).toBeNull();
   });
@@ -179,10 +179,10 @@ describe("deriveLoopProgress", () => {
   });
 
   it("derives duration progress from elapsed time", () => {
-    // Created 12 minutes ago, ends 18 minutes from now: 30-minute budget.
+    // 30-minute budget with 18 minutes left on the clock.
     const loop = makeLoop({
       maxIterations: null,
-      createdAt: new Date(NOW - 12 * 60_000).toISOString(),
+      durationSeconds: 30 * 60,
       endsAt: new Date(NOW + 18 * 60_000).toISOString(),
     });
     const progress = deriveLoopProgress(loop, NOW);
@@ -196,7 +196,10 @@ describe("deriveLoopProgress", () => {
   });
 
   it("shows no strip and the safety limit for no-budget loops", () => {
-    const progress = deriveLoopProgress(makeLoop({ maxIterations: null, endsAt: null }), NOW);
+    const progress = deriveLoopProgress(
+      makeLoop({ maxIterations: null, endsAt: null, durationSeconds: null }),
+      NOW,
+    );
     expect(progress.kind).toBe("none");
     expect(progress.segments).toEqual([]);
     expect(progress.counterText).toBe("2 turns");
@@ -237,7 +240,7 @@ describe("formatLoopStopReason", () => {
       "budget_duration",
       {
         maxIterations: null,
-        createdAt: new Date(NOW - 30 * 60_000).toISOString(),
+        durationSeconds: 30 * 60,
         endsAt: new Date(NOW).toISOString(),
       },
       4,
@@ -249,7 +252,7 @@ describe("formatLoopStopReason", () => {
       "budget_duration",
       {
         maxIterations: null,
-        createdAt: new Date(NOW - 60 * 60_000).toISOString(),
+        durationSeconds: 60 * 60,
         endsAt: new Date(NOW).toISOString(),
       },
       4,
@@ -299,15 +302,8 @@ describe("adaptive time formatting", () => {
 
 describe("loopDurationMinutes", () => {
   it("returns whole minutes for a duration budget and null otherwise", () => {
-    expect(
-      loopDurationMinutes(
-        makeLoop({
-          createdAt: new Date(NOW - 30 * 60_000).toISOString(),
-          endsAt: new Date(NOW).toISOString(),
-        }),
-      ),
-    ).toBe(30);
-    expect(loopDurationMinutes(makeLoop({ endsAt: null }))).toBeNull();
+    expect(loopDurationMinutes(makeLoop({ durationSeconds: 30 * 60 }))).toBe(30);
+    expect(loopDurationMinutes(makeLoop({ durationSeconds: null }))).toBeNull();
   });
 });
 

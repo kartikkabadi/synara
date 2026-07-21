@@ -160,11 +160,11 @@ describe("budget choices", () => {
       turns: 10,
     });
     expect(
-      loopBudgetChoiceFromLoop(
-        makeLoop({ maxIterations: null, endsAt: "2026-01-01T11:30:00.000Z" }),
-      ),
+      loopBudgetChoiceFromLoop(makeLoop({ maxIterations: null, durationSeconds: 30 * 60 })),
     ).toEqual({ kind: "duration", seconds: 30 * 60 });
-    expect(loopBudgetChoiceFromLoop(makeLoop({ maxIterations: null, endsAt: null }))).toEqual({
+    expect(
+      loopBudgetChoiceFromLoop(makeLoop({ maxIterations: null, durationSeconds: null })),
+    ).toEqual({
       kind: "until-stopped",
     });
   });
