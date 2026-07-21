@@ -9,7 +9,15 @@ import { LoopIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { DisclosureRegion } from "../ui/DisclosureRegion";
-import { Menu, MenuItem, MenuSeparator, MenuTrigger } from "../ui/menu";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "../ui/menu";
 import { ChevronDownIcon } from "~/lib/icons";
 import {
   LOOP_BUDGET_COUNT_ERROR,
@@ -37,7 +45,21 @@ type CustomEntry =
   | { kind: "count"; raw: string }
   | { kind: "duration"; raw: string; unit: "minutes" | "hours" };
 
-function LoopBudgetPicker(props: {
+export function loopBudgetRadioValue(budget: LoopBudgetChoice, custom: CustomEntry): string {
+  if (custom.kind === "count") return "custom-count";
+  if (custom.kind === "duration") return "custom-duration";
+  if (budget.kind === "until-stopped") return "until-stopped";
+  if (budget.kind === "count") {
+    return (LOOP_COUNT_PRESETS as readonly number[]).includes(budget.turns)
+      ? `count-${budget.turns}`
+      : "custom-count";
+  }
+  return (LOOP_DURATION_PRESETS_SECONDS as readonly number[]).includes(budget.seconds)
+    ? `duration-${budget.seconds}`
+    : "custom-duration";
+}
+
+export function LoopBudgetPicker(props: {
   budget: LoopBudgetChoice;
   disabled: boolean;
   onChange: (budget: LoopBudgetChoice) => void;
@@ -77,57 +99,70 @@ function LoopBudgetPicker(props: {
           <ChevronDownIcon className="size-3" />
         </MenuTrigger>
         <ComposerPickerMenuPopup align="end" side="bottom">
-          {LOOP_COUNT_PRESETS.map((turns) => (
-            <MenuItem
-              key={`count-${turns}`}
-              onClick={() => {
-                setCustom({ kind: "none" });
-                props.onChange({ kind: "count", turns });
-              }}
-            >
-              {turns} turns
-            </MenuItem>
-          ))}
-          <MenuSeparator />
-          {LOOP_DURATION_PRESETS_SECONDS.map((seconds) => (
-            <MenuItem
-              key={`duration-${seconds}`}
-              onClick={() => {
-                setCustom({ kind: "none" });
-                props.onChange({ kind: "duration", seconds });
-              }}
-            >
-              {formatDurationPreset(seconds)}
-            </MenuItem>
-          ))}
-          <MenuSeparator />
-          <MenuItem
-            onClick={() => {
-              setCustom({ kind: "none" });
-              props.onChange({ kind: "until-stopped" });
-            }}
-          >
-            <span className="flex flex-col items-start">
-              <span>Until stopped</span>
-              <span className="text-[10.5px] text-muted-foreground/60">
-                Safety limit: {LOOP_DEFAULT_HARD_CAP} turns
-              </span>
-            </span>
-          </MenuItem>
-          <MenuItem
-            onClick={() => {
-              setCustom({ kind: "count", raw: "" });
-            }}
-          >
-            Custom turns…
-          </MenuItem>
-          <MenuItem
-            onClick={() => {
-              setCustom({ kind: "duration", raw: "", unit: "minutes" });
-            }}
-          >
-            Custom duration…
-          </MenuItem>
+          <MenuGroup>
+            <MenuGroupLabel>Stop after</MenuGroupLabel>
+            <MenuRadioGroup value={loopBudgetRadioValue(props.budget, custom)}>
+              {LOOP_COUNT_PRESETS.map((turns) => (
+                <MenuRadioItem
+                  key={`count-${turns}`}
+                  value={`count-${turns}`}
+                  onClick={() => {
+                    setCustom({ kind: "none" });
+                    props.onChange({ kind: "count", turns });
+                  }}
+                >
+                  {turns} turns
+                </MenuRadioItem>
+              ))}
+              <MenuSeparator />
+              {LOOP_DURATION_PRESETS_SECONDS.map((seconds) => (
+                <MenuRadioItem
+                  key={`duration-${seconds}`}
+                  value={`duration-${seconds}`}
+                  onClick={() => {
+                    setCustom({ kind: "none" });
+                    props.onChange({ kind: "duration", seconds });
+                  }}
+                >
+                  {formatDurationPreset(seconds)}
+                </MenuRadioItem>
+              ))}
+              <MenuSeparator />
+              <MenuRadioItem
+                value="until-stopped"
+                onClick={() => {
+                  setCustom({ kind: "none" });
+                  props.onChange({ kind: "until-stopped" });
+                }}
+              >
+                <span className="flex flex-col items-start">
+                  <span>Until stopped</span>
+                  <span className="text-[10.5px] text-muted-foreground/60">
+                    Safety limit: {LOOP_DEFAULT_HARD_CAP} turns
+                  </span>
+                </span>
+              </MenuRadioItem>
+              <MenuRadioItem
+                value="custom-count"
+                onClick={() => {
+                  setCustom({
+                    kind: "count",
+                    raw: props.budget.kind === "count" ? String(props.budget.turns) : "",
+                  });
+                }}
+              >
+                Custom turns…
+              </MenuRadioItem>
+              <MenuRadioItem
+                value="custom-duration"
+                onClick={() => {
+                  setCustom({ kind: "duration", raw: "", unit: "minutes" });
+                }}
+              >
+                Custom duration…
+              </MenuRadioItem>
+            </MenuRadioGroup>
+          </MenuGroup>
         </ComposerPickerMenuPopup>
       </Menu>
       {custom.kind === "count" ? (
@@ -195,7 +230,8 @@ export function LoopComposerModeHeader(props: {
   mode: Exclude<LoopComposerModeState, { kind: "closed" }>;
   isDispatching: boolean;
   isLoopTurnRunning: boolean;
-  inlineError: string | null;
+  note: string | null;
+  error: string | null;
   isUnsupportedContext: boolean;
   onBudgetChange: (budget: LoopBudgetChoice) => void;
 }) {
@@ -228,10 +264,12 @@ export function LoopComposerModeHeader(props: {
         <p className="px-3 pt-1.5 text-[11px] text-warning" role="alert">
           {LOOP_UNSUPPORTED_CONTEXT_MESSAGE}
         </p>
-      ) : props.inlineError ? (
+      ) : props.error ? (
         <p className="px-3 pt-1.5 text-[11px] text-destructive" role="alert">
-          {props.inlineError}
+          {props.error}
         </p>
+      ) : props.note ? (
+        <p className="px-3 pt-1.5 text-[11px] text-muted-foreground">{props.note}</p>
       ) : null}
     </DisclosureRegion>
   );
@@ -270,7 +308,8 @@ export function LoopComposerMode(props: {
   mode: Exclude<LoopComposerModeState, { kind: "closed" }>;
   isDispatching: boolean;
   isLoopTurnRunning: boolean;
-  inlineError: string | null;
+  note: string | null;
+  error: string | null;
   isUnsupportedContext: boolean;
   onBudgetChange: (budget: LoopBudgetChoice) => void;
   editorSlot: ReactNode;
@@ -282,7 +321,8 @@ export function LoopComposerMode(props: {
         mode={props.mode}
         isDispatching={props.isDispatching}
         isLoopTurnRunning={props.isLoopTurnRunning}
-        inlineError={props.inlineError}
+        note={props.note}
+        error={props.error}
         isUnsupportedContext={props.isUnsupportedContext}
         onBudgetChange={props.onBudgetChange}
       />
