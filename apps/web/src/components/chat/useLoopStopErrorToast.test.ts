@@ -2,7 +2,12 @@
 // Purpose: Guards the exceptional-stop toast policy (spec §14) — errors toast, routine stops don't.
 // Layer: Pure logic tests
 
-import type { LoopStopReason, ThreadId, ThreadLoop } from "@synara/contracts";
+import {
+  LoopActivationId,
+  type LoopStopReason,
+  type ThreadId,
+  type ThreadLoop,
+} from "@synara/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const reactHarness = vi.hoisted(() => {
@@ -62,7 +67,7 @@ import {
 
 function makeLoop(overrides: Partial<ThreadLoop>): ThreadLoop {
   return {
-    activationId: "act-1",
+    activationId: LoopActivationId.makeUnsafe("act-1"),
     active: false,
     prompt: "fix the tests",
     iteration: 3,
@@ -101,7 +106,12 @@ describe("shouldToastLoopStop", () => {
   const stopped = makeLoop({ active: false, lastStopReason: "consecutive_errors" });
 
   it("toasts only on an observed active-to-stopped transition", () => {
-    expect(shouldToastLoopStop({ activationId: "act-1", active: true }, stopped)).toBe(true);
+    expect(
+      shouldToastLoopStop(
+        { activationId: LoopActivationId.makeUnsafe("act-1"), active: true },
+        stopped,
+      ),
+    ).toBe(true);
   });
 
   it("does not toast for a loop already stopped on mount", () => {
@@ -109,23 +119,33 @@ describe("shouldToastLoopStop", () => {
   });
 
   it("does not toast across different activations", () => {
-    expect(shouldToastLoopStop({ activationId: "act-0", active: true }, stopped)).toBe(false);
+    expect(
+      shouldToastLoopStop(
+        { activationId: LoopActivationId.makeUnsafe("act-0"), active: true },
+        stopped,
+      ),
+    ).toBe(false);
   });
 
   it("does not toast while the loop is still active or has no reason", () => {
     expect(
       shouldToastLoopStop(
-        { activationId: "act-1", active: true },
+        { activationId: LoopActivationId.makeUnsafe("act-1"), active: true },
         makeLoop({ active: true, lastStopReason: null }),
       ),
     ).toBe(false);
     expect(
       shouldToastLoopStop(
-        { activationId: "act-1", active: true },
+        { activationId: LoopActivationId.makeUnsafe("act-1"), active: true },
         makeLoop({ active: false, lastStopReason: null }),
       ),
     ).toBe(false);
-    expect(shouldToastLoopStop({ activationId: "act-1", active: true }, null)).toBe(false);
+    expect(
+      shouldToastLoopStop(
+        { activationId: LoopActivationId.makeUnsafe("act-1"), active: true },
+        null,
+      ),
+    ).toBe(false);
   });
 });
 
@@ -192,10 +212,18 @@ describe("useLoopStopErrorToast", () => {
 
   it("stays quiet when a new activation appears already stopped", () => {
     const addToast = vi.fn();
-    render(threadId, makeLoop({ active: true, activationId: "act-1" }), addToast);
     render(
       threadId,
-      makeLoop({ active: false, activationId: "act-2", lastStopReason: "consecutive_errors" }),
+      makeLoop({ active: true, activationId: LoopActivationId.makeUnsafe("act-1") }),
+      addToast,
+    );
+    render(
+      threadId,
+      makeLoop({
+        active: false,
+        activationId: LoopActivationId.makeUnsafe("act-2"),
+        lastStopReason: "consecutive_errors",
+      }),
       addToast,
     );
     expect(addToast).not.toHaveBeenCalled();

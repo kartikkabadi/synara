@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { LoopStopReason, OrchestrationLatestTurn, ThreadLoop } from "@synara/contracts";
+import {
+  LoopActivationId,
+  type LoopStopReason,
+  type OrchestrationLatestTurn,
+  type ThreadLoop,
+} from "@synara/contracts";
 
 import {
   type DeriveLoopPresentationStateInput,
@@ -24,7 +29,7 @@ function makeLoop(overrides: Partial<ThreadLoop> = {}): ThreadLoop {
     hardCap: 100,
     consecutiveErrors: 0,
     lastStopReason: null,
-    activationId: "activation-1",
+    activationId: LoopActivationId.makeUnsafe("activation-1"),
     createdAt: "2026-01-01T11:00:00.000Z",
     updatedAt: "2026-01-01T11:30:00.000Z",
     ...overrides,
@@ -41,7 +46,11 @@ function makeRunningLoopTurn(
     startedAt: "2026-01-01T11:45:01.000Z",
     completedAt: null,
     assistantMessageId: null,
-    purpose: { kind: "loop-iteration", activationId: "activation-1", iteration: 2 },
+    purpose: {
+      kind: "loop-iteration",
+      activationId: LoopActivationId.makeUnsafe("activation-1"),
+      iteration: 2,
+    },
     ...overrides,
   } as OrchestrationLatestTurn;
 }
@@ -104,7 +113,11 @@ describe("deriveLoopPresentationState", () => {
 
   it("ignores a running turn from a stale activation", () => {
     const latestTurn = makeRunningLoopTurn({
-      purpose: { kind: "loop-iteration", activationId: "activation-stale", iteration: 7 },
+      purpose: {
+        kind: "loop-iteration",
+        activationId: LoopActivationId.makeUnsafe("activation-stale"),
+        iteration: 7,
+      },
     });
     const presentation = derive({ latestTurn });
     expect(presentation?.state).toEqual({ kind: "ready" });

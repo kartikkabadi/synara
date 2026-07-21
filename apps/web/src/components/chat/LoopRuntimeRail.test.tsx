@@ -3,7 +3,7 @@
 // segments, and accessibility attributes via static markup rendering.
 // Layer: Web chat component tests
 
-import type { OrchestrationLatestTurn, ThreadLoop } from "@synara/contracts";
+import { LoopActivationId, type OrchestrationLatestTurn, type ThreadLoop } from "@synara/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
@@ -28,7 +28,7 @@ function makeLoop(overrides: Partial<ThreadLoop> = {}): ThreadLoop {
     hardCap: 100,
     consecutiveErrors: 0,
     lastStopReason: null,
-    activationId: "activation-1",
+    activationId: LoopActivationId.makeUnsafe("activation-1"),
     createdAt: "2026-01-01T11:00:00.000Z",
     updatedAt: "2026-01-01T11:30:00.000Z",
     ...overrides,
@@ -45,7 +45,11 @@ function makeRunningLoopTurn(
     startedAt: "2026-01-01T11:45:01.000Z",
     completedAt: null,
     assistantMessageId: null,
-    purpose: { kind: "loop-iteration", activationId: "activation-1", iteration: 2 },
+    purpose: {
+      kind: "loop-iteration",
+      activationId: LoopActivationId.makeUnsafe("activation-1"),
+      iteration: 2,
+    },
     ...overrides,
   } as OrchestrationLatestTurn;
 }
@@ -181,7 +185,11 @@ describe("LoopRuntimeRail", () => {
     const markup = renderRail({
       loop: makeLoop({ iteration: 17, maxIterations: 50 }),
       latestTurn: makeRunningLoopTurn({
-        purpose: { kind: "loop-iteration", activationId: "activation-1", iteration: 17 },
+        purpose: {
+          kind: "loop-iteration",
+          activationId: LoopActivationId.makeUnsafe("activation-1"),
+          iteration: 17,
+        },
       }),
     });
     expect(markup).toContain("17 / 50");

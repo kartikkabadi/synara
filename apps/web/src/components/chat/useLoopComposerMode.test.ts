@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { CommandId, ThreadId, type ThreadLoop } from "@synara/contracts";
+import { CommandId, LoopActivationId, ThreadId, type ThreadLoop } from "@synara/contracts";
 
 import {
   LOOP_BUDGET_COUNT_ERROR,
@@ -53,7 +53,7 @@ function makeLoop(overrides: Partial<ThreadLoop> = {}): ThreadLoop {
     hardCap: 100,
     consecutiveErrors: 0,
     lastStopReason: null,
-    activationId: "activation-1",
+    activationId: LoopActivationId.makeUnsafe("activation-1"),
     createdAt: "2026-01-01T11:00:00.000Z",
     updatedAt: "2026-01-01T11:30:00.000Z",
     ...overrides,
@@ -299,7 +299,7 @@ describe("performLoopSetupSubmit", () => {
       threadId: THREAD_ID,
       objective: "fix the tests",
       budget: { kind: "count", turns: 10 },
-      expectedActivationId: "activation-1",
+      expectedActivationId: LoopActivationId.makeUnsafe("activation-1"),
     });
     expect(result).toEqual({ ok: true });
     expect(dispatched[0]).toMatchObject({ expectedActivationId: "activation-1" });
@@ -432,7 +432,7 @@ describe("createLoopComposerCore", () => {
       kind: "edit",
       budget: { kind: "count", turns: 10 },
       sourceDraft: "draft text",
-      activationId: "activation-1",
+      activationId: LoopActivationId.makeUnsafe("activation-1"),
     });
     expect(getObjective()).toBe("Keep fixing tests");
   });
@@ -548,7 +548,7 @@ describe("createLoopComposerCore", () => {
       activeLoop: () => activeLoop,
     });
     core.openEdit();
-    activeLoop = makeLoop({ activationId: "activation-2" });
+    activeLoop = makeLoop({ activationId: LoopActivationId.makeUnsafe("activation-2") });
     await core.submit();
     expect(dispatched).toHaveLength(0);
     expect(core.getState()).toMatchObject({

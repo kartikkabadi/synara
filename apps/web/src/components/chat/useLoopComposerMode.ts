@@ -10,6 +10,7 @@ import {
   LOOP_MAX_COUNT_BUDGET,
   LOOP_MAX_DURATION_SECONDS,
   LOOP_PROMPT_MAX_INPUT_CHARS,
+  type LoopActivationId,
   type ThreadId,
   type ThreadLoop,
 } from "@synara/contracts";
@@ -27,7 +28,7 @@ export type LoopBudgetChoice =
 export type LoopComposerMode =
   | { kind: "closed" }
   | { kind: "create"; budget: LoopBudgetChoice; sourceDraft: string }
-  | { kind: "edit"; budget: LoopBudgetChoice; sourceDraft: string; activationId: string };
+  | { kind: "edit"; budget: LoopBudgetChoice; sourceDraft: string; activationId: LoopActivationId };
 
 export const LOOP_DEFAULT_BUDGET_CHOICE: LoopBudgetChoice = { kind: "count", turns: 5 };
 
@@ -254,7 +255,7 @@ export async function performLoopSetupSubmit(
     threadId: ThreadId;
     objective: string;
     budget: LoopBudgetChoice;
-    expectedActivationId?: string;
+    expectedActivationId?: LoopActivationId;
   },
 ): Promise<LoopSetupSubmitResult> {
   const fields = loopBudgetChoiceToDispatchFields(input.budget);
