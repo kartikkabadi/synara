@@ -6,11 +6,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import {
-  LoopBudgetPicker,
-  LoopComposerModeHeader,
-  loopBudgetRadioValue,
-} from "./LoopComposerMode";
+import { LoopBudgetPicker, LoopComposerModeHeader, loopBudgetRadioValue } from "./LoopComposerMode";
 import {
   LOOP_BUDGET_COUNT_ERROR,
   LOOP_BUDGET_DURATION_MAX_ERROR,
@@ -35,11 +31,7 @@ describe("LoopComposerModeHeader", () => {
 
   it("renders the note as quiet muted text without an alert role", () => {
     const markup = renderToStaticMarkup(
-      <LoopComposerModeHeader
-        {...baseProps}
-        note={LOOP_CHOOSE_BUDGET_NOTE}
-        error={null}
-      />,
+      <LoopComposerModeHeader {...baseProps} note={LOOP_CHOOSE_BUDGET_NOTE} error={null} />,
     );
     expect(markup).toContain(LOOP_CHOOSE_BUDGET_NOTE);
     expect(markup).toContain("text-muted-foreground");
@@ -48,11 +40,7 @@ describe("LoopComposerModeHeader", () => {
 
   it("renders the error as a destructive alert", () => {
     const markup = renderToStaticMarkup(
-      <LoopComposerModeHeader
-        {...baseProps}
-        note={null}
-        error={LOOP_BUDGET_COUNT_ERROR}
-      />,
+      <LoopComposerModeHeader {...baseProps} note={null} error={LOOP_BUDGET_COUNT_ERROR} />,
     );
     expect(markup).toContain(LOOP_BUDGET_COUNT_ERROR);
     expect(markup).toContain("text-destructive");
@@ -77,33 +65,24 @@ describe("loopBudgetRadioValue", () => {
   const noCustom = { kind: "none" } as const;
 
   it("marks preset counts and durations as selected", () => {
-    expect(loopBudgetRadioValue({ kind: "count", turns: 25 }, noCustom)).toBe(
-      "count-25",
+    expect(loopBudgetRadioValue({ kind: "count", turns: 25 }, noCustom)).toBe("count-25");
+    expect(loopBudgetRadioValue({ kind: "duration", seconds: 1800 }, noCustom)).toBe(
+      "duration-1800",
     );
-    expect(
-      loopBudgetRadioValue({ kind: "duration", seconds: 1800 }, noCustom),
-    ).toBe("duration-1800");
-    expect(loopBudgetRadioValue({ kind: "until-stopped" }, noCustom)).toBe(
-      "until-stopped",
-    );
+    expect(loopBudgetRadioValue({ kind: "until-stopped" }, noCustom)).toBe("until-stopped");
   });
 
   it("marks non-preset values as the matching custom entry", () => {
-    expect(loopBudgetRadioValue({ kind: "count", turns: 7 }, noCustom)).toBe(
-      "custom-count",
+    expect(loopBudgetRadioValue({ kind: "count", turns: 7 }, noCustom)).toBe("custom-count");
+    expect(loopBudgetRadioValue({ kind: "duration", seconds: 2700 }, noCustom)).toBe(
+      "custom-duration",
     );
-    expect(
-      loopBudgetRadioValue({ kind: "duration", seconds: 2700 }, noCustom),
-    ).toBe("custom-duration");
   });
 
   it("keeps the open custom entry selected while typing", () => {
-    expect(
-      loopBudgetRadioValue(
-        { kind: "count", turns: 5 },
-        { kind: "count", raw: "" },
-      ),
-    ).toBe("custom-count");
+    expect(loopBudgetRadioValue({ kind: "count", turns: 5 }, { kind: "count", raw: "" })).toBe(
+      "custom-count",
+    );
     expect(
       loopBudgetRadioValue(
         { kind: "count", turns: 5 },

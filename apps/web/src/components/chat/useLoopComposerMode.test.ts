@@ -126,17 +126,13 @@ describe("interpretLoopInvocation", () => {
       objective: "",
       note: "invalid-budget",
     });
-    expect(
-      interpretLoopInvocation("/loop 200 fix the tests", { loopActive: false }),
-    ).toEqual({
+    expect(interpretLoopInvocation("/loop 200 fix the tests", { loopActive: false })).toEqual({
       kind: "open-setup",
       budget: LOOP_DEFAULT_BUDGET_CHOICE,
       objective: "fix the tests",
       note: "invalid-budget",
     });
-    expect(
-      interpretLoopInvocation("/loop 25h ship it", { loopActive: false }),
-    ).toEqual({
+    expect(interpretLoopInvocation("/loop 25h ship it", { loopActive: false })).toEqual({
       kind: "open-setup",
       budget: LOOP_DEFAULT_BUDGET_CHOICE,
       objective: "ship it",
@@ -163,16 +159,12 @@ describe("interpretLoopInvocation", () => {
 
 describe("budget choices", () => {
   it("maps parsed budgets to choices", () => {
-    expect(loopBudgetChoiceFromParsed(null)).toEqual(
-      LOOP_DEFAULT_BUDGET_CHOICE,
-    );
+    expect(loopBudgetChoiceFromParsed(null)).toEqual(LOOP_DEFAULT_BUDGET_CHOICE);
     expect(loopBudgetChoiceFromParsed({ kind: "count", value: 25 })).toEqual({
       kind: "count",
       turns: 25,
     });
-    expect(
-      loopBudgetChoiceFromParsed({ kind: "duration", seconds: 3600 }),
-    ).toEqual({
+    expect(loopBudgetChoiceFromParsed({ kind: "duration", seconds: 3600 })).toEqual({
       kind: "duration",
       seconds: 3600,
     });
@@ -188,9 +180,7 @@ describe("budget choices", () => {
         makeLoop({ maxIterations: null, endsAt: "2026-01-01T11:30:00.000Z" }),
       ),
     ).toEqual({ kind: "duration", seconds: 30 * 60 });
-    expect(
-      loopBudgetChoiceFromLoop(makeLoop({ maxIterations: null, endsAt: null })),
-    ).toEqual({
+    expect(loopBudgetChoiceFromLoop(makeLoop({ maxIterations: null, endsAt: null }))).toEqual({
       kind: "until-stopped",
     });
   });
@@ -198,27 +188,19 @@ describe("budget choices", () => {
   it("validates count range 1..100", () => {
     expect(validateLoopBudgetChoice({ kind: "count", turns: 1 })).toBeNull();
     expect(validateLoopBudgetChoice({ kind: "count", turns: 100 })).toBeNull();
-    expect(validateLoopBudgetChoice({ kind: "count", turns: 0 })).toBe(
-      LOOP_BUDGET_COUNT_ERROR,
-    );
-    expect(validateLoopBudgetChoice({ kind: "count", turns: 101 })).toBe(
-      LOOP_BUDGET_COUNT_ERROR,
-    );
+    expect(validateLoopBudgetChoice({ kind: "count", turns: 0 })).toBe(LOOP_BUDGET_COUNT_ERROR);
+    expect(validateLoopBudgetChoice({ kind: "count", turns: 101 })).toBe(LOOP_BUDGET_COUNT_ERROR);
   });
 
   it("validates duration between 1 minute and 24 hours", () => {
-    expect(
-      validateLoopBudgetChoice({ kind: "duration", seconds: 60 }),
-    ).toBeNull();
-    expect(
-      validateLoopBudgetChoice({ kind: "duration", seconds: 24 * 3600 }),
-    ).toBeNull();
+    expect(validateLoopBudgetChoice({ kind: "duration", seconds: 60 })).toBeNull();
+    expect(validateLoopBudgetChoice({ kind: "duration", seconds: 24 * 3600 })).toBeNull();
     expect(validateLoopBudgetChoice({ kind: "duration", seconds: 59 })).toBe(
       LOOP_BUDGET_DURATION_MIN_ERROR,
     );
-    expect(
-      validateLoopBudgetChoice({ kind: "duration", seconds: 24 * 3600 + 1 }),
-    ).toBe(LOOP_BUDGET_DURATION_MAX_ERROR);
+    expect(validateLoopBudgetChoice({ kind: "duration", seconds: 24 * 3600 + 1 })).toBe(
+      LOOP_BUDGET_DURATION_MAX_ERROR,
+    );
     expect(validateLoopBudgetChoice({ kind: "until-stopped" })).toBeNull();
   });
 
@@ -239,39 +221,29 @@ describe("budget choices", () => {
   });
 
   it("formats trigger labels", () => {
-    expect(formatLoopBudgetChoiceLabel({ kind: "count", turns: 5 })).toBe(
-      "Stop after 5 turns",
+    expect(formatLoopBudgetChoiceLabel({ kind: "count", turns: 5 })).toBe("Stop after 5 turns");
+    expect(formatLoopBudgetChoiceLabel({ kind: "duration", seconds: 30 * 60 })).toBe(
+      "Stop after 30 minutes",
     );
-    expect(
-      formatLoopBudgetChoiceLabel({ kind: "duration", seconds: 30 * 60 }),
-    ).toBe("Stop after 30 minutes");
-    expect(
-      formatLoopBudgetChoiceLabel({ kind: "duration", seconds: 3600 }),
-    ).toBe("Stop after 1 hour");
-    expect(formatLoopBudgetChoiceLabel({ kind: "until-stopped" })).toBe(
-      "Until stopped",
+    expect(formatLoopBudgetChoiceLabel({ kind: "duration", seconds: 3600 })).toBe(
+      "Stop after 1 hour",
     );
+    expect(formatLoopBudgetChoiceLabel({ kind: "until-stopped" })).toBe("Until stopped");
   });
 
   it("maps choices to dispatch fields, with until-stopped deferring to the hard cap", () => {
-    expect(
-      loopBudgetChoiceToDispatchFields({ kind: "count", turns: 10 }),
-    ).toEqual({
+    expect(loopBudgetChoiceToDispatchFields({ kind: "count", turns: 10 })).toEqual({
       maxIterations: 10,
       durationSeconds: null,
     });
-    expect(
-      loopBudgetChoiceToDispatchFields({ kind: "duration", seconds: 1800 }),
-    ).toEqual({
+    expect(loopBudgetChoiceToDispatchFields({ kind: "duration", seconds: 1800 })).toEqual({
       maxIterations: null,
       durationSeconds: 1800,
     });
-    expect(loopBudgetChoiceToDispatchFields({ kind: "until-stopped" })).toEqual(
-      {
-        maxIterations: null,
-        durationSeconds: null,
-      },
-    );
+    expect(loopBudgetChoiceToDispatchFields({ kind: "until-stopped" })).toEqual({
+      maxIterations: null,
+      durationSeconds: null,
+    });
   });
 });
 
@@ -285,9 +257,7 @@ describe("objective validation", () => {
   });
 
   it("blocks unsupported context without touching content", () => {
-    expect(validateLoopObjective("fix the tests", true)).toBe(
-      "unsupported-context",
-    );
+    expect(validateLoopObjective("fix the tests", true)).toBe("unsupported-context");
   });
 });
 
@@ -308,18 +278,10 @@ describe("isUnsupportedLoopContext", () => {
   it("is true when any non-text context is present", () => {
     expect(isUnsupportedLoopContext({ ...empty, imageCount: 1 })).toBe(true);
     expect(isUnsupportedLoopContext({ ...empty, fileCount: 1 })).toBe(true);
-    expect(
-      isUnsupportedLoopContext({ ...empty, terminalContextCount: 1 }),
-    ).toBe(true);
-    expect(isUnsupportedLoopContext({ ...empty, selectedSkillCount: 1 })).toBe(
-      true,
-    );
-    expect(
-      isUnsupportedLoopContext({ ...empty, selectedMentionCount: 1 }),
-    ).toBe(true);
-    expect(
-      isUnsupportedLoopContext({ ...empty, assistantSelectionCount: 1 }),
-    ).toBe(true);
+    expect(isUnsupportedLoopContext({ ...empty, terminalContextCount: 1 })).toBe(true);
+    expect(isUnsupportedLoopContext({ ...empty, selectedSkillCount: 1 })).toBe(true);
+    expect(isUnsupportedLoopContext({ ...empty, selectedMentionCount: 1 })).toBe(true);
+    expect(isUnsupportedLoopContext({ ...empty, assistantSelectionCount: 1 })).toBe(true);
   });
 });
 
