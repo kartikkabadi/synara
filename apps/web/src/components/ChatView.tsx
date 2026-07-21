@@ -27,6 +27,7 @@ import {
   type ServerProviderStatus,
   ThreadId,
   ThreadMarkerId,
+  type ThreadCompactionSettings,
   type ThreadMarker,
   type ThreadMarkerColor,
   type ThreadMarkerStyle,
@@ -1701,6 +1702,41 @@ export default function ChatView({
   const activeCompactionRuntimeStatus = useMemo(
     () => deriveLatestCompactionRuntimeStatus(threadActivities),
     [threadActivities],
+  );
+  const compactActiveThreadNow = useCallback(() => {
+    const api = readNativeApi();
+    if (!api || activeThreadId === null) {
+      return;
+    }
+    void api.provider
+      .compactThread({
+        requestId: crypto.randomUUID(),
+        threadId: activeThreadId,
+        trigger: "manual",
+      })
+      .catch((error) => {
+        toastManager.add({
+          type: "error",
+          title: "Could not compact thread",
+          description:
+            error instanceof Error ? error.message : "An error occurred while compacting context.",
+        });
+      });
+  }, [activeThreadId]);
+  const updateActiveThreadCompactionSettings = useCallback(
+    (settings: ThreadCompactionSettings) => {
+      const api = readNativeApi();
+      if (!api || activeThreadId === null) {
+        return;
+      }
+      void api.provider.setCompactionSettings({ threadId: activeThreadId, settings }).catch(() => {
+        toastManager.add({
+          type: "error",
+          title: "Could not update compaction settings",
+        });
+      });
+    },
+    [activeThreadId],
   );
   const activeRateLimitStatus = useMemo(
     () => deriveLatestRateLimitStatus(threadActivities),
@@ -8997,6 +9033,8 @@ export default function ChatView({
       isServerThread &&
       activeThread?.session !== null &&
       activeThread?.session?.status !== "closed",
+    compactionSupportsInstructions:
+      providerComposerCapabilitiesQuery.data?.compaction?.manual.supportsInstructions === true,
     canOfferSideCommand,
     canOfferExportCommand,
     supportsTextNativeReviewCommand,
@@ -10242,6 +10280,8 @@ export default function ChatView({
                           usage={runtimeUsageContextWindow}
                           compaction={providerComposerCapabilitiesQuery.data?.compaction ?? null}
                           compactionRuntimeStatus={activeCompactionRuntimeStatus}
+                          onCompactNow={compactActiveThreadNow}
+                          onUpdateCompactionSettings={updateActiveThreadCompactionSettings}
                           {...(activeCumulativeCostUsd != null
                             ? { cumulativeCostUsd: activeCumulativeCostUsd }
                             : {})}

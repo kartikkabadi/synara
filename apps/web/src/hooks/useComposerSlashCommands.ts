@@ -57,6 +57,7 @@ export function useComposerSlashCommands(input: {
   isServerThread: boolean;
   supportsFastSlashCommand: boolean;
   canOfferCompactCommand: boolean;
+  compactionSupportsInstructions?: boolean;
   canOfferSideCommand: boolean;
   canOfferExportCommand: boolean;
   supportsTextNativeReviewCommand: boolean;
@@ -108,6 +109,7 @@ export function useComposerSlashCommands(input: {
     isServerThread,
     supportsFastSlashCommand,
     canOfferCompactCommand,
+    compactionSupportsInstructions,
     canOfferSideCommand,
     canOfferExportCommand,
     supportsTextNativeReviewCommand,
@@ -161,8 +163,17 @@ export function useComposerSlashCommands(input: {
         return false;
       }
 
+      const trimmedInstructions = instructions?.trim();
+      if (trimmedInstructions && compactionSupportsInstructions === false) {
+        toastManager.add({
+          type: "warning",
+          title: "Compaction instructions unsupported",
+          description: "This provider does not accept custom compaction instructions.",
+        });
+        return false;
+      }
+
       try {
-        const trimmedInstructions = instructions?.trim();
         void api.provider
           .compactThread({
             requestId: crypto.randomUUID(),
@@ -191,7 +202,7 @@ export function useComposerSlashCommands(input: {
         return false;
       }
     },
-    [activeThread, canOfferCompactCommand, isServerThread],
+    [activeThread, canOfferCompactCommand, compactionSupportsInstructions, isServerThread],
   );
 
   const setFastModeFromSlashCommand = useCallback(
