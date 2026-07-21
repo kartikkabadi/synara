@@ -1,10 +1,10 @@
-import type { ThreadLoop } from "@synara/contracts";
+import { LoopActivationId, type ThreadLoop } from "@synara/contracts";
 import { describe, expect, it } from "vitest";
 
 import { decideLoopContinuation, type LoopContinuationThreadView } from "./loopDecision";
 
 const NOW = new Date("2026-07-19T12:00:00.000Z").getTime();
-const ACTIVATION_ID = "test-activation";
+const ACTIVATION_ID = LoopActivationId.makeUnsafe("test-activation");
 
 function makeLoop(overrides: Partial<ThreadLoop> = {}): ThreadLoop {
   return {
@@ -45,7 +45,7 @@ function makeThread(
 function loopOwnedTerminal(
   state: "completed" | "error" | "interrupted",
   iteration: number,
-  activationId: string = ACTIVATION_ID,
+  activationId: LoopActivationId = ACTIVATION_ID,
 ): Partial<LoopContinuationThreadView> {
   return {
     latestTurnState: state,
@@ -135,6 +135,19 @@ describe("decideLoopContinuation", () => {
   it("turns off when the duration budget has expired", () => {
     const result = decideLoopContinuation({
       loop: makeLoop({ endsAt: "2026-07-19T11:59:59.000Z" }),
+      nowMs: NOW,
+      thread: makeThread(),
+    });
+    expect(result).toEqual({
+      type: "off",
+      reason: "budget_duration",
+      nextConsecutiveErrors: 0,
+    });
+  });
+
+  it("fails closed on a malformed endsAt", () => {
+    const result = decideLoopContinuation({
+      loop: makeLoop({ endsAt: "not-a-date" }),
       nowMs: NOW,
       thread: makeThread(),
     });
@@ -366,7 +379,9 @@ describe("decideLoopContinuation", () => {
     const result = decideLoopContinuation({
       loop: makeLoop({ iteration: 0, consecutiveErrors: 2 }),
       nowMs: NOW,
-      thread: makeThread(loopOwnedTerminal("error", 1, "stale-activation")),
+      thread: makeThread(
+        loopOwnedTerminal("error", 1, LoopActivationId.makeUnsafe("stale-activation")),
+      ),
     });
     expect(result).toEqual({
       type: "continue",
@@ -428,7 +443,7 @@ describe("decideLoopContinuation", () => {
         latestTurnState: "running",
         latestTurnPurpose: {
           kind: "loop-iteration",
-          activationId: "stale-activation",
+          activationId: LoopActivationId.makeUnsafe("stale-activation"),
           iteration: 1,
         },
       }),
