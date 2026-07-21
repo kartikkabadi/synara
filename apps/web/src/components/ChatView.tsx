@@ -461,7 +461,7 @@ import { ComposerExtrasMenu } from "./chat/ComposerExtrasMenu";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { ComposerInputBanners } from "./chat/ComposerInputBanners";
 import { LoopComposerModeCta, LoopComposerModeHeader } from "./chat/LoopComposerMode";
-import { isLoopOwnedTurnRunning, LOOP_ACTIVE_COMPOSER_PLACEHOLDER } from "./chat/loopPresentation";
+import { deriveLoopComposerPlaceholder, isLoopOwnedTurnRunning } from "./chat/loopPresentation";
 import { isUnsupportedLoopContext } from "~/lib/loop";
 import { useLoopComposerMode } from "./chat/useLoopComposerMode";
 import { useLoopStopErrorToast } from "./chat/useLoopStopErrorToast";
@@ -9511,6 +9511,35 @@ export default function ChatView({
     activeThread?.loop != null &&
     isLoopOwnedTurnRunning(activeThread.loop, activeThread.latestTurn);
 
+  const composerPlaceholder = useMemo(
+    () =>
+      deriveLoopComposerPlaceholder({
+        isApprovalState: isComposerApprovalState,
+        pendingProgressQuestion: activePendingProgress
+          ? activePendingProgress.activeQuestion?.options.length === 0
+            ? "free-form"
+            : "with-options"
+          : null,
+        loopSetupOpen: loopComposerModeOpen,
+        showPlanFollowUp: showPlanFollowUpPrompt && activeProposedPlan != null,
+        loop: activeThread?.loop ?? null,
+        isSubagentThread: activeThread?.parentThreadId != null,
+        hasLiveTurn,
+        isDisconnected: phase === "disconnected",
+      }),
+    [
+      isComposerApprovalState,
+      activePendingProgress,
+      loopComposerModeOpen,
+      showPlanFollowUpPrompt,
+      activeProposedPlan,
+      activeThread?.loop,
+      activeThread?.parentThreadId,
+      hasLiveTurn,
+      phase,
+    ],
+  );
+
   const {
     handleForkTargetSelection,
     handleReviewTargetSelection,
@@ -10780,29 +10809,7 @@ export default function ChatView({
                     {...(canCollapsePastedTextToDraft
                       ? { onCollapsePastedText: addPastedTextToDraft }
                       : {})}
-                    placeholder={
-                      isComposerApprovalState
-                        ? "Resolve this approval request to continue"
-                        : activePendingProgress
-                          ? activePendingProgress.activeQuestion?.options.length === 0
-                            ? "Type your answer to continue"
-                            : "Type your own answer, or leave this blank to use the selected option"
-                          : loopComposerModeOpen
-                            ? LOOP_SETUP_COMPOSER_PLACEHOLDER
-                            : showPlanFollowUpPrompt && activeProposedPlan
-                              ? "Add feedback to refine the plan, or leave this blank to implement it"
-                              : activeThread?.loop?.active
-                                ? activeThread.loop.prompt.trim().length === 0
-                                  ? LOOP_OBJECTIVE_PLACEHOLDER
-                                  : LOOP_ACTIVE_COMPOSER_PLACEHOLDER
-                                : activeThread?.parentThreadId
-                                  ? "Message this subagent while it works"
-                                  : hasLiveTurn
-                                    ? "Ask for follow-up changes"
-                                    : phase === "disconnected"
-                                      ? "Ask for follow-up changes or attach images"
-                                      : "Ask anything, @tag files/folders, or use / to show available commands"
-                    }
+                    placeholder={composerPlaceholder}
                     disabled={isComposerEditorDisabled}
                   />
                 </div>
