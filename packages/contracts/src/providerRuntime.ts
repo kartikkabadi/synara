@@ -312,6 +312,39 @@ const ThreadMetadataUpdatedPayload = Schema.Struct({
 });
 export type ThreadMetadataUpdatedPayload = typeof ThreadMetadataUpdatedPayload.Type;
 
+// How a context-occupancy number was obtained and how much to trust it.
+export const ContextUsageSnapshot = Schema.Struct({
+  usedTokens: NonNegativeInt,
+  maxTokens: Schema.optional(PositiveInt),
+  usedPercent: Schema.optional(
+    Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)).check(Schema.isLessThanOrEqualTo(100)),
+  ),
+  measurement: Schema.Literals(["provider-reported", "provider-estimated", "synara-estimated"]),
+  confidence: Schema.Literals(["exact", "high", "medium", "low"]),
+});
+export type ContextUsageSnapshot = typeof ContextUsageSnapshot.Type;
+
+// Lifetime totals across the whole thread; never context occupancy.
+export const CumulativeUsageSnapshot = Schema.Struct({
+  inputTokens: Schema.optional(NonNegativeInt),
+  cachedInputTokens: Schema.optional(NonNegativeInt),
+  outputTokens: Schema.optional(NonNegativeInt),
+  reasoningOutputTokens: Schema.optional(NonNegativeInt),
+  totalProcessedTokens: Schema.optional(NonNegativeInt),
+});
+export type CumulativeUsageSnapshot = typeof CumulativeUsageSnapshot.Type;
+
+// Usage attributable to the most recent turn only.
+export const LastTurnUsageSnapshot = Schema.Struct({
+  inputTokens: Schema.optional(NonNegativeInt),
+  cachedInputTokens: Schema.optional(NonNegativeInt),
+  outputTokens: Schema.optional(NonNegativeInt),
+  reasoningOutputTokens: Schema.optional(NonNegativeInt),
+  durationMs: Schema.optional(NonNegativeInt),
+  toolUses: Schema.optional(NonNegativeInt),
+});
+export type LastTurnUsageSnapshot = typeof LastTurnUsageSnapshot.Type;
+
 export const ThreadTokenUsageSnapshot = Schema.Struct({
   usedTokens: NonNegativeInt,
   usedPercent: Schema.optional(
@@ -331,6 +364,11 @@ export const ThreadTokenUsageSnapshot = Schema.Struct({
   toolUses: Schema.optional(NonNegativeInt),
   durationMs: Schema.optional(NonNegativeInt),
   compactsAutomatically: Schema.optional(Schema.Boolean),
+
+  // V2 nested semantics: flat fields above stay for backward compatibility.
+  context: Schema.optional(ContextUsageSnapshot),
+  cumulative: Schema.optional(CumulativeUsageSnapshot),
+  lastTurn: Schema.optional(LastTurnUsageSnapshot),
 });
 export type ThreadTokenUsageSnapshot = typeof ThreadTokenUsageSnapshot.Type;
 

@@ -464,6 +464,13 @@ describe("AcpRuntimeModel", () => {
           usedPercent: 4.2,
           maxTokens: 1_000_000,
           compactsAutomatically: true,
+          context: {
+            usedTokens: 42_000,
+            usedPercent: 4.2,
+            maxTokens: 1_000_000,
+            measurement: "provider-estimated",
+            confidence: "medium",
+          },
         },
         cost: {
           amount: 0.2,
@@ -518,6 +525,40 @@ describe("AcpRuntimeModel", () => {
         ? withFalseClaim.events[0].usage.compactsAutomatically
         : undefined,
     ).toBe(false);
+  });
+
+  it("maps ACP used/size to a provider-estimated context claim without a cumulative claim", () => {
+    const notification = {
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "usage_update",
+        size: 1_000_000,
+        used: 42_000,
+      },
+    } satisfies EffectAcpSchema.SessionNotification;
+
+    const defaultConfidence = parseSessionUpdateEvent(notification);
+    const defaultUsage =
+      defaultConfidence.events[0]?._tag === "UsageUpdated"
+        ? defaultConfidence.events[0].usage
+        : undefined;
+    expect(defaultUsage?.context).toEqual({
+      usedTokens: 42_000,
+      usedPercent: 4.2,
+      maxTokens: 1_000_000,
+      measurement: "provider-estimated",
+      confidence: "medium",
+    });
+    expect(defaultUsage?.cumulative).toBeUndefined();
+
+    const lowConfidence = parseSessionUpdateEvent(notification, {
+      usageContextConfidence: "low",
+    });
+    expect(
+      lowConfidence.events[0]?._tag === "UsageUpdated"
+        ? lowConfidence.events[0].usage.context?.confidence
+        : undefined,
+    ).toBe("low");
   });
 
   it("keeps permission request parsing compatible with loose extension payloads", () => {

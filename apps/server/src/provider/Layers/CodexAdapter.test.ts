@@ -1431,6 +1431,20 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         lastOutputTokens: 6,
         lastReasoningOutputTokens: 0,
         compactsAutomatically: true,
+        context: {
+          usedTokens: 126,
+          maxTokens: 258_400,
+          usedPercent: (126 / 258_400) * 100,
+          measurement: "provider-reported",
+          confidence: "high",
+        },
+        cumulative: { totalProcessedTokens: 11_839 },
+        lastTurn: {
+          inputTokens: 120,
+          cachedInputTokens: 0,
+          outputTokens: 6,
+          reasoningOutputTokens: 0,
+        },
       });
     }),
   );

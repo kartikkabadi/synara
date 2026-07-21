@@ -988,6 +988,8 @@ export function makeGrokAdapter(
             clientInfo: { name: "Synara", version: "0.0.0" },
             // Grok natively auto-compacts, so its usage snapshots may claim it.
             usageCompactsAutomatically: true,
+            // ACP `used`/`size` is a provider-side estimate, not exact model tokens.
+            usageContextConfidence: "medium",
             ...(agentGatewayCredentials
               ? {
                   buildMcpServers: (initializeResult) =>

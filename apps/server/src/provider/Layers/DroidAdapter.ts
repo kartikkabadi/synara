@@ -805,6 +805,8 @@ export function makeDroidAdapter(
             // Factory ACP exposes no observable compaction lifecycle, so usage
             // snapshots must not claim automatic compaction.
             usageCompactsAutomatically: false,
+            // Factory's ACP usage carries no exact token counts.
+            usageContextConfidence: "low",
             ...(agentGatewayCredentials
               ? {
                   buildMcpServers: (initializeResult: EffectAcpSchema.InitializeResponse) =>

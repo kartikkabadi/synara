@@ -203,10 +203,14 @@ function normalizeToolCallStatus(
 // Converts ACP's unstable usage updates into Synara's context-window snapshot shape.
 // `compactsAutomatically` is a per-provider claim, so callers must supply it
 // explicitly; when absent, the snapshot makes no automatic-compaction claim.
+// ACP `used`/`size` describe context occupancy, but only as a provider-side
+// estimate; per-provider `contextConfidence` says how much to trust it. The
+// values are never a cumulative-usage claim.
 function tokenUsageSnapshotFromAcpUsageUpdate(input: {
   readonly size: unknown;
   readonly used: unknown;
   readonly compactsAutomatically?: boolean | undefined;
+  readonly contextConfidence?: "medium" | "low" | undefined;
 }): ThreadTokenUsageSnapshot | undefined {
   const usedTokens = nonNegativeInteger(input.used);
   if (usedTokens === undefined) {
@@ -221,6 +225,13 @@ function tokenUsageSnapshotFromAcpUsageUpdate(input: {
     ...(input.compactsAutomatically !== undefined
       ? { compactsAutomatically: input.compactsAutomatically }
       : {}),
+    context: {
+      usedTokens,
+      ...(maxTokens !== undefined ? { maxTokens } : {}),
+      ...(usedPercent !== undefined ? { usedPercent } : {}),
+      measurement: "provider-estimated",
+      confidence: input.contextConfidence ?? "medium",
+    },
   };
 }
 
@@ -569,6 +580,7 @@ export function parseSessionUpdateEvent(
   params: EffectAcpSchema.SessionNotification,
   options?: {
     readonly usageCompactsAutomatically?: boolean | undefined;
+    readonly usageContextConfidence?: "medium" | "low" | undefined;
   },
 ): {
   readonly modeId?: string;
@@ -660,6 +672,7 @@ export function parseSessionUpdateEvent(
         size: upd.size,
         used: upd.used,
         compactsAutomatically: options?.usageCompactsAutomatically,
+        contextConfidence: options?.usageContextConfidence,
       });
       if (usage) {
         events.push({

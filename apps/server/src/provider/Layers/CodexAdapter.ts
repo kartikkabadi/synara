@@ -225,6 +225,26 @@ function normalizeCodexTokenUsage(value: unknown): ThreadTokenUsageSnapshot | un
       ? { lastReasoningOutputTokens: reasoningOutputTokens }
       : {}),
     compactsAutomatically: true,
+    // The last request's total is the closest provider-reported proxy for
+    // context occupancy; the lifetime total is cumulative, never context.
+    context: {
+      usedTokens,
+      ...(maxTokens !== undefined
+        ? {
+            maxTokens,
+            usedPercent: Math.min(100, (usedTokens / maxTokens) * 100),
+          }
+        : {}),
+      measurement: "provider-reported",
+      confidence: "high",
+    },
+    ...(totalProcessedTokens !== undefined ? { cumulative: { totalProcessedTokens } } : {}),
+    lastTurn: {
+      ...(inputTokens !== undefined ? { inputTokens } : {}),
+      ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+      ...(outputTokens !== undefined ? { outputTokens } : {}),
+      ...(reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
+    },
   };
 }
 

@@ -132,6 +132,11 @@ export interface AcpSessionRuntimeOptions {
    * Omit when there is no evidence of observable automatic compaction.
    */
   readonly usageCompactsAutomatically?: boolean;
+  /**
+   * How much to trust the provider's ACP `used`/`size` context estimate.
+   * Defaults to "medium" (an estimate, but grounded in real counts).
+   */
+  readonly usageContextConfidence?: "medium" | "low";
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
     readonly logIncoming?: boolean;
@@ -849,6 +854,7 @@ const makeAcpSessionRuntime = (
               runtimeInstanceId,
               params: notification,
               usageCompactsAutomatically: options.usageCompactsAutomatically,
+              usageContextConfidence: options.usageContextConfidence,
             }),
           ),
         );
@@ -1372,6 +1378,7 @@ const handleSessionUpdate = ({
   runtimeInstanceId,
   params,
   usageCompactsAutomatically,
+  usageContextConfidence,
 }: {
   readonly offer: (event: AcpParsedSessionEvent) => Effect.Effect<void>;
   readonly modeStateRef: Ref.Ref<AcpSessionModeState | undefined>;
@@ -1380,9 +1387,13 @@ const handleSessionUpdate = ({
   readonly runtimeInstanceId: string;
   readonly params: EffectAcpSchema.SessionNotification;
   readonly usageCompactsAutomatically?: boolean | undefined;
+  readonly usageContextConfidence?: "medium" | "low" | undefined;
 }): Effect.Effect<void> =>
   Effect.gen(function* () {
-    const parsed = parseSessionUpdateEvent(params, { usageCompactsAutomatically });
+    const parsed = parseSessionUpdateEvent(params, {
+      usageCompactsAutomatically,
+      usageContextConfidence,
+    });
     if (parsed.modeId) {
       yield* Ref.update(modeStateRef, (current) =>
         current === undefined ? current : updateModeState(current, parsed.modeId!),

@@ -631,6 +631,8 @@ export function makeCursorAdapter(
             // Cursor's ACP surface gives no evidence of automatic compaction,
             // so usage snapshots must not claim it.
             usageCompactsAutomatically: false,
+            // Cursor's ACP usage carries no exact token counts.
+            usageContextConfidence: "low",
             ...(agentGatewayCredentials
               ? {
                   buildMcpServers: (initializeResult) =>

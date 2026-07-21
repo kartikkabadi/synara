@@ -1,4 +1,7 @@
 import type {
+  ContextUsageSnapshot,
+  CumulativeUsageSnapshot,
+  LastTurnUsageSnapshot,
   OrchestrationThreadActivity,
   ProviderCompactionCapabilities,
   ThreadTokenUsageSnapshot,
@@ -14,6 +17,81 @@ function asFiniteNumber(value: unknown): number | null {
 
 function asBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
+}
+
+const CONTEXT_USAGE_MEASUREMENTS = [
+  "provider-reported",
+  "provider-estimated",
+  "synara-estimated",
+] as const;
+const CONTEXT_USAGE_CONFIDENCES = ["exact", "high", "medium", "low"] as const;
+
+function asContextUsageSnapshot(value: unknown): ContextUsageSnapshot | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const usedTokens = asFiniteNumber(record.usedTokens);
+  const measurement = CONTEXT_USAGE_MEASUREMENTS.find((entry) => entry === record.measurement);
+  const confidence = CONTEXT_USAGE_CONFIDENCES.find((entry) => entry === record.confidence);
+  if (usedTokens === null || usedTokens < 0 || !measurement || !confidence) {
+    return null;
+  }
+  const maxTokens = asFiniteNumber(record.maxTokens);
+  const usedPercent = asContextWindowPercent(record.usedPercent);
+  return {
+    usedTokens,
+    ...(maxTokens !== null && maxTokens > 0 ? { maxTokens } : {}),
+    ...(usedPercent !== null ? { usedPercent } : {}),
+    measurement,
+    confidence,
+  };
+}
+
+function asCumulativeUsageSnapshot(value: unknown): CumulativeUsageSnapshot | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const totalProcessedTokens = asFiniteNumber(record.totalProcessedTokens);
+  const inputTokens = asFiniteNumber(record.inputTokens);
+  const cachedInputTokens = asFiniteNumber(record.cachedInputTokens);
+  const outputTokens = asFiniteNumber(record.outputTokens);
+  const reasoningOutputTokens = asFiniteNumber(record.reasoningOutputTokens);
+  return {
+    ...(inputTokens !== null ? { inputTokens } : {}),
+    ...(cachedInputTokens !== null ? { cachedInputTokens } : {}),
+    ...(outputTokens !== null ? { outputTokens } : {}),
+    ...(reasoningOutputTokens !== null ? { reasoningOutputTokens } : {}),
+    ...(totalProcessedTokens !== null ? { totalProcessedTokens } : {}),
+  };
+}
+
+function asLastTurnUsageSnapshot(value: unknown): LastTurnUsageSnapshot | null {
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+  const inputTokens = asFiniteNumber(record.inputTokens);
+  const cachedInputTokens = asFiniteNumber(record.cachedInputTokens);
+  const outputTokens = asFiniteNumber(record.outputTokens);
+  const reasoningOutputTokens = asFiniteNumber(record.reasoningOutputTokens);
+  const durationMs = asFiniteNumber(record.durationMs);
+  const toolUses = asFiniteNumber(record.toolUses);
+  return {
+    ...(inputTokens !== null ? { inputTokens } : {}),
+    ...(cachedInputTokens !== null ? { cachedInputTokens } : {}),
+    ...(outputTokens !== null ? { outputTokens } : {}),
+    ...(reasoningOutputTokens !== null ? { reasoningOutputTokens } : {}),
+    ...(durationMs !== null ? { durationMs } : {}),
+    ...(toolUses !== null ? { toolUses } : {}),
+  };
+}
+
+export function isReliableContextUsageConfidence(
+  confidence: ContextUsageSnapshot["confidence"],
+): boolean {
+  return confidence === "exact" || confidence === "high";
 }
 
 function asContextWindowPercent(value: unknown): number | null {
@@ -68,10 +146,18 @@ function deriveLatestUsageContextWindowSnapshot(
     }
 
     const payload = asRecord(activity.payload);
-    const rawUsedTokens = asFiniteNumber(payload?.usedTokens);
+    const context = asContextUsageSnapshot(payload?.context);
+    const cumulative = asCumulativeUsageSnapshot(payload?.cumulative);
+    const lastTurn = asLastTurnUsageSnapshot(payload?.lastTurn);
+    // Prefer nested context occupancy; fall back to legacy flat fields.
+    const rawUsedTokens = context ? context.usedTokens : asFiniteNumber(payload?.usedTokens);
     const usedTokens = rawUsedTokens ?? 0;
-    const payloadUsedPercent = asContextWindowPercent(payload?.usedPercent);
-    const maxTokens = asFiniteNumber(payload?.maxTokens);
+    const payloadUsedPercent = context
+      ? asContextWindowPercent(context.usedPercent)
+      : asContextWindowPercent(payload?.usedPercent);
+    const maxTokens = context
+      ? (asFiniteNumber(context.maxTokens) ?? asFiniteNumber(payload?.maxTokens))
+      : asFiniteNumber(payload?.maxTokens);
     if (usedTokens <= 0 && payloadUsedPercent === null && (maxTokens === null || maxTokens <= 0)) {
       continue;
     }
@@ -91,7 +177,9 @@ function deriveLatestUsageContextWindowSnapshot(
     return {
       usedTokens,
       usedPercent: payloadUsedPercent,
-      totalProcessedTokens: asFiniteNumber(payload?.totalProcessedTokens),
+      totalProcessedTokens: cumulative
+        ? asFiniteNumber(cumulative.totalProcessedTokens)
+        : asFiniteNumber(payload?.totalProcessedTokens),
       maxTokens,
       remainingTokens,
       usedPercentage,
@@ -108,6 +196,9 @@ function deriveLatestUsageContextWindowSnapshot(
       toolUses: asFiniteNumber(payload?.toolUses),
       durationMs: asFiniteNumber(payload?.durationMs),
       compactsAutomatically: asBoolean(payload?.compactsAutomatically) ?? false,
+      context,
+      cumulative,
+      lastTurn,
       updatedAt: activity.createdAt,
     };
   }
@@ -181,6 +272,9 @@ export function deriveLatestContextWindowSnapshot(
     toolUses: usageSnapshot?.toolUses ?? null,
     durationMs: usageSnapshot?.durationMs ?? null,
     compactsAutomatically: usageSnapshot?.compactsAutomatically ?? false,
+    context: usageSnapshot?.context ?? null,
+    cumulative: usageSnapshot?.cumulative ?? null,
+    lastTurn: usageSnapshot?.lastTurn ?? null,
     updatedAt: usageSnapshot?.updatedAt ?? activities[activities.length - 1]?.createdAt ?? "",
   };
 }
@@ -219,6 +313,9 @@ export function deriveSelectedContextWindowSnapshot(
     toolUses: null,
     durationMs: null,
     compactsAutomatically: false,
+    context: null,
+    cumulative: null,
+    lastTurn: null,
     updatedAt: "",
   };
 }
@@ -238,17 +335,24 @@ export function deriveContextWindowMeterDisplay(
 ): ContextWindowMeterDisplay {
   const usedPercentageLabel = formatPercentage(usage.usedPercentage);
   const tokenUsageLabel = formatContextWindowTokens(usage.usedTokens);
+  // With a nested context claim, reliability follows its confidence; legacy
+  // flat payloads keep the historical heuristic.
+  const contextIsReliable = usage.context
+    ? isReliableContextUsageConfidence(usage.context.confidence)
+    : null;
   const hasReliableTokenRatio =
-    usage.maxTokens !== null &&
-    (usage.usedTokens > 0 || usage.usedPercent === null || usage.remainingTokens !== null);
+    contextIsReliable !== null
+      ? contextIsReliable && usage.maxTokens !== null
+      : usage.maxTokens !== null &&
+        (usage.usedTokens > 0 || usage.usedPercent === null || usage.remainingTokens !== null);
   const normalizedPercentage = Math.max(0, Math.min(100, usage.usedPercentage ?? 0));
+  const showPercentage = usage.usedPercentage !== null && contextIsReliable !== false;
   return {
     usedPercentageLabel,
     tokenUsageLabel,
     hasReliableTokenRatio,
     normalizedPercentage,
-    compactLabel:
-      usage.usedPercentage !== null ? `${Math.round(usage.usedPercentage)}%` : tokenUsageLabel,
+    compactLabel: showPercentage ? `${Math.round(usage.usedPercentage ?? 0)}%` : tokenUsageLabel,
     ariaLabel: usedPercentageLabel
       ? `Context window ${usedPercentageLabel} used`
       : `Context window ${tokenUsageLabel} tokens used`,
@@ -350,16 +454,15 @@ export function formatCostUsd(value: number): string {
 
 export type ContextCompactionMeterCopy = "provider-auto" | "unavailable" | null;
 
-// Capability-first meter copy: the structured descriptor decides what the
-// meter may claim; the legacy per-snapshot `compactsAutomatically` boolean is
-// only consulted when no descriptor is available.
+// Capability-only meter copy: the structured descriptor is the sole source of
+// compaction-policy claims. The legacy per-snapshot `compactsAutomatically`
+// boolean carries no policy meaning and is never consulted.
 export function deriveContextCompactionMeterCopy(input: {
   readonly compaction: ProviderCompactionCapabilities | null | undefined;
-  readonly compactsAutomatically: boolean;
 }): ContextCompactionMeterCopy {
   const compaction = input.compaction;
   if (!compaction) {
-    return input.compactsAutomatically ? "provider-auto" : null;
+    return null;
   }
   if (compaction.automatic.mode === "native") {
     return "provider-auto";

@@ -31,6 +31,9 @@ const usage: ContextWindowSnapshot = {
   toolUses: null,
   durationMs: null,
   compactsAutomatically: true,
+  context: null,
+  cumulative: null,
+  lastTurn: null,
   updatedAt: "2026-03-23T00:00:00.000Z",
 };
 
@@ -76,10 +79,10 @@ describe("ContextWindowMeterDetails", () => {
     expect(markup).not.toContain("Automatically compacts its context when needed.");
   });
 
-  it("falls back to the legacy snapshot flag without a descriptor", () => {
+  it("ignores the legacy snapshot flag without a descriptor", () => {
     const markup = renderToStaticMarkup(
       <ContextWindowMeterDetails usage={usage} compaction={null} />,
     );
-    expect(markup).toContain("Automatically compacts its context when needed.");
+    expect(markup).not.toContain("Automatically compacts its context when needed.");
   });
 });

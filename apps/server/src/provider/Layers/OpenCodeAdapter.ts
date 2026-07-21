@@ -1014,6 +1014,31 @@ export function normalizeOpenCodeTokenUsage(
     lastCachedInputTokens: cachedInputTokens,
     lastOutputTokens: outputTokens,
     lastReasoningOutputTokens: reasoningOutputTokens,
+    // The SDK only reports cumulative processed tokens; there is no reliable
+    // per-request context count, so the context claim is a low-confidence
+    // Synara estimate derived from that cumulative value.
+    context: {
+      usedTokens,
+      ...(normalizedMaxTokens !== undefined ? { maxTokens: normalizedMaxTokens } : {}),
+      ...(normalizedMaxTokens !== undefined
+        ? { usedPercent: Math.min(100, (usedTokens / normalizedMaxTokens) * 100) }
+        : {}),
+      measurement: "synara-estimated",
+      confidence: "low",
+    },
+    cumulative: {
+      inputTokens,
+      cachedInputTokens,
+      outputTokens,
+      reasoningOutputTokens,
+      totalProcessedTokens,
+    },
+    lastTurn: {
+      inputTokens,
+      cachedInputTokens,
+      outputTokens,
+      reasoningOutputTokens,
+    },
   };
 }
 

@@ -170,5 +170,74 @@ describe("ProviderRuntimeEvent", () => {
     expect(parsed.payload.usage.maxTokens).toBe(200000);
     expect(parsed.payload.usage.usedTokens).toBe(31251);
     expect(parsed.payload.usage.usedPercent).toBe(15.6255);
+    expect(parsed.payload.usage.context).toBeUndefined();
+    expect(parsed.payload.usage.cumulative).toBeUndefined();
+    expect(parsed.payload.usage.lastTurn).toBeUndefined();
+  });
+
+  it("decodes thread token usage snapshots with nested V2 claims", () => {
+    const parsed = decodeRuntimeEvent({
+      type: "thread.token-usage.updated",
+      eventId: "event-token-usage-2",
+      provider: "claudeAgent",
+      createdAt: "2026-02-28T00:00:05.000Z",
+      threadId: "thread-1",
+      payload: {
+        usage: {
+          usedTokens: 31251,
+          maxTokens: 200000,
+          totalProcessedTokens: 748126,
+          context: {
+            usedTokens: 31251,
+            maxTokens: 200000,
+            usedPercent: 15.6255,
+            measurement: "provider-reported",
+            confidence: "exact",
+          },
+          cumulative: {
+            inputTokens: 700000,
+            outputTokens: 48126,
+            totalProcessedTokens: 748126,
+          },
+          lastTurn: {
+            inputTokens: 30000,
+            outputTokens: 1251,
+            durationMs: 43567,
+            toolUses: 25,
+          },
+        },
+      },
+    });
+
+    expect(parsed.type).toBe("thread.token-usage.updated");
+    if (parsed.type !== "thread.token-usage.updated") {
+      throw new Error("expected thread.token-usage.updated");
+    }
+    expect(parsed.payload.usage.context?.measurement).toBe("provider-reported");
+    expect(parsed.payload.usage.context?.confidence).toBe("exact");
+    expect(parsed.payload.usage.cumulative?.totalProcessedTokens).toBe(748126);
+    expect(parsed.payload.usage.lastTurn?.toolUses).toBe(25);
+  });
+
+  it("rejects nested context claims with unknown measurement labels", () => {
+    expect(() =>
+      decodeRuntimeEvent({
+        type: "thread.token-usage.updated",
+        eventId: "event-token-usage-3",
+        provider: "claudeAgent",
+        createdAt: "2026-02-28T00:00:06.000Z",
+        threadId: "thread-1",
+        payload: {
+          usage: {
+            usedTokens: 31251,
+            context: {
+              usedTokens: 31251,
+              measurement: "guessed",
+              confidence: "exact",
+            },
+          },
+        },
+      }),
+    ).toThrow();
   });
 });
