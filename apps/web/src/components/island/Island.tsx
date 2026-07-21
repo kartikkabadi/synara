@@ -139,7 +139,7 @@ export function Island() {
   const [threads, setThreads] = useState<readonly OrchestrationThreadShell[]>([]);
   const [uiState, setUiState] = useState<IslandWindowState>("collapsed");
   const [popped, setPopped] = useState(false);
-  const sessionsRef = useRef<IslandSession[]>([]);
+  const sessionsRef = useRef<readonly IslandSession[]>([]);
   const popTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const surfaceRef = useRef<HTMLDivElement | null>(null);
