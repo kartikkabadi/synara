@@ -2,6 +2,7 @@ import { Effect, Exit, Layer, ManagedRuntime, Scope } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
+import { CompactionReactor } from "../Services/CompactionReactor.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { StudioOutputReactor } from "../Services/StudioOutputReactor.ts";
@@ -60,6 +61,19 @@ describe("OrchestrationReactor", () => {
           }),
         ),
         Layer.provideMerge(
+          Layer.succeed(CompactionReactor, {
+            start: Effect.acquireRelease(
+              Effect.sync(() => {
+                started.push("compaction-reactor");
+              }),
+              () => Effect.sync(() => stopped.push("compaction-reactor")),
+            ),
+            drain: Effect.void,
+            request: () => Effect.die(new Error("unused")),
+            getControlState: () => Effect.succeed({ status: "idle" as const }),
+          }),
+        ),
+        Layer.provideMerge(
           Layer.succeed(StudioOutputReactor, {
             captureBaselineBeforeTurn: () => Effect.void,
             cancelPendingTurnBaseline: () => Effect.void,
@@ -82,6 +96,7 @@ describe("OrchestrationReactor", () => {
     expect(started).toEqual([
       "studio-output-reactor",
       "checkpoint-reactor",
+      "compaction-reactor",
       "provider-runtime-ingestion",
       "provider-command-reactor",
     ]);
@@ -90,6 +105,7 @@ describe("OrchestrationReactor", () => {
     expect(stopped).toEqual([
       "provider-command-reactor",
       "provider-runtime-ingestion",
+      "compaction-reactor",
       "checkpoint-reactor",
       "studio-output-reactor",
     ]);
