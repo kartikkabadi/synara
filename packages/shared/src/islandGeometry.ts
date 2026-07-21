@@ -58,7 +58,10 @@ export function islandCollapsedSize(
 
 export function islandHoverSize(shell: IslandShellMode, notch: IslandNotchInfo | null): IslandSize {
   if (shell === "notch" && notch) {
-    return { width: Math.max(notch.width + 200, ISLAND_HOVER_SIZE.width), height: ISLAND_HOVER_SIZE.height };
+    return {
+      width: Math.max(notch.width + 200, ISLAND_HOVER_SIZE.width),
+      height: ISLAND_HOVER_SIZE.height,
+    };
   }
   return ISLAND_HOVER_SIZE;
 }
