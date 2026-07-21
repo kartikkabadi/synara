@@ -449,12 +449,8 @@ import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { ComposerInputBanners } from "./chat/ComposerInputBanners";
 import { LoopComposerModeCta, LoopComposerModeHeader } from "./chat/LoopComposerMode";
 import { isLoopOwnedTurnRunning, LOOP_ACTIVE_COMPOSER_PLACEHOLDER } from "./chat/loopPresentation";
-import {
-  isUnsupportedLoopContext,
-  LOOP_OBJECTIVE_PLACEHOLDER,
-  LOOP_SETUP_COMPOSER_PLACEHOLDER,
-  useLoopComposerMode,
-} from "./chat/useLoopComposerMode";
+import { isUnsupportedLoopContext } from "~/lib/loop";
+import { useLoopComposerMode } from "./chat/useLoopComposerMode";
 import { useLoopStopErrorToast } from "./chat/useLoopStopErrorToast";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerVoiceButton } from "./chat/ComposerVoiceButton";
