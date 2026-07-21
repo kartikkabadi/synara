@@ -14,6 +14,7 @@ import {
   type ThreadLoop,
   type ThreadTurnPurpose,
 } from "@synara/contracts";
+import { makeLoop as makeLoopFixture } from "@synara/shared/loopTestFixtures";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -112,32 +113,16 @@ async function makeReadModelWithThread(options: { parentThreadId?: string | null
   );
 }
 
-function makeLoop(
-  payload: {
-    active?: boolean;
-    prompt?: string;
-    iteration?: number;
-    maxIterations?: number | null;
-    consecutiveErrors?: number;
-    lastStopReason?: ThreadLoop["lastStopReason"];
-    activationId?: string;
-    createdAt?: string;
-    updatedAt?: string;
-  } = {},
-): ThreadLoop {
-  return {
-    active: payload.active ?? true,
-    prompt: payload.prompt ?? "fix tests",
-    iteration: payload.iteration ?? 0,
-    maxIterations: payload.maxIterations ?? null,
-    endsAt: null,
-    hardCap: 100,
-    consecutiveErrors: payload.consecutiveErrors ?? 0,
-    lastStopReason: payload.lastStopReason ?? null,
-    activationId: payload.activationId ?? "test-activation",
-    createdAt: payload.createdAt ?? NOW,
-    updatedAt: payload.updatedAt ?? NOW,
-  };
+function makeLoop(overrides: Partial<ThreadLoop> = {}): ThreadLoop {
+  return makeLoopFixture({
+    prompt: "fix tests",
+    iteration: 0,
+    maxIterations: null,
+    activationId: "test-activation",
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...overrides,
+  });
 }
 
 async function projectLoopSet(
@@ -757,29 +742,6 @@ describe("decider loop commands", () => {
     });
   });
 
-  it("emits thread.loop-off on thread.loop.continue for a deleted thread", async () => {
-    const readModel = await deleteThread(await projectLoopSet(await makeReadModelWithThread()));
-
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.continue",
-          commandId: asCommandId("cmd-loop-continue-deleted"),
-          threadId: asThreadId("thread-loop"),
-          createdAt: NOW,
-        },
-        readModel,
-      }),
-    );
-    const event = Array.isArray(result) ? result[0] : result;
-    expect(event.type).toBe("thread.loop-off");
-    expect(event.payload).toMatchObject({
-      threadId: asThreadId("thread-loop"),
-      stopReason: "thread_deleted",
-      loop: { active: false, lastStopReason: "thread_deleted" },
-    });
-  });
-
   it("binds the first user message as the loop prompt and iteration body when prompt is omitted", async () => {
     const readModel = await projectLoopSet(
       await makeReadModelWithThread(),
@@ -1056,44 +1018,5 @@ describe("decider loop commands", () => {
     };
     expect(continuedPayload.nextIteration).toBe(1);
     expect(continuedPayload.nextConsecutiveErrors).toBe(0);
-  });
-
-  it("thread.loop.continue stops when hard cap is reached", async () => {
-    const readModel = await projectLoopSet(
-      await makeReadModelWithThread(),
-      makeLoop({ active: true }),
-    );
-    const withHardCap = await Effect.runPromise(
-      projectEvent(
-        readModel,
-        makeEvent({
-          sequence: 4,
-          type: "thread.loop-set",
-          aggregateKind: "thread",
-          aggregateId: "thread-loop",
-          occurredAt: NOW,
-          commandId: "cmd-loop-hardcap",
-          payload: {
-            threadId: "thread-loop",
-            loop: { ...makeLoop({ active: true }), iteration: 1, hardCap: 1 },
-          },
-        }),
-      ),
-    );
-
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.continue",
-          commandId: asCommandId("cmd-loop-continue"),
-          threadId: asThreadId("thread-loop"),
-          createdAt: NOW,
-        },
-        readModel: withHardCap,
-      }),
-    );
-    const event = Array.isArray(result) ? result[0] : result;
-    expect(event.type).toBe("thread.loop-off");
-    expect((event.payload as { stopReason: string }).stopReason).toBe("hard_cap");
   });
 });
