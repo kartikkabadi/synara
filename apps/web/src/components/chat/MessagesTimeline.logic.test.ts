@@ -1257,121 +1257,6 @@ describe("deriveMessagesTimelineRows", () => {
     expect(rows.map((row) => row.kind)).toEqual(["message", "working"]);
   });
 
-  it("labels loop-owned assistant messages by correlated turn ID", () => {
-    const rows = deriveMessagesTimelineRows({
-      ...baseInput,
-      timelineEntries: [
-        {
-          id: "entry-loop-user",
-          kind: "message",
-          createdAt: "2026-01-01T00:00:00Z",
-          message: {
-            id: MessageId.makeUnsafe("loop-user"),
-            role: "user",
-            text: "fix tests",
-            turnId: TurnId.makeUnsafe("t-loop"),
-            purpose: {
-              kind: "loop-iteration",
-              activationId: "activation-1",
-              iteration: 3,
-            },
-            createdAt: "2026-01-01T00:00:00Z",
-            streaming: false,
-          },
-        },
-        {
-          id: "entry-loop-assistant",
-          kind: "message",
-          createdAt: "2026-01-01T00:00:05Z",
-          message: {
-            id: MessageId.makeUnsafe("loop-assistant"),
-            role: "assistant",
-            text: "Done",
-            turnId: TurnId.makeUnsafe("t-loop"),
-            createdAt: "2026-01-01T00:00:05Z",
-            completedAt: "2026-01-01T00:00:05Z",
-            streaming: false,
-          },
-        },
-      ],
-    });
-
-    expect(messageRow(rows, "loop-user")?.loopIteration).toBe(3);
-    expect(messageRow(rows, "loop-assistant")?.loopIteration).toBe(3);
-  });
-
-  it("labels loop-owned assistant messages positionally before the turn ID is bound", () => {
-    const rows = deriveMessagesTimelineRows({
-      ...baseInput,
-      timelineEntries: [
-        {
-          id: "entry-loop-user",
-          kind: "message",
-          createdAt: "2026-01-01T00:00:00Z",
-          message: {
-            id: MessageId.makeUnsafe("loop-user"),
-            role: "user",
-            text: "fix tests",
-            turnId: null,
-            purpose: {
-              kind: "loop-iteration",
-              activationId: "activation-1",
-              iteration: 2,
-            },
-            createdAt: "2026-01-01T00:00:00Z",
-            streaming: false,
-          },
-        },
-        {
-          id: "entry-loop-assistant",
-          kind: "message",
-          createdAt: "2026-01-01T00:00:05Z",
-          message: {
-            id: MessageId.makeUnsafe("loop-assistant"),
-            role: "assistant",
-            text: "Done",
-            turnId: TurnId.makeUnsafe("t-loop"),
-            createdAt: "2026-01-01T00:00:05Z",
-            completedAt: "2026-01-01T00:00:05Z",
-            streaming: false,
-          },
-        },
-        {
-          id: "entry-manual-user",
-          kind: "message",
-          createdAt: "2026-01-01T00:00:10Z",
-          message: {
-            id: MessageId.makeUnsafe("manual-user"),
-            role: "user",
-            text: "one-off question",
-            turnId: null,
-            createdAt: "2026-01-01T00:00:10Z",
-            streaming: false,
-          },
-        },
-        {
-          id: "entry-manual-assistant",
-          kind: "message",
-          createdAt: "2026-01-01T00:00:15Z",
-          message: {
-            id: MessageId.makeUnsafe("manual-assistant"),
-            role: "assistant",
-            text: "Answer",
-            turnId: TurnId.makeUnsafe("t-manual"),
-            createdAt: "2026-01-01T00:00:15Z",
-            completedAt: "2026-01-01T00:00:15Z",
-            streaming: false,
-          },
-        },
-      ],
-    });
-
-    expect(messageRow(rows, "loop-user")?.loopIteration).toBe(2);
-    expect(messageRow(rows, "loop-assistant")?.loopIteration).toBe(2);
-    expect(messageRow(rows, "manual-user")?.loopIteration).toBeUndefined();
-    expect(messageRow(rows, "manual-assistant")?.loopIteration).toBeUndefined();
-  });
-
   const makeLoop = (overrides: Partial<ThreadLoop> = {}): ThreadLoop => ({
     active: false,
     prompt: "keep going",
@@ -1387,6 +1272,139 @@ describe("deriveMessagesTimelineRows", () => {
     ...overrides,
   });
 
+  const loopUserEntry = (
+    id: string,
+    createdAt: string,
+    opts: { turnId?: string | null; activationId?: string; iteration?: number } = {},
+  ): TimelineEntry => ({
+    id: `entry-${id}`,
+    kind: "message",
+    createdAt,
+    message: {
+      id: MessageId.makeUnsafe(id),
+      role: "user",
+      text: "fix tests",
+      turnId: opts.turnId != null ? TurnId.makeUnsafe(opts.turnId) : null,
+      purpose: {
+        kind: "loop-iteration",
+        activationId: opts.activationId ?? "activation-1",
+        iteration: opts.iteration ?? 3,
+      },
+      createdAt,
+      streaming: false,
+    },
+  });
+
+  it("labels loop-owned rows by correlated turn ID with the loop's count budget", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      loop: makeLoop({ active: true, lastStopReason: null, maxIterations: 5 }),
+      timelineEntries: [
+        loopUserEntry("loop-user", "2026-01-01T00:00:00Z", { turnId: "t-loop" }),
+        assistantEntry("loop-assistant", "2026-01-01T00:00:05Z", {
+          turnId: "t-loop",
+          text: "Done",
+          completedAt: "2026-01-01T00:00:05Z",
+        }),
+      ],
+    });
+
+    expect(messageRow(rows, "loop-user")?.loopIteration).toBe(3);
+    expect(messageRow(rows, "loop-user")?.loopMaxIterations).toBe(5);
+    expect(messageRow(rows, "loop-assistant")?.loopIteration).toBe(3);
+    expect(messageRow(rows, "loop-assistant")?.loopMaxIterations).toBe(5);
+  });
+
+  it("does not label assistant rows positionally before the turn ID is bound", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      loop: makeLoop({ active: true, lastStopReason: null }),
+      timelineEntries: [
+        loopUserEntry("loop-user", "2026-01-01T00:00:00Z", { turnId: null, iteration: 2 }),
+        assistantEntry("loop-assistant", "2026-01-01T00:00:05Z", {
+          turnId: "t-loop",
+          text: "Done",
+          completedAt: "2026-01-01T00:00:05Z",
+        }),
+        userEntry("manual-user", "2026-01-01T00:00:10Z"),
+        assistantEntry("manual-assistant", "2026-01-01T00:00:15Z", {
+          turnId: "t-manual",
+          text: "Answer",
+          completedAt: "2026-01-01T00:00:15Z",
+        }),
+      ],
+    });
+
+    expect(messageRow(rows, "loop-user")?.loopIteration).toBe(2);
+    expect(messageRow(rows, "loop-assistant")?.loopIteration).toBeUndefined();
+    expect(messageRow(rows, "manual-user")?.loopIteration).toBeUndefined();
+    expect(messageRow(rows, "manual-assistant")?.loopIteration).toBeUndefined();
+  });
+
+  it("does not label assistant rows from a stale activation", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      loop: makeLoop({ active: true, lastStopReason: null, activationId: "activation-2" }),
+      timelineEntries: [
+        loopUserEntry("loop-user", "2026-01-01T00:00:00Z", {
+          turnId: "t-loop",
+          activationId: "activation-1",
+        }),
+        assistantEntry("loop-assistant", "2026-01-01T00:00:05Z", {
+          turnId: "t-loop",
+          text: "Done",
+          completedAt: "2026-01-01T00:00:05Z",
+        }),
+      ],
+    });
+
+    expect(messageRow(rows, "loop-assistant")?.loopIteration).toBeUndefined();
+  });
+
+  it("inserts a loop-start row before the first loop-owned message of each activation", () => {
+    const rows = deriveMessagesTimelineRows({
+      ...baseInput,
+      loop: makeLoop({
+        active: true,
+        lastStopReason: null,
+        maxIterations: 5,
+        prompt: "fix the tests",
+      }),
+      timelineEntries: [
+        userEntry("u1", "2026-01-01T00:00:00Z"),
+        loopUserEntry("loop-user-1", "2026-01-01T00:01:00Z", {
+          turnId: "t1",
+          activationId: "activation-0",
+          iteration: 1,
+        }),
+        loopUserEntry("loop-user-2", "2026-01-01T00:02:00Z", {
+          turnId: "t2",
+          activationId: "activation-0",
+          iteration: 2,
+        }),
+        loopUserEntry("loop-user-3", "2026-01-01T00:03:00Z", {
+          turnId: "t3",
+          activationId: "activation-1",
+          iteration: 1,
+        }),
+      ],
+    });
+
+    const startRows = rows.filter((row) => row.kind === "loop-start");
+    expect(startRows).toHaveLength(2);
+    expect(startRows[0]).toMatchObject({
+      id: "loop-start:activation-0",
+      label: "Loop started",
+    });
+    expect(startRows[1]).toMatchObject({
+      id: "loop-start:activation-1",
+      label: "Loop started \u00b7 /loop 5 fix the tests",
+    });
+    const rowIds = rows.map((row) => row.id);
+    expect(rowIds.indexOf("loop-start:activation-0")).toBe(rowIds.indexOf("entry-loop-user-1") - 1);
+    expect(rowIds.indexOf("loop-start:activation-1")).toBe(rowIds.indexOf("entry-loop-user-3") - 1);
+  });
+
   it("appends a loop-end row when the loop is off with a stop reason", () => {
     const loop = makeLoop();
     const rows = deriveMessagesTimelineRows({
@@ -1396,7 +1414,54 @@ describe("deriveMessagesTimelineRows", () => {
     });
 
     const tail = rows.at(-1);
-    expect(tail).toEqual({ kind: "loop-end", id: "loop-end", loop });
+    expect(tail).toEqual({
+      kind: "loop-end",
+      id: "loop-end:activation-1:2026-01-01T00:10:00Z",
+      loop,
+    });
+  });
+
+  it("holds back the loop-end row while a matching loop-owned turn is still running", () => {
+    const loop = makeLoop({ lastStopReason: "user_stop" });
+    const timelineEntries = [
+      loopUserEntry("loop-user", "2026-01-01T00:00:00Z", { turnId: "t-loop" }),
+    ];
+
+    const whileRunning = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries,
+      loop,
+      activeTurnInProgress: true,
+      activeTurnId: TurnId.makeUnsafe("t-loop"),
+    });
+    expect(whileRunning.some((row) => row.kind === "loop-end")).toBe(false);
+
+    const afterSettlement = deriveMessagesTimelineRows({
+      ...baseInput,
+      timelineEntries,
+      loop,
+      activeTurnInProgress: false,
+      activeTurnId: null,
+    });
+    expect(afterSettlement.at(-1)).toMatchObject({
+      kind: "loop-end",
+      id: "loop-end:activation-1:2026-01-01T00:10:00Z",
+    });
+  });
+
+  it("keys the loop-end row by activation and stop time", () => {
+    const rowsFor = (loop: ThreadLoop) =>
+      deriveMessagesTimelineRows({
+        ...baseInput,
+        timelineEntries: [userEntry("u1", "2026-01-01T00:00:00Z")],
+        loop,
+      });
+
+    expect(rowsFor(makeLoop()).at(-1)?.id).toBe("loop-end:activation-1:2026-01-01T00:10:00Z");
+    expect(
+      rowsFor(makeLoop({ activationId: "activation-2", updatedAt: "2026-01-01T00:20:00Z" })).at(-1)
+        ?.id,
+    ).toBe("loop-end:activation-2:2026-01-01T00:20:00Z");
   });
 
   it("does not append a loop-end row while the loop is active", () => {

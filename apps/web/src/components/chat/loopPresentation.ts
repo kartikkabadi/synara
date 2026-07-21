@@ -180,6 +180,32 @@ export function deriveLoopProgress(loop: ThreadLoop, now: number): LoopProgress 
   };
 }
 
+const LOOP_START_LABEL_MAX_PROMPT_CHARS = 60;
+
+// Reconstructs the `/loop` invocation for the transcript start divider,
+// e.g. "Loop started · /loop 5 fix the tests". Long prompts are truncated.
+export function formatLoopStartLabel(loop: {
+  readonly prompt: string;
+  readonly maxIterations: number | null;
+  readonly endsAt: string | null;
+  readonly createdAt: string;
+}): string {
+  let budgetToken = "";
+  if (loop.maxIterations !== null) {
+    budgetToken = `${loop.maxIterations} `;
+  } else if (loop.endsAt !== null) {
+    const totalMs = new Date(loop.endsAt).getTime() - new Date(loop.createdAt).getTime();
+    budgetToken = `${Math.max(1, Math.round(totalMs / 60_000))}m `;
+  }
+  const prompt = loop.prompt.trim();
+  const truncatedPrompt =
+    prompt.length > LOOP_START_LABEL_MAX_PROMPT_CHARS
+      ? `${prompt.slice(0, LOOP_START_LABEL_MAX_PROMPT_CHARS).trimEnd()}…`
+      : prompt;
+  const invocation = `/loop ${budgetToken}${truncatedPrompt}`.trimEnd();
+  return `Loop started · ${invocation}`;
+}
+
 export interface LoopStopReasonCopy {
   // "Loop completed" for budget outcomes, "Loop stopped" otherwise.
   title: string;
