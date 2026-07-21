@@ -646,32 +646,59 @@ const make = Effect.gen(function* () {
 
   // Minimal dispatch gate for loop-owned turns: the authoritative ThreadLoop
   // must still be active on the same activation, and the turn must carry the
-  // activation's current dispatched iteration count. A stale loop turn is
-  // dropped and its queued promotion rows for that activation are retired.
-  const verifyLoopTurnAuthority = Effect.fnUntraced(function* (input: {
+  // activation's current dispatched iteration count. Pure check only — no side
+  // effects — so callers decide whether to retire promotions or retry.
+  const checkLoopTurnAuthority = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
     readonly purpose: ThreadTurnPurpose;
-    readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
     const loop = thread?.loop ?? null;
-    const authorized =
-      thread !== undefined &&
-      thread.deletedAt === null &&
-      thread.archivedAt === null &&
-      loop?.active === true &&
-      input.purpose.activationId === loop.activationId &&
-      input.purpose.iteration === loop.iteration;
-    if (authorized) {
-      return true;
+    if (
+      thread === undefined ||
+      thread.deletedAt !== null ||
+      thread.archivedAt !== null ||
+      loop?.active !== true ||
+      input.purpose.activationId !== loop.activationId
+    ) {
+      return "stale_activation" as const;
     }
-    yield* queuedTurnPromotions
+    if (input.purpose.iteration !== loop.iteration) {
+      // Same live activation but a different iteration count: the loop
+      // projection likely lags the event that dispatched this turn. This is
+      // transient, not a stale turn.
+      return "iteration_mismatch" as const;
+    }
+    return "authorized" as const;
+  });
+
+  // Side effect for a genuinely stale loop turn: retire the activation's
+  // queued promotion rows so they are not resurrected later.
+  const retireLoopActivationPromotions = (input: {
+    readonly threadId: ThreadId;
+    readonly purpose: ThreadTurnPurpose;
+    readonly createdAt: string;
+  }) =>
+    queuedTurnPromotions
       .cancelByActivation({
         threadId: input.threadId,
         activationId: input.purpose.activationId,
         updatedAt: input.createdAt,
       })
       .pipe(Effect.ignore);
+
+  const verifyLoopTurnAuthority = Effect.fnUntraced(function* (input: {
+    readonly threadId: ThreadId;
+    readonly purpose: ThreadTurnPurpose;
+    readonly createdAt: string;
+  }) {
+    const authority = yield* checkLoopTurnAuthority(input);
+    if (authority === "authorized") {
+      return true;
+    }
+    if (authority === "stale_activation") {
+      yield* retireLoopActivationPromotions(input);
+    }
     return false;
   });
 
@@ -2163,14 +2190,30 @@ const make = Effect.gen(function* () {
         }
         const nextQueuedTurn = sourceEvent.payload;
         if (nextQueuedTurn.purpose?.kind === "loop-iteration") {
-          const authorized = yield* verifyLoopTurnAuthority({
+          const authority = yield* checkLoopTurnAuthority({
             threadId,
             purpose: nextQueuedTurn.purpose,
-            createdAt: new Date().toISOString(),
           });
-          if (!authorized) {
+          if (authority === "stale_activation") {
+            yield* retireLoopActivationPromotions({
+              threadId,
+              purpose: nextQueuedTurn.purpose,
+              createdAt: new Date().toISOString(),
+            });
             // The cancellation retired the promotion row; the claim must not
             // be released back into the queue.
+            return;
+          }
+          if (authority === "iteration_mismatch") {
+            // Likely projection lag on a live activation: release the claim so
+            // a later drain retries once the loop projection catches up.
+            yield* queuedTurnPromotions
+              .releaseClaim({
+                queuedEventSequence: promotion.queuedEventSequence,
+                claimOwner: queuedTurnPromotionOwner,
+                updatedAt: new Date().toISOString(),
+              })
+              .pipe(Effect.ignore);
             return;
           }
         }
