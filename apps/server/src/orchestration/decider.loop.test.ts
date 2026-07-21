@@ -5,6 +5,7 @@
 import {
   CommandId,
   EventId,
+  LoopActivationId,
   MessageId,
   ProjectId,
   ThreadId,
@@ -120,7 +121,7 @@ function makeLoop(
     maxIterations?: number | null;
     consecutiveErrors?: number;
     lastStopReason?: ThreadLoop["lastStopReason"];
-    activationId?: string;
+    activationId?: LoopActivationId;
     createdAt?: string;
     updatedAt?: string;
   } = {},
@@ -134,7 +135,7 @@ function makeLoop(
     hardCap: 100,
     consecutiveErrors: payload.consecutiveErrors ?? 0,
     lastStopReason: payload.lastStopReason ?? null,
-    activationId: payload.activationId ?? "test-activation",
+    activationId: payload.activationId ?? LoopActivationId.makeUnsafe("test-activation"),
     createdAt: payload.createdAt ?? NOW,
     updatedAt: payload.updatedAt ?? NOW,
   };
@@ -385,6 +386,95 @@ describe("decider loop commands", () => {
     });
   });
 
+  it("defaults budget-less thread.loop.set to the 5-turn safe default", async () => {
+    const readModel = await makeReadModelWithThread();
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.loop.set",
+          commandId: asCommandId("cmd-loop-set-budgetless"),
+          threadId: asThreadId("thread-loop"),
+          prompt: "fix tests",
+          maxIterations: null,
+          durationSeconds: null,
+          createdAt: NOW,
+        },
+        readModel,
+      }),
+    );
+    const event = Array.isArray(result) ? result[0] : result;
+    expect(event.type).toBe("thread.loop-set");
+    expect(event.payload).toMatchObject({
+      loop: { maxIterations: 5, endsAt: null },
+    });
+  });
+
+  it("preserves the active prompt on thread.loop.set with a null prompt", async () => {
+    const readModel = await projectLoopSet(
+      await makeReadModelWithThread(),
+      makeLoop({ active: true, prompt: "keep me" }),
+    );
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.loop.set",
+          commandId: asCommandId("cmd-loop-set-null-prompt"),
+          threadId: asThreadId("thread-loop"),
+          prompt: null,
+          maxIterations: 3,
+          durationSeconds: null,
+          createdAt: NOW,
+        },
+        readModel,
+      }),
+    );
+    const event = Array.isArray(result) ? result[0] : result;
+    expect(event.type).toBe("thread.loop-set");
+    expect(event.payload).toMatchObject({ loop: { prompt: "keep me" } });
+  });
+
+  it("rejects thread.loop.set clearing an active prompt with an empty string", async () => {
+    const readModel = await projectLoopSet(
+      await makeReadModelWithThread(),
+      makeLoop({ active: true, prompt: "keep me" }),
+    );
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.loop.set",
+            commandId: asCommandId("cmd-loop-set-empty-prompt"),
+            threadId: asThreadId("thread-loop"),
+            prompt: "",
+            maxIterations: 3,
+            durationSeconds: null,
+            createdAt: NOW,
+          },
+          readModel,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      commandType: "thread.loop.set",
+    });
+  });
+
+  it("returns no events for thread.loop.off on a thread without a loop", async () => {
+    const readModel = await makeReadModelWithThread();
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.loop.off",
+          commandId: asCommandId("cmd-loop-off-no-loop"),
+          threadId: asThreadId("thread-loop"),
+          reason: "user_stop",
+          createdAt: NOW,
+        },
+        readModel,
+      }),
+    );
+    expect(result).toEqual([]);
+  });
+
   it("resets iteration and consecutiveErrors on thread.loop.set reconfigure", async () => {
     const readModel = await projectLoopSet(
       await makeReadModelWithThread(),
@@ -435,7 +525,7 @@ describe("decider loop commands", () => {
   it("accepts thread.loop.set when expectedActivationId matches the active loop", async () => {
     const readModel = await projectLoopSet(
       await makeReadModelWithThread(),
-      makeLoop({ active: true, activationId: "activation-1" }),
+      makeLoop({ active: true, activationId: LoopActivationId.makeUnsafe("activation-1") }),
     );
     const result = await Effect.runPromise(
       decideOrchestrationCommand({
@@ -446,7 +536,7 @@ describe("decider loop commands", () => {
           prompt: "new prompt",
           maxIterations: 3,
           durationSeconds: null,
-          expectedActivationId: "activation-1",
+          expectedActivationId: LoopActivationId.makeUnsafe("activation-1"),
           createdAt: NOW,
         },
         readModel,
@@ -459,7 +549,7 @@ describe("decider loop commands", () => {
   it("rejects thread.loop.set when expectedActivationId no longer matches", async () => {
     const readModel = await projectLoopSet(
       await makeReadModelWithThread(),
-      makeLoop({ active: true, activationId: "activation-2" }),
+      makeLoop({ active: true, activationId: LoopActivationId.makeUnsafe("activation-2") }),
     );
     await expect(
       Effect.runPromise(
@@ -471,7 +561,7 @@ describe("decider loop commands", () => {
             prompt: "new prompt",
             maxIterations: 3,
             durationSeconds: null,
-            expectedActivationId: "activation-1",
+            expectedActivationId: LoopActivationId.makeUnsafe("activation-1"),
             createdAt: NOW,
           },
           readModel,
@@ -485,7 +575,7 @@ describe("decider loop commands", () => {
   it("rejects thread.loop.set with expectedActivationId when no loop is active", async () => {
     const readModel = await projectLoopSet(
       await makeReadModelWithThread(),
-      makeLoop({ active: false, activationId: "activation-1" }),
+      makeLoop({ active: false, activationId: LoopActivationId.makeUnsafe("activation-1") }),
     );
     await expect(
       Effect.runPromise(
@@ -497,7 +587,7 @@ describe("decider loop commands", () => {
             prompt: "new prompt",
             maxIterations: 3,
             durationSeconds: null,
-            expectedActivationId: "activation-1",
+            expectedActivationId: LoopActivationId.makeUnsafe("activation-1"),
             createdAt: NOW,
           },
           readModel,
@@ -702,7 +792,7 @@ describe("decider loop commands", () => {
       messageId: "msg-loop-user",
       purpose: {
         kind: "loop-iteration",
-        activationId: "test-activation",
+        activationId: LoopActivationId.makeUnsafe("test-activation"),
         iteration: 1,
       } as ThreadTurnPurpose,
     });
@@ -750,7 +840,7 @@ describe("decider loop commands", () => {
     );
     const events = Array.isArray(result) ? result : [result];
     expect(events).toHaveLength(1);
-    expect(events[0]?.type).toBe("thread.loop-set");
+    expect(events[0]?.type).toBe("thread.loop-wait-noted");
     expect(events[0]?.payload).toMatchObject({
       threadId: asThreadId("thread-loop"),
       loop: { active: true, iteration: 0, updatedAt: later },
@@ -870,7 +960,7 @@ describe("decider loop commands", () => {
       messageId: "msg-loop-user-1",
       purpose: {
         kind: "loop-iteration",
-        activationId: "test-activation",
+        activationId: LoopActivationId.makeUnsafe("test-activation"),
         iteration: 1,
       } as ThreadTurnPurpose,
     });
@@ -927,7 +1017,7 @@ describe("decider loop commands", () => {
           messageId: "msg-queued-1",
           purpose: {
             kind: "loop-iteration",
-            activationId: "test-activation",
+            activationId: LoopActivationId.makeUnsafe("test-activation"),
             iteration: 1,
           } as ThreadTurnPurpose,
         }),
@@ -979,7 +1069,7 @@ describe("decider loop commands", () => {
       messageId: "msg-loop-user-1",
       purpose: {
         kind: "loop-iteration",
-        activationId: "test-activation",
+        activationId: LoopActivationId.makeUnsafe("test-activation"),
         iteration: 1,
       } as ThreadTurnPurpose,
     });
@@ -1044,8 +1134,10 @@ describe("decider loop commands", () => {
     expect(events[1]?.type).toBe("thread.turn-start-requested");
     expect(events[2]?.type).toBe("thread.loop-continued");
 
-    const messagePayload = events[0]?.payload as { purpose?: unknown };
+    const messagePayload = events[0]?.payload as { purpose?: unknown; messageId?: unknown };
     expect(messagePayload.purpose).toMatchObject({ kind: "loop-iteration", iteration: 1 });
+    // Deterministic: at-least-once command execution must mint the same id.
+    expect(messagePayload.messageId).toBe("loop-msg:cmd-loop-continue");
 
     const turnPayload = events[1]?.payload as { purpose?: unknown };
     expect(turnPayload.purpose).toMatchObject({ kind: "loop-iteration", iteration: 1 });
