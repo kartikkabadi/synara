@@ -39,32 +39,25 @@ export const LOOP_COUNT_PRESETS = [5, 10, 25, 50] as const;
 export const LOOP_DURATION_PRESETS_SECONDS = [30 * 60, 60 * 60] as const;
 
 export const LOOP_BUDGET_COUNT_ERROR = "Choose between 1 and 100 turns.";
-export const LOOP_BUDGET_DURATION_MIN_ERROR =
-  "Choose a duration of at least 1 minute.";
-export const LOOP_BUDGET_DURATION_MAX_ERROR =
-  "Choose a duration of 24 hours or less.";
-export const LOOP_BUDGET_INVALID_ERROR =
-  "That budget isn't valid. Choose a budget below.";
+export const LOOP_BUDGET_DURATION_MIN_ERROR = "Choose a duration of at least 1 minute.";
+export const LOOP_BUDGET_DURATION_MAX_ERROR = "Choose a duration of 24 hours or less.";
+export const LOOP_BUDGET_INVALID_ERROR = "That budget isn't valid. Choose a budget below.";
 export const LOOP_CHOOSE_BUDGET_NOTE = "Choose how long the loop should run.";
 export const LOOP_UNSUPPORTED_CONTEXT_MESSAGE =
   "Loop prompts are text-only. Remove attachments and selected tools to continue.";
 export const LOOP_EDIT_STALE_ERROR =
   "This loop ended while you were editing. Start a new loop to continue.";
 
-export function loopBudgetChoiceFromParsed(
-  budget: LoopBudget | null,
-): LoopBudgetChoice {
+export function loopBudgetChoiceFromParsed(budget: LoopBudget | null): LoopBudgetChoice {
   if (budget === null) return LOOP_DEFAULT_BUDGET_CHOICE;
   if (budget.kind === "count") return { kind: "count", turns: budget.value };
   return { kind: "duration", seconds: budget.seconds };
 }
 
 export function loopBudgetChoiceFromLoop(loop: ThreadLoop): LoopBudgetChoice {
-  if (loop.maxIterations !== null)
-    return { kind: "count", turns: loop.maxIterations };
+  if (loop.maxIterations !== null) return { kind: "count", turns: loop.maxIterations };
   if (loop.endsAt !== null) {
-    const totalMs =
-      new Date(loop.endsAt).getTime() - new Date(loop.createdAt).getTime();
+    const totalMs = new Date(loop.endsAt).getTime() - new Date(loop.createdAt).getTime();
     return {
       kind: "duration",
       seconds: Math.max(60, Math.round(totalMs / 1000)),
@@ -73,9 +66,7 @@ export function loopBudgetChoiceFromLoop(loop: ThreadLoop): LoopBudgetChoice {
   return { kind: "until-stopped" };
 }
 
-export function validateLoopBudgetChoice(
-  choice: LoopBudgetChoice,
-): string | null {
+export function validateLoopBudgetChoice(choice: LoopBudgetChoice): string | null {
   if (choice.kind === "count") {
     if (
       !Number.isInteger(choice.turns) ||
@@ -104,8 +95,7 @@ export function formatLoopBudgetChoiceLabel(choice: LoopBudgetChoice): string {
   }
   if (choice.kind === "duration") {
     const minutes = Math.round(choice.seconds / 60);
-    if (minutes < 60)
-      return `Stop after ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+    if (minutes < 60) return `Stop after ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
     const hours = Math.floor(minutes / 60);
     const rest = minutes % 60;
     return rest === 0
@@ -119,10 +109,8 @@ export function loopBudgetChoiceToDispatchFields(choice: LoopBudgetChoice): {
   maxIterations: number | null;
   durationSeconds: number | null;
 } {
-  if (choice.kind === "count")
-    return { maxIterations: choice.turns, durationSeconds: null };
-  if (choice.kind === "duration")
-    return { maxIterations: null, durationSeconds: choice.seconds };
+  if (choice.kind === "count") return { maxIterations: choice.turns, durationSeconds: null };
+  if (choice.kind === "duration") return { maxIterations: null, durationSeconds: choice.seconds };
   // Until-stopped relies on the server-side hard cap of LOOP_DEFAULT_HARD_CAP turns.
   return { maxIterations: null, durationSeconds: null };
 }
@@ -136,9 +124,7 @@ export interface LoopUnsupportedContextInput {
   assistantSelectionCount: number;
 }
 
-export function isUnsupportedLoopContext(
-  input: LoopUnsupportedContextInput,
-): boolean {
+export function isUnsupportedLoopContext(input: LoopUnsupportedContextInput): boolean {
   return (
     input.imageCount > 0 ||
     input.fileCount > 0 ||
@@ -150,7 +136,10 @@ export function isUnsupportedLoopContext(
 }
 
 export type LoopObjectiveInvalidReason =
-  "empty" | "starts-with-slash" | "too-long" | "unsupported-context";
+  | "empty"
+  | "starts-with-slash"
+  | "too-long"
+  | "unsupported-context";
 
 export function validateLoopObjective(
   objective: string,
@@ -164,8 +153,7 @@ export function validateLoopObjective(
   return null;
 }
 
-export type LoopSetupNote =
-  "choose-budget" | "invalid-budget" | "unsupported-context";
+export type LoopSetupNote = "choose-budget" | "invalid-budget" | "unsupported-context";
 
 // Maps an open-setup note to the initial hint/error pair shown in the header.
 export function loopSetupNoticeFor(note: LoopSetupNote | null | undefined): {
@@ -195,10 +183,7 @@ export type LoopInvocationInterpretation =
   | { kind: "toggle-off" }
   | {
       kind: "reject";
-      reason:
-        | "ambiguous_second_budget"
-        | "prompt_starts_with_slash"
-        | "prompt_too_long";
+      reason: "ambiguous_second_budget" | "prompt_starts_with_slash" | "prompt_too_long";
     }
   | { kind: "not-loop" };
 
@@ -266,10 +251,7 @@ export function interpretLoopInvocation(
   };
 }
 
-type LoopSetCommand = Extract<
-  ClientOrchestrationCommand,
-  { type: "thread.loop.set" }
->;
+type LoopSetCommand = Extract<ClientOrchestrationCommand, { type: "thread.loop.set" }>;
 
 export interface LoopSetupDispatchDeps {
   dispatchCommand: (command: LoopSetCommand) => Promise<unknown>;
@@ -277,8 +259,7 @@ export interface LoopSetupDispatchDeps {
   now: () => string;
 }
 
-export type LoopSetupSubmitResult =
-  { ok: true } | { ok: false; message: string };
+export type LoopSetupSubmitResult = { ok: true } | { ok: false; message: string };
 
 export async function performLoopSetupSubmit(
   deps: LoopSetupDispatchDeps,
@@ -308,9 +289,7 @@ export async function performLoopSetupSubmit(
     return {
       ok: false,
       message:
-        error instanceof Error
-          ? error.message
-          : "An error occurred while starting the loop.",
+        error instanceof Error ? error.message : "An error occurred while starting the loop.",
     };
   }
 }
@@ -370,16 +349,13 @@ const CLOSED_STATE: LoopComposerModeHookState = {
   isDispatching: false,
 };
 
-export function useLoopComposerMode(
-  input: UseLoopComposerModeInput,
-): LoopComposerController {
+export function useLoopComposerMode(input: UseLoopComposerModeInput): LoopComposerController {
   const inputRef = useRef(input);
   useEffect(() => {
     inputRef.current = input;
   }, [input]);
 
-  const [state, setStateRaw] =
-    useState<LoopComposerModeHookState>(CLOSED_STATE);
+  const [state, setStateRaw] = useState<LoopComposerModeHookState>(CLOSED_STATE);
   // Actions read/patch through a ref so async flows (submit) always see the
   // latest state without re-creating callbacks every render.
   const stateRef = useRef(state);
@@ -455,10 +431,7 @@ export function useLoopComposerMode(
     const mode = stateRef.current.mode;
     if (mode.kind === "closed" || stateRef.current.isDispatching) return;
     const objective = env.objective;
-    const objectiveError = validateLoopObjective(
-      objective,
-      env.hasUnsupportedContext,
-    );
+    const objectiveError = validateLoopObjective(objective, env.hasUnsupportedContext);
     const nextBudgetError = validateLoopBudgetChoice(mode.budget);
     if (objectiveError !== null || nextBudgetError !== null) {
       patch({
@@ -480,10 +453,7 @@ export function useLoopComposerMode(
     // Edit saves must target the activation the user opened; if the loop
     // ended or was replaced meanwhile, surface it instead of silently
     // starting a brand-new loop.
-    if (
-      mode.kind === "edit" &&
-      env.activeLoop?.activationId !== mode.activationId
-    ) {
+    if (mode.kind === "edit" && env.activeLoop?.activationId !== mode.activationId) {
       patch({ note: null, error: LOOP_EDIT_STALE_ERROR });
       env.focusEditor();
       return;
@@ -506,8 +476,7 @@ export function useLoopComposerMode(
       }
       const result = await performLoopSetupSubmit(
         {
-          dispatchCommand: (command) =>
-            api.orchestration.dispatchCommand(command),
+          dispatchCommand: (command) => api.orchestration.dispatchCommand(command),
           newCommandId,
           now: () => new Date().toISOString(),
         },
@@ -515,9 +484,7 @@ export function useLoopComposerMode(
           threadId: env.threadId,
           objective,
           budget: mode.budget,
-          ...(mode.kind === "edit"
-            ? { expectedActivationId: mode.activationId }
-            : {}),
+          ...(mode.kind === "edit" ? { expectedActivationId: mode.activationId } : {}),
         },
       );
       if (!result.ok) {
@@ -537,8 +504,7 @@ export function useLoopComposerMode(
   }, [patch]);
 
   const { mode, note, error, isDispatching } = state;
-  const budgetError =
-    mode.kind === "closed" ? null : validateLoopBudgetChoice(mode.budget);
+  const budgetError = mode.kind === "closed" ? null : validateLoopBudgetChoice(mode.budget);
   const objectiveInvalidReason =
     mode.kind === "closed"
       ? null
