@@ -53,30 +53,36 @@ describe("detectNotch", () => {
 
 describe("island sizes", () => {
   it("extends the notch housing when collapsed in notch mode", () => {
-    expect(islandCollapsedSize({ width: 180, height: 38 })).toEqual({ width: 240, height: 38 });
+    expect(islandCollapsedSize("notch", { width: 180, height: 38 })).toEqual({
+      width: 240,
+      height: 38,
+    });
   });
 
   it("uses the floating pill size without a notch", () => {
-    expect(islandCollapsedSize(null)).toEqual({ width: 76, height: 32 });
-    expect(islandCollapsedSize(null, 2)).toEqual({ width: 76, height: 32 });
+    expect(islandCollapsedSize("floating", null)).toEqual({ width: 120, height: 32 });
+    expect(islandCollapsedSize("floating", null, 2)).toEqual({ width: 120, height: 32 });
   });
 
   it("shrinks to the idle mini pill with zero sessions, except in notch mode", () => {
-    expect(islandCollapsedSize(null, 0)).toEqual({ width: 64, height: 30 });
-    expect(islandCollapsedSize({ width: 180, height: 38 }, 0)).toEqual({ width: 240, height: 38 });
+    expect(islandCollapsedSize("floating", null, 0)).toEqual({ width: 64, height: 30 });
+    expect(islandCollapsedSize("notch", { width: 180, height: 38 }, 0)).toEqual({
+      width: 240,
+      height: 38,
+    });
   });
 
   it("derives the expanded height from the row count", () => {
-    expect(islandExpandedSize()).toEqual({ width: 560, height: 320 });
-    expect(islandExpandedSize(0)).toEqual({ width: 560, height: 180 });
-    expect(islandExpandedSize(1)).toEqual({ width: 560, height: 140 });
-    expect(islandExpandedSize(3)).toEqual({ width: 560, height: 208 });
-    expect(islandExpandedSize(10)).toEqual({ width: 560, height: 320 });
+    expect(islandExpandedSize()).toEqual({ width: 432, height: 288 });
+    expect(islandExpandedSize(0)).toEqual({ width: 432, height: 140 });
+    expect(islandExpandedSize(1)).toEqual({ width: 432, height: 140 });
+    expect(islandExpandedSize(3)).toEqual({ width: 432, height: 196 });
+    expect(islandExpandedSize(10)).toEqual({ width: 432, height: 288 });
   });
 
-  it("keeps the hover width at least 420", () => {
-    expect(islandHoverSize(null).width).toBe(420);
-    expect(islandHoverSize({ width: 300, height: 38 }).width).toBe(500);
+  it("uses the floating hover size, widening for a wide notch housing", () => {
+    expect(islandHoverSize("floating", null)).toEqual({ width: 372, height: 80 });
+    expect(islandHoverSize("notch", { width: 300, height: 38 }).width).toBe(500);
   });
 });
 
@@ -84,10 +90,10 @@ describe("island anchoring", () => {
   it("pre-sizes the window past the max surface, flush with the screen top in notch mode", () => {
     const notch = detectNotch("darwin", notchedDisplay);
     expect(islandWindowBounds(notchedDisplay, notch)).toEqual({
-      x: 428,
+      x: 492,
       y: 0,
-      width: 656,
-      height: 376,
+      width: 528,
+      height: 344,
     });
   });
 
@@ -96,19 +102,19 @@ describe("island anchoring", () => {
     expect(islandWindowBounds(notchedDisplay, wideNotch).width).toBe(620 + 60 + 96);
   });
 
-  it("sits flush with the work area top without a notch", () => {
+  it("sits 9px below the work area top without a notch", () => {
     expect(islandWindowBounds(plainDisplay, null)).toEqual({
-      x: 632,
-      y: 25,
-      width: 656,
-      height: 376,
+      x: 696,
+      y: 34,
+      width: 528,
+      height: 344,
     });
   });
 
   it("anchors to displays with non-zero origins", () => {
     const bounds = islandWindowBounds(secondaryDisplay, null);
-    expect(bounds.x).toBe(1920 + (1920 - 656) / 2);
-    expect(bounds.y).toBe(-175);
+    expect(bounds.x).toBe(1920 + (1920 - 528) / 2);
+    expect(bounds.y).toBe(-175 + 9);
   });
 
   it("pads past a possible notch when the macOS menu bar auto-hides", () => {
@@ -118,27 +124,27 @@ describe("island anchoring", () => {
     };
     expect(detectNotch("darwin", autoHideDisplay)).toBeNull();
     expect(islandWindowBounds(autoHideDisplay, null, "darwin").y).toBe(
-      DARWIN_HIDDEN_MENU_BAR_TOP_INSET,
+      DARWIN_HIDDEN_MENU_BAR_TOP_INSET + 9,
     );
-    // Non-darwin platforms keep the plain work-area anchor.
-    expect(islandWindowBounds(autoHideDisplay, null, "win32").y).toBe(0);
+    // Non-darwin platforms keep the work-area anchor plus the floating margin.
+    expect(islandWindowBounds(autoHideDisplay, null, "win32").y).toBe(9);
   });
 
   it("centers the surface rect at the window top per state", () => {
     expect(islandSurfaceRect("collapsed", windowsDisplay, null)).toEqual({
-      x: (2560 - 76) / 2,
-      y: 0,
-      width: 76,
+      x: (2560 - 120) / 2,
+      y: 9,
+      width: 120,
       height: 32,
     });
     expect(islandSurfaceRect("hover", windowsDisplay, null)).toMatchObject({
-      width: 420,
-      height: 104,
-      y: 0,
+      width: 372,
+      height: 80,
+      y: 9,
     });
     expect(islandSurfaceRect("expanded", windowsDisplay, null)).toMatchObject({
-      width: 560,
-      height: 320,
+      width: 432,
+      height: 288,
     });
   });
 
@@ -148,8 +154,8 @@ describe("island anchoring", () => {
       height: 30,
     });
     expect(islandSurfaceRect("expanded", windowsDisplay, null, "linux", 2)).toMatchObject({
-      width: 560,
-      height: 164,
+      width: 432,
+      height: 152,
     });
   });
 });

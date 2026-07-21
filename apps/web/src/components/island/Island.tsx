@@ -21,7 +21,7 @@ import {
   type OrchestrationThreadShell,
   type ProviderKind,
 } from "@synara/contracts";
-import { islandStateSize } from "@synara/shared/islandGeometry";
+import { islandShellMode, islandStateSize } from "@synara/shared/islandGeometry";
 
 import { ensureNativeApi } from "~/nativeApi";
 import {
@@ -94,7 +94,8 @@ function innerSize(
   context: IslandDisplayContext | null,
   sessionCount: number,
 ) {
-  return islandStateSize(state, context?.notch ?? null, sessionCount);
+  const notch = context?.notch ?? null;
+  return islandStateSize(state, islandShellMode(notch), notch, sessionCount);
 }
 
 // Token-based status text colors so text matches the orb's state hues exactly

@@ -7,6 +7,7 @@ import {
   DEFAULT_NOTCH_WIDTH,
   ISLAND_WINDOW_MARGIN,
   ISLAND_WINDOW_SIZE,
+  islandShellMode,
   islandStateSize,
   type IslandSize,
 } from "@synara/shared/islandGeometry";
@@ -18,12 +19,14 @@ export {
   ISLAND_WINDOW_SIZE,
   ISLAND_EXPANDED_EMPTY_SIZE,
   ISLAND_FLOATING_COLLAPSED_SIZE,
-  ISLAND_HOVER_HEIGHT,
+  ISLAND_HOVER_SIZE,
   ISLAND_IDLE_COLLAPSED_SIZE,
   islandCollapsedSize,
   islandExpandedSize,
   islandHoverSize,
+  islandShellMode,
   islandStateSize,
+  type IslandShellMode,
   type IslandSize,
 } from "@synara/shared/islandGeometry";
 
@@ -43,7 +46,9 @@ export interface IslandDisplayMetrics {
 // versus ~24–25pt without a notch. 30 splits the two populations safely.
 export const NOTCH_TOP_INSET_THRESHOLD = 30;
 
-export const ISLAND_FLOATING_TOP_MARGIN = 0;
+// Floating shell sits just below the work-area top so the rounded surface
+// reads as a detached overlay rather than fusing with the screen edge.
+export const ISLAND_FLOATING_TOP_MARGIN = 9;
 
 // With "Automatically hide and show the menu bar" the work area reaches the
 // screen top, so the notch heuristic is blind. Fall back to the notched
@@ -70,8 +75,8 @@ function islandFloatingTop(metrics: IslandDisplayMetrics, platform?: NodeJS.Plat
 }
 
 // Top-center anchor: flush with the screen top in notch mode (the pill reads
-// as a camera-housing extension), flush with the work-area top elsewhere so
-// the square-top surface fuses with the display edge.
+// as a camera-housing extension); 9px below the work-area top in the floating
+// shell.
 function islandAnchoredBounds(
   size: IslandSize,
   metrics: IslandDisplayMetrics,
@@ -114,7 +119,7 @@ export function islandSurfaceRect(
   sessionCount?: number,
 ): IslandRect {
   const window = islandWindowBounds(metrics, notch, platform);
-  const size = islandStateSize(state, notch, sessionCount);
+  const size = islandStateSize(state, islandShellMode(notch), notch, sessionCount);
   return {
     x: window.x + Math.round((window.width - size.width) / 2),
     y: window.y,

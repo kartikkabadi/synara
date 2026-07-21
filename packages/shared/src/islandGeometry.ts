@@ -9,47 +9,58 @@ export interface IslandSize {
   height: number;
 }
 
+// Shell mode: `floating` (Windows, Linux, non-notched macOS) is the fully
+// implemented shell; `notch` (notched macOS) is a stub that reuses the
+// floating rendering until the camera-housing fusion pass.
+export type IslandShellMode = "floating" | "notch";
+
+export function islandShellMode(notch: IslandNotchInfo | null): IslandShellMode {
+  return notch ? "notch" : "floating";
+}
+
 // Electron cannot measure the physical notch width without native code, so the
 // island uses the common MacBook Pro housing width; side extensions keep the
 // status glyphs clear of the camera housing either way.
 export const DEFAULT_NOTCH_WIDTH = 180;
 
-export const ISLAND_EXPANDED_SIZE: IslandSize = { width: 560, height: 320 };
+export const ISLAND_EXPANDED_SIZE: IslandSize = { width: 432, height: 288 };
 
 // The BrowserWindow is pre-sized to the maximum surface plus room for the
-// ambient shadow + glow so nothing clips at the window edge; the top edge
-// stays flush with the anchor so the surface can fuse with the screen top.
+// ambient shadow so nothing clips at the window edge; the renderer morphs the
+// inner surface within the fixed window.
 export const ISLAND_WINDOW_MARGIN = { x: 48, bottom: 56 } as const;
 export const ISLAND_WINDOW_SIZE: IslandSize = {
   width: ISLAND_EXPANDED_SIZE.width + ISLAND_WINDOW_MARGIN.x * 2,
   height: ISLAND_EXPANDED_SIZE.height + ISLAND_WINDOW_MARGIN.bottom,
 };
-export const ISLAND_EXPANDED_EMPTY_SIZE: IslandSize = { width: 560, height: 180 };
-// Content-fit pill: orb seat + session count with 10/12px padding — no dead
-// space or trailing filler.
-export const ISLAND_FLOATING_COLLAPSED_SIZE: IslandSize = { width: 76, height: 32 };
-// With zero sessions the floating pill shrinks to just the seated orb.
+export const ISLAND_EXPANDED_EMPTY_SIZE: IslandSize = { width: 432, height: 140 };
+// Content-fit pill: status light + session count with breathing room.
+export const ISLAND_FLOATING_COLLAPSED_SIZE: IslandSize = { width: 120, height: 32 };
+// With zero sessions the floating pill shrinks to just the status light.
 export const ISLAND_IDLE_COLLAPSED_SIZE: IslandSize = { width: 64, height: 30 };
-export const ISLAND_HOVER_HEIGHT = 104;
+export const ISLAND_HOVER_SIZE: IslandSize = { width: 372, height: 80 };
 
 const EXPANDED_ROW_HEIGHT = 44;
-const EXPANDED_CHROME_HEIGHT = 64 + 12;
+const EXPANDED_CHROME_HEIGHT = 64;
 
 // sessionCount undefined means "unknown": callers without content knowledge
 // keep the classic sizes.
 export function islandCollapsedSize(
+  shell: IslandShellMode,
   notch: IslandNotchInfo | null,
   sessionCount?: number,
 ): IslandSize {
-  // Notch mode keeps the hardware-anchored housing width in every state.
-  if (notch) return { width: notch.width + 60, height: notch.height };
+  // Notch stub keeps the hardware-anchored housing width in every state.
+  if (shell === "notch" && notch) return { width: notch.width + 60, height: notch.height };
   if (sessionCount === 0) return ISLAND_IDLE_COLLAPSED_SIZE;
   return ISLAND_FLOATING_COLLAPSED_SIZE;
 }
 
-export function islandHoverSize(notch: IslandNotchInfo | null): IslandSize {
-  const width = Math.max((notch?.width ?? DEFAULT_NOTCH_WIDTH) + 200, 420);
-  return { width, height: ISLAND_HOVER_HEIGHT };
+export function islandHoverSize(shell: IslandShellMode, notch: IslandNotchInfo | null): IslandSize {
+  if (shell === "notch" && notch) {
+    return { width: Math.max(notch.width + 200, ISLAND_HOVER_SIZE.width), height: ISLAND_HOVER_SIZE.height };
+  }
+  return ISLAND_HOVER_SIZE;
 }
 
 // Content-driven expanded height: chrome + rows, clamped to sane bounds.
@@ -65,10 +76,11 @@ export function islandExpandedSize(rowCount?: number): IslandSize {
 
 export function islandStateSize(
   state: IslandWindowState,
+  shell: IslandShellMode,
   notch: IslandNotchInfo | null,
   sessionCount?: number,
 ): IslandSize {
   if (state === "expanded") return islandExpandedSize(sessionCount);
-  if (state === "hover") return islandHoverSize(notch);
-  return islandCollapsedSize(notch, sessionCount);
+  if (state === "hover") return islandHoverSize(shell, notch);
+  return islandCollapsedSize(shell, notch, sessionCount);
 }
