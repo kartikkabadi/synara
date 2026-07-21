@@ -330,6 +330,7 @@ export const makeOrchestrationIntegrationHarness = (
       start: Effect.void,
       drain: Effect.void,
       request: () => Effect.die(new Error("CompactionReactor is unused in this harness")),
+      setThreadSettings: () => Effect.void,
       getControlState: () => Effect.succeed({ status: "idle" as const }),
     });
     const orchestrationReactorLayer = OrchestrationReactorLive.pipe(

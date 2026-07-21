@@ -71,6 +71,7 @@ describe("OrchestrationReactor", () => {
             drain: Effect.void,
             request: () => Effect.die(new Error("unused")),
             getControlState: () => Effect.succeed({ status: "idle" as const }),
+            setThreadSettings: () => Effect.void,
           }),
         ),
         Layer.provideMerge(

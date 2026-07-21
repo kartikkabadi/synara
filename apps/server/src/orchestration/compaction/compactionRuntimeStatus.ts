@@ -12,10 +12,13 @@ import type {
   CompactionOperationSummary,
   CompactionTrigger,
   ProviderCompactionCapabilities,
+  ThreadCompactionPhase,
   ThreadCompactionRuntimeStatus,
+  ThreadCompactionSettings,
 } from "@synara/contracts";
 
 import type { ThreadCompactionOperation } from "../../persistence/Services/ThreadCompactionOperations.ts";
+import type { CompactionControlState } from "./compactionState.ts";
 
 const PI_DEFAULT_RESERVE_TOKENS = 16_384;
 const GROK_DEFAULT_TRIGGER_PERCENT = 85;
@@ -41,22 +44,49 @@ function providerAutoTrigger(
   }
 }
 
+// Project the durable control state into the client-facing phase snapshot.
+export function compactionPhaseFromControlState(
+  state: CompactionControlState,
+): ThreadCompactionPhase {
+  switch (state.status) {
+    case "idle":
+      return { status: "idle" };
+    case "pending":
+      return { status: "pending", reason: state.reason };
+    case "running":
+      return { status: "running" };
+    case "uncertain":
+      return { status: "uncertain", detail: state.detail, retryable: true };
+    case "suspended":
+      return {
+        status: "suspended",
+        reason: state.reason,
+        ...(state.detail !== undefined ? { detail: state.detail } : {}),
+        retryable: false,
+      };
+  }
+}
+
 export function deriveThreadCompactionRuntimeStatus(input: {
   readonly provider: string | null;
   readonly capabilities: ProviderCompactionCapabilities | null;
   readonly contextWindowMaxTokens?: number | null;
   readonly lastCompaction?: CompactionOperationSummary | undefined;
+  readonly settings?: ThreadCompactionSettings | undefined;
+  readonly controlState?: CompactionControlState | undefined;
 }): ThreadCompactionRuntimeStatus {
-  const { provider, capabilities, lastCompaction } = input;
+  const { provider, capabilities, lastCompaction, settings, controlState } = input;
   const automaticMode = capabilities?.automatic.mode ?? "unknown";
-  const owner = automaticMode === "native" ? "provider" : "none";
+  const manualSupported = capabilities !== null && capabilities.manual.mode !== "unsupported";
+  const synaraManaged =
+    automaticMode !== "native" && manualSupported && settings?.autoEnabled === true;
+  const owner = automaticMode === "native" ? "provider" : synaraManaged ? "synara" : "none";
   const providerAutoEnabled =
     automaticMode === "native"
       ? (capabilities?.automatic.enabledByDefault ?? true)
       : automaticMode === "none"
         ? false
         : null;
-  const manualSupported = capabilities !== null && capabilities.manual.mode !== "unsupported";
   return {
     owner,
     providerAutoEnabled,
@@ -71,7 +101,10 @@ export function deriveThreadCompactionRuntimeStatus(input: {
         },
     ...(owner === "provider"
       ? { trigger: providerAutoTrigger(provider, input.contextWindowMaxTokens ?? null) }
-      : {}),
+      : owner === "synara" && settings?.trigger !== undefined
+        ? { trigger: settings.trigger }
+        : {}),
+    ...(controlState !== undefined ? { phase: compactionPhaseFromControlState(controlState) } : {}),
     ...(lastCompaction !== undefined ? { lastCompaction } : {}),
   };
 }

@@ -19,7 +19,9 @@ import {
   type ProviderCompactionRequest,
   type ProviderCompactionResult,
   type ProviderRuntimeEvent,
+  type ProviderSetCompactionSettingsInput,
   type ThreadCompactionLifecycleEvent,
+  type ThreadCompactionSettings,
   type ThreadTokenUsageSnapshot,
 } from "@synara/contracts";
 import { CommandId } from "@synara/contracts";
@@ -90,6 +92,7 @@ const make = Effect.gen(function* () {
   const sessionRuntimeRepository = yield* ProviderSessionRuntimeRepository;
 
   const states = new Map<string, CompactionControlState>();
+  const settings = new Map<string, ThreadCompactionSettings>();
   const latestUsage = new Map<string, ThreadTokenUsageSnapshot>();
   const lastCompactions = new Map<string, CompactionOperationSummary>();
   const capabilitiesCache = new Map<string, ProviderCompactionCapabilities | null>();
@@ -142,6 +145,8 @@ const make = Effect.gen(function* () {
         capabilities,
         contextWindowMaxTokens: latestUsage.get(threadId)?.maxTokens ?? null,
         lastCompaction: lastCompactions.get(threadId),
+        settings: settings.get(threadId),
+        controlState: getState(threadId),
       });
     });
 
@@ -602,11 +607,20 @@ const make = Effect.gen(function* () {
   const getControlState: CompactionReactorShape["getControlState"] = (threadId) =>
     Effect.sync(() => getState(threadId));
 
+  const setThreadSettings: CompactionReactorShape["setThreadSettings"] = (
+    input: ProviderSetCompactionSettingsInput,
+  ) =>
+    Effect.suspend(() => {
+      settings.set(input.threadId, input.settings);
+      return publishStatus(input.threadId, getState(input.threadId));
+    });
+
   return {
     start,
     drain: worker.drain,
     request,
     getControlState,
+    setThreadSettings,
   } satisfies CompactionReactorShape;
 });
 
