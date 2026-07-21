@@ -39,9 +39,9 @@ describe("supportsThreadCompaction", () => {
   it("requires an explicit supportsThreadCompaction capability", () => {
     expect(supportsThreadCompaction(undefined)).toBe(false);
     expect(supportsThreadCompaction(baseCapabilities)).toBe(false);
-    expect(
-      supportsThreadCompaction({ ...baseCapabilities, supportsThreadCompaction: false }),
-    ).toBe(false);
+    expect(supportsThreadCompaction({ ...baseCapabilities, supportsThreadCompaction: false })).toBe(
+      false,
+    );
     expect(supportsThreadCompaction({ ...baseCapabilities, supportsThreadCompaction: true })).toBe(
       true,
     );

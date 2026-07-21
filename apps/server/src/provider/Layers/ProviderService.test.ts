@@ -2510,48 +2510,52 @@ routing.layer("ProviderServiceLive routing", (it) => {
   );
 });
 
-it.effect("ProviderServiceLive rejects compactThread when the adapter lacks compaction support", () =>
-  Effect.gen(function* () {
-    const codex = makeFakeCodexAdapter();
-    const { compactThread: _omittedCompactThread, ...adapterWithoutCompaction } = codex.adapter;
-    const registry: typeof ProviderAdapterRegistry.Service = {
-      getByProvider: (provider) =>
-        provider === "codex"
-          ? Effect.succeed(adapterWithoutCompaction)
-          : Effect.fail(new ProviderUnsupportedError({ provider })),
-      listProviders: () => Effect.succeed(["codex"]),
-    };
-    const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
-      Layer.provide(SqlitePersistenceMemory),
-    );
-    const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
-    const providerLayer = makeProviderServiceLive().pipe(
-      Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
-      Layer.provide(directoryLayer),
-      Layer.provide(AnalyticsService.layerTest),
-    );
-
-    yield* Effect.gen(function* () {
-      const provider = yield* ProviderService;
-      const threadId = asThreadId("thread-compact-unsupported");
-      yield* provider.startSession(threadId, {
-        provider: "codex",
-        threadId,
-        cwd: "/tmp/project",
-        runtimeMode: "full-access",
-      });
-
-      const failure = yield* Effect.result(provider.compactThread({ threadId }));
-      assertFailure(
-        failure,
-        new ProviderValidationError({
-          operation: "ProviderService.compactThread",
-          issue: "Context compaction is unavailable for provider 'codex'.",
-        }),
+it.effect(
+  "ProviderServiceLive rejects compactThread when the adapter lacks compaction support",
+  () =>
+    Effect.gen(function* () {
+      const codex = makeFakeCodexAdapter();
+      const { compactThread: _omittedCompactThread, ...adapterWithoutCompaction } = codex.adapter;
+      const registry: typeof ProviderAdapterRegistry.Service = {
+        getByProvider: (provider) =>
+          provider === "codex"
+            ? Effect.succeed(adapterWithoutCompaction)
+            : Effect.fail(new ProviderUnsupportedError({ provider })),
+        listProviders: () => Effect.succeed(["codex"]),
+      };
+      const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+        Layer.provide(SqlitePersistenceMemory),
       );
-      assert.equal(codex.compactThread.mock.calls.length, 0);
-    }).pipe(Effect.provide(providerLayer));
-  }).pipe(Effect.provide(NodeServices.layer)),
+      const directoryLayer = ProviderSessionDirectoryLive.pipe(
+        Layer.provide(runtimeRepositoryLayer),
+      );
+      const providerLayer = makeProviderServiceLive().pipe(
+        Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
+        Layer.provide(directoryLayer),
+        Layer.provide(AnalyticsService.layerTest),
+      );
+
+      yield* Effect.gen(function* () {
+        const provider = yield* ProviderService;
+        const threadId = asThreadId("thread-compact-unsupported");
+        yield* provider.startSession(threadId, {
+          provider: "codex",
+          threadId,
+          cwd: "/tmp/project",
+          runtimeMode: "full-access",
+        });
+
+        const failure = yield* Effect.result(provider.compactThread({ threadId }));
+        assertFailure(
+          failure,
+          new ProviderValidationError({
+            operation: "ProviderService.compactThread",
+            issue: "Context compaction is unavailable for provider 'codex'.",
+          }),
+        );
+        assert.equal(codex.compactThread.mock.calls.length, 0);
+      }).pipe(Effect.provide(providerLayer));
+    }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 restartRollbackRouting.layer("ProviderServiceLive restart-based rollback", (it) => {
