@@ -51,11 +51,17 @@ const STATUS_LABEL: Record<IslandSessionStatus, string> = {
 };
 
 // Global-shortcut hint for the expanded header; the display context from the
-// main process is authoritative, with navigator.platform as a pre-load fallback.
+// main process is authoritative, with the browser platform as a pre-load
+// fallback. Only an explicit mac signal yields ⌘ — Windows/Linux must never
+// show mac glyphs.
 function shortcutHint(context: IslandDisplayContext | null): string {
-  const isMac = context
-    ? context.platform === "macos"
-    : isMacPlatform(typeof navigator === "undefined" ? "" : navigator.platform);
+  let isMac = false;
+  if (context) {
+    isMac = context.platform === "macos";
+  } else if (typeof navigator !== "undefined") {
+    const uaData = (navigator as { userAgentData?: { platform?: string } }).userAgentData;
+    isMac = isMacPlatform(uaData?.platform ?? navigator.platform ?? "");
+  }
   return isMac ? "\u2318\u21e7I" : "Ctrl\u21e7I";
 }
 
@@ -138,10 +144,11 @@ export function Island() {
     };
   }, []);
 
-  // Auto-pop on needs-approval / turn-completed transitions, with a spring
-  // overshoot on the surface. The resize itself keeps the 220ms ease-out
-  // transition — it is a status animation, not a disclosure toggle, so
-  // disclosureMotion.ts does not apply (see .plans/island-siri-orb-v2.md §2.4).
+  // Auto-pop on needs-approval / turn-completed transitions, with a bigger
+  // spring overshoot plus a one-shot brightness flash on the surface. The
+  // resize itself keeps the 220ms ease-out transition — it is a status
+  // animation, not a disclosure toggle, so disclosureMotion.ts does not apply
+  // (see .plans/island-siri-orb-v2.md §2.4).
   useEffect(() => {
     const transition = findPopTransition(sessionsRef.current, sessions);
     sessionsRef.current = sessions;
@@ -153,6 +160,10 @@ export function Island() {
       surfaceRef.current?.animate(
         { transform: ["scale(1)", "scale(1.035)", "scale(1)"] },
         { duration: 280, easing: "cubic-bezier(0.34,1.56,0.64,1)" },
+      );
+      surfaceRef.current?.animate(
+        { filter: ["brightness(1)", "brightness(1.25)", "brightness(1)"] },
+        { duration: 500, easing: "ease-out" },
       );
     }
   }, [sessions]);
@@ -196,6 +207,21 @@ export function Island() {
 
   const effectiveState: IslandWindowState = uiState === "collapsed" && popped ? "hover" : uiState;
 
+  // Every displayed state change gets the spring overshoot alongside the 220ms
+  // size transition, so the surface always feels alive, not just on pops.
+  const previousStateRef = useRef<IslandWindowState | null>(null);
+  const wasExpanded = previousStateRef.current === "expanded";
+  useEffect(() => {
+    const previous = previousStateRef.current;
+    previousStateRef.current = effectiveState;
+    if (previous === null || previous === effectiveState) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    surfaceRef.current?.animate(
+      { transform: ["scale(1)", "scale(1.02)", "scale(1)"] },
+      { duration: 260, easing: "cubic-bezier(0.34,1.56,0.64,1)" },
+    );
+  }, [effectiveState]);
+
   // Every displayed state change (click, shortcut, idle collapse, auto-pop) is
   // mirrored to the main process: on Linux there is no click-through
   // forwarding, so the window itself must resize to the displayed state.
@@ -215,6 +241,7 @@ export function Island() {
       <div
         ref={surfaceRef}
         data-island-state={effectiveState}
+        data-island-status={orbState}
         onPointerEnter={onPointerEnter}
         onPointerLeave={onPointerLeave}
         style={
@@ -229,6 +256,7 @@ export function Island() {
           isNotch && "island-surface-notch",
           "transition-[width,height,border-radius] duration-220 ease-out motion-reduce:transition-none",
           glowing && (isNotch ? "island-surface-glow-notch" : "island-surface-glow"),
+          aggregate === "done" && !isNotch && "island-surface-glow-done",
           effectiveState === "expanded"
             ? "rounded-[26px]"
             : effectiveState === "hover"
@@ -243,7 +271,10 @@ export function Island() {
             key="collapsed"
             type="button"
             onClick={() => applyState("expanded")}
-            className="island-crossfade flex h-full w-full items-center justify-center gap-2 px-3 text-xs font-medium tracking-wide text-white/80"
+            className={cn(
+              "island-crossfade flex h-full w-full items-center justify-center gap-2 px-3 text-xs font-medium tracking-wide text-white/80",
+              wasExpanded && "island-crossfade-nodelay",
+            )}
             aria-label="Expand agent sessions island"
           >
             <IslandOrb state={orbState} />

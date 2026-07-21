@@ -8,6 +8,7 @@
 /* ---- Surface -------------------------------------------------------- */
 
 .island-surface {
+  position: relative;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 30%),
     linear-gradient(180deg, #232326 0%, #131316 45%, #0a0a0c 100%);
@@ -42,22 +43,110 @@
    the physical camera housing. */
 .island-surface-glow {
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 8px 32px rgba(0, 0, 0, 0.45),
-    0 0 24px hsl(var(--island-hue, 205) 80% 60% / 0.15);
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.6),
+    inset 0 0 24px rgba(0, 0, 0, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 12px 40px rgba(0, 0, 0, 0.35),
+    0 0 20px hsl(var(--island-hue, 205) 85% 60% / 0.35),
+    0 0 48px hsl(var(--island-hue, 205) 85% 55% / 0.18);
 }
 
 .island-surface-glow-notch {
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 8px 32px rgba(0, 0, 0, 0.45),
-    0 12px 24px -8px hsl(var(--island-hue, 205) 80% 60% / 0.2);
+    inset 0 -1px 0 rgba(0, 0, 0, 0.6),
+    inset 0 0 24px rgba(0, 0, 0, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.5),
+    0 12px 40px rgba(0, 0, 0, 0.35),
+    0 12px 24px -8px hsl(var(--island-hue, 205) 80% 60% / 0.4),
+    0 24px 48px -12px hsl(var(--island-hue, 205) 80% 55% / 0.2);
+}
+
+/* Done: the glow fades out over 2s instead of cutting off. */
+.island-surface-glow-done {
+  animation: island-glow-fade 2s ease-out both;
+}
+
+@keyframes island-glow-fade {
+  from {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.14),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.6),
+      inset 0 0 24px rgba(0, 0, 0, 0.35),
+      0 1px 2px rgba(0, 0, 0, 0.5),
+      0 12px 40px rgba(0, 0, 0, 0.35),
+      0 0 20px hsl(var(--island-hue, 205) 85% 60% / 0.35),
+      0 0 48px hsl(var(--island-hue, 205) 85% 55% / 0.18);
+  }
+  to {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.14),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.6),
+      inset 0 0 24px rgba(0, 0, 0, 0.35),
+      0 1px 2px rgba(0, 0, 0, 0.5),
+      0 12px 40px rgba(0, 0, 0, 0.35),
+      0 0 20px hsl(var(--island-hue, 205) 85% 60% / 0),
+      0 0 48px hsl(var(--island-hue, 205) 85% 55% / 0);
+  }
+}
+
+/* ---- Rim shimmer ------------------------------------------------------ */
+
+/* Liquid-glass rim sweep, active only while work is actually happening
+   (working/looping); needs-approval's pulse owns attention instead. */
+@property --island-rim-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.island-surface::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--island-rim-angle, 0deg),
+    transparent 0deg,
+    hsl(var(--island-hue, 205) 80% 70% / 0.5) 40deg,
+    transparent 110deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 400ms ease;
+}
+
+.island-surface[data-island-status="working"]::after {
+  opacity: 1;
+  animation: island-rim-sweep 5s linear infinite;
+}
+
+.island-surface[data-island-status="looping"]::after {
+  opacity: 1;
+  animation: island-rim-sweep 3.5s linear infinite;
+}
+
+@keyframes island-rim-sweep {
+  to {
+    --island-rim-angle: 360deg;
+  }
 }
 
 /* ---- Content crossfade ---------------------------------------------- */
 
 .island-crossfade {
   animation: island-crossfade-in 160ms ease-out 60ms both;
+}
+
+/* Expanded -> collapsed: the pill content must be there when the shrink lands. */
+.island-crossfade-nodelay {
+  animation-delay: 0ms;
 }
 
 @keyframes island-crossfade-in {
@@ -234,5 +323,10 @@
 
   .island-crossfade {
     animation: none;
+  }
+
+  .island-surface::after,
+  .island-surface-glow-done {
+    animation: none !important;
   }
 }
