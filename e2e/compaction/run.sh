@@ -41,6 +41,13 @@ if [[ -z "${OPENAI_API_KEY:-}" && -n "${CODEX_API_KEY:-}" ]]; then
   export OPENAI_API_KEY="$CODEX_API_KEY"
 fi
 
+# Provider CLIs installed under ~/clis (e.g. opencode) must be visible to the
+# server's health probes, which resolve binaries via PATH.
+CLI_BIN_DIR="${SYNARA_E2E_CLI_BIN_DIR:-$HOME/clis/node_modules/.bin}"
+if [[ -d "$CLI_BIN_DIR" ]]; then
+  export PATH="$CLI_BIN_DIR:$PATH"
+fi
+
 # Dependencies.
 if [[ ! -d "$REPO_ROOT/node_modules" ]]; then
   echo "==> bun install (repo root)"
