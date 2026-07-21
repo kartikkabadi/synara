@@ -1,5 +1,7 @@
+import type { ProviderCompactionCapabilities } from "@synara/contracts";
 import {
   type ContextWindowSnapshot,
+  deriveContextCompactionMeterCopy,
   deriveContextWindowMeterDisplay,
   formatContextWindowTokens,
   formatCostUsd,
@@ -8,11 +10,12 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 
 export function ContextWindowMeter(props: {
   usage: ContextWindowSnapshot;
+  compaction?: ProviderCompactionCapabilities | null | undefined;
   cumulativeCostUsd?: number | null | undefined;
   activeWindowLabel?: string | null | undefined;
   pendingWindowLabel?: string | null | undefined;
 }) {
-  const { usage, cumulativeCostUsd, activeWindowLabel, pendingWindowLabel } = props;
+  const { usage, compaction, cumulativeCostUsd, activeWindowLabel, pendingWindowLabel } = props;
   const display = deriveContextWindowMeterDisplay(usage);
   const radius = 6;
   const circumference = 2 * Math.PI * radius;
@@ -63,59 +66,83 @@ export function ContextWindowMeter(props: {
         }
       />
       <PopoverPopup tooltipStyle side="top" align="end" className="w-max max-w-none px-3 py-2">
-        <div className="space-y-1.5 leading-tight">
-          <div className="text-[11px] font-medium text-muted-foreground">Context window</div>
-          {pendingWindowLabel ? (
-            <div className="text-xs text-muted-foreground">
-              Current session: {activeWindowLabel ?? "Unknown"}
-            </div>
-          ) : null}
-          {display.usedPercentageLabel ? (
-            <div className="whitespace-nowrap text-xs font-medium text-foreground">
-              <span>{display.usedPercentageLabel}</span>
-              {display.hasReliableTokenRatio ? (
-                <>
-                  <span className="mx-1">⋅</span>
-                  <span>{display.tokenUsageLabel}</span>
-                  <span>/</span>
-                  <span>{formatContextWindowTokens(usage.maxTokens)} context used</span>
-                </>
-              ) : (
-                <span className="ml-1">context used</span>
-              )}
-            </div>
-          ) : (
-            <div className="text-sm text-foreground">
-              {display.tokenUsageLabel} tokens used so far
-            </div>
-          )}
-          {usage.maxTokens !== null ? (
-            <div className="text-xs text-muted-foreground">
-              Model window: {formatContextWindowTokens(usage.maxTokens)} tokens
-            </div>
-          ) : null}
-          {pendingWindowLabel ? (
-            <div className="text-xs text-muted-foreground">Next turn: {pendingWindowLabel}</div>
-          ) : null}
-          {(usage.totalProcessedTokens ?? null) !== null &&
-          (usage.totalProcessedTokens ?? 0) > usage.usedTokens ? (
-            <div className="text-xs text-muted-foreground">
-              Total processed: {formatContextWindowTokens(usage.totalProcessedTokens ?? null)}{" "}
-              tokens
-            </div>
-          ) : null}
-          {usage.compactsAutomatically ? (
-            <div className="text-xs text-muted-foreground">
-              Automatically compacts its context when needed.
-            </div>
-          ) : null}
-          {cumulativeCostUsd !== null && cumulativeCostUsd !== undefined ? (
-            <div className="text-xs text-muted-foreground">
-              Session cost: {formatCostUsd(cumulativeCostUsd)}
-            </div>
-          ) : null}
-        </div>
+        <ContextWindowMeterDetails
+          usage={usage}
+          compaction={compaction}
+          cumulativeCostUsd={cumulativeCostUsd}
+          activeWindowLabel={activeWindowLabel}
+          pendingWindowLabel={pendingWindowLabel}
+        />
       </PopoverPopup>
     </Popover>
+  );
+}
+
+export function ContextWindowMeterDetails(props: {
+  usage: ContextWindowSnapshot;
+  compaction?: ProviderCompactionCapabilities | null | undefined;
+  cumulativeCostUsd?: number | null | undefined;
+  activeWindowLabel?: string | null | undefined;
+  pendingWindowLabel?: string | null | undefined;
+}) {
+  const { usage, compaction, cumulativeCostUsd, activeWindowLabel, pendingWindowLabel } = props;
+  const display = deriveContextWindowMeterDisplay(usage);
+  const compactionCopy = deriveContextCompactionMeterCopy({
+    compaction,
+    compactsAutomatically: usage.compactsAutomatically ?? false,
+  });
+  return (
+    <div className="space-y-1.5 leading-tight">
+      <div className="text-[11px] font-medium text-muted-foreground">Context window</div>
+      {pendingWindowLabel ? (
+        <div className="text-xs text-muted-foreground">
+          Current session: {activeWindowLabel ?? "Unknown"}
+        </div>
+      ) : null}
+      {display.usedPercentageLabel ? (
+        <div className="whitespace-nowrap text-xs font-medium text-foreground">
+          <span>{display.usedPercentageLabel}</span>
+          {display.hasReliableTokenRatio ? (
+            <>
+              <span className="mx-1">⋅</span>
+              <span>{display.tokenUsageLabel}</span>
+              <span>/</span>
+              <span>{formatContextWindowTokens(usage.maxTokens)} context used</span>
+            </>
+          ) : (
+            <span className="ml-1">context used</span>
+          )}
+        </div>
+      ) : (
+        <div className="text-sm text-foreground">{display.tokenUsageLabel} tokens used so far</div>
+      )}
+      {usage.maxTokens !== null ? (
+        <div className="text-xs text-muted-foreground">
+          Model window: {formatContextWindowTokens(usage.maxTokens)} tokens
+        </div>
+      ) : null}
+      {pendingWindowLabel ? (
+        <div className="text-xs text-muted-foreground">Next turn: {pendingWindowLabel}</div>
+      ) : null}
+      {(usage.totalProcessedTokens ?? null) !== null &&
+      (usage.totalProcessedTokens ?? 0) > usage.usedTokens ? (
+        <div className="text-xs text-muted-foreground">
+          Total processed: {formatContextWindowTokens(usage.totalProcessedTokens ?? null)} tokens
+        </div>
+      ) : null}
+      {compactionCopy === "provider-auto" ? (
+        <div className="text-xs text-muted-foreground">
+          Automatically compacts its context when needed.
+        </div>
+      ) : null}
+      {compactionCopy === "unavailable" ? (
+        <div className="text-xs text-muted-foreground">Context compaction is unavailable.</div>
+      ) : null}
+      {cumulativeCostUsd !== null && cumulativeCostUsd !== undefined ? (
+        <div className="text-xs text-muted-foreground">
+          Session cost: {formatCostUsd(cumulativeCostUsd)}
+        </div>
+      ) : null}
+    </div>
   );
 }

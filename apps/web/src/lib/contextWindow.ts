@@ -1,4 +1,8 @@
-import type { OrchestrationThreadActivity, ThreadTokenUsageSnapshot } from "@synara/contracts";
+import type {
+  OrchestrationThreadActivity,
+  ProviderCompactionCapabilities,
+  ThreadTokenUsageSnapshot,
+} from "@synara/contracts";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
@@ -342,6 +346,28 @@ export function formatCostUsd(value: number): string {
   if (value < 0.01) return `$${value.toFixed(4)}`;
   if (value < 0.1) return `$${value.toFixed(3)}`;
   return `$${value.toFixed(2)}`;
+}
+
+export type ContextCompactionMeterCopy = "provider-auto" | "unavailable" | null;
+
+// Capability-first meter copy: the structured descriptor decides what the
+// meter may claim; the legacy per-snapshot `compactsAutomatically` boolean is
+// only consulted when no descriptor is available.
+export function deriveContextCompactionMeterCopy(input: {
+  readonly compaction: ProviderCompactionCapabilities | null | undefined;
+  readonly compactsAutomatically: boolean;
+}): ContextCompactionMeterCopy {
+  const compaction = input.compaction;
+  if (!compaction) {
+    return input.compactsAutomatically ? "provider-auto" : null;
+  }
+  if (compaction.automatic.mode === "native") {
+    return "provider-auto";
+  }
+  if (compaction.manual.mode === "unsupported") {
+    return "unavailable";
+  }
+  return null;
 }
 
 export function formatContextWindowTokens(value: number | null | undefined): string {
