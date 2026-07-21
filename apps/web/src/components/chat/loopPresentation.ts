@@ -70,7 +70,7 @@ function pluralizeTurns(count: number): string {
   return count === 1 ? "turn" : "turns";
 }
 
-function isLoopOwnedTurnRunning(
+export function isLoopOwnedTurnRunning(
   loop: ThreadLoop,
   latestTurn: OrchestrationLatestTurn | null | undefined,
 ): boolean {
