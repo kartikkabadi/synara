@@ -4,7 +4,7 @@
 // The outer composer shell stays unchanged; this renders inside the existing surface
 // and receives the existing editor as a slot rather than duplicating composer controls.
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { LoopIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -200,8 +200,14 @@ export function LoopComposerModeHeader(props: {
   onBudgetChange: (budget: LoopBudgetChoice) => void;
 }) {
   const isEdit = props.mode.kind === "edit";
+  // The header mounts and unmounts with the composer mode; toggling `open`
+  // after mount lets the shared 220 ms disclosure expand actually play.
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    setOpen(true);
+  }, []);
   return (
-    <DisclosureRegion open>
+    <DisclosureRegion open={open}>
       <div className="flex min-h-9 items-center justify-between gap-2 border-border/60 border-b px-3 py-1.5">
         <span className="flex items-center gap-1.5 text-[12px] font-medium text-foreground/80">
           <LoopIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
