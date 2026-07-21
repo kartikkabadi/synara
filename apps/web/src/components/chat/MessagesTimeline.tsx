@@ -51,12 +51,11 @@ import {
   CircleCheckIcon,
   ClockIcon,
   LoaderIcon,
+  LoopIcon,
   type LucideIcon,
   NewThreadIcon,
   PinIcon,
-  RefreshCwIcon,
   SteerIcon,
-  StopIcon,
   Undo2Icon,
   WorktreeIcon,
 } from "~/lib/icons";
@@ -64,7 +63,7 @@ import { pinActionLabel } from "~/lib/pin";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { CrossTaskOriginLabel, type CrossTaskOrigin } from "./CrossTaskOriginLabel";
-import { formatStopReason } from "./LoopIndicator";
+import { LoopCompletionRecord } from "./LoopCompletionRecord";
 import { SynaraThreadCreationCard } from "./SynaraThreadCreationCard";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
@@ -1175,11 +1174,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   {/* The cross-task origin label already attributes this turn to another Synara thread,
                       so suppress the dispatch chip here to avoid a duplicate "Sent by …" marker. */}
                   {row.loopIteration != null ? (
-                    <div className="mb-1 self-end">
-                      <Badge variant="outline">
-                        <RefreshCwIcon />
-                        Loop iteration {row.loopIteration}
-                      </Badge>
+                    <div className="mb-0.5 flex items-center gap-1 self-end text-[11px] font-normal text-muted-foreground/70">
+                      <LoopIcon className="size-3" aria-hidden />
+                      <span>
+                        Loop prompt · {row.loopIteration}
+                        {row.loopMaxIterations != null ? `/${row.loopMaxIterations}` : ""}
+                      </span>
                     </div>
                   ) : null}
                   {showCrossTaskOrigin ? null : (
@@ -1418,16 +1418,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           // signal (see deriveTerminalAssistantMessageIds).
           const isTerminalAssistantMessage =
             row.showAssistantCopyButton && !row.assistantTurnInProgress;
-          const loopLabel =
-            row.loopIteration != null ? `Loop iteration ${row.loopIteration}` : null;
-          const assistantMeta = [
-            loopLabel,
-            isTerminalAssistantMessage
-              ? formatShortTimestamp(row.message.createdAt, timestampFormat)
-              : null,
-          ]
-            .filter((value): value is string => Boolean(value))
-            .join(" • ");
+          const assistantMeta = isTerminalAssistantMessage
+            ? formatShortTimestamp(row.message.createdAt, timestampFormat)
+            : "";
+          const assistantLoopMeta =
+            isTerminalAssistantMessage && row.loopIteration != null
+              ? `Loop · ${row.loopIteration}${row.loopMaxIterations != null ? `/${row.loopMaxIterations}` : ""}`
+              : "";
           const allTurnWorkEntries = [
             ...(row.leadingWorkEntries ?? []),
             ...(row.inlineWorkEntries ?? []),
@@ -1722,14 +1719,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                 </div>
               )}
               <div className="group min-w-0 py-0.5">
-                {row.loopIteration != null ? (
-                  <div className="mb-1.5">
-                    <Badge variant="outline">
-                      <RefreshCwIcon />
-                      Loop iteration {row.loopIteration}
-                    </Badge>
-                  </div>
-                ) : null}
                 {renderWorkDisplay(leadingWorkDisplay, "leading")}
                 {messageText !== null ? (
                   <div data-assistant-message-id={row.message.id}>
@@ -1765,7 +1754,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                     ))}
                   </div>
                 )}
-                {(showPinToggle || assistantCopyState.visible || assistantMeta.length > 0) && (
+                {(showPinToggle ||
+                  assistantCopyState.visible ||
+                  assistantMeta.length > 0 ||
+                  assistantLoopMeta.length > 0) && (
                   <div
                     className="mt-0.5 flex items-center gap-2 font-system-ui font-normal text-muted-foreground/45"
                     style={chatMessageFooterStyle}
@@ -1794,6 +1786,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                         text={assistantCopyState.text ?? ""}
                         className={MESSAGE_HOVER_REVEAL_CLASS_NAME}
                       />
+                    ) : null}
+                    {assistantLoopMeta.length > 0 ? (
+                      <p className="flex items-center gap-1 tabular-nums">
+                        <LoopIcon className="size-3" aria-hidden />
+                        {assistantLoopMeta}
+                      </p>
                     ) : null}
                     {assistantMeta.length > 0 ? (
                       <p className={cn("tabular-nums", MESSAGE_HOVER_REVEAL_CLASS_NAME)}>
@@ -2054,20 +2052,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         </DisclosureRegion>
       )}
 
-      {row.kind === "loop-end" && (
-        <div className="flex items-center justify-center gap-2 py-3">
-          <Badge variant={row.loop.lastStopReason === "consecutive_errors" ? "error" : "secondary"}>
-            <StopIcon />
-            Loop ended
-          </Badge>
-          <span className="truncate text-[11px] text-muted-foreground">
-            {formatStopReason(row.loop.lastStopReason!)}
-            {row.loop.iteration > 0
-              ? ` · ${row.loop.iteration} ${pluralize(row.loop.iteration, "iteration")}`
-              : ""}
-          </span>
+      {row.kind === "loop-start" && (
+        <div className="flex items-center justify-center gap-1.5 py-2 text-[11px] text-muted-foreground/70">
+          <LoopIcon className="size-3" aria-hidden />
+          <span className="truncate">{row.label}</span>
         </div>
       )}
+
+      {row.kind === "loop-end" && <LoopCompletionRecord loop={row.loop} />}
     </div>
   );
 
