@@ -87,10 +87,7 @@ export function ContextWindowMeterDetails(props: {
 }) {
   const { usage, compaction, cumulativeCostUsd, activeWindowLabel, pendingWindowLabel } = props;
   const display = deriveContextWindowMeterDisplay(usage);
-  const compactionCopy = deriveContextCompactionMeterCopy({
-    compaction,
-    compactsAutomatically: usage.compactsAutomatically ?? false,
-  });
+  const compactionCopy = deriveContextCompactionMeterCopy({ compaction });
   return (
     <div className="space-y-1.5 leading-tight">
       <div className="text-[11px] font-medium text-muted-foreground">Context window</div>

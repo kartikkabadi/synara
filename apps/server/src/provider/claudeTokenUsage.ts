@@ -108,6 +108,14 @@ export function normalizeClaudeTokenUsage(
   const maxTokens = positiveFiniteNumber(contextWindow);
   const usedTokens =
     maxTokens !== undefined ? Math.min(totalProcessedTokens, maxTokens) : totalProcessedTokens;
+  const toolUses =
+    typeof usage.tool_uses === "number" && Number.isFinite(usage.tool_uses)
+      ? usage.tool_uses
+      : undefined;
+  const durationMs =
+    typeof usage.duration_ms === "number" && Number.isFinite(usage.duration_ms)
+      ? usage.duration_ms
+      : undefined;
 
   return {
     usedTokens,
@@ -116,12 +124,21 @@ export function normalizeClaudeTokenUsage(
     ...(inputTokens > 0 ? { inputTokens } : {}),
     ...(outputTokens > 0 ? { outputTokens } : {}),
     ...(maxTokens !== undefined ? { maxTokens } : {}),
-    ...(typeof usage.tool_uses === "number" && Number.isFinite(usage.tool_uses)
-      ? { toolUses: usage.tool_uses }
-      : {}),
-    ...(typeof usage.duration_ms === "number" && Number.isFinite(usage.duration_ms)
-      ? { durationMs: usage.duration_ms }
-      : {}),
+    ...(toolUses !== undefined ? { toolUses } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+    // SDK result usage is accumulated across all API calls: cumulative, never
+    // context occupancy.
+    cumulative: {
+      ...(inputTokens > 0 ? { inputTokens } : {}),
+      ...(outputTokens > 0 ? { outputTokens } : {}),
+      totalProcessedTokens,
+    },
+    lastTurn: {
+      ...(inputTokens > 0 ? { inputTokens } : {}),
+      ...(outputTokens > 0 ? { outputTokens } : {}),
+      ...(toolUses !== undefined ? { toolUses } : {}),
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    },
   };
 }
 
@@ -144,6 +161,29 @@ export function mergeClaudeTokenUsageSnapshot(
     accumulated?.totalProcessedTokens ?? accumulated?.usedTokens ?? 0,
     usedTokens,
   );
+  const previousContext = previous.context;
+  const contextUsedTokens =
+    previousContext !== undefined && maxTokens !== undefined
+      ? Math.min(previousContext.usedTokens, maxTokens)
+      : previousContext?.usedTokens;
+  const context =
+    previousContext !== undefined && contextUsedTokens !== undefined
+      ? {
+          ...previousContext,
+          usedTokens: contextUsedTokens,
+          ...(maxTokens !== undefined
+            ? {
+                maxTokens,
+                usedPercent: Math.min(100, (contextUsedTokens / maxTokens) * 100),
+              }
+            : {}),
+        }
+      : undefined;
+  const cumulative = {
+    ...previous.cumulative,
+    ...accumulated?.cumulative,
+    totalProcessedTokens,
+  };
 
   return {
     ...previous,
@@ -151,6 +191,11 @@ export function mergeClaudeTokenUsageSnapshot(
     lastUsedTokens,
     ...(maxTokens !== undefined ? { maxTokens } : {}),
     ...(totalProcessedTokens > usedTokens ? { totalProcessedTokens } : {}),
+    ...(context !== undefined ? { context } : {}),
+    cumulative,
+    ...(previous.lastTurn !== undefined || accumulated?.lastTurn !== undefined
+      ? { lastTurn: previous.lastTurn ?? accumulated?.lastTurn }
+      : {}),
   };
 }
 
@@ -243,6 +288,25 @@ export function snapshotFromClaudeContextUsage(
       : {}),
     ...(outputTokens > 0 ? { outputTokens, lastOutputTokens: outputTokens } : {}),
     compactsAutomatically: usage.isAutoCompactEnabled,
+    // The SDK reports real context occupancy for the live session.
+    context: {
+      usedTokens:
+        effectiveMaxTokens !== undefined ? Math.min(usedTokens, effectiveMaxTokens) : usedTokens,
+      ...(effectiveMaxTokens !== undefined
+        ? {
+            maxTokens: effectiveMaxTokens,
+            usedPercent: Math.min(100, (usedTokens / effectiveMaxTokens) * 100),
+          }
+        : {}),
+      measurement: "provider-reported",
+      confidence: "exact",
+    },
+    ...(totalProcessedTokens !== undefined ? { cumulative: { totalProcessedTokens } } : {}),
+    lastTurn: {
+      ...(inputTokens > 0 ? { inputTokens } : {}),
+      ...(cachedInputTokens > 0 ? { cachedInputTokens } : {}),
+      ...(outputTokens > 0 ? { outputTokens } : {}),
+    },
   };
 }
 

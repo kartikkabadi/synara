@@ -20,8 +20,77 @@ import {
   makePiBashProcessSupervisor,
   makePiRuntimeEventBase,
   makePiUserInputOptions,
+  normalizePiTokenUsage,
   PLAIN_PI_EXTENSION_THEME,
 } from "./PiAdapter";
+
+function makePiSessionStats(input: {
+  readonly tokens: {
+    readonly input: number;
+    readonly output: number;
+    readonly cacheRead: number;
+    readonly cacheWrite: number;
+    readonly total: number;
+  };
+  readonly contextUsage?: {
+    readonly tokens: number | null;
+    readonly contextWindow: number;
+    readonly percent: number | null;
+  };
+}): Parameters<typeof normalizePiTokenUsage>[0] {
+  return {
+    sessionFile: undefined,
+    sessionId: "pi-session-1",
+    userMessages: 1,
+    assistantMessages: 1,
+    toolCalls: 0,
+    toolResults: 0,
+    totalMessages: 2,
+    tokens: input.tokens,
+    cost: 0,
+    ...(input.contextUsage ? { contextUsage: input.contextUsage } : {}),
+  };
+}
+
+describe("normalizePiTokenUsage", () => {
+  it("maps SDK contextTokens/contextWindow to an exact provider-reported context claim", () => {
+    const usage = normalizePiTokenUsage(
+      makePiSessionStats({
+        tokens: { input: 700_000, output: 48_126, cacheRead: 0, cacheWrite: 0, total: 748_126 },
+        contextUsage: { tokens: 31_251, contextWindow: 200_000, percent: 15.6255 },
+      }),
+    );
+
+    expect(usage?.usedTokens).toBe(31_251);
+    expect(usage?.maxTokens).toBe(200_000);
+    expect(usage?.totalProcessedTokens).toBe(748_126);
+    expect(usage?.context).toEqual({
+      usedTokens: 31_251,
+      maxTokens: 200_000,
+      usedPercent: 15.6255,
+      measurement: "provider-reported",
+      confidence: "exact",
+    });
+    expect(usage?.cumulative).toEqual({
+      inputTokens: 700_000,
+      cachedInputTokens: 0,
+      outputTokens: 48_126,
+      totalProcessedTokens: 748_126,
+    });
+  });
+
+  it("downgrades to a low-confidence Synara estimate without SDK context usage", () => {
+    const usage = normalizePiTokenUsage(
+      makePiSessionStats({
+        tokens: { input: 100, output: 50, cacheRead: 10, cacheWrite: 0, total: 160 },
+      }),
+      200_000,
+    );
+
+    expect(usage?.context?.measurement).toBe("synara-estimated");
+    expect(usage?.context?.confidence).toBe("low");
+  });
+});
 
 describe("Pi native Synara gateway tools", () => {
   it("uses canonical MCP schemas and keeps same-cwd thread tokens distinct", async () => {

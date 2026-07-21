@@ -274,7 +274,6 @@ describe("contextWindow", () => {
             ...baseCompaction,
             automatic: { mode: "native", statusVisibility: "none", triggerVisibility: "opaque" },
           },
-          compactsAutomatically: false,
         }),
       ).toBe("provider-auto");
     });
@@ -283,7 +282,6 @@ describe("contextWindow", () => {
       expect(
         deriveContextCompactionMeterCopy({
           compaction: baseCompaction,
-          compactsAutomatically: true,
         }),
       ).toBe("unavailable");
     });
@@ -300,24 +298,103 @@ describe("contextWindow", () => {
             },
             automatic: { mode: "none", statusVisibility: "none", triggerVisibility: "opaque" },
           },
-          compactsAutomatically: false,
         }),
       ).toBeNull();
     });
 
-    it("falls back to the legacy snapshot boolean when no descriptor is available", () => {
-      expect(
-        deriveContextCompactionMeterCopy({
-          compaction: null,
+    it("ignores the legacy snapshot boolean when no descriptor is available", () => {
+      expect(deriveContextCompactionMeterCopy({ compaction: null })).toBeNull();
+      const legacySnapshot = deriveLatestContextWindowSnapshot([
+        makeActivity("activity-1", "context-window.updated", {
+          usedTokens: 14_000,
+          maxTokens: 258_000,
           compactsAutomatically: true,
         }),
-      ).toBe("provider-auto");
-      expect(
-        deriveContextCompactionMeterCopy({
-          compaction: null,
-          compactsAutomatically: false,
+      ]);
+      expect(legacySnapshot?.compactsAutomatically).toBe(true);
+      expect(deriveContextCompactionMeterCopy({ compaction: null })).toBeNull();
+    });
+  });
+
+  describe("nested V2 usage semantics", () => {
+    it("prefers the nested context claim over flat fields", () => {
+      const snapshot = deriveLatestContextWindowSnapshot([
+        makeActivity("activity-1", "context-window.updated", {
+          usedTokens: 500_000,
+          maxTokens: 1_000_000,
+          context: {
+            usedTokens: 90_000,
+            maxTokens: 200_000,
+            usedPercent: 45,
+            measurement: "provider-reported",
+            confidence: "exact",
+          },
         }),
-      ).toBeNull();
+      ]);
+
+      expect(snapshot?.usedTokens).toBe(90_000);
+      expect(snapshot?.maxTokens).toBe(200_000);
+      expect(snapshot?.usedPercentage).toBe(45);
+      expect(deriveContextWindowMeterDisplay(snapshot!)).toMatchObject({
+        hasReliableTokenRatio: true,
+        compactLabel: "45%",
+      });
+    });
+
+    it("marks low-confidence context claims as unreliable", () => {
+      const snapshot = deriveLatestContextWindowSnapshot([
+        makeActivity("activity-1", "context-window.updated", {
+          usedTokens: 90_000,
+          maxTokens: 200_000,
+          context: {
+            usedTokens: 90_000,
+            maxTokens: 200_000,
+            usedPercent: 45,
+            measurement: "synara-estimated",
+            confidence: "low",
+          },
+        }),
+      ]);
+
+      expect(deriveContextWindowMeterDisplay(snapshot!)).toMatchObject({
+        hasReliableTokenRatio: false,
+        compactLabel: "90k",
+      });
+    });
+
+    it("only reads total processed tokens from the cumulative claim when present", () => {
+      const snapshot = deriveLatestContextWindowSnapshot([
+        makeActivity("activity-1", "context-window.updated", {
+          usedTokens: 90_000,
+          maxTokens: 200_000,
+          totalProcessedTokens: 900_000,
+          context: {
+            usedTokens: 90_000,
+            maxTokens: 200_000,
+            measurement: "provider-reported",
+            confidence: "exact",
+          },
+          cumulative: { totalProcessedTokens: 750_000 },
+        }),
+      ]);
+
+      expect(snapshot?.totalProcessedTokens).toBe(750_000);
+      expect(snapshot?.usedTokens).toBe(90_000);
+    });
+
+    it("keeps legacy flat payloads working without nested claims", () => {
+      const snapshot = deriveLatestContextWindowSnapshot([
+        makeActivity("activity-1", "context-window.updated", {
+          usedTokens: 14_000,
+          maxTokens: 258_000,
+          totalProcessedTokens: 748_126,
+        }),
+      ]);
+
+      expect(snapshot?.usedTokens).toBe(14_000);
+      expect(snapshot?.maxTokens).toBe(258_000);
+      expect(snapshot?.totalProcessedTokens).toBe(748_126);
+      expect(snapshot?.context).toBeNull();
     });
   });
 });
