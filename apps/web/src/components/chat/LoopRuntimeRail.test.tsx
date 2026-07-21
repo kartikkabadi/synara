@@ -8,7 +8,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import {
-  deriveLoopStopControl,
   isLoopRuntimeRailVisible,
   LOOP_STEERING_TOOLTIP_TEXT,
   LOOP_STOP_AFTER_TURN_DESCRIPTION,
@@ -61,7 +60,6 @@ function renderRail(overrides: Partial<LoopRuntimeRailProps> = {}): string {
       onEditLoop={() => {}}
       onStopAfterTurn={() => {}}
       onStopNow={() => {}}
-      session={null}
       {...overrides}
     />,
   );
@@ -125,7 +123,7 @@ describe("LoopRuntimeRail", () => {
     const markup = renderRail({ latestTurn: makeRunningLoopTurn() });
     expect(markup).toContain('role="status"');
     expect(markup).toContain("Loop running");
-    expect(markup).toContain("2 / 5");
+    expect(markup).toContain("2/5");
     expect(markup).toContain("Stop after turn");
     expect(countSegments(markup)).toBe(5);
   });
@@ -137,7 +135,7 @@ describe("LoopRuntimeRail", () => {
     expect(markup).toContain('aria-valuemin="0"');
     expect(markup).toContain('aria-valuemax="5"');
     expect(markup).toContain('aria-valuenow="2"');
-    expect(markup).toContain('aria-valuetext="2 of 5 loop turns started"');
+    expect(markup).toContain('aria-valuetext="Turn 2 of 5"');
     expect(markup).toContain("aria-hidden");
   });
 
@@ -146,7 +144,7 @@ describe("LoopRuntimeRail", () => {
     const region = statusRegion(markup);
     expect(region).toContain("Loop running");
     expect(region).not.toContain('role="progressbar"');
-    expect(region).not.toContain("2 / 5");
+    expect(region).not.toContain("2/5");
     expect(region).not.toContain("Stop");
   });
 
@@ -184,7 +182,7 @@ describe("LoopRuntimeRail", () => {
         purpose: { kind: "loop-iteration", activationId: "activation-1", iteration: 17 },
       }),
     });
-    expect(markup).toContain("17 / 50");
+    expect(markup).toContain("17/50");
     expect(countSegments(markup)).toBe(5);
   });
 
@@ -218,22 +216,30 @@ describe("LoopRuntimeRail", () => {
     expect(countSegments(markup)).toBe(0);
   });
 
-  it("disables Stop now in the menu when no loop-owned turn is running", () => {
-    expect(deriveLoopStopControl(false)).toEqual({
-      triggerLabel: "Stop loop",
-      stopNowDisabled: true,
-    });
-    expect(deriveLoopStopControl(true)).toEqual({
-      triggerLabel: "Stop after turn",
-      stopNowDisabled: false,
-    });
+  it("labels the stop trigger by whether a loop-owned turn is running", () => {
+    expect(renderRail()).toContain("Stop loop");
+    expect(renderRail({ latestTurn: makeRunningLoopTurn() })).toContain("Stop after turn");
+  });
+
+  it("only shows the steering tooltip while running or ready", () => {
+    expect(renderRail({ latestTurn: makeRunningLoopTurn() })).toContain('tabindex="0"');
+    expect(renderRail()).toContain('tabindex="0"');
+    const waiting = renderRail({ hasPendingUserInput: true });
+    expect(waiting).not.toContain('data-slot="tooltip-trigger"');
+  });
+
+  it("pulses only the current filled segment while running", () => {
+    const running = renderRail({ latestTurn: makeRunningLoopTurn() });
+    expect(running.split("animate-[pulse_2s_ease-in-out_infinite]").length - 1).toBe(1);
+    const ready = renderRail();
+    expect(ready).not.toContain("animate-[pulse_2s_ease-in-out_infinite]");
   });
 
   it("renders waiting-approval with counter and stop menu while the turn runs", () => {
     const markup = renderRail({ hasPendingApprovals: true, latestTurn: makeRunningLoopTurn() });
     expect(markup).toContain("Loop waiting");
     expect(markup).toContain("Approval required");
-    expect(markup).toContain("2 / 5");
+    expect(markup).toContain("2/5");
     expect(markup).toContain("Stop after turn");
   });
 
@@ -247,20 +253,20 @@ describe("LoopRuntimeRail", () => {
     const markup = renderRail({ interactionMode: "plan" });
     expect(markup).toContain("Loop waiting");
     expect(markup).toContain("Plan mode is active");
-    expect(markup).not.toContain("2 / 5");
+    expect(markup).not.toContain("2/5");
   });
 
-  it("renders ending state with counter and progress but no stop controls", () => {
+  it("renders ending state with counter, progress, and a Stop now button", () => {
     const markup = renderRail({
       loop: makeLoop({ active: false, lastStopReason: "toggled_off" }),
       latestTurn: makeRunningLoopTurn(),
     });
     expect(markup).toContain("Loop ending");
     expect(markup).toContain("Current turn will finish");
-    expect(markup).toContain("2 / 5");
+    expect(markup).toContain("2/5");
     expect(countSegments(markup)).toBe(5);
     expect(markup).not.toContain("Stop after turn");
-    expect(markup).not.toContain("Stop loop");
+    expect(markup).toContain("Stop now");
   });
 
   it("renders stopping state with counter and progress but no stop controls", () => {
@@ -269,13 +275,10 @@ describe("LoopRuntimeRail", () => {
       latestTurn: makeRunningLoopTurn(),
     });
     expect(markup).toContain("Stopping loop");
-    expect(markup).toContain("2 / 5");
+    expect(markup).toContain("2/5");
     expect(countSegments(markup)).toBe(5);
     expect(markup).not.toContain("Stop after turn");
     expect(markup).not.toContain("Stop loop");
-  });
-
-  it("renders nothing once the loop has ended", () => {
-    expect(renderRail({ loop: makeLoop({ active: false, lastStopReason: "user_stop" }) })).toBe("");
+    expect(markup).not.toContain("Stop now");
   });
 });
