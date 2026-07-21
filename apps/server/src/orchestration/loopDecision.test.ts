@@ -1,4 +1,4 @@
-import type { ThreadLoop } from "@synara/contracts";
+import { LoopActivationId, type ThreadLoop } from "@synara/contracts";
 import {
   LOOP_FIXTURE_ACTIVATION_ID,
   makeLoop as makeLoopFixture,
@@ -91,7 +91,7 @@ describe("decideLoopContinuation", () => {
         latestTurnState: "running",
         latestTurnPurpose: {
           kind: "loop-iteration",
-          activationId: "stale-activation",
+          activationId: LoopActivationId.makeUnsafe("stale-activation"),
           iteration: 1,
         },
       },

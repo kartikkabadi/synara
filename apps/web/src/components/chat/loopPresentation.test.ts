@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { LoopStopReason, ThreadLoop } from "@synara/contracts";
+import { LoopActivationId, type LoopStopReason, type ThreadLoop } from "@synara/contracts";
 import { makeLoop, makeRunningLoopTurn } from "@synara/shared/loopTestFixtures";
 
 import {

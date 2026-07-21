@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { CommandId, ThreadId, type ThreadLoop } from "@synara/contracts";
+import { CommandId, LoopActivationId, ThreadId, type ThreadLoop } from "@synara/contracts";
 import { makeLoop } from "@synara/shared/loopTestFixtures";
 
 import {

@@ -1464,7 +1464,7 @@ describe("deriveMessagesTimelineRows", () => {
       activeTurnId: TurnId.makeUnsafe("t-loop"),
       activeTurnPurpose: {
         kind: "loop-iteration",
-        activationId: "activation-1",
+        activationId: LoopActivationId.makeUnsafe("activation-1"),
         iteration: 3,
       },
     });

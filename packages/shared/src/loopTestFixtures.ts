@@ -2,11 +2,7 @@
 // Purpose: Shared `/loop` test fixtures used by server and web loop test suites.
 // Layer: Test support (not for production code paths)
 
-import {
-  LoopActivationId,
-  type OrchestrationLatestTurn,
-  type ThreadLoop,
-} from "@synara/contracts";
+import { LoopActivationId, type OrchestrationLatestTurn, type ThreadLoop } from "@synara/contracts";
 
 export const LOOP_FIXTURE_ACTIVATION_ID = LoopActivationId.makeUnsafe("activation-1");
 

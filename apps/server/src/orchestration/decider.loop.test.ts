@@ -593,7 +593,9 @@ describe("decider loop commands", () => {
     );
     await expectRejected(
       readModel,
-      loopSetCommand("cmd-loop-edit-stale", { expectedActivationId: LoopActivationId.makeUnsafe("activation-1") }),
+      loopSetCommand("cmd-loop-edit-stale", {
+        expectedActivationId: LoopActivationId.makeUnsafe("activation-1"),
+      }),
     );
   });
 
@@ -604,7 +606,9 @@ describe("decider loop commands", () => {
     );
     await expectRejected(
       readModel,
-      loopSetCommand("cmd-loop-edit-ended", { expectedActivationId: LoopActivationId.makeUnsafe("activation-1") }),
+      loopSetCommand("cmd-loop-edit-ended", {
+        expectedActivationId: LoopActivationId.makeUnsafe("activation-1"),
+      }),
     );
   });
 
