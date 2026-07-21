@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { EventId, type OrchestrationThreadActivity, TurnId } from "@synara/contracts";
 
 import {
+  deriveContextCompactionMeterCopy,
   deriveContextWindowSelectionStatus,
   deriveContextWindowMeterDisplay,
   deriveCumulativeCostUsd,
@@ -245,6 +246,78 @@ describe("contextWindow", () => {
       activeLabel: "200k",
       selectedLabel: "1M",
       pendingSelectedLabel: "1M",
+    });
+  });
+
+  describe("deriveContextCompactionMeterCopy", () => {
+    const baseCompaction = {
+      manual: {
+        mode: "unsupported",
+        mechanism: "unsupported",
+        supportsInstructions: false,
+      },
+      automatic: {
+        mode: "unknown",
+        statusVisibility: "none",
+        triggerVisibility: "opaque",
+      },
+      telemetry: {
+        lifecycle: "none",
+        contextUsage: "none",
+      },
+    } as const;
+
+    it("claims provider-managed auto compaction from the descriptor, not the snapshot", () => {
+      expect(
+        deriveContextCompactionMeterCopy({
+          compaction: {
+            ...baseCompaction,
+            automatic: { mode: "native", statusVisibility: "none", triggerVisibility: "opaque" },
+          },
+          compactsAutomatically: false,
+        }),
+      ).toBe("provider-auto");
+    });
+
+    it("reports compaction as unavailable when neither manual nor automatic exists", () => {
+      expect(
+        deriveContextCompactionMeterCopy({
+          compaction: baseCompaction,
+          compactsAutomatically: true,
+        }),
+      ).toBe("unavailable");
+    });
+
+    it("stays silent when manual compaction exists without observable native auto", () => {
+      expect(
+        deriveContextCompactionMeterCopy({
+          compaction: {
+            ...baseCompaction,
+            manual: {
+              mode: "same-session",
+              mechanism: "control-command",
+              supportsInstructions: true,
+            },
+            automatic: { mode: "none", statusVisibility: "none", triggerVisibility: "opaque" },
+          },
+          compactsAutomatically: false,
+        }),
+      ).toBeNull();
+    });
+
+    it("falls back to the legacy snapshot boolean when no descriptor is available", () => {
+      expect(
+        deriveContextCompactionMeterCopy({
+          compaction: null,
+          compactsAutomatically: true,
+        }),
+      ).toBe("provider-auto");
+      expect(
+        deriveContextCompactionMeterCopy({
+          compaction: null,
+          compactsAutomatically: false,
+        }),
+      ).toBeNull();
     });
   });
 });

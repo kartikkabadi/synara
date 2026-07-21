@@ -51,7 +51,9 @@ import {
   ThreadId,
   TurnId,
   type UserInputQuestion,
+  type ProviderCompactionCapabilities,
   type ProviderComposerCapabilities,
+  supportsThreadCompactionFromCompaction,
   type ProviderListCommandsInput,
   type ProviderListCommandsResult,
   type ProviderListSkillsInput,
@@ -5224,6 +5226,25 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       ).pipe(Effect.ignore, Effect.andThen(Queue.shutdown(runtimeEventQueue))),
     );
 
+    // No manual compaction through the current Claude SDK path; automatic
+    // compaction is native (`autoCompactWindow` model option).
+    const compaction: ProviderCompactionCapabilities = {
+      manual: {
+        mode: "unsupported",
+        mechanism: "unsupported",
+        supportsInstructions: false,
+      },
+      automatic: {
+        mode: "native",
+        enabledByDefault: true,
+        statusVisibility: "partial",
+        triggerVisibility: "derived",
+      },
+      telemetry: {
+        lifecycle: "native",
+        contextUsage: "exact",
+      },
+    };
     const composerCapabilities: ProviderComposerCapabilities = {
       provider: PROVIDER,
       supportsSkillMentions: false,
@@ -5232,7 +5253,8 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       supportsPluginMentions: false,
       supportsPluginDiscovery: false,
       supportsRuntimeModelList: true,
-      supportsThreadCompaction: false,
+      compaction,
+      supportsThreadCompaction: supportsThreadCompactionFromCompaction(compaction),
       supportsThreadImport: true,
     };
 

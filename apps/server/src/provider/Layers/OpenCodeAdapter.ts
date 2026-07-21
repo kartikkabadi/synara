@@ -4,7 +4,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EventId,
   type ProviderKind,
+  type ProviderCompactionCapabilities,
   type ProviderComposerCapabilities,
+  supportsThreadCompactionFromCompaction,
   type ProviderListCommandsResult,
   type ProviderRuntimeEvent,
   type ProviderSession,
@@ -3997,6 +3999,30 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         );
       };
 
+      // Built per provider (`opencode` vs `kilo`) so the two providers never
+      // silently share one descriptor. Both currently compact manually via the
+      // `session.summarize` SDK call and compact natively with
+      // `part.type === "compaction"` / `session.compacted` events; the current
+      // usage normalizer reports cumulative processed tokens, not exact
+      // occupancy, so context usage is provider-estimated.
+      const compaction: ProviderCompactionCapabilities = {
+        manual: {
+          mode: "same-session",
+          mechanism: "native-sdk",
+          supportsInstructions: false,
+        },
+        automatic: {
+          mode: "native",
+          enabledByDefault: true,
+          statusVisibility: "exact",
+          triggerVisibility: "exact",
+        },
+        telemetry: {
+          lifecycle: "native",
+          contextUsage: "provider-estimated",
+        },
+      };
+
       const getComposerCapabilities: NonNullable<
         OpenCodeAdapterShape["getComposerCapabilities"]
       > = () =>
@@ -4008,7 +4034,8 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           supportsPluginMentions: false,
           supportsPluginDiscovery: false,
           supportsRuntimeModelList: true,
-          supportsThreadCompaction: true,
+          compaction,
+          supportsThreadCompaction: supportsThreadCompactionFromCompaction(compaction),
           supportsThreadImport: true,
         } satisfies ProviderComposerCapabilities);
 

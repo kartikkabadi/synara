@@ -199,5 +199,12 @@ describe("ProviderDiscoveryService.getComposerCapabilities", () => {
 
     expect(capabilities.supportsSkillDiscovery).toBe(true);
     expect(capabilities.supportsSkillMentions).toBe(true);
+    // Adapters without composer capabilities must not claim any compaction support.
+    expect(capabilities.compaction).toEqual({
+      manual: { mode: "unsupported", mechanism: "unsupported", supportsInstructions: false },
+      automatic: { mode: "unknown", statusVisibility: "none", triggerVisibility: "opaque" },
+      telemetry: { lifecycle: "none", contextUsage: "none" },
+    });
+    expect(capabilities.supportsThreadCompaction).toBe(false);
   });
 });

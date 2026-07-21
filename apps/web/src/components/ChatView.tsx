@@ -10235,6 +10235,7 @@ export default function ChatView({
                       composerFooterControlsPlan.showContextMeter ? (
                         <ContextWindowMeter
                           usage={runtimeUsageContextWindow}
+                          compaction={providerComposerCapabilitiesQuery.data?.compaction ?? null}
                           {...(activeCumulativeCostUsd != null
                             ? { cumulativeCostUsd: activeCumulativeCostUsd }
                             : {})}

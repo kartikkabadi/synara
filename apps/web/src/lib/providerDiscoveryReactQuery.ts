@@ -302,6 +302,13 @@ export function supportsPluginDiscovery(
 export function supportsThreadCompaction(
   capabilities: ProviderComposerCapabilities | undefined,
 ): boolean {
+  // Only same-session manual compaction is offered as a composer command.
+  // The legacy boolean remains as a fallback for servers that predate the
+  // structured compaction descriptor.
+  const manualMode = capabilities?.compaction?.manual.mode;
+  if (manualMode !== undefined) {
+    return manualMode === "same-session";
+  }
   return capabilities?.supportsThreadCompaction === true;
 }
 

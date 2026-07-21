@@ -201,9 +201,12 @@ function normalizeToolCallStatus(
 }
 
 // Converts ACP's unstable usage updates into Synara's context-window snapshot shape.
+// `compactsAutomatically` is a per-provider claim, so callers must supply it
+// explicitly; when absent, the snapshot makes no automatic-compaction claim.
 function tokenUsageSnapshotFromAcpUsageUpdate(input: {
   readonly size: unknown;
   readonly used: unknown;
+  readonly compactsAutomatically?: boolean | undefined;
 }): ThreadTokenUsageSnapshot | undefined {
   const usedTokens = nonNegativeInteger(input.used);
   if (usedTokens === undefined) {
@@ -215,7 +218,9 @@ function tokenUsageSnapshotFromAcpUsageUpdate(input: {
     usedTokens,
     ...(usedPercent !== undefined ? { usedPercent } : {}),
     ...(maxTokens !== undefined ? { maxTokens } : {}),
-    compactsAutomatically: true,
+    ...(input.compactsAutomatically !== undefined
+      ? { compactsAutomatically: input.compactsAutomatically }
+      : {}),
   };
 }
 
@@ -560,7 +565,12 @@ export function parsePermissionRequest(
   };
 }
 
-export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotification): {
+export function parseSessionUpdateEvent(
+  params: EffectAcpSchema.SessionNotification,
+  options?: {
+    readonly usageCompactsAutomatically?: boolean | undefined;
+  },
+): {
   readonly modeId?: string;
   readonly events: ReadonlyArray<AcpParsedSessionEvent>;
 } {
@@ -649,6 +659,7 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
       const usage = tokenUsageSnapshotFromAcpUsageUpdate({
         size: upd.size,
         used: upd.used,
+        compactsAutomatically: options?.usageCompactsAutomatically,
       });
       if (usage) {
         events.push({
