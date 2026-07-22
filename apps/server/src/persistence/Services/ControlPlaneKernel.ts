@@ -73,6 +73,14 @@ export interface KernelJobAck {
   readonly resultDigest?: Uint8Array;
 }
 
+export type KernelJobResolution = "retry" | "markSucceeded" | "markDead";
+
+/** Operator decision for one job in the `uncertain` state. */
+export interface KernelJobResolutionInput {
+  readonly jobId: string;
+  readonly resolution: KernelJobResolution;
+}
+
 export interface KernelCommitBatch {
   /**
    * 32-char hex; generated when omitted. Supply one to be able to recover
@@ -85,6 +93,7 @@ export interface KernelCommitBatch {
   readonly projectionPatches?: ReadonlyArray<KernelProjectionPatch>;
   readonly enqueueJobs?: ReadonlyArray<KernelJobSpec>;
   readonly ackJobs?: ReadonlyArray<KernelJobAck>;
+  readonly resolveUncertainJobs?: ReadonlyArray<KernelJobResolutionInput>;
 }
 
 export interface KernelCommitReceipt {
@@ -152,6 +161,12 @@ export interface KernelJobInfo {
   readonly errorSummary?: string;
 }
 
+/** One page from `jobsPage`; pass `nextAfterSequence` back for the next page. */
+export interface KernelJobsPage {
+  readonly jobs: ReadonlyArray<KernelJobInfo>;
+  readonly nextAfterSequence: number;
+}
+
 export interface KernelPersistedEvent {
   readonly transactionId: string;
   readonly globalSequence: number;
@@ -205,6 +220,26 @@ export interface ControlPlaneKernelShape {
     readonly state?: string;
     readonly limit: number;
   }) => Effect.Effect<ReadonlyArray<KernelJobInfo>, ControlPlaneKernelError>;
+
+  /** Look up one job by its ID (null when unknown). */
+  readonly job: (jobId: string) => Effect.Effect<KernelJobInfo | null, ControlPlaneKernelError>;
+
+  /**
+   * One page of jobs after a pagination cursor (an enqueue-sequence value;
+   * start from 0), optionally filtered by queue and state.
+   */
+  readonly jobsPage: (input: {
+    readonly queue?: string;
+    readonly state?: string;
+    readonly afterSequence: number;
+    readonly limit: number;
+  }) => Effect.Effect<KernelJobsPage, ControlPlaneKernelError>;
+
+  /** Durably resolve jobs in the `uncertain` state (retry / markSucceeded / markDead). */
+  readonly resolveUncertainJobs: (input: {
+    readonly committedAtMs: number;
+    readonly resolutions: ReadonlyArray<KernelJobResolutionInput>;
+  }) => Effect.Effect<KernelCommitReceipt, ControlPlaneKernelError>;
 
   /** Get one projection entry by key. */
   readonly projectionGet: (input: {
