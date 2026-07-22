@@ -69,8 +69,7 @@ export const ControlPlaneResolveUncertainJobInput = Schema.Struct({
   jobId: TrimmedNonEmptyString,
   resolution: ControlPlaneJobResolution,
 });
-export type ControlPlaneResolveUncertainJobInput =
-  typeof ControlPlaneResolveUncertainJobInput.Type;
+export type ControlPlaneResolveUncertainJobInput = typeof ControlPlaneResolveUncertainJobInput.Type;
 
 /** The job's state after the resolution committed. */
 export const ControlPlaneResolveUncertainJobResult = Schema.Struct({

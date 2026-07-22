@@ -178,10 +178,7 @@ describe.skipIf(!addonAvailable)("ControlPlaneKernel (native addon smoke)", () =
           afterSequence: 0,
           limit: 10,
         });
-        assert.deepEqual(
-          uncertain.jobs.map((job) => job.jobId).sort(),
-          [first, second].sort(),
-        );
+        assert.deepEqual(uncertain.jobs.map((job) => job.jobId).sort(), [first, second].sort());
 
         yield* kernel.resolveUncertainJobs({
           committedAtMs: now + 1_000,
