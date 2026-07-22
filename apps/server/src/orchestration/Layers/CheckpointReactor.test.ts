@@ -27,6 +27,13 @@ import { CheckpointStoreLive } from "../../checkpointing/Layers/CheckpointStore.
 import { CheckpointStore } from "../../checkpointing/Services/CheckpointStore.ts";
 import { GitCoreLive } from "../../git/Layers/GitCore.ts";
 import { CheckpointReactorLive } from "./CheckpointReactor.ts";
+import { RevertSagaWorkerLive } from "./RevertSagaWorker.ts";
+import {
+  ControlPlaneKernelLive,
+  loadControlPlaneAddon,
+} from "../../persistence/Layers/ControlPlaneKernel.ts";
+import { ControlPlaneKernel } from "../../persistence/Services/ControlPlaneKernel.ts";
+import { REVERT_SAGA_QUEUE } from "../Services/RevertSagaWorker.ts";
 import { TurnCheckpointCoordinatorLive } from "./TurnCheckpointCoordinator.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
@@ -243,7 +250,7 @@ async function waitForGitRefExists(cwd: string, ref: string, timeoutMs = 30_000)
 
 describe("CheckpointReactor", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
-    OrchestrationEngineService | CheckpointReactor | CheckpointStore,
+    OrchestrationEngineService | CheckpointReactor | CheckpointStore | ControlPlaneKernel,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -299,6 +306,8 @@ describe("CheckpointReactor", () => {
     });
 
     const layer = CheckpointReactorLive.pipe(
+      Layer.provideMerge(RevertSagaWorkerLive),
+      Layer.provideMerge(ControlPlaneKernelLive),
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
       Layer.provideMerge(RuntimeReceiptBusLive),
@@ -2115,6 +2124,93 @@ describe("CheckpointReactor", () => {
       numTurns: 1,
     });
   });
+
+  const kernelAddonAvailable = typeof loadControlPlaneAddon() !== "string";
+  it.skipIf(!kernelAddonAvailable)(
+    "records a complete kernel saga trail in shadow mode while legacy revert stays authoritative",
+    async () => {
+      process.env.SYNARA_CONTROL_PLANE_KERNEL = "shadow";
+      try {
+        const harness = await createHarness({ providerName: "claudeAgent" });
+        const threadId = ThreadId.makeUnsafe("thread-1");
+        const createdAt = new Date().toISOString();
+
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.session.set",
+            commandId: CommandId.makeUnsafe("cmd-session-set-shadow"),
+            threadId,
+            session: {
+              threadId,
+              status: "ready",
+              providerName: "claudeAgent",
+              runtimeMode: "approval-required",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: createdAt,
+            },
+            createdAt,
+          }),
+        );
+        for (const turnCount of [1, 2]) {
+          await Effect.runPromise(
+            harness.engine.dispatch({
+              type: "thread.turn.diff.complete",
+              commandId: CommandId.makeUnsafe(`cmd-diff-shadow-${turnCount}`),
+              threadId,
+              turnId: asTurnId(`turn-shadow-${turnCount}`),
+              completedAt: createdAt,
+              checkpointRef: checkpointRefForThreadTurn(threadId, turnCount),
+              status: "ready",
+              files: [],
+              checkpointTurnCount: turnCount,
+              createdAt,
+            }),
+          );
+        }
+
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.checkpoint.revert",
+            commandId: CommandId.makeUnsafe("cmd-revert-request-shadow"),
+            threadId,
+            turnCount: 1,
+            scope: "thread",
+            createdAt,
+          }),
+        );
+
+        // Legacy path stays authoritative and executes effects exactly once.
+        await waitForEvent(harness.engine, (event) => event.type === "thread.reverted");
+        expect(harness.provider.rollbackConversation).toHaveBeenCalledTimes(1);
+        expect(harness.provider.rollbackConversation).toHaveBeenCalledWith({
+          threadId,
+          numTurns: 1,
+        });
+
+        // Kernel recorded a complete durable trail and settled the queued job.
+        const kernel = await runtime!.runPromise(Effect.service(ControlPlaneKernel));
+        const trail = await runtime!.runPromise(
+          Effect.map(kernel.eventsAfter({ after: 0, limit: 100 }), (events) =>
+            events.map((event) => event.eventType),
+          ),
+        );
+        expect(trail[0]).toBe("thread.revert.started");
+        expect(trail.at(-1)).toBe("thread.revert.completed");
+        expect(trail.filter((eventType) => eventType === "thread.revert.step").length).toBe(3);
+        const succeededJobs = await runtime!.runPromise(
+          kernel.jobs({ queue: REVERT_SAGA_QUEUE, state: "succeeded", limit: 10 }),
+        );
+        expect(succeededJobs.length).toBe(1);
+        const pendingJobs = await runtime!.runPromise(
+          kernel.jobs({ queue: REVERT_SAGA_QUEUE, state: "pending", limit: 10 }),
+        );
+        expect(pendingJobs.length).toBe(0);
+      } finally {
+        delete process.env.SYNARA_CONTROL_PLANE_KERNEL;
+      }
+    },
+  );
 
   it("processes consecutive revert requests with deterministic rollback sequencing", async () => {
     const harness = await createHarness();
