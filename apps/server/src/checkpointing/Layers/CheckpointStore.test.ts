@@ -353,12 +353,7 @@ describe("CheckpointStoreLive rescue checkpoints (real Git)", () => {
         );
         expect(yield* store.hasCheckpointRef({ cwd, checkpointRef })).toBe(true);
 
-        const capturedFiles = yield* git(cwd, [
-          "ls-tree",
-          "--name-only",
-          "-r",
-          checkpointRef,
-        ]);
+        const capturedFiles = yield* git(cwd, ["ls-tree", "--name-only", "-r", checkpointRef]);
         expect(capturedFiles.split("\n").sort()).toEqual(["tracked.txt", "untracked.txt"]);
       }),
     );

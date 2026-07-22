@@ -16,6 +16,7 @@ import type {
 } from "@synara/contracts";
 import {
   ApprovalRequestId,
+  CheckpointRef,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
@@ -289,6 +290,10 @@ describe("ProviderCommandReactor", () => {
       reverseCheckpointDiff: () => Effect.succeed(true),
       diffCheckpoints: () => Effect.succeed(""),
       deleteCheckpointRefs: () => Effect.void,
+      captureRescueCheckpoint: () =>
+        Effect.succeed(CheckpointRef.makeUnsafe("refs/synara-rescue/thread/0")),
+      restoreRescueCheckpoint: () => Effect.succeed(true),
+      deleteRescueRef: () => Effect.void,
       ...input?.checkpointStore,
     };
     const stopSession = vi.fn((input: unknown) =>
