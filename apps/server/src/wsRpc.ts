@@ -12,6 +12,7 @@ import {
   WsBootstrapRpcGroup,
   WsFeatureRpcGroup,
   WsRpcError,
+  CONTROL_PLANE_KERNEL_DISABLED_CODE,
   PullRequestsUnavailableError,
   type GitActionProgressEvent,
   type OrchestrationCommand,
@@ -43,6 +44,15 @@ import { SessionCredentialService } from "./auth/Services/SessionCredentialServi
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery";
 import { resolveThreadWorkspaceCwd } from "./checkpointing/Utils";
 import { ServerConfig, type ServerConfigShape } from "./config";
+import {
+  getControlPlaneJob,
+  listUncertainRevertJobs,
+  resolveUncertainRevertJob,
+} from "./controlPlaneOperator";
+import {
+  ControlPlaneKernel,
+  type ControlPlaneKernelError,
+} from "./persistence/Services/ControlPlaneKernel";
 import { realpathNearestExisting } from "./realpathNearestExisting";
 import { listStudioThreadOutputs } from "./studioOutputs";
 import {
@@ -295,6 +305,7 @@ const makeWsRpcHandlersLayer = () =>
   AdmittedWsFeatureRpcGroup.toLayer(
     Effect.gen(function* () {
       const checkpointDiffQuery = yield* CheckpointDiffQuery;
+      const controlPlaneKernel = yield* ControlPlaneKernel;
       const automationService = yield* AutomationService;
       const config = yield* ServerConfig;
       const devServerManager = yield* DevServerManager;
@@ -735,6 +746,23 @@ const makeWsRpcHandlersLayer = () =>
 
       const rpcEffect = <A, E, R>(effect: Effect.Effect<A, E, R>, fallbackMessage: string) =>
         effect.pipe(Effect.mapError((cause) => toWsRpcError(cause, fallbackMessage)));
+
+      // Kernel-disabled failures surface with a stable code so clients can
+      // hide the operator surface instead of showing a generic error.
+      const controlPlaneEffect = <A, R>(
+        effect: Effect.Effect<A, ControlPlaneKernelError, R>,
+        fallbackMessage: string,
+      ) =>
+        effect.pipe(
+          Effect.mapError((cause) =>
+            cause.code === "KernelDisabled"
+              ? new WsRpcError({
+                  message: "The control-plane kernel is disabled on this server.",
+                  code: CONTROL_PLANE_KERNEL_DISABLED_CODE,
+                })
+              : toWsRpcError(cause, fallbackMessage),
+          ),
+        );
 
       const requireOwner = Effect.gen(function* () {
         if (!canManageExternalMcp(yield* CurrentWsSessionRole)) {
@@ -1349,6 +1377,21 @@ const makeWsRpcHandlersLayer = () =>
           ),
         [WS_METHODS.serverStopLocalServer]: (input) =>
           rpcEffect(stopLocalServerAndTrackedProjectRun(input), "Failed to stop local server"),
+        [WS_METHODS.controlPlaneListUncertainRevertJobs]: (input) =>
+          controlPlaneEffect(
+            listUncertainRevertJobs(controlPlaneKernel, input),
+            "Failed to list uncertain checkpoint-revert jobs",
+          ),
+        [WS_METHODS.controlPlaneGetJob]: (input) =>
+          controlPlaneEffect(
+            getControlPlaneJob(controlPlaneKernel, input),
+            "Failed to load control-plane job",
+          ),
+        [WS_METHODS.controlPlaneResolveUncertainJob]: (input) =>
+          controlPlaneEffect(
+            resolveUncertainRevertJob(controlPlaneKernel, input),
+            "Failed to resolve uncertain checkpoint-revert job",
+          ),
         [WS_METHODS.statsGetProfileStats]: (input) =>
           rpcEffect(profileStatsQuery.getProfileStats(input), "Failed to load profile stats"),
         [WS_METHODS.statsGetProfileTokenStats]: (input) =>
