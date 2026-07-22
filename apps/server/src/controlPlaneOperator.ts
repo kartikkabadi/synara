@@ -28,7 +28,10 @@ const DEFAULT_PAGE_LIMIT = 50;
 
 export const listUncertainRevertJobs = (
   kernel: ControlPlaneKernelShape,
-  input: { readonly afterSequence?: number; readonly limit?: number },
+  input: {
+    readonly afterSequence?: number | undefined;
+    readonly limit?: number | undefined;
+  },
 ): Effect.Effect<ControlPlaneListUncertainRevertJobsResult, ControlPlaneKernelError> => {
   const afterSequence = input.afterSequence ?? 0;
   if (kernel.mode === "off") {
