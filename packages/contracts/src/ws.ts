@@ -99,6 +99,11 @@ import {
 } from "./server";
 import { StatsGetProfileStatsInput, StatsGetProfileTokenStatsInput } from "./stats";
 import {
+  ControlPlaneGetJobInput,
+  ControlPlaneListUncertainRevertJobsInput,
+  ControlPlaneResolveUncertainJobInput,
+} from "./controlPlane";
+import {
   ProviderListCommandsInput,
   ProviderGetComposerCapabilitiesInput,
   ProviderListPluginsInput,
@@ -209,6 +214,9 @@ export const WS_METHODS = {
   serverListProviderUsage: "server.listProviderUsage",
   statsGetProfileStats: "stats.getProfileStats",
   statsGetProfileTokenStats: "stats.getProfileTokenStats",
+  controlPlaneListUncertainRevertJobs: "controlPlane.listUncertainRevertJobs",
+  controlPlaneGetJob: "controlPlane.getJob",
+  controlPlaneResolveUncertainJob: "controlPlane.resolveUncertainJob",
   serverGetDiagnostics: "server.getDiagnostics",
   serverTranscribeVoice: "server.transcribeVoice",
   serverGenerateThreadRecap: "server.generateThreadRecap",
@@ -376,6 +384,12 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.serverListProviderUsage, ServerListProviderUsageInput),
   tagRequestBody(WS_METHODS.statsGetProfileStats, StatsGetProfileStatsInput),
   tagRequestBody(WS_METHODS.statsGetProfileTokenStats, StatsGetProfileTokenStatsInput),
+  tagRequestBody(
+    WS_METHODS.controlPlaneListUncertainRevertJobs,
+    ControlPlaneListUncertainRevertJobsInput,
+  ),
+  tagRequestBody(WS_METHODS.controlPlaneGetJob, ControlPlaneGetJobInput),
+  tagRequestBody(WS_METHODS.controlPlaneResolveUncertainJob, ControlPlaneResolveUncertainJobInput),
   tagRequestBody(WS_METHODS.serverGetDiagnostics, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverTranscribeVoice, ServerVoiceTranscriptionInput),
   tagRequestBody(WS_METHODS.serverGenerateThreadRecap, ServerGenerateThreadRecapInput),

@@ -18,6 +18,14 @@ import {
   AutomationStreamEvent,
   AutomationUpdateInput,
 } from "./automation";
+import {
+  ControlPlaneGetJobInput,
+  ControlPlaneGetJobResult,
+  ControlPlaneListUncertainRevertJobsInput,
+  ControlPlaneListUncertainRevertJobsResult,
+  ControlPlaneResolveUncertainJobInput,
+  ControlPlaneResolveUncertainJobResult,
+} from "./controlPlane";
 import { OpenInEditorInput } from "./editor";
 import {
   ExternalMcpCreateIntegrationInput,
@@ -890,6 +898,30 @@ export const WsProviderListAgentsRpc = Rpc.make(WS_METHODS.providerListAgents, {
   error: WsRpcError,
 });
 
+export const WsControlPlaneListUncertainRevertJobsRpc = Rpc.make(
+  WS_METHODS.controlPlaneListUncertainRevertJobs,
+  {
+    payload: ControlPlaneListUncertainRevertJobsInput,
+    success: ControlPlaneListUncertainRevertJobsResult,
+    error: WsRpcError,
+  },
+);
+
+export const WsControlPlaneGetJobRpc = Rpc.make(WS_METHODS.controlPlaneGetJob, {
+  payload: ControlPlaneGetJobInput,
+  success: ControlPlaneGetJobResult,
+  error: WsRpcError,
+});
+
+export const WsControlPlaneResolveUncertainJobRpc = Rpc.make(
+  WS_METHODS.controlPlaneResolveUncertainJob,
+  {
+    payload: ControlPlaneResolveUncertainJobInput,
+    success: ControlPlaneResolveUncertainJobResult,
+    error: WsRpcError,
+  },
+);
+
 export const WsAutomationListRpc = Rpc.make(WS_METHODS.automationList, {
   payload: AutomationListInput,
   success: AutomationListResult,
@@ -1032,6 +1064,9 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsServerListProviderUsageRpc,
   WsStatsGetProfileStatsRpc,
   WsStatsGetProfileTokenStatsRpc,
+  WsControlPlaneListUncertainRevertJobsRpc,
+  WsControlPlaneGetJobRpc,
+  WsControlPlaneResolveUncertainJobRpc,
   WsServerGetDiagnosticsRpc,
   WsServerTranscribeVoiceRpc,
   WsServerGenerateThreadRecapRpc,
