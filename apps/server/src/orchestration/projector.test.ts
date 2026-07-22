@@ -185,6 +185,7 @@ describe("orchestration projector", () => {
         sidechatSourceThreadId: null,
         lastKnownPr: null,
         latestTurn: null,
+        revertSaga: null,
         createdAt: now,
         updatedAt: now,
         archivedAt: null,
