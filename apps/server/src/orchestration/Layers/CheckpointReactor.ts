@@ -34,6 +34,7 @@ import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { CheckpointReactor, type CheckpointReactorShape } from "../Services/CheckpointReactor.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+import { RevertSagaWorker } from "../Services/RevertSagaWorker.ts";
 import { RuntimeReceiptBus } from "../Services/RuntimeReceiptBus.ts";
 import { TurnCheckpointCoordinator } from "../Services/TurnCheckpointCoordinator.ts";
 import { CheckpointStoreError } from "../../checkpointing/Errors.ts";
@@ -128,6 +129,7 @@ const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const receiptBus = yield* RuntimeReceiptBus;
+  const revertSagaWorker = yield* RevertSagaWorker;
   const turnCheckpointCoordinator = yield* TurnCheckpointCoordinator;
   const pendingMessageStartByThread = new Map<ThreadId, MessageId>();
   // Coalesces live turn-diff recomputes: at most one queued + one in-flight per
@@ -1169,11 +1171,29 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    // Shadow saga: record the same revert as a durable kernel saga. The
+    // legacy path below stays authoritative and executes all effects; the
+    // shadow handle only records intent, steps, and settlement, and is
+    // Option.none when SYNARA_CONTROL_PLANE_KERNEL is off.
+    const shadowSaga = Option.getOrUndefined(
+      yield* revertSagaWorker.armShadowSaga({
+        threadId: event.payload.threadId,
+        turnCount: event.payload.turnCount,
+        targetCheckpointRef,
+        cwd: sessionRuntime.value.cwd,
+      }),
+    );
+
     const restored = yield* checkpointStore.restoreCheckpoint({
       cwd: sessionRuntime.value.cwd,
       checkpointRef: targetCheckpointRef,
     });
     if (!restored) {
+      if (shadowSaga) {
+        yield* shadowSaga.abort(
+          `Filesystem checkpoint is unavailable for turn ${event.payload.turnCount}; nothing was mutated.`,
+        );
+      }
       yield* appendRevertFailureActivity({
         threadId: event.payload.threadId,
         turnCount: event.payload.turnCount,
@@ -1182,6 +1202,9 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.catch(() => Effect.void));
       return;
     }
+    if (shadowSaga) {
+      yield* shadowSaga.recordStep("filesystem-restore");
+    }
 
     // Invalidate the workspace entry cache so the @-mention file picker
     // reflects the reverted filesystem state.
@@ -1189,10 +1212,23 @@ const make = Effect.gen(function* () {
 
     const rolledBackTurns = Math.max(0, currentTurnCount - event.payload.turnCount);
     if (rolledBackTurns > 0) {
-      yield* providerService.rollbackConversation({
-        threadId: sessionRuntime.value.threadId,
-        numTurns: rolledBackTurns,
-      });
+      // A failed rollback call is ambiguous: the provider may or may not
+      // have applied it. Record it as uncertain rather than assuming failure.
+      yield* providerService
+        .rollbackConversation({
+          threadId: sessionRuntime.value.threadId,
+          numTurns: rolledBackTurns,
+        })
+        .pipe(
+          Effect.tapError((error) =>
+            shadowSaga
+              ? shadowSaga.recordUncertain("provider-rollback", error.message)
+              : Effect.void,
+          ),
+        );
+      if (shadowSaga) {
+        yield* shadowSaga.recordStep("provider-rollback", `numTurns:${rolledBackTurns}`);
+      }
     }
 
     const staleCheckpointRefs = thread.checkpoints
@@ -1204,6 +1240,9 @@ const make = Effect.gen(function* () {
         cwd: sessionRuntime.value.cwd,
         checkpointRefs: staleCheckpointRefs,
       });
+      if (shadowSaga) {
+        yield* shadowSaga.recordStep("checkpoint-ref-gc", `refs:${staleCheckpointRefs.length}`);
+      }
     }
 
     yield* orchestrationEngine
@@ -1225,6 +1264,10 @@ const make = Effect.gen(function* () {
         ),
         Effect.asVoid,
       );
+
+    if (shadowSaga) {
+      yield* shadowSaga.complete();
+    }
   });
 
   const handleRevertRequested = (
