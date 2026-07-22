@@ -36,6 +36,15 @@ export interface ArmShadowSagaInput {
 export interface RevertSagaShadowHandle {
   readonly sagaId: string;
 
+  /**
+   * Take a lease on the queued job before executing effects (kernel-
+   * authoritative "on" mode). Returns false (logged) when the claim fails;
+   * the saga then falls back to settlement by scan. While the lease is
+   * held, an uncertain outcome simply leaves it to expire, which is what
+   * transitions the reconcilable job to Uncertain.
+   */
+  readonly claim: () => Effect.Effect<boolean>;
+
   /** Record one completed step of the legacy revert. */
   readonly recordStep: (stepId: string, detail?: string) => Effect.Effect<void>;
 
@@ -63,6 +72,9 @@ export interface RevertSagaShadowHandle {
  * RevertSagaWorkerShape - Service API for shadow-recording revert sagas.
  */
 export interface RevertSagaWorkerShape {
+  /** Effective rollout mode of the backing kernel. */
+  readonly mode: "off" | "shadow" | "on";
+
   /**
    * Arm a shadow saga before the legacy revert mutates anything. Returns
    * `Option.none()` when the kernel is off or arming fails (logged).

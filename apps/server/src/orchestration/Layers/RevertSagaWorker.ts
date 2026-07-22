@@ -26,7 +26,9 @@ import {
 } from "../Services/RevertSagaWorker.ts";
 
 const SHADOW_WORKER_ID = "checkpoint-reactor-shadow";
+const EXECUTOR_WORKER_ID = "checkpoint-revert-executor";
 const SHADOW_CLAIM_LEASE_MS = 30_000;
+const EXECUTOR_LEASE_MS = 60_000;
 const SHADOW_CLAIM_LIMIT = 8;
 
 const encodePayload = (payload: object): Uint8Array =>
@@ -46,6 +48,8 @@ function makeHandle(
   sagaId: string,
   jobId: string,
 ): RevertSagaShadowHandle {
+  let heldLeaseToken: string | null = null;
+
   const appendEvent = (eventType: string, payload: object) =>
     kernel
       .commit({
@@ -61,28 +65,57 @@ function makeHandle(
       })
       .pipe(Effect.asVoid, Effect.catch(logKernelFailure(eventType)));
 
-  // Claim from the saga queue and acknowledge this saga's job in the same
-  // kernel transaction as the terminal event. Jobs claimed alongside that
-  // belong to other sagas are left to lease-expire; shadow mode never
-  // executes anything, so an expiring shadow lease is only log noise.
-  const settleJob = (eventType: string, payload: object) =>
+  const claim = () =>
     Effect.gen(function* () {
-      const claim = yield* kernel.claimJobs({
+      const outcome = yield* kernel.claimJobs({
         queue: REVERT_SAGA_QUEUE,
-        workerId: SHADOW_WORKER_ID,
+        workerId: EXECUTOR_WORKER_ID,
         nowMs: Date.now(),
-        leaseMs: SHADOW_CLAIM_LEASE_MS,
+        leaseMs: EXECUTOR_LEASE_MS,
         limit: SHADOW_CLAIM_LIMIT,
       });
-      const claimedJob = claim.jobs.find((job) => job.jobId === jobId);
+      const claimedJob = outcome.jobs.find((job) => job.jobId === jobId);
       if (!claimedJob) {
-        yield* Effect.logWarning("revert saga shadow job missing at settlement", {
+        yield* Effect.logWarning("revert saga job could not be claimed", {
           sagaId,
           jobId,
           threadId: input.threadId,
-          claimedJobIds: claim.jobs.map((job) => job.jobId),
+          claimedJobIds: outcome.jobs.map((job) => job.jobId),
         });
-        return;
+        return false;
+      }
+      heldLeaseToken = claimedJob.leaseToken;
+      return true;
+    }).pipe(Effect.catch((error) => logKernelFailure("claim")(error).pipe(Effect.as(false))));
+
+  // Acknowledge this saga's job in the same kernel transaction as the
+  // terminal event, using the held lease when the executor claimed the job
+  // up front, otherwise claiming by scan (shadow mode). Jobs claimed
+  // alongside that belong to other sagas are left to lease-expire; shadow
+  // mode never executes anything, so an expiring shadow lease is only log
+  // noise.
+  const settleJob = (eventType: string, payload: object) =>
+    Effect.gen(function* () {
+      let leaseToken = heldLeaseToken;
+      if (leaseToken === null) {
+        const outcome = yield* kernel.claimJobs({
+          queue: REVERT_SAGA_QUEUE,
+          workerId: SHADOW_WORKER_ID,
+          nowMs: Date.now(),
+          leaseMs: SHADOW_CLAIM_LEASE_MS,
+          limit: SHADOW_CLAIM_LIMIT,
+        });
+        const claimedJob = outcome.jobs.find((job) => job.jobId === jobId);
+        if (!claimedJob) {
+          yield* Effect.logWarning("revert saga shadow job missing at settlement", {
+            sagaId,
+            jobId,
+            threadId: input.threadId,
+            claimedJobIds: outcome.jobs.map((job) => job.jobId),
+          });
+          return;
+        }
+        leaseToken = claimedJob.leaseToken;
       }
       yield* kernel.commit({
         committedAtMs: Date.now(),
@@ -94,7 +127,7 @@ function makeHandle(
             payload: encodePayload(payload),
           },
         ],
-        ackJobs: [{ jobId: claimedJob.jobId, leaseToken: claimedJob.leaseToken }],
+        ackJobs: [{ jobId, leaseToken }],
       });
     }).pipe(Effect.catch(logKernelFailure(eventType)));
 
@@ -112,6 +145,7 @@ function makeHandle(
 
   return {
     sagaId,
+    claim,
     recordStep: (stepId, detail) =>
       appendEvent("thread.revert.step", {
         sagaId,
@@ -145,6 +179,7 @@ function makeHandle(
 }
 
 export const makeRevertSagaWorker = (kernel: ControlPlaneKernelShape): RevertSagaWorkerShape => ({
+  mode: kernel.mode,
   armShadowSaga: (input) =>
     kernel.mode === "off"
       ? Effect.succeedNone
