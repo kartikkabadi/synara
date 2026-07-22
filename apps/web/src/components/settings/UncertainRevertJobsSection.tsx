@@ -4,7 +4,7 @@
 // Layer: Settings UI components
 // Exports: UncertainRevertJobsSection
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import type { ControlPlaneJob, ControlPlaneJobResolution } from "@synara/contracts";
@@ -30,7 +30,6 @@ const RESOLUTIONS: ReadonlyArray<{ resolution: ControlPlaneJobResolution; label:
 ];
 
 export function UncertainRevertJobsSection() {
-  const queryClient = useQueryClient();
   const [resolvingJobId, setResolvingJobId] = useState<string | null>(null);
 
   const jobsQuery = useQuery({
@@ -61,7 +60,7 @@ export function UncertainRevertJobsSection() {
       })
       .finally(() => {
         setResolvingJobId(null);
-        void queryClient.invalidateQueries({ queryKey: UNCERTAIN_REVERT_JOBS_QUERY_KEY });
+        void jobsQuery.refetch();
       });
   };
 
