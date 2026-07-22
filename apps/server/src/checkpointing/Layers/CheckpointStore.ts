@@ -17,6 +17,7 @@ import { CheckpointInvariantError, type CheckpointStoreError } from "../Errors.t
 import { GitCommandError } from "../../git/Errors.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { CheckpointStore, type CheckpointStoreShape } from "../Services/CheckpointStore.ts";
+import { rescueCheckpointRefForThread } from "../Utils.ts";
 import { CheckpointRef } from "@synara/contracts";
 
 const CHECKPOINT_DIFF_MAX_OUTPUT_BYTES = 10_000_000;
@@ -474,6 +475,22 @@ const makeCheckpointStore = Effect.gen(function* () {
       );
     });
 
+  const captureRescueCheckpoint: CheckpointStoreShape["captureRescueCheckpoint"] = (input) =>
+    Effect.gen(function* () {
+      const checkpointRef = rescueCheckpointRefForThread(
+        input.threadId,
+        input.timestampMs ?? Date.now(),
+      );
+      yield* captureCheckpoint({ cwd: input.cwd, checkpointRef });
+      return checkpointRef;
+    });
+
+  const restoreRescueCheckpoint: CheckpointStoreShape["restoreRescueCheckpoint"] = (input) =>
+    restoreCheckpoint({ cwd: input.cwd, checkpointRef: input.checkpointRef });
+
+  const deleteRescueRef: CheckpointStoreShape["deleteRescueRef"] = (input) =>
+    deleteCheckpointRefs({ cwd: input.cwd, checkpointRefs: [input.checkpointRef] });
+
   return {
     isGitRepository,
     captureCheckpoint,
@@ -483,6 +500,9 @@ const makeCheckpointStore = Effect.gen(function* () {
     diffCheckpoints,
     reverseCheckpointDiff,
     deleteCheckpointRefs,
+    captureRescueCheckpoint,
+    restoreRescueCheckpoint,
+    deleteRescueRef,
   } satisfies CheckpointStoreShape;
 });
 
