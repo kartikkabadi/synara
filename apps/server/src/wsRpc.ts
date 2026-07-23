@@ -136,6 +136,17 @@ export function canManageExternalMcp(role: "owner" | "client"): boolean {
   return role === "owner";
 }
 
+// The control-plane operator surface mutates durable job state (retry /
+// markSucceeded / markDead), so it is restricted to owner sessions server-side
+// regardless of what the UI exposes.
+export const requireControlPlaneOperator = Effect.gen(function* () {
+  if ((yield* CurrentWsSessionRole) !== "owner") {
+    return yield* Effect.fail(
+      new WsRpcError({ message: "Owner authorization is required for this operation." }),
+    );
+  }
+});
+
 const MAX_DIAGNOSTIC_CHILD_PROCESSES = 80;
 const MAX_DIAGNOSTIC_ARGS_CHARS = 500;
 
@@ -1378,19 +1389,31 @@ const makeWsRpcHandlersLayer = () =>
         [WS_METHODS.serverStopLocalServer]: (input) =>
           rpcEffect(stopLocalServerAndTrackedProjectRun(input), "Failed to stop local server"),
         [WS_METHODS.controlPlaneListUncertainRevertJobs]: (input) =>
-          controlPlaneEffect(
-            listUncertainRevertJobs(controlPlaneKernel, input),
-            "Failed to list uncertain checkpoint-revert jobs",
+          requireControlPlaneOperator.pipe(
+            Effect.andThen(
+              controlPlaneEffect(
+                listUncertainRevertJobs(controlPlaneKernel, input),
+                "Failed to list uncertain checkpoint-revert jobs",
+              ),
+            ),
           ),
         [WS_METHODS.controlPlaneGetJob]: (input) =>
-          controlPlaneEffect(
-            getControlPlaneJob(controlPlaneKernel, input),
-            "Failed to load control-plane job",
+          requireControlPlaneOperator.pipe(
+            Effect.andThen(
+              controlPlaneEffect(
+                getControlPlaneJob(controlPlaneKernel, input),
+                "Failed to load control-plane job",
+              ),
+            ),
           ),
         [WS_METHODS.controlPlaneResolveUncertainJob]: (input) =>
-          controlPlaneEffect(
-            resolveUncertainRevertJob(controlPlaneKernel, input),
-            "Failed to resolve uncertain checkpoint-revert job",
+          requireControlPlaneOperator.pipe(
+            Effect.andThen(
+              controlPlaneEffect(
+                resolveUncertainRevertJob(controlPlaneKernel, input),
+                "Failed to resolve uncertain checkpoint-revert job",
+              ),
+            ),
           ),
         [WS_METHODS.statsGetProfileStats]: (input) =>
           rpcEffect(profileStatsQuery.getProfileStats(input), "Failed to load profile stats"),
