@@ -19,7 +19,6 @@ import type {
 } from "@synara/contracts";
 import {
   DEFAULT_TURN_DISPATCH_MODE,
-  LOOP_DEFAULT_ARMED_MAX_ITERATIONS,
   LoopActivationId,
   MessageId,
   LOOP_DEFAULT_HARD_CAP,
@@ -150,12 +149,9 @@ export function decideLoopSet(
   } else {
     prompt = isReconfigure ? existingLoop.prompt : "";
   }
-  // Budget-less loops default to the guided-UI count budget instead of running
-  // to the hard cap.
-  const maxIterations =
-    command.maxIterations === null && command.durationSeconds === null
-      ? LOOP_DEFAULT_ARMED_MAX_ITERATIONS
-      : command.maxIterations;
+  // Budget-less arming carries no explicit budget; only the hard cap bounds
+  // the activation (issue #49 §3.3).
+  const maxIterations = command.maxIterations;
 
   // Locked reconfigure rule: any successful set while active starts a new
   // activation window — counters reset, new activationId, original createdAt.
@@ -245,8 +241,8 @@ export function decideLoopToggle(
     active: true,
     prompt: "",
     iteration: 0,
-    // Toggle-armed loops carry the safe default count budget, not hardCap-only.
-    maxIterations: LOOP_DEFAULT_ARMED_MAX_ITERATIONS,
+    // Toggle-armed loops carry no explicit budget; the hard cap bounds them.
+    maxIterations: null,
     endsAt: null,
     durationSeconds: null,
     hardCap: LOOP_DEFAULT_HARD_CAP,

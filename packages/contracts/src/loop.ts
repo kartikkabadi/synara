@@ -9,9 +9,6 @@ import {
 } from "./baseSchemas";
 
 export const LOOP_DEFAULT_HARD_CAP = 100;
-// Safe default count budget applied when a loop is armed without an explicit
-// count or duration budget (bare `/loop`, budget-less `thread.loop.set`).
-export const LOOP_DEFAULT_ARMED_MAX_ITERATIONS = 5;
 // Issue #49 final locked caps: explicit count budgets are 1..100 and are
 // also capped by the default hard cap (100) so the two limits never diverge.
 export const LOOP_MAX_COUNT_BUDGET = 100;

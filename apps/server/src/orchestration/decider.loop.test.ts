@@ -386,26 +386,53 @@ describe("decider loop commands", () => {
     });
   });
 
-  it("defaults budget-less thread.loop.set to the 5-turn safe default", async () => {
+  it("stores durationSeconds and derives endsAt for duration budgets", async () => {
     const readModel = await makeReadModelWithThread();
-    const result = await Effect.runPromise(
-      decideOrchestrationCommand({
-        command: {
-          type: "thread.loop.set",
-          commandId: asCommandId("cmd-loop-set-budgetless"),
-          threadId: asThreadId("thread-loop"),
-          prompt: "fix tests",
-          maxIterations: null,
-          durationSeconds: null,
-          createdAt: NOW,
-        },
-        readModel,
+    const [event] = await decide(
+      readModel,
+      loopSetCommand("cmd-loop-set-duration", { durationSeconds: 30 * 60 }),
+    );
+    expect(event?.type).toBe("thread.loop-set");
+    expect(event?.payload).toMatchObject({
+      loop: {
+        maxIterations: null,
+        durationSeconds: 30 * 60,
+        endsAt: new Date(Date.parse(NOW) + 30 * 60 * 1000).toISOString(),
+      },
+    });
+  });
+
+  it("re-anchors endsAt to the new budget when reconfiguring a duration loop", async () => {
+    const originalCreatedAt = "2026-01-01T00:00:00.000Z";
+    const readModel = await projectLoopSet(
+      await makeReadModelWithThread(),
+      makeLoop({
+        active: true,
+        durationSeconds: 30 * 60,
+        endsAt: "2026-01-01T00:30:00.000Z",
+        createdAt: originalCreatedAt,
       }),
     );
-    const event = Array.isArray(result) ? result[0] : result;
-    expect(event.type).toBe("thread.loop-set");
-    expect(event.payload).toMatchObject({
-      loop: { maxIterations: 5, endsAt: null },
+    const [event] = await decide(
+      readModel,
+      loopSetCommand("cmd-loop-reconfigure-duration", { durationSeconds: 45 * 60 }),
+    );
+    expect(event?.payload).toMatchObject({
+      loop: {
+        durationSeconds: 45 * 60,
+        endsAt: new Date(Date.parse(NOW) + 45 * 60 * 1000).toISOString(),
+        // createdAt keeps the original activation start for the Started row.
+        createdAt: originalCreatedAt,
+      },
+    });
+  });
+
+  it("arms budget-less thread.loop.set with no explicit budget (hard cap only)", async () => {
+    const readModel = await makeReadModelWithThread();
+    const [event] = await decide(readModel, loopSetCommand("cmd-loop-set-budgetless"));
+    expect(event?.type).toBe("thread.loop-set");
+    expect(event?.payload).toMatchObject({
+      loop: { maxIterations: null, endsAt: null, durationSeconds: null },
     });
   });
 
@@ -761,7 +788,7 @@ describe("decider loop commands", () => {
       type: "thread.loop-set",
       payload: {
         threadId: asThreadId("thread-loop"),
-        loop: { active: true, prompt: "" },
+        loop: { active: true, prompt: "", maxIterations: null, durationSeconds: null },
       },
     });
   });
