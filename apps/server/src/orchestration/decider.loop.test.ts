@@ -386,12 +386,12 @@ describe("decider loop commands", () => {
     });
   });
 
-  it("defaults budget-less thread.loop.set to the 5-turn safe default", async () => {
+  it("arms budget-less thread.loop.set with no explicit budget (hard cap only)", async () => {
     const readModel = await makeReadModelWithThread();
     const [event] = await decide(readModel, loopSetCommand("cmd-loop-set-budgetless"));
     expect(event?.type).toBe("thread.loop-set");
     expect(event?.payload).toMatchObject({
-      loop: { maxIterations: 5, endsAt: null, durationSeconds: null },
+      loop: { maxIterations: null, endsAt: null, durationSeconds: null },
     });
   });
 
@@ -562,7 +562,7 @@ describe("decider loop commands", () => {
       type: "thread.loop-set",
       payload: {
         threadId: asThreadId("thread-loop"),
-        loop: { active: true, prompt: "", durationSeconds: null },
+        loop: { active: true, prompt: "", maxIterations: null, durationSeconds: null },
       },
     });
   });
