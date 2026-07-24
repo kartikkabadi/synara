@@ -5,6 +5,7 @@ import {
   EventId,
   MessageId,
   ProjectId,
+  SpaceId,
   ThreadId,
   ThreadMarkerId,
   TurnId,
@@ -221,6 +222,7 @@ describe("store projection", () => {
 
   it("reuses the existing project slot for shell upserts that keep the same workspace root", () => {
     const initialState: AppState = {
+      spaces: [],
       projects: [
         makeProject({
           id: ProjectId.makeUnsafe("project-old"),
@@ -258,9 +260,48 @@ describe("store projection", () => {
     });
   });
 
+  it("moves shell projects to Void with the deletion timestamp", () => {
+    const spaceId = SpaceId.makeUnsafe("space-shell-delete");
+    const initialState: AppState = {
+      spaces: [
+        {
+          id: spaceId,
+          name: "Work",
+          icon: "bag",
+          sortOrder: 0,
+          createdAt: "2026-07-15T10:00:00.000Z",
+          updatedAt: "2026-07-15T10:00:00.000Z",
+        },
+      ],
+      projects: [
+        makeProject({
+          id: ProjectId.makeUnsafe("project-shell-space"),
+          spaceId,
+          updatedAt: "2026-07-15T10:00:01.000Z",
+        }),
+      ],
+      sidebarThreadSummaryById: {},
+      threadsHydrated: true,
+    };
+
+    const next = applyShellEvent(initialState, {
+      kind: "space-removed",
+      sequence: 3,
+      spaceId,
+      updatedAt: "2026-07-15T10:00:02.000Z",
+    } satisfies OrchestrationShellStreamEvent);
+
+    expect(next.spaces).toEqual([]);
+    expect(next.projects[0]).toMatchObject({
+      spaceId: null,
+      updatedAt: "2026-07-15T10:00:02.000Z",
+    });
+  });
+
   it("drops descendant thread state when a shell project removal arrives", () => {
     const initialState = syncServerReadModel(
       {
+        spaces: [],
         projects: [
           makeProject({
             id: ProjectId.makeUnsafe("project-shell"),
@@ -277,6 +318,7 @@ describe("store projection", () => {
       {
         snapshotSequence: 1,
         updatedAt: "2026-02-27T00:00:00.000Z",
+        spaces: [],
         projects: [
           makeReadModelProject({
             id: ProjectId.makeUnsafe("project-shell"),
@@ -1531,6 +1573,7 @@ describe("store projection", () => {
     const readModel = {
       snapshotSequence: 1,
       updatedAt: "2026-02-28T00:00:00.000Z",
+      spaces: [],
       projects: [
         makeReadModelProject({
           defaultModelSelection: {

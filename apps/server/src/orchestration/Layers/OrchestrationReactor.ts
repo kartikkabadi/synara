@@ -30,6 +30,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
 
   return {
     start,
+    reconcileSettledOpenTurns: providerRuntimeIngestion.reconcileSettledOpenTurns,
   } satisfies OrchestrationReactorShape;
 });
 

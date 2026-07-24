@@ -66,6 +66,11 @@ import {
 } from "../../provider/Errors.ts";
 import { buildInlineSkillInstructions } from "../../provider/skillPromptInjection.ts";
 import {
+  appendThreadMentionContextBlocks,
+  resolveThreadMentionPromptProjection,
+  threadMentionContextSuffix,
+} from "../../provider/threadMentionContext.ts";
+import {
   TextGeneration,
   type BranchNameGenerationInput,
   type ThreadTitleGenerationInput,
@@ -109,6 +114,9 @@ import {
   isReplaySafeClaimedProviderIntent,
   type ProviderIntentEvent,
 } from "../providerIntentClassification.ts";
+import { deriveTurnStartSession } from "../turnStartSession.ts";
+import { TurnCheckpointCoordinator } from "../Services/TurnCheckpointCoordinator.ts";
+import { resolveProviderSessionThread as resolveProviderSessionThreadFromProjection } from "../providerSessionThread.ts";
 
 type ProviderQueueDrainEvent = Extract<
   ProviderRuntimeEvent,
@@ -204,6 +212,8 @@ const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
 const PROVIDER_COMMAND_CLAIM_LEASE_MS = 30_000;
 const PROVIDER_COMMAND_SAFE_RETRY_LIMIT = 3;
 const PROVIDER_COMMAND_SAFE_RETRY_DELAY = Duration.millis(50);
+const PROVIDER_INPUT_SAFETY_MARGIN_CHARS = 1_000;
+const THREAD_MENTION_CONTEXT_SUFFIX_PREFIX_CHARS = 2;
 const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 const SIDECHAT_BOUNDARY_INSTRUCTION =
   "You are in a sidechat. Treat all prior conversation as reference-only context. Do not continue any prior task automatically. Do not mutate files, git, or the workspace and do not run workspace-changing commands unless the latest user message explicitly asks you to do so after this boundary. Use this sidechat for focused explanation, safety checks, summaries, and alternatives.";
@@ -230,6 +240,16 @@ function availableProviderContextChars(input: {
   return Math.max(
     0,
     PROVIDER_SEND_TURN_MAX_INPUT_CHARS - wrapProviderContext({ ...input, contextText: "" }).length,
+  );
+}
+
+function availableThreadMentionContextChars(messageText: string): number {
+  return Math.max(
+    0,
+    PROVIDER_SEND_TURN_MAX_INPUT_CHARS -
+      messageText.length -
+      PROVIDER_INPUT_SAFETY_MARGIN_CHARS -
+      THREAD_MENTION_CONTEXT_SUFFIX_PREFIX_CHARS,
   );
 }
 
@@ -329,6 +349,7 @@ function buildGeneratedWorktreeBranchName(raw: string): string {
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const deliveryRepository = yield* OrchestrationEventDeliveryRepository;
+  const turnCheckpointCoordinator = yield* TurnCheckpointCoordinator;
   const queuedTurnPromotions = yield* QueuedTurnPromotionRepository;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
@@ -590,31 +611,15 @@ const make = Effect.gen(function* () {
     return Option.getOrUndefined(yield* projectionSnapshotQuery.getThreadDetailById(threadId));
   });
 
-  // Recovers the parent thread when older/local-only subagent rows are missing parentThreadId metadata.
-  const inferParentThreadFromSyntheticSubagentId = Effect.fnUntraced(function* (
-    threadId: ThreadId,
-  ) {
-    const rawThreadId = threadId as string;
-    if (!rawThreadId.startsWith("subagent:")) {
-      return null;
-    }
+  const resolveProviderSessionThread = (threadId: ThreadId) =>
+    resolveProviderSessionThreadFromProjection(projectionSnapshotQuery, threadId);
 
-    return Option.getOrNull(
-      yield* projectionSnapshotQuery.findSyntheticSubagentParentThread(threadId),
+  const withProviderSessionLease = <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) =>
+    resolveProviderSessionThread(threadId).pipe(
+      Effect.flatMap((providerThread) =>
+        turnCheckpointCoordinator.withThreadLease(providerThread?.id ?? threadId, effect),
+      ),
     );
-  });
-
-  const resolveProviderSessionThread = Effect.fnUntraced(function* (threadId: ThreadId) {
-    const thread = yield* resolveThread(threadId);
-    if (!thread) {
-      return null;
-    }
-    if (!thread.parentThreadId) {
-      return (yield* inferParentThreadFromSyntheticSubagentId(thread.id)) ?? thread;
-    }
-    const parentThread = yield* resolveThread(thread.parentThreadId);
-    return parentThread ?? thread;
-  });
 
   const resolveSubagentProviderThreadId = (
     threadId: ThreadId,
@@ -1155,6 +1160,17 @@ const make = Effect.gen(function* () {
     if (!thread) {
       return;
     }
+    const threadMentionProjection = yield* resolveThreadMentionPromptProjection({
+      mentions: input.mentions,
+      snapshotQuery: projectionSnapshotQuery,
+      maxTotalContextChars: availableThreadMentionContextChars(input.messageText),
+    });
+    const messageText = appendThreadMentionContextBlocks({
+      text: input.messageText,
+      contextBlocks: threadMentionProjection.contextBlocks,
+    });
+    const mentionContextSuffix = threadMentionContextSuffix(threadMentionProjection.contextBlocks);
+    const providerMentions = threadMentionProjection.providerMentions;
     // Subagent threads have no provider session of their own: their messages
     // steer the running child task through the parent session (mirrors the
     // interrupt seam), never the session-bootstrap path below. Parent metadata
@@ -1179,7 +1195,9 @@ const make = Effect.gen(function* () {
                 skills: input.skills ?? [],
                 maxChars: Math.max(
                   0,
-                  PROVIDER_SEND_TURN_MAX_INPUT_CHARS - input.messageText.length - 1_000,
+                  PROVIDER_SEND_TURN_MAX_INPUT_CHARS -
+                    messageText.length -
+                    PROVIDER_INPUT_SAFETY_MARGIN_CHARS,
                 ),
               }),
             ).pipe(
@@ -1192,8 +1210,8 @@ const make = Effect.gen(function* () {
             )
           : "";
       const steerMessageWithSkills = steerSkillInlineText
-        ? `${input.messageText}\n\n${steerSkillInlineText}`
-        : input.messageText;
+        ? `${messageText}\n\n${steerSkillInlineText}`
+        : messageText;
       const normalizedSteerInput = toNonEmptyProviderInput(
         normalizeSkillMentionTextForProvider({
           provider: steerProvider,
@@ -1218,7 +1236,7 @@ const make = Effect.gen(function* () {
           ? { attachments: normalizedSteerAttachments }
           : {}),
         ...(input.skills !== undefined ? { skills: input.skills } : {}),
-        ...(input.mentions !== undefined ? { mentions: input.mentions } : {}),
+        ...(providerMentions !== undefined ? { mentions: providerMentions } : {}),
       });
       return;
     }
@@ -1238,15 +1256,21 @@ const make = Effect.gen(function* () {
     if (input.modelSelection !== undefined) {
       threadSessionModelSelections.set(input.threadId, input.modelSelection);
     }
+    // Bootstrap prompts wrap the user message in `<latest_user_message>` tags;
+    // mentioned-thread context is appended after the assembled provider input
+    // instead so it never reads as part of the user's own words. The budget
+    // text below still counts the suffix, keeping the total under the provider
+    // input limit regardless of where the suffix sits.
     const boundaryMessageText = thread.sidechatSourceThreadId
       ? `<sidechat_boundary>\n${SIDECHAT_BOUNDARY_INSTRUCTION}\n</sidechat_boundary>\n\n<latest_user_message>\n${input.messageText}\n</latest_user_message>`
       : input.messageText;
+    const bootstrapBudgetMessageText = `${boundaryMessageText}${mentionContextSuffix}`;
     const shouldBootstrapHandoff =
       thread.handoff?.bootstrapStatus === "pending" &&
       !hasNativeAssistantMessagesBefore(thread, input.messageId);
     const handoffBootstrapAvailableChars = availableProviderContextChars({
       tag: "handoff_context",
-      messageText: boundaryMessageText,
+      messageText: bootstrapBudgetMessageText,
       wrapLatestUserMessage: true,
     });
     const handoffBootstrapText =
@@ -1269,7 +1293,7 @@ const make = Effect.gen(function* () {
       !hasPendingPriorTranscriptBootstrap;
     const sidechatBootstrapAvailableChars = availableProviderContextChars({
       tag: "sidechat_context",
-      messageText: boundaryMessageText,
+      messageText: bootstrapBudgetMessageText,
       wrapLatestUserMessage: false,
     });
     const sidechatBootstrapText =
@@ -1301,7 +1325,7 @@ const make = Effect.gen(function* () {
       listPriorTranscriptMessages(thread, input.messageId).length > 0;
     const priorTranscriptBootstrapAvailableChars = availableProviderContextChars({
       tag: "thread_context",
-      messageText: boundaryMessageText,
+      messageText: bootstrapBudgetMessageText,
       wrapLatestUserMessage: true,
     });
     if (
@@ -1348,6 +1372,7 @@ const make = Effect.gen(function* () {
               wrapLatestUserMessage: true,
             })
           : boundaryMessageText;
+    const providerInputWithMentionContext = `${providerInput}${mentionContextSuffix}`;
     // Portable skills fallback: providers that cannot load the referenced skill
     // file natively get the skill instructions inlined into the prompt.
     const skillInlineText =
@@ -1358,7 +1383,9 @@ const make = Effect.gen(function* () {
               skills: input.skills ?? [],
               maxChars: Math.max(
                 0,
-                PROVIDER_SEND_TURN_MAX_INPUT_CHARS - providerInput.length - 1_000,
+                PROVIDER_SEND_TURN_MAX_INPUT_CHARS -
+                  providerInputWithMentionContext.length -
+                  PROVIDER_INPUT_SAFETY_MARGIN_CHARS,
               ),
             }),
           ).pipe(
@@ -1371,8 +1398,8 @@ const make = Effect.gen(function* () {
           )
         : "";
     const providerInputWithSkills = skillInlineText
-      ? `${providerInput}\n\n${skillInlineText}`
-      : providerInput;
+      ? `${providerInputWithMentionContext}\n\n${skillInlineText}`
+      : providerInputWithMentionContext;
     const normalizedInput = toNonEmptyProviderInput(
       normalizeSkillMentionTextForProvider({
         provider: selectedProvider as ProviderKind,
@@ -1412,7 +1439,7 @@ const make = Effect.gen(function* () {
       threadId: input.threadId,
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
       ...(input.skills !== undefined ? { skills: input.skills } : {}),
-      ...(input.mentions !== undefined ? { mentions: input.mentions } : {}),
+      ...(providerMentions !== undefined ? { mentions: providerMentions } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
     };
@@ -1535,9 +1562,10 @@ const make = Effect.gen(function* () {
                 wrapLatestUserMessage: true,
               })
             : boundaryMessageText;
+          const retryProviderInputWithMentionContext = `${retryProviderInput}${mentionContextSuffix}`;
           const retryProviderInputWithSkills = skillInlineText
-            ? `${retryProviderInput}\n\n${skillInlineText}`
-            : retryProviderInput;
+            ? `${retryProviderInputWithMentionContext}\n\n${skillInlineText}`
+            : retryProviderInputWithMentionContext;
           const retryNormalizedInput = toNonEmptyProviderInput(
             normalizeSkillMentionTextForProvider({
               provider: selectedProvider as ProviderKind,
@@ -1891,7 +1919,7 @@ const make = Effect.gen(function* () {
     });
   });
 
-  const processTurnStartRequested = Effect.fnUntraced(function* (
+  const processTurnStartRequestedWithoutLease = Effect.fnUntraced(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
   ) {
     const sessionThreadId =
@@ -2000,19 +2028,17 @@ const make = Effect.gen(function* () {
       // session's runtimeMode: ensureSessionForThread detects mode changes by
       // comparing against it, and adopting the requested mode here would mask
       // the restart.
-      if (thread.session?.status !== "running" && thread.session?.status !== "starting") {
+      const turnStartSession = deriveTurnStartSession({
+        threadId: event.payload.threadId,
+        currentSession: thread.session,
+        providerName,
+        requestedRuntimeMode: event.payload.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+        requestedAt: event.payload.createdAt,
+      });
+      if (turnStartSession !== null) {
         yield* setThreadSession({
           threadId: event.payload.threadId,
-          session: {
-            threadId: event.payload.threadId,
-            status: "starting",
-            providerName: thread.session?.providerName ?? thread.modelSelection.provider,
-            runtimeMode:
-              thread.session?.runtimeMode ?? event.payload.runtimeMode ?? DEFAULT_RUNTIME_MODE,
-            activeTurnId: null,
-            lastError: null,
-            updatedAt: event.payload.createdAt,
-          },
+          session: turnStartSession,
           createdAt: event.payload.createdAt,
         });
       }
@@ -2135,6 +2161,11 @@ const make = Effect.gen(function* () {
     }
   });
 
+  const processTurnStartRequested = (
+    event: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
+  ) =>
+    withProviderSessionLease(event.payload.threadId, processTurnStartRequestedWithoutLease(event));
+
   const processTurnQueued = Effect.fnUntraced(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-queued" }>,
   ) {
@@ -2241,6 +2272,9 @@ const make = Effect.gen(function* () {
             ? { assistantDeliveryMode: nextQueuedTurn.assistantDeliveryMode }
             : {}),
           dispatchMode: nextQueuedTurn.dispatchMode,
+          ...(nextQueuedTurn.dispatchOrigin !== undefined
+            ? { dispatchOrigin: nextQueuedTurn.dispatchOrigin }
+            : {}),
           runtimeMode: nextQueuedTurn.runtimeMode,
           interactionMode: nextQueuedTurn.interactionMode,
           ...(nextQueuedTurn.sourceProposedPlan !== undefined
@@ -2578,6 +2612,7 @@ const make = Effect.gen(function* () {
         decision: event.payload.decision,
       })
       .pipe(
+        Effect.asVoid,
         Effect.catchCause((cause) => {
           const unknownPendingRequest = isUnknownPendingApprovalRequestError(cause);
           return appendInteractionResponseFailure(event, {
@@ -2611,6 +2646,7 @@ const make = Effect.gen(function* () {
         answers: event.payload.answers,
       })
       .pipe(
+        Effect.asVoid,
         Effect.catchCause((cause) => {
           const unknownPendingRequest = isUnknownPendingUserInputRequestError(cause);
           return appendInteractionResponseFailure(event, {
@@ -2624,10 +2660,23 @@ const make = Effect.gen(function* () {
       );
   });
 
-  const processConversationRollbackRequested = Effect.fnUntraced(function* (
+  const processConversationRollbackRequestedWithoutLease = Effect.fnUntraced(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.conversation-rollback-requested" }>,
   ) {
     const thread = yield* resolveThread(event.payload.threadId);
+    const removedTurnIds = thread
+      ? collectTailTurnIds<TurnId>({
+          messages: thread.messages,
+          messageId: event.payload.messageId,
+        })
+      : [];
+    if (!thread || removedTurnIds.length !== event.payload.numTurns) {
+      return yield* Effect.fail(
+        new Error(
+          `Conversation rollback target '${event.payload.messageId}' is no longer valid for ${event.payload.numTurns} turn(s).`,
+        ),
+      );
+    }
     if (event.payload.numTurns > 0) {
       const providerThread = yield* resolveProviderSessionThread(event.payload.threadId);
       if (
@@ -2654,15 +2703,18 @@ const make = Effect.gen(function* () {
       threadId: event.payload.threadId,
       messageId: event.payload.messageId,
       numTurns: event.payload.numTurns,
-      removedTurnIds: thread
-        ? collectTailTurnIds<TurnId>({
-            messages: thread.messages,
-            messageId: event.payload.messageId,
-          })
-        : [],
+      removedTurnIds,
       createdAt: event.payload.createdAt,
     });
   });
+
+  const processConversationRollbackRequested = (
+    event: Extract<ProviderIntentEvent, { type: "thread.conversation-rollback-requested" }>,
+  ) =>
+    withProviderSessionLease(
+      event.payload.threadId,
+      processConversationRollbackRequestedWithoutLease(event),
+    );
 
   const processMessageEditResendPayload = Effect.fnUntraced(function* (
     payload: Extract<
@@ -2815,7 +2867,7 @@ const make = Effect.gen(function* () {
     yield* providerService.stopSession({ threadId: input.threadId });
   });
 
-  const processMessageEditResendRequested = Effect.fnUntraced(function* (
+  const processMessageEditResendRequestedWithoutLease = Effect.fnUntraced(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.message-edit-resend-requested" }>,
   ) {
     const thread = yield* resolveThread(event.payload.threadId);
@@ -2867,11 +2919,20 @@ const make = Effect.gen(function* () {
     });
   });
 
-  const processSessionStopRequested = Effect.fnUntraced(function* (
-    event: Extract<ProviderIntentEvent, { type: "thread.session-stop-requested" }>,
-  ) {
-    const thread = yield* resolveThread(event.payload.threadId);
-    const providerThread = yield* resolveProviderSessionThread(event.payload.threadId);
+  const processMessageEditResendRequested = (
+    event: Extract<ProviderIntentEvent, { type: "thread.message-edit-resend-requested" }>,
+  ) =>
+    withProviderSessionLease(
+      event.payload.threadId,
+      processMessageEditResendRequestedWithoutLease(event),
+    );
+
+  const processThreadSessionStop = Effect.fnUntraced(function* (input: {
+    readonly threadId: ThreadId;
+    readonly createdAt: string;
+  }) {
+    const thread = yield* resolveThread(input.threadId);
+    const providerThread = yield* resolveProviderSessionThread(input.threadId);
     if (!thread) {
       return;
     }
@@ -2891,7 +2952,7 @@ const make = Effect.gen(function* () {
     for (const queuedThreadId of clearedQueuedThreadIds) {
       yield* queuedTurnPromotions.cancelThread({
         threadId: queuedThreadId,
-        updatedAt: event.payload.createdAt,
+        updatedAt: input.createdAt,
       });
       yield* clearEditResendTurnStartKeysForThread(queuedThreadId);
       drainingQueuedTurns.delete(queuedThreadId);
@@ -2910,7 +2971,6 @@ const make = Effect.gen(function* () {
     clearPendingContextBootstraps(thread.id);
     suppressContextBootstrapOnNextStartThreadIds.add(thread.id);
 
-    const now = event.payload.createdAt;
     const providerThreadId =
       providerThread !== null
         ? resolveSubagentProviderThreadId(thread.id, providerThread.id)
@@ -2944,9 +3004,9 @@ const make = Effect.gen(function* () {
           // Preserve the active turn until the provider emits the terminal child event.
           activeTurnId: thread.session.activeTurnId,
           lastError: null,
-          updatedAt: now,
+          updatedAt: input.createdAt,
         },
-        createdAt: now,
+        createdAt: input.createdAt,
       });
       return;
     }
@@ -2965,11 +3025,19 @@ const make = Effect.gen(function* () {
         runtimeMode: thread.session?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
         activeTurnId: null,
         lastError: thread.session?.lastError ?? null,
-        updatedAt: now,
+        updatedAt: input.createdAt,
       },
-      createdAt: now,
+      createdAt: input.createdAt,
     });
   });
+
+  const processSessionStopRequested = (
+    event: Extract<ProviderIntentEvent, { type: "thread.session-stop-requested" }>,
+  ) =>
+    processThreadSessionStop({
+      threadId: event.payload.threadId,
+      createdAt: event.payload.createdAt,
+    });
 
   const processDomainEvent = (event: ProviderIntentEvent) =>
     Effect.gen(function* () {
@@ -2997,6 +3065,16 @@ const make = Effect.gen(function* () {
             updatedAt: event.payload.deletedAt,
           });
           yield* clearThreadRuntimeCaches(event.payload.threadId);
+          return;
+        case "thread.archived":
+          // Archive cleanup shares this durable, sequence-ordered provider
+          // source with later turn-start intents. An immediate unarchive/send
+          // therefore cannot race an older archive stop against the new turn.
+          yield* processThreadSessionStop({
+            threadId: event.payload.threadId,
+            // Legacy thread.archived events may omit archivedAt; fall back like the projector.
+            createdAt: event.payload.archivedAt ?? event.payload.updatedAt ?? event.occurredAt,
+          });
           return;
         case "thread.meta-updated": {
           const thread = yield* resolveThread(event.payload.threadId);
@@ -3490,7 +3568,7 @@ const make = Effect.gen(function* () {
             };
           }),
         ),
-      );
+      ) as ReturnType<ProviderCommandReactorShape["reconcileDelivery"]>;
 
     const retryableDeliveries = yield* deliveryRepository.listRetryableDeliveries(
       PROVIDER_COMMAND_REACTOR_CONSUMER,
@@ -3517,7 +3595,7 @@ const make = Effect.gen(function* () {
     );
   });
 
-  const start: ProviderCommandReactorShape["start"] = seedThreadModelSelections.pipe(
+  const start = seedThreadModelSelections.pipe(
     Effect.andThen(
       Effect.all([
         startProviderIntentSource.pipe(Effect.andThen(recoverQueuedTurnPromotions)),
@@ -3530,7 +3608,7 @@ const make = Effect.gen(function* () {
       ]).pipe(Effect.asVoid),
     ),
     Effect.orDie,
-  );
+  ) as ProviderCommandReactorShape["start"];
 
   const drain: ProviderCommandReactorShape["drain"] = Effect.gen(function* () {
     const targetSequence = yield* orchestrationEngine.getEventHighWaterSequence;

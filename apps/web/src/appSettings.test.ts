@@ -62,6 +62,10 @@ describe("getAppModelOptions", () => {
     expect(getAppModelOptions("antigravity", [])).toEqual([]);
   });
 
+  it("does not expose Anthropic models in Pi before authenticated discovery", () => {
+    expect(getAppModelOptions("pi", [])).toEqual([]);
+  });
+
   it("appends saved custom models after the built-in options", () => {
     const options = getAppModelOptions("codex", ["custom/internal-model"]);
 
@@ -819,6 +823,7 @@ describe("AppSettingsSchema", () => {
       confirmThreadDelete: false,
       confirmTerminalTabClose: true,
       enableAppSnap: false,
+      appSnapShortcut: { kind: "both-option-keys" },
       appSnapPlaySound: true,
       enableAssistantStreaming: true,
       sidebarProjectSortOrder: DEFAULT_SIDEBAR_PROJECT_SORT_ORDER,

@@ -40,7 +40,6 @@ import {
 import { getModelCapabilities, normalizeModelSlug } from "@synara/shared/model";
 import { resolveTailUserMessageEditTarget } from "@synara/shared/conversationEdit";
 import { threadExportBlockedReason } from "@synara/shared/threadExport";
-import { buildTemporaryWorktreeBranchName } from "@synara/shared/git";
 import { pendingRequestInstanceKey } from "@synara/shared/threadSummary";
 import {
   buildPromptThreadTitleFallback,
@@ -71,7 +70,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { type LegendListRef } from "@legendapp/list/react";
 import {
   GIT_WORKING_TREE_DIFF_LIVE_REFETCH_INTERVAL_MS,
-  gitCreateWorktreeMutationOptions,
+  gitCreateDetachedWorktreeMutationOptions,
   gitGithubRepositoryQueryOptions,
   gitBranchesQueryOptions,
 } from "~/lib/gitReactQuery";
@@ -118,6 +117,7 @@ import { resolveSubagentPresentationForThread } from "../lib/subagentPresentatio
 import { ensureHomeChatProject, isHomeChatContainerProject } from "../lib/chatProjects";
 import { ensureStudioProject, isStudioContainerProject } from "../lib/studioProjects";
 import { resolveFirstSendTarget } from "../lib/chatFirstSend";
+import { readActiveSpaceId } from "../spacesUiStore";
 import {
   createOrRecoverProjectFromPath,
   PROJECT_CREATE_EXISTING_SYNC_ERROR,
@@ -175,6 +175,7 @@ import {
   resolveEnvironmentPanelPreferenceAfterFirstSend,
   resolveEnvironmentPanelPreferenceUpdate,
   resolveEnvironmentPanelVisible,
+  resolveGitRepoUiState,
   resolveProjectScriptTerminalTarget,
   resolvePromptHistoryNavigation,
   shouldHandlePromptHistoryNavigationKey,
@@ -200,7 +201,11 @@ import {
   ensureLeadingSpaceForReplacement,
   extendReplacementRangeForTrailingSpace,
 } from "../composerTriggerInsertion";
-import { createProjectSelector, createThreadSelector } from "../storeSelectors";
+import {
+  createProjectSelector,
+  createComposerThreadMentionSourcesSelector,
+  createThreadSelector,
+} from "../storeSelectors";
 import { retainThreadDetailSubscription } from "../threadDetailSubscriptionRetention";
 import {
   canOfferForkSlashCommand,
@@ -1109,7 +1114,9 @@ export default function ChatView({
   const removeThreadFromSplitViews = useSplitViewStore((store) => store.removeThreadFromSplitViews);
   const { resolvedTheme } = useTheme();
   const queryClient = useQueryClient();
-  const createWorktreeMutation = useMutation(gitCreateWorktreeMutationOptions({ queryClient }));
+  const createWorktreeMutation = useMutation(
+    gitCreateDetachedWorktreeMutationOptions({ queryClient }),
+  );
   const isEditorRail = presentationMode === "editor";
   const isInactiveSplitPane = surfaceMode === "split" && !isFocusedPane;
   const composerDraft = useComposerThreadDraft(threadId);
@@ -1232,6 +1239,10 @@ export default function ChatView({
   const markWorkflowRunPaused = useWorkflowRunUiStore((store) => store.markPaused);
   const markWorkflowRunDismissed = useWorkflowRunUiStore((store) => store.markDismissed);
   const serverThread = useStore(useMemo(() => createThreadSelector(threadId), [threadId]));
+  const composerThreadSummaries = useStore(
+    useMemo(() => createComposerThreadMentionSourcesSelector(), []),
+  );
+  const composerThreadProjects = useStore((state) => state.projects);
   const crossTaskSourceThreadId =
     serverThread?.creationSource && serverThread.sourceThreadId
       ? serverThread.sourceThreadId
@@ -1424,6 +1435,13 @@ export default function ChatView({
   }, [threadId]);
   const composerEditorRef = useRef<ComposerPromptEditorHandle>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
+  // Set by whichever mounted GitActionsControl instance (header quick-action or the
+  // Environment panel row) last registered — either performs the identical commit &
+  // push mutation for this thread's repo, so it doesn't matter which one is "current".
+  const commitAndPushTriggerRef = useRef<(() => void) | null>(null);
+  const onRegisterCommitAndPushTrigger = useCallback((trigger: (() => void) | null) => {
+    commitAndPushTriggerRef.current = trigger;
+  }, []);
   const pendingComposerFocusRef = useRef(false);
   const promptHistoryNavigationRef = useRef<PromptHistoryNavigationState | null>(null);
   const applyingPromptHistoryNavigationRef = useRef(false);
@@ -3146,7 +3164,6 @@ export default function ChatView({
       })
     : null;
   const gitCwd = threadWorkspaceCwd;
-  const showGitActions = !isContainerLandingProject || Boolean(resolvedThreadWorktreePath);
   const gitBranchSourceCwd = activeProject
     ? resolveThreadBranchSourceCwd({
         projectCwd: activeProject.cwd,
@@ -3357,6 +3374,11 @@ export default function ChatView({
     canOfferSideCommand,
     canOfferExportCommand,
     dynamicAgents,
+    threadMentionSources: {
+      threads: composerThreadSummaries,
+      projects: composerThreadProjects,
+      currentThreadId: threadId,
+    },
   });
   const composerMenuItems = useMemo(() => {
     if (composerCommandPicker === "fork-target") {
@@ -3567,8 +3589,15 @@ export default function ChatView({
       worktreePath: activeThreadWorktreePath,
     });
   }, [activeProjectCwd, activeThreadWorktreePath]);
-  // Default true while loading to avoid toolbar flicker.
-  const isGitRepo = branchesQuery.data?.isRepo ?? true;
+  const isGitRepo = resolveGitRepoUiState({
+    isStudioContainer,
+    queriedIsRepo: branchesQuery.data?.isRepo,
+  });
+  // Studio never offers "Initialize Git": a folder picked via "Use a folder" is casual
+  // context, not a repo-to-be, so git actions appear there only when it already is one.
+  const showGitActions = isStudioContainer
+    ? Boolean(resolvedThreadWorktreePath) && isGitRepo
+    : !isContainerLandingProject || Boolean(resolvedThreadWorktreePath);
   const repoDiffTotals = useRepoDiffTotals({
     gitCwd: threadWorkspaceCwd,
     isGitRepo,
@@ -5746,6 +5775,28 @@ export default function ChatView({
         return;
       }
 
+      if (command === "git.commitAndPush") {
+        if (commitAndPushTriggerRef.current) {
+          event.preventDefault();
+          event.stopPropagation();
+          commitAndPushTriggerRef.current();
+          return;
+        }
+        // No registered trigger inside a git-enabled thread means the action just
+        // isn't runnable right now (clean tree, behind upstream, action in flight)
+        // — tell the user instead of eating the chord silently. Outside git threads
+        // the chord falls through untouched.
+        if (showGitActions && isGitRepo) {
+          event.preventDefault();
+          event.stopPropagation();
+          toastManager.add({
+            type: "info",
+            title: "Nothing to commit or push.",
+          });
+        }
+        return;
+      }
+
       if (command === "browser.toggle") {
         event.preventDefault();
         event.stopPropagation();
@@ -5797,6 +5848,8 @@ export default function ChatView({
     onToggleDiff,
     onInterrupt,
     onSplitSurface,
+    showGitActions,
+    isGitRepo,
     composerSubagentStripItems,
     onBackgroundAllForegroundSubagentStripItems,
     isFocusedPane,
@@ -6975,6 +7028,10 @@ export default function ChatView({
     }
     // Keep the optimistic label short while the server asks Codex for a better summary.
     const title = buildPromptThreadTitleFallback(titleSeed);
+    const currentStoreState = useStore.getState();
+    // Keep an optimistically selected Space across the command/snapshot race. The server
+    // validates this best-effort target and degrades genuinely stale/deleted ids to Void.
+    const activeSpaceIdForSend = readActiveSpaceId();
     const firstSendTarget = resolveFirstSendTarget({
       activeProject,
       chatWorkspaceRoot,
@@ -6982,7 +7039,7 @@ export default function ChatView({
       isFirstMessage,
       isHomeChatContainer,
       isStudioContainer,
-      projects: useStore.getState().projects,
+      projects: currentStoreState.projects,
       selectedWorkspaceRoot: isContainerLandingProject
         ? (resolvedThreadWorktreePath ?? null)
         : null,
@@ -7008,6 +7065,9 @@ export default function ChatView({
     let nextThreadEnvMode = envModeForSend;
     let nextThreadBranch = activeThread.branch;
     let nextThreadWorktreePath = activeThread.worktreePath;
+    let nextAssociatedWorktreePath = activeThread.associatedWorktreePath ?? null;
+    let nextAssociatedWorktreeBranch = activeThread.associatedWorktreeBranch ?? null;
+    let nextAssociatedWorktreeRef = activeThread.associatedWorktreeRef ?? null;
 
     if (isFirstMessage && isContainerLandingProject && firstSendTarget.kind !== "current") {
       if (firstSendTarget.kind === "create-project") {
@@ -7023,6 +7083,11 @@ export default function ChatView({
             workspaceRoot: firstSendTarget.creation.workspaceRoot,
             createWorkspaceRootIfMissing: firstSendTarget.creation.createWorkspaceRootIfMissing,
             defaultModelSelection: firstSendTarget.creation.defaultModelSelection,
+            // Managed chat rows stay global; a folder mention creates an ordinary project
+            // and should inherit the Space where the first send originated.
+            ...(firstSendTarget.creation.kind === "project"
+              ? { spaceId: activeSpaceIdForSend }
+              : {}),
             createdAt,
           });
           targetProjectIdForSend = projectId;
@@ -7073,6 +7138,9 @@ export default function ChatView({
       nextThreadEnvMode = "local";
       nextThreadBranch = null;
       nextThreadWorktreePath = null;
+      nextAssociatedWorktreePath = null;
+      nextAssociatedWorktreeBranch = null;
+      nextAssociatedWorktreeRef = null;
     }
 
     // The branch query can finish just after the user chooses New worktree. Use the
@@ -7244,14 +7312,17 @@ export default function ChatView({
     }
 
     let createdServerThreadForLocalDraft = false;
+    let createdWorktreeForSendPath: string | null = null;
     let turnStartSucceeded = false;
     await (async () => {
       // On first message: lock in branch + create worktree if needed.
       if (baseBranchForWorktree) {
         const result = await createWorktreeMutation.mutateAsync({
           cwd: targetProjectCwdForSend,
-          branch: baseBranchForWorktree,
-          newBranch: buildTemporaryWorktreeBranchName(),
+          ref: baseBranchForWorktree,
+          ...(baseBranchForWorktree === activeRootBranch
+            ? { copyChangesFrom: targetProjectCwdForSend }
+            : {}),
         });
         beginLocalDispatch({
           worktreeSetupStepId: "prepare-thread",
@@ -7259,10 +7330,15 @@ export default function ChatView({
         });
         nextThreadBranch = result.worktree.branch;
         nextThreadWorktreePath = result.worktree.path;
-        const nextAssociatedWorktree = deriveAssociatedWorktreeMetadata({
-          branch: result.worktree.branch,
-          worktreePath: result.worktree.path,
-        });
+        createdWorktreeForSendPath = result.worktree.path;
+        const nextAssociatedWorktree = {
+          associatedWorktreePath: result.worktree.path,
+          associatedWorktreeBranch: null,
+          associatedWorktreeRef: result.worktree.ref,
+        };
+        nextAssociatedWorktreePath = nextAssociatedWorktree.associatedWorktreePath;
+        nextAssociatedWorktreeBranch = nextAssociatedWorktree.associatedWorktreeBranch;
+        nextAssociatedWorktreeRef = nextAssociatedWorktree.associatedWorktreeRef;
         if (isServerThread) {
           await api.orchestration.dispatchCommand({
             type: "thread.meta.update",
@@ -7315,6 +7391,9 @@ export default function ChatView({
             envMode: nextThreadEnvMode,
             branch: nextThreadBranch,
             worktreePath: nextThreadWorktreePath,
+            associatedWorktreePath: nextAssociatedWorktreePath,
+            associatedWorktreeBranch: nextAssociatedWorktreeBranch,
+            associatedWorktreeRef: nextAssociatedWorktreeRef,
             lastKnownPr: activeThread.lastKnownPr ?? null,
             createdAt: activeThread.createdAt,
           },
@@ -7463,6 +7542,43 @@ export default function ChatView({
             threadId: threadIdForSend,
           })
           .catch(() => undefined);
+      }
+      if (createdWorktreeForSendPath && !turnStartSucceeded) {
+        const removed = await api.git
+          .removeWorktree({
+            cwd: targetProjectCwdForSend,
+            path: createdWorktreeForSendPath,
+            force: true,
+          })
+          .then(
+            () => true,
+            () => false,
+          );
+        if (removed && isServerThread) {
+          await api.orchestration
+            .dispatchCommand({
+              type: "thread.meta.update",
+              commandId: newCommandId(),
+              threadId: threadIdForSend,
+              envMode: "local",
+              branch: null,
+              worktreePath: null,
+              associatedWorktreePath: null,
+              associatedWorktreeBranch: null,
+              associatedWorktreeRef: null,
+            })
+            .then(
+              () =>
+                setStoreThreadWorkspace(threadIdForSend, {
+                  branch: null,
+                  worktreePath: null,
+                  associatedWorktreePath: null,
+                  associatedWorktreeBranch: null,
+                  associatedWorktreeRef: null,
+                }),
+              () => undefined,
+            );
+        }
       }
       if (
         queuedChatTurn === null &&
@@ -9205,7 +9321,7 @@ export default function ChatView({
         });
         return;
       }
-      if (item.type === "plugin") {
+      if (item.type === "plugin" || item.type === "thread") {
         applyComposerTriggerReplacement({
           snapshot,
           trigger,
@@ -9857,10 +9973,21 @@ export default function ChatView({
           triggerClassName="h-7 py-1"
           showResetToHome={Boolean(resolvedThreadWorktreePath)}
           selectedWorkspaceRoot={resolvedThreadWorktreePath}
-          onSelectProject={handleSelectProjectForEmptyDraft}
           onSelectWorkspaceRoot={handleSelectWorkspaceRoot}
-          onCreateProjectFromPath={handleCreateProjectFromPickerPath}
           onResetToHome={handleResetWorkspaceToHome}
+          // Studio folder picks only tag the chat's workspace root; they never create a
+          // Projects entry or move the draft out of the Studio container.
+          {...(isStudioContainer
+            ? {
+                emptyTriggerLabel: "Use a folder",
+                addActionLabel: "Choose a folder",
+                resetActionLabel: "Don't use a folder",
+                searchPlaceholder: "Search folders",
+              }
+            : {
+                onSelectProject: handleSelectProjectForEmptyDraft,
+                onCreateProjectFromPath: handleCreateProjectFromPickerPath,
+              })}
         />
       ) : showEmptyLandingProjectPicker ? (
         <ProjectPicker
@@ -9941,6 +10068,7 @@ export default function ChatView({
     activeThreadId: activeThread.id,
     activeProvider: activeThread.session?.provider ?? activeThread.modelSelection.provider,
     isStudioChat: isStudioContainer,
+    studioFolderPath: isStudioContainer ? resolvedThreadWorktreePath : null,
     showGitActions,
     diffOpen: resolvedDiffOpen,
     threadAutomations: threadAutomationItems,
@@ -9972,6 +10100,7 @@ export default function ChatView({
     onNotesChange: handleNotesChange,
     onOpenEditorView: viewModeAction?.onClick ?? null,
     onClose: closeEnvironmentPanelAfterAction,
+    onRegisterCommitAndPushTrigger,
   };
   // Full-width single chat: overlay plus transcript/composer inset. Floating overlay when the
   // column is already narrow — right dock open or a split pane (same as header compact mode).
@@ -10696,6 +10825,7 @@ export default function ChatView({
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
           onToggleDiff={onToggleDiff}
+          onRegisterCommitAndPushTrigger={onRegisterCommitAndPushTrigger}
           onCreateHandoff={onCreateHandoffThread}
           onNavigateToThread={onNavigateToThread}
           onRenameThread={() => setRenameDialogOpen(true)}

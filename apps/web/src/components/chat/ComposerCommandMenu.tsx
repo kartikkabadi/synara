@@ -44,6 +44,7 @@ import {
   CommandSeparator,
 } from "../ui/command";
 import { FileEntryIcon } from "./FileEntryIcon";
+import { ProviderIcon } from "../ProviderIcon";
 import {
   COMPOSER_COMMAND_MENU_ITEM_ACTIVE_CLASS_NAME,
   COMPOSER_COMMAND_MENU_ITEM_CLASS_NAME,
@@ -105,6 +106,10 @@ function commandMenuTrailingMeta(item: ComposerCommandItem): string | null {
     return "Plugin";
   }
 
+  if (item.type === "thread") {
+    return null;
+  }
+
   if (item.type === "local-root") {
     return "Local";
   }
@@ -143,7 +148,12 @@ function commandMenuSecondaryText(item: ComposerCommandItem): string | null {
     return item.description;
   }
 
-  if (item.type === "plugin" || item.type === "skill" || item.type === "local-root") {
+  if (
+    item.type === "plugin" ||
+    item.type === "skill" ||
+    item.type === "local-root" ||
+    item.type === "thread"
+  ) {
     return item.description;
   }
 
@@ -213,6 +223,15 @@ export type ComposerCommandItem =
     }
   | {
       id: string;
+      type: "thread";
+      threadId: string;
+      provider: ProviderKind;
+      mention: ProviderMentionReference;
+      label: string;
+      description: string;
+    }
+  | {
+      id: string;
       type: "skill";
       skill: ProviderSkillDescriptor;
       label: string;
@@ -244,11 +263,13 @@ export function groupCommandItems(
 ): ComposerCommandGroupModel[] {
   if (triggerKind === "mention") {
     const pluginItems = items.filter((item) => item.type === "plugin");
+    const threadItems = items.filter((item) => item.type === "thread");
     const localItems = items.filter((item) => item.type === "local-root" || item.type === "path");
     const agentItems = items.filter((item) => item.type === "agent");
     const otherItems = items.filter(
       (item) =>
         item.type !== "plugin" &&
+        item.type !== "thread" &&
         item.type !== "local-root" &&
         item.type !== "path" &&
         item.type !== "agent",
@@ -257,6 +278,9 @@ export function groupCommandItems(
     const groups: ComposerCommandGroupModel[] = [];
     if (pluginItems.length > 0) {
       groups.push({ id: "plugins", label: "Plugins", items: pluginItems });
+    }
+    if (threadItems.length > 0) {
+      groups.push({ id: "chats", label: "Chats", items: threadItems });
     }
     if (localItems.length > 0) {
       groups.push({ id: "local", label: "Local", items: localItems });
@@ -395,7 +419,7 @@ export function ComposerCommandMenu(props: {
                   : "Loading commands..."
               : (props.emptyStateText ??
                 (props.triggerKind === "mention"
-                  ? "No matching plugin or file."
+                  ? "No matching plugin, chat, or file."
                   : props.triggerKind === "skill"
                     ? "No matching skill."
                     : "No matching command."))}
@@ -486,6 +510,8 @@ function commandMenuItemGlyph(item: ComposerCommandItem, theme: "light" | "dark"
       return <BotIcon className={cls} />;
     case "plugin":
       return <PluginIcon className={cls} />;
+    case "thread":
+      return <ProviderIcon provider={item.provider} className={cls} />;
     case "skill":
       return <SkillCubeIcon className={cls} />;
     default:

@@ -239,7 +239,7 @@ export function LoopBudgetPicker(props: {
                     <SelectTrigger aria-label="Duration unit" className="h-6 px-1.5 text-[11px]">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectPopup>
+                    <SelectPopup surface="composer">
                       <SelectItem value="minutes">minutes</SelectItem>
                       <SelectItem value="hours">hours</SelectItem>
                     </SelectPopup>

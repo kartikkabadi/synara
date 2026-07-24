@@ -24,8 +24,10 @@ import {
   deriveSynaraMcpToolTitle,
   isGenericToolTitle,
   normalizeCompactToolLabel,
+  normalizeToolTextForComparison,
   type SynaraMcpToolStatus,
 } from "./lib/toolCallLabel";
+import { toolArgumentSummaryToolName } from "./lib/toolArgumentSummary";
 import {
   deriveWorkLogToolDetails,
   mergeWorkLogToolDetails,
@@ -74,6 +76,7 @@ export interface WorkLogAutomation {
   id: string;
   name: string;
   cadenceLabel: string;
+  proposalState?: "pending" | "accepted" | "dismissed";
 }
 
 export interface WorkLogSynaraCreatedThread {
@@ -316,14 +319,10 @@ function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): bool
     activity.payload && typeof activity.payload === "object"
       ? (activity.payload as Record<string, unknown>)
       : null;
-  return typeof payload?.detail === "string" && payload.detail.startsWith("ExitPlanMode:");
-}
-
-function normalizeWorkLogTextForComparison(value: string | undefined): string {
-  return normalizeCompactToolLabel(value ?? "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
+  return (
+    typeof payload?.detail === "string" &&
+    toolArgumentSummaryToolName(payload.detail) === "ExitPlanMode"
+  );
 }
 
 function extractWorkLogAutomation(
@@ -338,7 +337,18 @@ function extractWorkLogAutomation(
     return null;
   }
   const cadenceLabel = typeof payload.cadenceLabel === "string" ? payload.cadenceLabel : "";
-  return { id, name, cadenceLabel };
+  const proposalState =
+    payload.proposalState === "pending" ||
+    payload.proposalState === "accepted" ||
+    payload.proposalState === "dismissed"
+      ? payload.proposalState
+      : undefined;
+  return {
+    id,
+    name,
+    cadenceLabel,
+    ...(proposalState ? { proposalState } : {}),
+  };
 }
 
 function extractWorkLogSynaraThreadCreation(
@@ -505,8 +515,8 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (
     entry.detail &&
-    normalizeWorkLogTextForComparison(entry.detail) ===
-      normalizeWorkLogTextForComparison(entry.toolTitle ?? entry.label)
+    normalizeToolTextForComparison(entry.detail) ===
+      normalizeToolTextForComparison(entry.toolTitle ?? entry.label)
   ) {
     delete entry.detail;
   }
@@ -717,12 +727,11 @@ function shouldCollapseRuntimeWarningEntries(
     return false;
   }
   return (
-    normalizeWorkLogTextForComparison(previous.label) ===
-      normalizeWorkLogTextForComparison(next.label) &&
-    normalizeWorkLogTextForComparison(
+    normalizeToolTextForComparison(previous.label) === normalizeToolTextForComparison(next.label) &&
+    normalizeToolTextForComparison(
       previous.runtimeWarningMessage ?? previous.detail ?? previous.preview ?? "",
     ) ===
-      normalizeWorkLogTextForComparison(
+      normalizeToolTextForComparison(
         next.runtimeWarningMessage ?? next.detail ?? next.preview ?? "",
       )
   );

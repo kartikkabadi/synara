@@ -220,7 +220,7 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
     section: "appsnap",
     title: "Enable AppSnap",
     keywords:
-      "Capture the frontmost macOS app window with both Option keys and add it to a recent task. appshot screenshot snap window capture alt",
+      "Capture the frontmost macOS app window with a configurable two-key shortcut and add it to a recent task. appshot screenshot snap window capture hotkey",
   },
   {
     id: "appsnap:shortcut",
@@ -385,6 +385,13 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
     title: "Recovery tools",
     keywords:
       "Rebuild local project indexes without clearing existing chats when the local state gets out of sync.",
+  },
+  {
+    id: "integrations:external-mcp",
+    section: "integrations",
+    title: "External MCP integrations",
+    keywords:
+      "Pair Codex Claude and other local MCP clients with scoped project access. revoke credential task create wait read worktree approval",
   },
   {
     id: "advanced:version",

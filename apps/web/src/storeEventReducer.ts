@@ -35,10 +35,13 @@ import {
   withOrchestrationEventSequence,
 } from "./storeNormalization";
 import {
+  applySpaceOrder,
   applyThreadUpdate,
+  removeSpace,
   removeDeletedProjectFromClientState,
   removeDeletedThreadFromClientState,
   upsertProject,
+  upsertSpace,
 } from "./storeProjection";
 import type { AppState } from "./storeState";
 import type { ChatMessage, Thread } from "./types";
@@ -739,6 +742,34 @@ function applyOrchestrationEvent(
   options?: ApplyOrchestrationEventOptions,
 ): AppState {
   switch (event.type) {
+    case "space.created":
+      return upsertSpace(state, {
+        id: event.payload.spaceId,
+        name: event.payload.name,
+        icon: event.payload.icon,
+        sortOrder: event.payload.sortOrder,
+        createdAt: event.payload.createdAt,
+        updatedAt: event.payload.updatedAt,
+      });
+
+    case "space.meta-updated": {
+      const existing = state.spaces.find((space) => space.id === event.payload.spaceId);
+      return existing
+        ? upsertSpace(state, {
+            ...existing,
+            name: event.payload.name ?? existing.name,
+            icon: event.payload.icon ?? existing.icon,
+            updatedAt: event.payload.updatedAt,
+          })
+        : state;
+    }
+
+    case "space.order-updated":
+      return applySpaceOrder(state, event.payload.orderedSpaceIds, event.payload.updatedAt);
+
+    case "space.deleted":
+      return removeSpace(state, event.payload.spaceId, event.payload.deletedAt);
+
     case "project.created":
       return upsertProject(
         state,
@@ -750,6 +781,7 @@ function applyOrchestrationEvent(
           defaultModelSelection: event.payload.defaultModelSelection,
           scripts: event.payload.scripts,
           isPinned: event.payload.isPinned ?? false,
+          spaceId: event.payload.spaceId ?? null,
           createdAt: event.payload.createdAt,
           updatedAt: event.payload.updatedAt,
         },
@@ -776,6 +808,10 @@ function applyOrchestrationEvent(
               : existingProject.defaultModelSelection,
           scripts: event.payload.scripts ?? existingProject.scripts,
           isPinned: event.payload.isPinned ?? existingProject.isPinned ?? false,
+          spaceId:
+            event.payload.spaceId !== undefined
+              ? event.payload.spaceId
+              : (existingProject.spaceId ?? null),
           createdAt: existingProject.createdAt ?? event.payload.updatedAt,
           updatedAt: event.payload.updatedAt,
         },
@@ -1234,10 +1270,18 @@ function applyOrchestrationEvent(
             event.payload.modelSelection !== undefined
               ? normalizeModelSelection(event.payload.modelSelection, thread.modelSelection)
               : thread.modelSelection;
+          // Automation-dispatched turns must not repaint the thread's persisted
+          // modes (mirrors the server projection): the automation's modes govern
+          // its own turn only, while the user's composer selection stays put.
+          const adoptTurnModes = event.payload.dispatchOrigin !== "automation";
+          const runtimeMode = adoptTurnModes ? event.payload.runtimeMode : thread.runtimeMode;
+          const interactionMode = adoptTurnModes
+            ? event.payload.interactionMode
+            : thread.interactionMode;
           if (
             modelSelection === thread.modelSelection &&
-            thread.runtimeMode === event.payload.runtimeMode &&
-            thread.interactionMode === event.payload.interactionMode &&
+            thread.runtimeMode === runtimeMode &&
+            thread.interactionMode === interactionMode &&
             thread.pendingSourceProposedPlan === event.payload.sourceProposedPlan &&
             (thread.updatedAt ?? thread.createdAt) >= event.payload.createdAt
           ) {
@@ -1246,8 +1290,8 @@ function applyOrchestrationEvent(
           return {
             ...thread,
             modelSelection,
-            runtimeMode: event.payload.runtimeMode,
-            interactionMode: event.payload.interactionMode,
+            runtimeMode,
+            interactionMode,
             pendingSourceProposedPlan: event.payload.sourceProposedPlan,
             updatedAt:
               (thread.updatedAt ?? thread.createdAt) > event.payload.createdAt

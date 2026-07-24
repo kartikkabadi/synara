@@ -17,6 +17,7 @@ export const SETTINGS_SECTION_IDS = [
   "providers",
   "skills",
   "usage",
+  "integrations",
   "advanced",
 ] as const;
 
@@ -57,7 +58,7 @@ export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
     group: "app",
     label: "General",
     description: "Default provider, thread mode, and sidebar organization.",
-    icon: "settings-gear-1",
+    icon: "settings-gear-4",
     eyebrow: "Workflow defaults",
   },
   {
@@ -155,6 +156,14 @@ export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
     description: "Remaining quota and credits for each signed-in provider.",
     icon: "gauge",
     eyebrow: "Limits & credits",
+  },
+  {
+    id: "integrations",
+    group: "synara",
+    label: "Integrations",
+    description: "Pair local MCP clients with scoped, revocable access to Synara tasks.",
+    icon: "plugin-1",
+    eyebrow: "External MCP",
   },
   {
     id: "advanced",

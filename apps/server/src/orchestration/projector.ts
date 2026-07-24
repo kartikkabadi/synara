@@ -23,6 +23,10 @@ import { Effect, Schema } from "effect";
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
   MessageSentPayloadSchema,
+  SpaceCreatedPayload,
+  SpaceDeletedPayload,
+  SpaceMetaUpdatedPayload,
+  SpaceOrderUpdatedPayload,
   ProjectCreatedPayload,
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
@@ -54,6 +58,8 @@ import {
   ThreadTurnStartRequestedPayload,
 } from "./Schemas.ts";
 import { resolveStableMessageTurnId } from "./messageTurnId.ts";
+import { settleTurnStateFromSession } from "./turnLifecycle.ts";
+import { deriveTurnStartModelSelection, deriveTurnStartSession } from "./turnStartSession.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
@@ -94,42 +100,15 @@ function settleLatestTurnForSessionStatus(
   if (latestTurn?.state !== "running") {
     return latestTurn;
   }
-
-  if (session.status === "error") {
-    return {
-      ...latestTurn,
-      state: "error" as const,
-      completedAt: latestTurn.completedAt ?? session.updatedAt,
-    };
+  const settledState = settleTurnStateFromSession(session, latestTurn.state);
+  if (settledState === null) {
+    return latestTurn;
   }
-
-  if (session.status === "interrupted" || session.status === "stopped") {
-    if (session.activeTurnId !== null) {
-      return latestTurn;
-    }
-    const stoppedState =
-      session.status === "stopped" && session.lastError !== null
-        ? ("error" as const)
-        : ("interrupted" as const);
-    return {
-      ...latestTurn,
-      state: stoppedState,
-      completedAt: latestTurn.completedAt ?? session.updatedAt,
-    };
-  }
-
-  if (session.status === "ready") {
-    if (session.activeTurnId !== null) {
-      return latestTurn;
-    }
-    return {
-      ...latestTurn,
-      state: "completed" as const,
-      completedAt: latestTurn.completedAt ?? session.updatedAt,
-    };
-  }
-
-  return latestTurn;
+  return {
+    ...latestTurn,
+    state: settledState,
+    completedAt: latestTurn.completedAt ?? session.updatedAt,
+  };
 }
 
 function updateThread(
@@ -301,6 +280,7 @@ function upsertThreadActivity(
 export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
   return {
     snapshotSequence: 0,
+    spaces: [],
     projects: [],
     threads: [],
     updatedAt: nowIso,
@@ -318,6 +298,87 @@ export function projectEvent(
   };
 
   switch (event.type) {
+    case "space.created":
+      return decodeForEvent(SpaceCreatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const existing = nextBase.spaces.find((entry) => entry.id === payload.spaceId);
+          const nextSpace = {
+            id: payload.spaceId,
+            name: payload.name,
+            icon: payload.icon,
+            sortOrder: payload.sortOrder,
+            createdAt: payload.createdAt,
+            updatedAt: payload.updatedAt,
+            deletedAt: null,
+          };
+          return {
+            ...nextBase,
+            spaces: existing
+              ? nextBase.spaces.map((entry) => (entry.id === payload.spaceId ? nextSpace : entry))
+              : [...nextBase.spaces, nextSpace],
+          };
+        }),
+      );
+
+    case "space.meta-updated":
+      return decodeForEvent(SpaceMetaUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          spaces: nextBase.spaces.map((space) =>
+            space.id === payload.spaceId
+              ? {
+                  ...space,
+                  ...(payload.name !== undefined ? { name: payload.name } : {}),
+                  ...(payload.icon !== undefined ? { icon: payload.icon } : {}),
+                  updatedAt: payload.updatedAt,
+                }
+              : space,
+          ),
+        })),
+      );
+
+    case "space.order-updated":
+      return decodeForEvent(SpaceOrderUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => {
+          const orderBySpaceId = new Map(
+            payload.orderedSpaceIds.map((spaceId, index) => [spaceId, index] as const),
+          );
+          return {
+            ...nextBase,
+            spaces: nextBase.spaces.map((space) => {
+              const sortOrder = orderBySpaceId.get(space.id);
+              // A listed space whose position did not move is not a change; skipping it keeps
+              // this read model, the SQL projection, and the client store byte-identical.
+              return sortOrder === undefined || sortOrder === space.sortOrder
+                ? space
+                : { ...space, sortOrder, updatedAt: payload.updatedAt };
+            }),
+          };
+        }),
+      );
+
+    case "space.deleted":
+      return decodeForEvent(SpaceDeletedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          spaces: nextBase.spaces.map((space) =>
+            space.id === payload.spaceId
+              ? { ...space, deletedAt: payload.deletedAt, updatedAt: payload.deletedAt }
+              : space,
+          ),
+          projects: nextBase.projects.map((project) =>
+            project.spaceId === payload.spaceId
+              ? {
+                  ...project,
+                  spaceId: null,
+                  updatedAt:
+                    project.updatedAt > payload.deletedAt ? project.updatedAt : payload.deletedAt,
+                }
+              : project,
+          ),
+        })),
+      );
+
     case "project.created":
       return decodeForEvent(ProjectCreatedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => {
@@ -330,6 +391,7 @@ export function projectEvent(
             defaultModelSelection: payload.defaultModelSelection,
             scripts: payload.scripts,
             isPinned: payload.isPinned ?? false,
+            spaceId: payload.spaceId ?? null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,
@@ -364,6 +426,7 @@ export function projectEvent(
                     : {}),
                   ...(payload.scripts !== undefined ? { scripts: payload.scripts } : {}),
                   ...(payload.isPinned !== undefined ? { isPinned: payload.isPinned } : {}),
+                  ...(payload.spaceId !== undefined ? { spaceId: payload.spaceId } : {}),
                   updatedAt: payload.updatedAt,
                 }
               : project,
@@ -750,16 +813,27 @@ export function projectEvent(
           }
           const canAdoptFirstTurnProvider =
             thread.latestTurn === null && thread.session === null && thread.messages.length <= 1;
+          const projectedModelSelection = deriveTurnStartModelSelection({
+            currentModelSelection: thread.modelSelection,
+            requestedModelSelection: payload.modelSelection,
+            canAdoptRequestedProvider: canAdoptFirstTurnProvider,
+          });
           const modelSelectionPatch =
-            payload.modelSelection !== undefined &&
-            (payload.modelSelection.provider === thread.modelSelection.provider ||
-              canAdoptFirstTurnProvider)
-              ? { modelSelection: payload.modelSelection }
+            projectedModelSelection !== thread.modelSelection
+              ? { modelSelection: projectedModelSelection }
               : {};
+          const turnStartSession = deriveTurnStartSession({
+            threadId: thread.id,
+            currentSession: thread.session,
+            providerName: projectedModelSelection.provider,
+            requestedRuntimeMode: payload.runtimeMode,
+            requestedAt: payload.createdAt,
+          });
           return {
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
               ...modelSelectionPatch,
+              ...(turnStartSession !== null ? { session: turnStartSession } : {}),
               runtimeMode: payload.runtimeMode,
               interactionMode: payload.interactionMode,
               hasPendingTurnStart: true,
@@ -1213,7 +1287,10 @@ export function projectEvent(
             return nextBase;
           }
 
-          const activities = upsertThreadActivity(thread.activities, payload.activity);
+          const activities = upsertThreadActivity(thread.activities, {
+            ...payload.activity,
+            sequence: event.sequence,
+          });
 
           return {
             ...nextBase,
