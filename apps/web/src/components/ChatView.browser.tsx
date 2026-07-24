@@ -4565,6 +4565,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         () => {
+          // The home chat container may auto-dispatch its own project.create,
+          // so match the dialog's project by workspace root.
           const projectCreateCommand = wsRequests
             .map((request) =>
               request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
@@ -4572,13 +4574,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
               request.command &&
               typeof request.command === "object" &&
               "type" in request.command &&
-              request.command.type === "project.create"
+              request.command.type === "project.create" &&
+              "workspaceRoot" in request.command &&
+              request.command.workspaceRoot === "/repo/spaced-project"
                 ? (request.command as Record<string, unknown>)
                 : null,
             )
-            .find((command) => command?.workspaceRoot === "/repo/spaced-project");
+            .find(Boolean);
           expect(projectCreateCommand).toBeDefined();
-          expect(projectCreateCommand?.workspaceRoot).toBe("/repo/spaced-project");
           expect(projectCreateCommand?.spaceId).toBe(createdSpaceId);
         },
         { timeout: 8_000, interval: 16 },
