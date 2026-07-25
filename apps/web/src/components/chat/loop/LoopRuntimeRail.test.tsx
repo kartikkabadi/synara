@@ -179,7 +179,7 @@ describe("LoopRuntimeRail", () => {
     expect(LOOP_ACTIVE_COMPOSER_PLACEHOLDER).toBe("Steer the next iteration…");
   });
 
-  it("normalizes budgets over eight turns to five segments", () => {
+  it("caps budgets over twelve turns at twelve proportional segments", () => {
     const markup = renderRail({
       loop: makeLoop({ iteration: 17, maxIterations: 50 }),
       latestTurn: makeRunningLoopTurn({
@@ -191,7 +191,25 @@ describe("LoopRuntimeRail", () => {
       }),
     });
     expect(markup).toContain("17/50");
-    expect(countSegments(markup)).toBe(5);
+    expect(countSegments(markup)).toBe(12);
+  });
+
+  it("renders fractional progress as a partial-width segment fill", () => {
+    // 3/24 across twelve segments = 1.5: one full segment, one half-filled.
+    const markup = renderRail({
+      loop: makeLoop({ iteration: 3, maxIterations: 24 }),
+      latestTurn: makeRunningLoopTurn({
+        purpose: {
+          kind: "loop-iteration",
+          activationId: LoopActivationId.makeUnsafe("activation-1"),
+          iteration: 3,
+        },
+      }),
+    });
+    expect(countSegments(markup)).toBe(12);
+    expect(markup).toContain("width:100%");
+    expect(markup).toContain("width:50%");
+    expect(markup).toContain("width:0%");
   });
 
   it("respects reduced motion on the running icon", () => {
