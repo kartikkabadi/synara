@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { LOOP_OBJECTIVE_PLACEHOLDER, LOOP_SETUP_COMPOSER_PLACEHOLDER } from "~/lib/loop";
 import {
   deriveLoopComposerPlaceholder,
+  isLoopSteerSendSignal,
   LOOP_IDLE_COMPOSER_PLACEHOLDER,
   LOOP_STREAMING_COMPOSER_PLACEHOLDER,
   type DeriveLoopComposerPlaceholderInput,
@@ -77,5 +78,41 @@ describe("deriveLoopComposerPlaceholder", () => {
     expect(deriveLoopComposerPlaceholder(makeInput())).toBe(
       "Ask anything, @tag files/folders, or use / to show available commands",
     );
+  });
+});
+
+describe("isLoopSteerSendSignal", () => {
+  it("signals steer for an active loop with a saved objective", () => {
+    expect(
+      isLoopSteerSendSignal({
+        loop: { active: true, prompt: "keep fixing tests" },
+        hasUnsupportedLoopContext: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("stays a plain send when the draft carries unsupported loop context", () => {
+    expect(
+      isLoopSteerSendSignal({
+        loop: { active: true, prompt: "keep fixing tests" },
+        hasUnsupportedLoopContext: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("stays a plain send without an active loop or saved objective", () => {
+    expect(isLoopSteerSendSignal({ loop: null, hasUnsupportedLoopContext: false })).toBe(false);
+    expect(
+      isLoopSteerSendSignal({
+        loop: { active: false, prompt: "keep fixing tests" },
+        hasUnsupportedLoopContext: false,
+      }),
+    ).toBe(false);
+    expect(
+      isLoopSteerSendSignal({
+        loop: { active: true, prompt: "  " },
+        hasUnsupportedLoopContext: false,
+      }),
+    ).toBe(false);
   });
 });

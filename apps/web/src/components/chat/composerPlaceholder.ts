@@ -13,6 +13,21 @@ export const LOOP_STREAMING_COMPOSER_PLACEHOLDER = "Queue a new objective for th
 export const LOOP_IDLE_COMPOSER_PLACEHOLDER =
   "Steer the loop — your message becomes the new objective";
 
+// Send-slot `↳` signal: the send button only renders while no turn is running,
+// so an active loop with a saved objective means Enter retargets — unless the
+// draft carries unsupported context, in which case sending stops the loop and
+// runs a normal message, so the button must stay a plain send.
+export function isLoopSteerSendSignal(input: {
+  loop: Pick<ThreadLoop, "active" | "prompt"> | null | undefined;
+  hasUnsupportedLoopContext: boolean;
+}): boolean {
+  return (
+    input.loop?.active === true &&
+    input.loop.prompt.trim().length > 0 &&
+    !input.hasUnsupportedLoopContext
+  );
+}
+
 export interface DeriveLoopComposerPlaceholderInput {
   isApprovalState: boolean;
   // null when no pending-progress question owns the composer.
