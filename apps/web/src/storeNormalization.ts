@@ -4,6 +4,7 @@
 
 import {
   MessageId,
+  type OrchestrationLatestTurn,
   type OrchestrationReadModel,
   type OrchestrationSpaceShell,
   type OrchestrationSessionStatus,
@@ -69,6 +70,19 @@ function sourceProposedPlansEqual(
   return left.threadId === right.threadId && left.planId === right.planId;
 }
 
+function turnPurposesEqual(
+  left: OrchestrationLatestTurn["purpose"],
+  right: OrchestrationLatestTurn["purpose"],
+): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  return (
+    left.kind === right.kind &&
+    left.activationId === right.activationId &&
+    left.iteration === right.iteration
+  );
+}
+
 function latestTurnsEqual(left: Thread["latestTurn"], right: Thread["latestTurn"]): boolean {
   if (left === right) return true;
   if (left == null || right == null) return false;
@@ -79,7 +93,8 @@ function latestTurnsEqual(left: Thread["latestTurn"], right: Thread["latestTurn"
     left.startedAt === right.startedAt &&
     left.completedAt === right.completedAt &&
     left.assistantMessageId === right.assistantMessageId &&
-    sourceProposedPlansEqual(left.sourceProposedPlan, right.sourceProposedPlan)
+    sourceProposedPlansEqual(left.sourceProposedPlan, right.sourceProposedPlan) &&
+    turnPurposesEqual(left.purpose, right.purpose)
   );
 }
 
@@ -1331,7 +1346,8 @@ function normalizeLatestTurn(
     previous.startedAt === incoming.startedAt &&
     previous.completedAt === incoming.completedAt &&
     previous.assistantMessageId === incoming.assistantMessageId &&
-    previous.sourceProposedPlan === nextSourceProposedPlan
+    previous.sourceProposedPlan === nextSourceProposedPlan &&
+    turnPurposesEqual(previous.purpose, incoming.purpose)
   ) {
     return previous;
   }
@@ -1344,6 +1360,7 @@ function normalizeLatestTurn(
     completedAt: incoming.completedAt,
     assistantMessageId: incoming.assistantMessageId,
     ...(nextSourceProposedPlan ? { sourceProposedPlan: nextSourceProposedPlan } : {}),
+    ...(incoming.purpose !== undefined ? { purpose: incoming.purpose } : {}),
   };
 }
 

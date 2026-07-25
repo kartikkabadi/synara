@@ -6,6 +6,7 @@ import {
   CheckpointRef,
   CommandId,
   EventId,
+  LoopActivationId,
   MessageId,
   OrchestrationProposedPlanId,
   ProjectId,
@@ -91,6 +92,48 @@ describe("store event reducer", () => {
     expect(threadsOf(next)[0]?.messages[0]?.mentions).toEqual([
       { name: "linear", path: "plugin://linear@openai-curated" },
     ]);
+  });
+
+  it("carries the initiating message's purpose onto client-built running turns", () => {
+    const turnId = TurnId.makeUnsafe("turn-loop");
+    const purpose = {
+      kind: "loop-iteration" as const,
+      activationId: LoopActivationId.makeUnsafe("act-1"),
+      iteration: 2,
+    };
+    const next = applyOrchestrationEvents(makeState(makeThread()), [
+      makeDomainEvent("thread.message-sent", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        messageId: MessageId.makeUnsafe("message-loop-user"),
+        role: "user",
+        text: "keep going",
+        attachments: [],
+        turnId,
+        purpose,
+        streaming: false,
+        source: "native",
+        createdAt: "2026-02-27T00:00:00.000Z",
+        updatedAt: "2026-02-27T00:00:00.000Z",
+      }),
+      makeDomainEvent("thread.message-sent", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        messageId: MessageId.makeUnsafe("message-loop-assistant"),
+        role: "assistant",
+        text: "working…",
+        attachments: [],
+        turnId,
+        streaming: true,
+        source: "native",
+        createdAt: "2026-02-27T00:00:01.000Z",
+        updatedAt: "2026-02-27T00:00:01.000Z",
+      }),
+    ]);
+
+    expect(threadsOf(next)[0]?.latestTurn).toMatchObject({
+      turnId,
+      state: "running",
+      purpose,
+    });
   });
 
   it("updates thread error and marks the running latest turn failed from session-set events", () => {
