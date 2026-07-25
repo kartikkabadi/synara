@@ -205,6 +205,7 @@ const ProjectionThreadCheckpointContextThreadRowSchema = Schema.Struct({
   workspaceRoot: Schema.String,
   envMode: ThreadEnvironmentMode,
   worktreePath: Schema.NullOr(Schema.String),
+  workingDirectory: Schema.NullOr(Schema.String),
 });
 const ProjectionFullThreadDiffContextRowSchema = Schema.Struct({
   threadId: ThreadId,
@@ -213,6 +214,7 @@ const ProjectionFullThreadDiffContextRowSchema = Schema.Struct({
   workspaceRoot: Schema.String,
   envMode: ThreadEnvironmentMode,
   worktreePath: Schema.NullOr(Schema.String),
+  workingDirectory: Schema.NullOr(Schema.String),
   latestCheckpointTurnCount: Schema.NullOr(NonNegativeInt),
   baselineCheckpointRef: Schema.NullOr(CheckpointRef),
   toCheckpointRef: Schema.NullOr(CheckpointRef),
@@ -632,6 +634,7 @@ function toProjectedThreadShellFromStoredSummary(input: {
     envMode: threadRow.envMode,
     branch: threadRow.branch,
     worktreePath: threadRow.worktreePath,
+    workingDirectory: threadRow.workingDirectory,
     associatedWorktreePath: threadRow.associatedWorktreePath,
     associatedWorktreeBranch: threadRow.associatedWorktreeBranch,
     associatedWorktreeRef: threadRow.associatedWorktreeRef,
@@ -689,6 +692,7 @@ function toProjectedThread(input: {
     envMode: threadRow.envMode,
     branch: threadRow.branch,
     worktreePath: threadRow.worktreePath,
+    workingDirectory: threadRow.workingDirectory,
     associatedWorktreePath: threadRow.associatedWorktreePath,
     associatedWorktreeBranch: threadRow.associatedWorktreeBranch,
     associatedWorktreeRef: threadRow.associatedWorktreeRef,
@@ -813,6 +817,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           env_mode AS "envMode",
           branch,
           worktree_path AS "worktreePath",
+          working_directory AS "workingDirectory",
           associated_worktree_path AS "associatedWorktreePath",
           associated_worktree_branch AS "associatedWorktreeBranch",
           associated_worktree_ref AS "associatedWorktreeRef",
@@ -863,6 +868,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           env_mode AS "envMode",
           branch,
           worktree_path AS "worktreePath",
+          working_directory AS "workingDirectory",
           associated_worktree_path AS "associatedWorktreePath",
           associated_worktree_branch AS "associatedWorktreeBranch",
           associated_worktree_ref AS "associatedWorktreeRef",
@@ -1362,6 +1368,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           env_mode AS "envMode",
           branch,
           worktree_path AS "worktreePath",
+          working_directory AS "workingDirectory",
           associated_worktree_path AS "associatedWorktreePath",
           associated_worktree_branch AS "associatedWorktreeBranch",
           associated_worktree_ref AS "associatedWorktreeRef",
@@ -1414,6 +1421,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           env_mode AS "envMode",
           branch,
           worktree_path AS "worktreePath",
+          working_directory AS "workingDirectory",
           associated_worktree_path AS "associatedWorktreePath",
           associated_worktree_branch AS "associatedWorktreeBranch",
           associated_worktree_ref AS "associatedWorktreeRef",
@@ -1723,7 +1731,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           projects.kind AS "projectKind",
           projects.workspace_root AS "workspaceRoot",
           threads.env_mode AS "envMode",
-          threads.worktree_path AS "worktreePath"
+          threads.worktree_path AS "worktreePath",
+          threads.working_directory AS "workingDirectory"
         FROM projection_threads AS threads
         INNER JOIN projection_projects AS projects
           ON projects.project_id = threads.project_id
@@ -1816,6 +1825,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           projects.workspace_root AS "workspaceRoot",
           threads.env_mode AS "envMode",
           threads.worktree_path AS "worktreePath",
+          threads.working_directory AS "workingDirectory",
           (
             SELECT MAX(turns.checkpoint_turn_count)
             FROM projection_turns AS turns
@@ -2526,6 +2536,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         workspaceRoot: threadRow.value.workspaceRoot,
         envMode: threadRow.value.envMode,
         worktreePath: threadRow.value.worktreePath,
+        workingDirectory: threadRow.value.workingDirectory,
         checkpoints: checkpointRows.map(
           (row): OrchestrationCheckpointSummary => ({
             turnId: row.turnId,
@@ -2583,6 +2594,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         workspaceRoot: row.value.workspaceRoot,
         envMode: row.value.envMode,
         worktreePath: row.value.worktreePath,
+        workingDirectory: row.value.workingDirectory,
         latestCheckpointTurnCount: row.value.latestCheckpointTurnCount ?? 0,
         baselineCheckpointRef: row.value.baselineCheckpointRef,
         toCheckpointRef: row.value.toCheckpointRef,

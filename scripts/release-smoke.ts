@@ -262,7 +262,7 @@ function verifyReleaseWorkflowSafety(): void {
   );
 
   const desktopBuildConfig = readFileSync(
-    resolve(repoRoot, "apps/desktop/tsdown.config.ts"),
+    resolve(repoRoot, "apps/desktop/tsdown.config.mts"),
     "utf8",
   );
   assertContains(
@@ -337,7 +337,7 @@ function verifyDesktopStageLockAuthority(): void {
   );
   assertContains(
     buildScript,
-    'createRequire(new URL("./package.json", import.meta.url))',
+    'createRequire(new URL("./package.json", import.meta.url)',
     "Expected desktop packaging to resolve dependencies from the owning scripts workspace.",
   );
   assertContains(

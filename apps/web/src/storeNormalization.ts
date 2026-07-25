@@ -155,6 +155,7 @@ export function threadShellsEqual(left: ThreadShell | undefined, right: ThreadSh
     left.envMode === right.envMode &&
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
+    (left.workingDirectory ?? null) === (right.workingDirectory ?? null) &&
     (left.associatedWorktreePath ?? null) === (right.associatedWorktreePath ?? null) &&
     (left.associatedWorktreeBranch ?? null) === (right.associatedWorktreeBranch ?? null) &&
     (left.associatedWorktreeRef ?? null) === (right.associatedWorktreeRef ?? null) &&
@@ -1304,6 +1305,7 @@ export function normalizeThreadFromReadModel(
       ? incoming.hasActionableProposedPlan
       : undefined;
   const nextWorktreePath = incoming.worktreePath;
+  const nextWorkingDirectory = incoming.workingDirectory ?? null;
   const nextAssociatedWorktreePath = incoming.associatedWorktreePath ?? null;
   const nextAssociatedWorktreeBranch = incoming.associatedWorktreeBranch ?? null;
   const nextAssociatedWorktreeRef = incoming.associatedWorktreeRef ?? null;
@@ -1356,6 +1358,7 @@ export function normalizeThreadFromReadModel(
     previous.envMode === (incoming.envMode ?? "local") &&
     previous.branch === resolvedBranch &&
     previous.worktreePath === nextWorktreePath &&
+    (previous.workingDirectory ?? null) === nextWorkingDirectory &&
     (previous.associatedWorktreePath ?? null) === nextAssociatedWorktreePath &&
     (previous.associatedWorktreeBranch ?? null) === nextAssociatedWorktreeBranch &&
     (previous.associatedWorktreeRef ?? null) === nextAssociatedWorktreeRef &&
@@ -1407,6 +1410,7 @@ export function normalizeThreadFromReadModel(
     envMode: incoming.envMode ?? "local",
     branch: resolvedBranch,
     worktreePath: nextWorktreePath,
+    workingDirectory: nextWorkingDirectory,
     associatedWorktreePath: nextAssociatedWorktreePath,
     associatedWorktreeBranch: nextAssociatedWorktreeBranch,
     associatedWorktreeRef: nextAssociatedWorktreeRef,
@@ -1465,6 +1469,7 @@ export function normalizeThreadShellSnapshot(
       : (incoming.loop ?? null);
   const lastVisitedAt = previous?.lastVisitedAt ?? incoming.updatedAt;
   const nextWorktreePath = incoming.worktreePath;
+  const nextWorkingDirectory = incoming.workingDirectory ?? null;
   const nextAssociatedWorktreePath = incoming.associatedWorktreePath ?? null;
   const nextAssociatedWorktreeBranch = incoming.associatedWorktreeBranch ?? null;
   const nextAssociatedWorktreeRef = incoming.associatedWorktreeRef ?? null;
@@ -1502,6 +1507,7 @@ export function normalizeThreadShellSnapshot(
     envMode: incoming.envMode ?? "local",
     branch: resolvedBranch,
     worktreePath: nextWorktreePath,
+    workingDirectory: nextWorkingDirectory,
     associatedWorktreePath: nextAssociatedWorktreePath,
     associatedWorktreeBranch: nextAssociatedWorktreeBranch,
     associatedWorktreeRef: nextAssociatedWorktreeRef,

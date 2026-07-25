@@ -374,6 +374,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           envMode: "local",
           branch: null,
           worktreePath: null,
+          workingDirectory: null,
           associatedWorktreePath: null,
           associatedWorktreeBranch: null,
           associatedWorktreeRef: null,
@@ -1525,6 +1526,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           envMode: "local",
           branch: null,
           worktreePath: null,
+          workingDirectory: null,
           associatedWorktreePath: null,
           associatedWorktreeBranch: null,
           associatedWorktreeRef: null,
@@ -1803,6 +1805,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           workspaceRoot: "/tmp/context-workspace",
           envMode: "local",
           worktreePath: "/tmp/context-worktree",
+          workingDirectory: null,
           checkpoints: [
             {
               turnId: asTurnId("turn-1"),
@@ -1896,6 +1899,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           workspaceRoot: "/tmp/context-workspace",
           envMode: "local",
           worktreePath: "/tmp/context-worktree",
+          workingDirectory: null,
           latestCheckpointTurnCount: 2,
           baselineCheckpointRef: asCheckpointRef("checkpoint-a"),
           toCheckpointRef: asCheckpointRef("checkpoint-b"),

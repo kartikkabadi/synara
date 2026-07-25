@@ -727,6 +727,9 @@ export const OrchestrationThread = Schema.Struct({
   envMode: Schema.optional(ThreadEnvironmentMode).pipe(Schema.withDecodingDefault(() => "local")),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  workingDirectory: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   associatedWorktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)).pipe(
     Schema.withDecodingDefault(() => null),
   ),
@@ -815,6 +818,9 @@ export const OrchestrationThreadShell = Schema.Struct({
   envMode: Schema.optional(ThreadEnvironmentMode).pipe(Schema.withDecodingDefault(() => "local")),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  workingDirectory: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   associatedWorktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)).pipe(
     Schema.withDecodingDefault(() => null),
   ),
@@ -1051,6 +1057,7 @@ const ThreadCreateCommand = Schema.Struct({
   envMode: Schema.optional(ThreadEnvironmentMode).pipe(Schema.withDecodingDefault(() => "local")),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  workingDirectory: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   associatedWorktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   associatedWorktreeBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   associatedWorktreeRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -1106,6 +1113,7 @@ const ThreadHandoffCreateCommand = Schema.Struct({
   envMode: Schema.optional(ThreadEnvironmentMode).pipe(Schema.withDecodingDefault(() => "local")),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  workingDirectory: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   associatedWorktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   associatedWorktreeBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   associatedWorktreeRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -1131,6 +1139,7 @@ const ThreadForkCreateCommand = Schema.Struct({
   envMode: Schema.optional(ThreadEnvironmentMode).pipe(Schema.withDecodingDefault(() => "local")),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  workingDirectory: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   associatedWorktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   associatedWorktreeBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   associatedWorktreeRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -1169,6 +1178,7 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   envMode: Schema.optional(ThreadEnvironmentMode),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  workingDirectory: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   associatedWorktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   associatedWorktreeBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   associatedWorktreeRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -1786,6 +1796,9 @@ export const ThreadCreatedPayload = Schema.Struct({
   envMode: Schema.optional(ThreadEnvironmentMode).pipe(Schema.withDecodingDefault(() => "local")),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  workingDirectory: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   associatedWorktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)).pipe(
     Schema.withDecodingDefault(() => null),
   ),
@@ -1855,6 +1868,7 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   envMode: Schema.optional(ThreadEnvironmentMode),
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  workingDirectory: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   associatedWorktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   associatedWorktreeBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   associatedWorktreeRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),

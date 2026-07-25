@@ -52,6 +52,7 @@ import {
   EMPTY_TURN_DIFF_BY_THREAD,
   EMPTY_TURN_DIFF_IDS_BY_THREAD,
   type AppState,
+  type ThreadDetailSyncState,
 } from "./storeState";
 import type {
   ChatMessage,
@@ -84,6 +85,7 @@ function toThreadShell(thread: Thread): ThreadShell {
     envMode: thread.envMode,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    workingDirectory: thread.workingDirectory ?? null,
     associatedWorktreePath: thread.associatedWorktreePath ?? null,
     associatedWorktreeBranch: thread.associatedWorktreeBranch ?? null,
     associatedWorktreeRef: thread.associatedWorktreeRef ?? null,
@@ -289,6 +291,7 @@ function sidebarThreadSummariesEqual(
     left.envMode === right.envMode &&
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
+    (left.workingDirectory ?? null) === (right.workingDirectory ?? null) &&
     (left.associatedWorktreePath ?? null) === (right.associatedWorktreePath ?? null) &&
     (left.associatedWorktreeBranch ?? null) === (right.associatedWorktreeBranch ?? null) &&
     (left.associatedWorktreeRef ?? null) === (right.associatedWorktreeRef ?? null) &&
@@ -329,6 +332,7 @@ function buildSidebarThreadSummary(
     envMode: thread.envMode,
     branch: thread.branch,
     worktreePath: thread.worktreePath,
+    workingDirectory: thread.workingDirectory ?? null,
     associatedWorktreePath: thread.associatedWorktreePath ?? null,
     associatedWorktreeBranch: thread.associatedWorktreeBranch ?? null,
     associatedWorktreeRef: thread.associatedWorktreeRef ?? null,
@@ -441,6 +445,55 @@ function writeThreadShellProjection(
   }
 
   return nextState;
+}
+
+function writeThreadDetailSyncState(
+  state: AppState,
+  threadId: ThreadId,
+  syncState: ThreadDetailSyncState,
+): AppState {
+  if (state.threadDetailSyncById?.[threadId] === syncState) {
+    return state;
+  }
+  return {
+    ...state,
+    threadDetailSyncById: {
+      ...(state.threadDetailSyncById ?? {}),
+      [threadId]: syncState,
+    },
+  };
+}
+
+function clearThreadDetailSyncState(state: AppState, threadId: ThreadId): AppState {
+  if (
+    state.threadDetailSyncById === undefined ||
+    !Object.hasOwn(state.threadDetailSyncById, threadId)
+  ) {
+    return state;
+  }
+  const { [threadId]: _removed, ...threadDetailSyncById } = state.threadDetailSyncById;
+  return { ...state, threadDetailSyncById };
+}
+
+export function markThreadDetailSyncFailedInClientState(
+  state: AppState,
+  threadId: ThreadId,
+): AppState {
+  // Applied detail outranks a late stream failure: keep rendering the data we have.
+  if (state.threadDetailSyncById?.[threadId] === "synced") {
+    return state;
+  }
+  return writeThreadDetailSyncState(state, threadId, "failed");
+}
+
+export function clearThreadDetailSyncFailureInClientState(
+  state: AppState,
+  threadId: ThreadId,
+): AppState {
+  if (state.threadDetailSyncById?.[threadId] !== "failed") {
+    return state;
+  }
+  return clearThreadDetailSyncState(state, threadId);
 }
 
 function writeThreadState(state: AppState, nextThread: Thread, previousThread?: Thread): AppState {
@@ -575,25 +628,28 @@ function removeThreadState(state: AppState, threadId: ThreadId): AppState {
     nextThreadIds === state.threadIds &&
     sidebarThreadSummaryById === state.sidebarThreadSummaryById
   ) {
-    return state;
+    return clearThreadDetailSyncState(state, threadId);
   }
 
-  return {
-    ...state,
-    threadIds: nextThreadIds,
-    threadShellById,
-    threadSessionById,
-    threadTurnStateById,
-    messageIdsByThreadId,
-    messageByThreadId,
-    activityIdsByThreadId,
-    activityByThreadId,
-    proposedPlanIdsByThreadId,
-    proposedPlanByThreadId,
-    turnDiffIdsByThreadId,
-    turnDiffSummaryByThreadId,
-    sidebarThreadSummaryById,
-  };
+  return clearThreadDetailSyncState(
+    {
+      ...state,
+      threadIds: nextThreadIds,
+      threadShellById,
+      threadSessionById,
+      threadTurnStateById,
+      messageIdsByThreadId,
+      messageByThreadId,
+      activityIdsByThreadId,
+      activityByThreadId,
+      proposedPlanIdsByThreadId,
+      proposedPlanByThreadId,
+      turnDiffIdsByThreadId,
+      turnDiffSummaryByThreadId,
+      sidebarThreadSummaryById,
+    },
+    threadId,
+  );
 }
 
 export function evictThreadDetailFromClientState(state: AppState, threadId: ThreadId): AppState {
@@ -611,7 +667,8 @@ export function evictThreadDetailFromClientState(state: AppState, threadId: Thre
     (record) => record !== undefined && Object.hasOwn(record, threadId),
   );
   if (!hasNormalizedDetail) {
-    return state;
+    // A sync flag without normalized detail is stale; clear it so hydration restarts cleanly.
+    return clearThreadDetailSyncState(state, threadId);
   }
 
   const { [threadId]: _removedMessageIds, ...messageIdsByThreadId } =
@@ -631,17 +688,20 @@ export function evictThreadDetailFromClientState(state: AppState, threadId: Thre
   const { [threadId]: _removedDiffs, ...turnDiffSummaryByThreadId } =
     state.turnDiffSummaryByThreadId ?? EMPTY_TURN_DIFF_BY_THREAD;
 
-  return {
-    ...state,
-    messageIdsByThreadId,
-    messageByThreadId,
-    activityIdsByThreadId,
-    activityByThreadId,
-    proposedPlanIdsByThreadId,
-    proposedPlanByThreadId,
-    turnDiffIdsByThreadId,
-    turnDiffSummaryByThreadId,
-  };
+  return clearThreadDetailSyncState(
+    {
+      ...state,
+      messageIdsByThreadId,
+      messageByThreadId,
+      activityIdsByThreadId,
+      activityByThreadId,
+      proposedPlanIdsByThreadId,
+      proposedPlanByThreadId,
+      turnDiffIdsByThreadId,
+      turnDiffSummaryByThreadId,
+    },
+    threadId,
+  );
 }
 
 export function removeDeletedThreadFromClientState(state: AppState, threadId: ThreadId): AppState {
@@ -854,6 +914,7 @@ export function syncServerShellSnapshot(
       state.turnDiffSummaryByThreadId,
       nextThreadIds,
     ),
+    threadDetailSyncById: retainThreadScopedRecord(state.threadDetailSyncById, nextThreadIds),
   };
 
   for (const thread of snapshotThreads) {
@@ -899,16 +960,20 @@ function syncServerThreadDetailWithOptions(
   const nextThreadDetail = options
     ? mergeReadModelThreadDetailWithLiveHotPath(thread, previousThread)
     : thread;
-  return commitThreadProjection(
-    writeThreadState(
-      state,
-      normalizeThreadFromReadModel(nextThreadDetail, previousThread),
-      previousThread,
+  return writeThreadDetailSyncState(
+    commitThreadProjection(
+      writeThreadState(
+        state,
+        normalizeThreadFromReadModel(nextThreadDetail, previousThread),
+        previousThread,
+      ),
+      thread.id,
+      {
+        updateSidebarSummary: false,
+      },
     ),
     thread.id,
-    {
-      updateSidebarSummary: false,
-    },
+    "synced",
   );
 }
 
@@ -1010,9 +1075,15 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
       state.turnDiffSummaryByThreadId,
       nextThreadIds,
     ),
+    threadDetailSyncById: retainThreadScopedRecord(state.threadDetailSyncById, nextThreadIds),
   };
   for (const thread of nextThreads) {
-    normalizedState = writeThreadState(normalizedState, thread);
+    // Read-model threads carry full detail (messages, activities), so they are synced by definition.
+    normalizedState = writeThreadDetailSyncState(
+      writeThreadState(normalizedState, thread),
+      thread.id,
+      "synced",
+    );
   }
   const threads = getThreadsFromState(normalizedState);
   const nextSidebarThreadSummaryById = Object.fromEntries(
@@ -1043,6 +1114,7 @@ export function syncServerReadModel(state: AppState, readModel: OrchestrationRea
     normalizedState.proposedPlanByThreadId === state.proposedPlanByThreadId &&
     normalizedState.turnDiffIdsByThreadId === state.turnDiffIdsByThreadId &&
     normalizedState.turnDiffSummaryByThreadId === state.turnDiffSummaryByThreadId &&
+    normalizedState.threadDetailSyncById === state.threadDetailSyncById &&
     state.threadsHydrated
   ) {
     return state;

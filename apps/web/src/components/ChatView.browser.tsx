@@ -4097,11 +4097,38 @@ describe("ChatView timeline estimator parity (full app)", () => {
           expect(useComposerDraftStore.getState().getDraftThread(newThreadId)).toMatchObject({
             projectId: STUDIO_PROJECT_ID,
             entryPoint: "chat",
+            envMode: "local",
+            branch: null,
+            worktreePath: null,
+            workingDirectory: null,
           });
+          expect(document.querySelector('[data-testid="workspace-picker-trigger"]')).not.toBeNull();
           expect(
             useComposerDraftStore.getState().projectDraftThreadIdByProjectId[HOME_PROJECT_ID],
           ).toBeUndefined();
           expect(mounted.router.state.location.pathname).toBe(newThreadPath);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await page.getByTestId("workspace-picker-trigger").click();
+      const projectFolderOption = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll<HTMLElement>('[data-slot="combobox-item"]')).find(
+            (item) => item.textContent?.trim() === "project",
+          ) ?? null,
+        "Unable to find the reference folder option.",
+      );
+      projectFolderOption.click();
+      await vi.waitFor(
+        () => {
+          expect(useComposerDraftStore.getState().getDraftThread(newThreadId)).toMatchObject({
+            projectId: STUDIO_PROJECT_ID,
+            envMode: "local",
+            branch: null,
+            worktreePath: null,
+            workingDirectory: "/repo/project",
+          });
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -4493,8 +4520,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         () => {
-          // The home chat container may auto-dispatch its own project.create,
-          // so match the dialog's project by workspace root.
           const projectCreateCommand = wsRequests
             .map((request) =>
               request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
@@ -4502,14 +4527,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
               request.command &&
               typeof request.command === "object" &&
               "type" in request.command &&
-              request.command.type === "project.create" &&
-              "workspaceRoot" in request.command &&
-              request.command.workspaceRoot === "/repo/spaced-project"
+              request.command.type === "project.create"
                 ? (request.command as Record<string, unknown>)
                 : null,
             )
-            .find(Boolean);
+            .find((command) => command?.workspaceRoot === "/repo/spaced-project");
           expect(projectCreateCommand).toBeDefined();
+          expect(projectCreateCommand?.workspaceRoot).toBe("/repo/spaced-project");
           expect(projectCreateCommand?.spaceId).toBe(createdSpaceId);
         },
         { timeout: 8_000, interval: 16 },

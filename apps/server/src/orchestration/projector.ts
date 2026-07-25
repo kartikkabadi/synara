@@ -458,6 +458,8 @@ export function projectEvent(
           event.type,
           "payload",
         );
+        const isStudio =
+          nextBase.projects.find((project) => project.id === payload.projectId)?.kind === "studio";
         const thread: OrchestrationThread = yield* decodeForEvent(
           OrchestrationThread,
           {
@@ -467,13 +469,16 @@ export function projectEvent(
             modelSelection: payload.modelSelection,
             runtimeMode: payload.runtimeMode,
             interactionMode: payload.interactionMode,
-            envMode: payload.envMode,
-            branch: payload.branch,
-            worktreePath: payload.worktreePath,
-            associatedWorktreePath: payload.associatedWorktreePath,
-            associatedWorktreeBranch: payload.associatedWorktreeBranch,
-            associatedWorktreeRef: payload.associatedWorktreeRef,
-            createBranchFlowCompleted: payload.createBranchFlowCompleted,
+            envMode: isStudio ? "local" : payload.envMode,
+            branch: isStudio ? null : payload.branch,
+            worktreePath: isStudio ? null : payload.worktreePath,
+            workingDirectory: isStudio
+              ? (payload.workingDirectory ?? payload.worktreePath)
+              : payload.workingDirectory,
+            associatedWorktreePath: isStudio ? null : payload.associatedWorktreePath,
+            associatedWorktreeBranch: isStudio ? null : payload.associatedWorktreeBranch,
+            associatedWorktreeRef: isStudio ? null : payload.associatedWorktreeRef,
+            createBranchFlowCompleted: isStudio ? false : payload.createBranchFlowCompleted,
             isPinned: payload.isPinned,
             parentThreadId: payload.parentThreadId,
             creationSource: payload.creationSource ?? null,
@@ -554,6 +559,9 @@ export function projectEvent(
         Effect.map((payload) => {
           const existingThread =
             nextBase.threads.find((thread) => thread.id === payload.threadId) ?? null;
+          const isStudio =
+            nextBase.projects.find((project) => project.id === existingThread?.projectId)?.kind ===
+            "studio";
           const nextCreateBranchFlowCompleted =
             payload.createBranchFlowCompleted !== undefined
               ? payload.createBranchFlowCompleted
@@ -569,9 +577,30 @@ export function projectEvent(
               ...(payload.modelSelection !== undefined
                 ? { modelSelection: payload.modelSelection }
                 : {}),
-              ...(payload.envMode !== undefined ? { envMode: payload.envMode } : {}),
-              ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
-              ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
+              ...(isStudio
+                ? {
+                    envMode: "local" as const,
+                    branch: null,
+                    worktreePath: null,
+                    workingDirectory:
+                      payload.workingDirectory !== undefined
+                        ? payload.workingDirectory
+                        : payload.worktreePath !== undefined
+                          ? payload.worktreePath
+                          : (existingThread?.workingDirectory ??
+                            existingThread?.worktreePath ??
+                            null),
+                  }
+                : {
+                    ...(payload.envMode !== undefined ? { envMode: payload.envMode } : {}),
+                    ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
+                    ...(payload.worktreePath !== undefined
+                      ? { worktreePath: payload.worktreePath }
+                      : {}),
+                    ...(payload.workingDirectory !== undefined
+                      ? { workingDirectory: payload.workingDirectory }
+                      : {}),
+                  }),
               ...(payload.associatedWorktreePath !== undefined
                 ? { associatedWorktreePath: payload.associatedWorktreePath }
                 : {}),
@@ -583,6 +612,14 @@ export function projectEvent(
                 : {}),
               ...(nextCreateBranchFlowCompleted !== undefined
                 ? { createBranchFlowCompleted: nextCreateBranchFlowCompleted }
+                : {}),
+              ...(isStudio
+                ? {
+                    associatedWorktreePath: null,
+                    associatedWorktreeBranch: null,
+                    associatedWorktreeRef: null,
+                    createBranchFlowCompleted: false,
+                  }
                 : {}),
               ...(payload.isPinned !== undefined ? { isPinned: payload.isPinned } : {}),
               ...(payload.parentThreadId !== undefined
