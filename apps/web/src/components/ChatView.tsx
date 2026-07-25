@@ -10538,9 +10538,7 @@ export default function ChatView({
                           size="icon-xs"
                           className="sm:size-[26px]"
                           onClick={() =>
-                            isLoopOwnedTurnActive
-                              ? void handleStopLoopNow()
-                              : void onInterrupt()
+                            isLoopOwnedTurnActive ? void handleStopLoopNow() : void onInterrupt()
                           }
                           aria-label={isLoopOwnedTurnActive ? "Stop loop" : "Stop generation"}
                           title={

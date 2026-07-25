@@ -9,8 +9,7 @@ import { LOOP_OBJECTIVE_PLACEHOLDER, LOOP_SETUP_COMPOSER_PLACEHOLDER } from "~/l
 // Composer placeholders while a loop with a saved objective is active (spec §9).
 // Streaming iteration: Enter queues a chip that replaces the objective when
 // the turn ends. Idle between iterations: Enter retargets immediately.
-export const LOOP_STREAMING_COMPOSER_PLACEHOLDER =
-  "Queue a new objective for the next iteration…";
+export const LOOP_STREAMING_COMPOSER_PLACEHOLDER = "Queue a new objective for the next iteration…";
 export const LOOP_IDLE_COMPOSER_PLACEHOLDER =
   "Steer the loop — your message becomes the new objective";
 
