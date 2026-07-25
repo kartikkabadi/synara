@@ -1,24 +1,31 @@
 // FILE: userTurnMarker.ts
 // Purpose: Single predicate for the marker chip above a sent user message
-// ("Sent via Automation" / "Sent by agent" / "Steering conversation"). Shared by the transcript
-// renderer (MessagesTimeline) and the row-height estimator (timelineHeight) so
+// ("Sent via Automation" / "Sent by agent" / "Steering conversation" /
+// "Steering next iteration"). Shared by the transcript renderer
+// (MessagesTimeline) and the row-height estimator (timelineHeight) so
 // what gets rendered and what gets measured can never drift apart.
 // Layer: web chat feature (pure logic, no I/O).
 
 // Server-dispatched turns (automation runs, agent gateway tools) take
-// precedence over the steer marker so the origin stays visible even for
-// steered dispatches.
-export type UserTurnMarkerKind = "automation" | "agent" | "steer";
+// precedence over the steer markers so the origin stays visible even for
+// steered dispatches. Manual loop retargets carry a loop-iteration purpose
+// with a "user" dispatch origin; automatic loop iterations omit the origin
+// and stay unmarked.
+export type UserTurnMarkerKind = "automation" | "agent" | "steer" | "loop-steer";
 
 export function resolveUserTurnMarker(message: {
   readonly dispatchMode?: "queue" | "steer" | undefined;
   readonly dispatchOrigin?: "user" | "automation" | "agent" | undefined;
+  readonly purpose?: { readonly kind: "loop-iteration" } | undefined;
 }): UserTurnMarkerKind | null {
   if (message.dispatchOrigin === "automation") {
     return "automation";
   }
   if (message.dispatchOrigin === "agent") {
     return "agent";
+  }
+  if (message.purpose?.kind === "loop-iteration" && message.dispatchOrigin === "user") {
+    return "loop-steer";
   }
   if (message.dispatchMode === "steer") {
     return "steer";
