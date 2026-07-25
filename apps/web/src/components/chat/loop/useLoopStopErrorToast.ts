@@ -6,7 +6,7 @@
 
 import type { ThreadId, ThreadLoop } from "@synara/contracts";
 import { useEffect, useRef } from "react";
-import { formatLoopStopReasonShort } from "./loop/presentation";
+import { formatLoopStopReasonShort } from "./presentation";
 
 interface LoopStopSnapshot {
   activationId: string;

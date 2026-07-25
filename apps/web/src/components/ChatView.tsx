@@ -460,12 +460,12 @@ import { ComposerPendingApprovalPanel } from "./chat/ComposerPendingApprovalPane
 import { ComposerExtrasMenu } from "./chat/ComposerExtrasMenu";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { ComposerInputBanners } from "./chat/ComposerInputBanners";
-import { LoopComposerModeCta, LoopComposerModeHeader } from "./chat/LoopComposerMode";
+import { LoopComposerModeCta, LoopComposerModeHeader } from "./chat/loop/LoopComposerMode";
 import { deriveLoopComposerPlaceholder } from "./chat/composerPlaceholder";
 import { isLoopOwnedTurnRunning } from "./chat/loop/presentation";
 import { isUnsupportedLoopContext } from "~/lib/loop";
-import { useLoopComposerMode } from "./chat/useLoopComposerMode";
-import { useLoopActions } from "../hooks/useLoopActions";
+import { useLoopComposerMode } from "./chat/loop/useLoopComposerMode";
+import { useLoopActions } from "./chat/loop/useLoopActions";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerVoiceButton } from "./chat/ComposerVoiceButton";
 import { ComposerVoiceRecorderBar } from "./chat/ComposerVoiceRecorderBar";

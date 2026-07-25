@@ -6,8 +6,8 @@
 
 import { useEffect, useState } from "react";
 import { LoopIcon } from "~/lib/icons";
-import { Button } from "../ui/button";
-import { DisclosureRegion } from "../ui/DisclosureRegion";
+import { Button } from "../../ui/button";
+import { DisclosureRegion } from "../../ui/DisclosureRegion";
 import {
   Menu,
   MenuGroup,
@@ -16,9 +16,9 @@ import {
   MenuRadioItem,
   MenuSeparator,
   MenuTrigger,
-} from "../ui/menu";
+} from "../../ui/menu";
 import { ChevronDownIcon } from "~/lib/icons";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../ui/select";
 import { LOOP_DEFAULT_HARD_CAP } from "@synara/contracts";
 import {
   LOOP_COUNT_PRESETS,
@@ -28,7 +28,7 @@ import {
   type LoopBudgetChoice,
 } from "~/lib/loop";
 import { type LoopComposerMode as LoopComposerModeState } from "./useLoopComposerMode";
-import { ComposerPickerMenuPopup } from "./ComposerPickerMenuPopup";
+import { ComposerPickerMenuPopup } from "../ComposerPickerMenuPopup";
 
 function formatDurationPreset(seconds: number): string {
   const minutes = Math.round(seconds / 60);

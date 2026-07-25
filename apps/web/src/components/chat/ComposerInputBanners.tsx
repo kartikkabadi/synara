@@ -13,7 +13,7 @@ import { cn } from "~/lib/utils";
 import type { Thread } from "../../types";
 import { ComposerAutomationSetupBanner } from "./ComposerAutomationSetupBanner";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
-import { isLoopRuntimeRailVisible, LoopRuntimeRail } from "./LoopRuntimeRail";
+import { isLoopRuntimeRailVisible, LoopRuntimeRail } from "./loop/LoopRuntimeRail";
 import { COMPOSER_INPUT_SURFACE_BANNER_CLASS_NAME } from "./composerPickerStyles";
 
 interface ComposerInputBannersProps {

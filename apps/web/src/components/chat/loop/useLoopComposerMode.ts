@@ -16,9 +16,9 @@ import {
   validateLoopObjective,
   type LoopBudgetChoice,
   type LoopSetupNote,
-} from "../../lib/loop";
-import { newCommandId } from "../../lib/utils";
-import { readNativeApi } from "../../nativeApi";
+} from "../../../lib/loop";
+import { newCommandId } from "../../../lib/utils";
+import { readNativeApi } from "../../../nativeApi";
 
 export type LoopComposerMode =
   | { kind: "closed" }

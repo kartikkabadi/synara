@@ -14,13 +14,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ChevronDownIcon, LoopIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
-import { Menu, MenuItem, MenuPopupBase, MenuSeparator, MenuTrigger } from "../ui/menu";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Menu, MenuItem, MenuPopupBase, MenuSeparator, MenuTrigger } from "../../ui/menu";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../../ui/tooltip";
 import {
   deriveLoopPresentationState,
   isLoopOwnedTurnRunning,
   type LoopSemanticColor,
-} from "./loop/presentation";
+} from "./presentation";
 
 export interface LoopRuntimeRailProps {
   loop: ThreadLoop;
