@@ -208,7 +208,7 @@ function LoopStopSplitButton({
 }
 
 // Transient confirmation after a manual retarget: when `loop.prompt` changes
-// while the loop stays active, surface `↳ Objective updated` for a few
+// while the loop stays active, surface `Objective updated` for a few
 // seconds; the existing crossfade machinery animates it in and out. Resets
 // across loops (activationId) and clears on unmount.
 function useObjectiveUpdatedCue(loop: ThreadLoop): boolean {
