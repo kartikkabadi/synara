@@ -10485,6 +10485,7 @@ export default function ChatView({
               ) : null}
               <ComposerQueuedHeader
                 queuedTurns={queuedComposerTurns}
+                loopActive={activeThread?.loop?.active === true}
                 onSteer={onSteerQueuedComposerTurn}
                 onRemove={removeQueuedComposerTurn}
                 onEdit={onEditQueuedComposerTurn}
