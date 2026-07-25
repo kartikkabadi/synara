@@ -454,10 +454,7 @@ import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { ComposerInputBanners } from "./chat/ComposerInputBanners";
 import { LoopComposerModeCta, LoopComposerModeHeader } from "./chat/loop/LoopComposerMode";
 import { deriveLoopComposerPlaceholder } from "./chat/composerPlaceholder";
-import { isLoopOwnedTurnRunning } from "./chat/loop/presentation";
-import { isUnsupportedLoopContext } from "~/lib/loop";
-import { useLoopComposerMode } from "./chat/loop/useLoopComposerMode";
-import { useLoopActions } from "./chat/loop/useLoopActions";
+import { useLoopController } from "./chat/loop/useLoopController";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerVoiceButton } from "./chat/ComposerVoiceButton";
 import { ComposerVoiceRecorderBar } from "./chat/ComposerVoiceRecorderBar";
@@ -4233,21 +4230,6 @@ export default function ChatView({
       createdAt: new Date().toISOString(),
     });
   }, [activeThread, isServerThread]);
-
-  const {
-    stopAfterTurn: handleStopLoopAfterTurn,
-    stopNow: handleStopLoopNow,
-    ensureLoopThreadReady,
-  } = useLoopActions({
-    threadId,
-    activeThread,
-    activeProject,
-    isServerThread,
-    selectedModelSelection,
-    runtimeMode,
-    interactionMode,
-    syncServerShellSnapshot,
-  });
 
   const {
     handoffBusy,
@@ -9112,48 +9094,38 @@ export default function ChatView({
     ],
   );
 
-  const loopUnsupportedContext = isUnsupportedLoopContext({
-    imageCount: composerImages.length,
-    fileCount: composerFiles.length,
-    terminalContextCount: composerTerminalContexts.length,
-    selectedSkillCount: composerSkills.length,
-    selectedMentionCount: composerMentions.length,
-    assistantSelectionCount: composerAssistantSelections.length,
-  });
-
-  const loopComposer = useLoopComposerMode({
+  const loopController = useLoopController({
     threadId,
-    activeLoop: activeThread?.loop ?? null,
-    hasUnsupportedContext: loopUnsupportedContext,
-    objective: prompt,
-    setObjective: setComposerPromptValue,
-    clearObjective: clearComposerSlashDraft,
-    focusEditor: scheduleComposerFocus,
-    syncServerShellSnapshot: async () => {
-      const api = readNativeApi();
-      if (api) {
-        syncServerShellSnapshot(await api.orchestration.getShellSnapshot());
-      }
+    activeThread,
+    activeProject,
+    isServerThread,
+    selectedModelSelection,
+    runtimeMode,
+    interactionMode,
+    isComposerApprovalState,
+    unsupportedContext: {
+      imageCount: composerImages.length,
+      fileCount: composerFiles.length,
+      terminalContextCount: composerTerminalContexts.length,
+      selectedSkillCount: composerSkills.length,
+      selectedMentionCount: composerMentions.length,
+      assistantSelectionCount: composerAssistantSelections.length,
     },
-    ensureThreadReady: ensureLoopThreadReady,
+    composer: {
+      objective: prompt,
+      setObjective: setComposerPromptValue,
+      clearObjective: clearComposerSlashDraft,
+      focusEditor: scheduleComposerFocus,
+    },
+    syncServerShellSnapshot,
   });
+  const {
+    composerMode: loopComposer,
+    actions: { stopAfterTurn: handleStopLoopAfterTurn, stopNow: handleStopLoopNow },
+    ensureLoopThreadReady,
+    isLoopOwnedTurnActive,
+  } = loopController;
   const loopComposerModeOpen = loopComposer.mode.kind !== "closed";
-  const loopComposerReset = loopComposer.reset;
-  // Loop setup/edit is per-thread state: close it when the thread changes so
-  // a mode opened on one thread never dispatches against another.
-  useEffect(() => {
-    loopComposerReset();
-  }, [threadId, loopComposerReset]);
-  // The approval composer takes over the surface; close loop setup rather
-  // than leaving it hidden-but-armed behind the approval flow.
-  useEffect(() => {
-    if (isComposerApprovalState) {
-      loopComposerReset();
-    }
-  }, [isComposerApprovalState, loopComposerReset]);
-  const isLoopOwnedTurnActive =
-    activeThread?.loop != null &&
-    isLoopOwnedTurnRunning(activeThread.loop, activeThread.latestTurn);
 
   const composerPlaceholder = useMemo(
     () =>
@@ -9208,7 +9180,7 @@ export default function ChatView({
     fastModeEnabled,
     providerNativeCommands,
     providerCommandDiscoveryCwd: composerSkillCwd,
-    hasUnsupportedLoopContext: loopUnsupportedContext,
+    hasUnsupportedLoopContext: loopController.hasUnsupportedContext,
     selectedProvider,
     currentProviderModelOptions,
     selectedModelSelection,

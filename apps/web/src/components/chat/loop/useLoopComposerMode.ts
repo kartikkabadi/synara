@@ -3,7 +3,12 @@
 // Layer: Web chat composer controller
 // No JSX. Pure `/loop` helpers live in ~/lib/loop; the hook wires them to the composer.
 
-import { type LoopActivationId, type ThreadId, type ThreadLoop } from "@synara/contracts";
+import {
+  type LoopActivationId,
+  type OrchestrationShellSnapshot,
+  type ThreadId,
+  type ThreadLoop,
+} from "@synara/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   LOOP_DEFAULT_BUDGET_CHOICE,
@@ -11,14 +16,12 @@ import {
   LOOP_UNSUPPORTED_CONTEXT_MESSAGE,
   loopBudgetChoiceFromLoop,
   loopSetupNoticeFor,
-  performLoopSetupSubmit,
   validateLoopBudgetChoice,
   validateLoopObjective,
   type LoopBudgetChoice,
   type LoopSetupNote,
 } from "../../../lib/loop";
-import { newCommandId } from "../../../lib/utils";
-import { readNativeApi } from "../../../nativeApi";
+import { performLoopSetupSubmit } from "./dispatch";
 
 export type LoopComposerMode =
   | { kind: "closed" }
@@ -38,7 +41,7 @@ export interface UseLoopComposerModeInput {
   setObjective: (value: string) => void;
   clearObjective: () => void;
   focusEditor: () => void;
-  syncServerShellSnapshot: () => Promise<void>;
+  syncServerShellSnapshot: (snapshot: OrchestrationShellSnapshot) => void;
   ensureThreadReady: (titleSeed: string) => Promise<boolean>;
 }
 
@@ -190,13 +193,6 @@ export function useLoopComposerMode(input: UseLoopComposerModeInput): LoopCompos
       return;
     }
 
-    const api = readNativeApi();
-    if (!api) {
-      patch({ note: null, error: "Unable to connect to the app server." });
-      env.focusEditor();
-      return;
-    }
-
     patch({ isDispatching: true, note: null, error: null });
     try {
       const ready = await env.ensureThreadReady(objective);
@@ -205,25 +201,18 @@ export function useLoopComposerMode(input: UseLoopComposerModeInput): LoopCompos
         env.focusEditor();
         return;
       }
-      const result = await performLoopSetupSubmit(
-        {
-          dispatchCommand: (command) => api.orchestration.dispatchCommand(command),
-          newCommandId,
-          now: () => new Date().toISOString(),
-        },
-        {
-          threadId: env.threadId,
-          objective,
-          budget: mode.budget,
-          ...(mode.kind === "edit" ? { expectedActivationId: mode.activationId } : {}),
-        },
-      );
+      const result = await performLoopSetupSubmit({
+        threadId: env.threadId,
+        objective,
+        budget: mode.budget,
+        ...(mode.kind === "edit" ? { expectedActivationId: mode.activationId } : {}),
+        syncServerShellSnapshot: (snapshot) => inputRef.current.syncServerShellSnapshot(snapshot),
+      });
       if (!result.ok) {
         patch({ error: result.message });
         env.focusEditor();
         return;
       }
-      await inputRef.current.syncServerShellSnapshot();
       // Authoritative success: exit setup and clear the objective from the
       // normal composer. Never clear local state before this point.
       inputRef.current.clearObjective();

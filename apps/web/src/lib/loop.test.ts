@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { CommandId, LoopActivationId, ThreadId, type ThreadLoop } from "@synara/contracts";
+import { type ThreadLoop } from "@synara/contracts";
 import { makeLoop } from "@synara/shared/loopTestFixtures";
 
 import {
@@ -18,30 +18,9 @@ import {
   loopBudgetChoiceFromParsed,
   loopBudgetChoiceToDispatchFields,
   loopSetupNoticeFor,
-  performLoopSetupSubmit,
   validateLoopBudgetChoice,
   validateLoopObjective,
-  type LoopSetupDispatchDeps,
 } from "./loop";
-
-const THREAD_ID = ThreadId.makeUnsafe("thread-1");
-
-function makeDeps(overrides: Partial<LoopSetupDispatchDeps> = {}): {
-  deps: LoopSetupDispatchDeps;
-  dispatched: unknown[];
-} {
-  const dispatched: unknown[] = [];
-  const deps: LoopSetupDispatchDeps = {
-    dispatchCommand: (command) => {
-      dispatched.push(command);
-      return Promise.resolve();
-    },
-    newCommandId: () => CommandId.makeUnsafe("cmd-1"),
-    now: () => "2026-01-01T12:00:00.000Z",
-    ...overrides,
-  };
-  return { deps, dispatched };
-}
 
 describe("interpretLoopInvocation", () => {
   it.each([
@@ -257,64 +236,5 @@ describe("isUnsupportedLoopContext", () => {
     expect(isUnsupportedLoopContext({ ...empty, selectedSkillCount: 1 })).toBe(true);
     expect(isUnsupportedLoopContext({ ...empty, selectedMentionCount: 1 })).toBe(true);
     expect(isUnsupportedLoopContext({ ...empty, assistantSelectionCount: 1 })).toBe(true);
-  });
-});
-
-describe("performLoopSetupSubmit", () => {
-  it("dispatches thread.loop.set with the trimmed prompt and budget", async () => {
-    const { deps, dispatched } = makeDeps();
-    const result = await performLoopSetupSubmit(deps, {
-      threadId: THREAD_ID,
-      objective: "  fix the tests  ",
-      budget: { kind: "count", turns: 10 },
-    });
-    expect(result).toEqual({ ok: true });
-    expect(dispatched).toEqual([
-      {
-        type: "thread.loop.set",
-        commandId: "cmd-1",
-        threadId: THREAD_ID,
-        prompt: "fix the tests",
-        maxIterations: 10,
-        durationSeconds: null,
-        createdAt: "2026-01-01T12:00:00.000Z",
-      },
-    ]);
-  });
-
-  it("includes expectedActivationId when provided", async () => {
-    const { deps, dispatched } = makeDeps();
-    const result = await performLoopSetupSubmit(deps, {
-      threadId: THREAD_ID,
-      objective: "fix the tests",
-      budget: { kind: "count", turns: 10 },
-      expectedActivationId: LoopActivationId.makeUnsafe("activation-1"),
-    });
-    expect(result).toEqual({ ok: true });
-    expect(dispatched[0]).toMatchObject({
-      expectedActivationId: "activation-1",
-    });
-  });
-
-  it("omits expectedActivationId when not provided", async () => {
-    const { deps, dispatched } = makeDeps();
-    await performLoopSetupSubmit(deps, {
-      threadId: THREAD_ID,
-      objective: "fix the tests",
-      budget: { kind: "count", turns: 10 },
-    });
-    expect(dispatched[0]).not.toHaveProperty("expectedActivationId");
-  });
-
-  it("returns the failure message and dispatches nothing extra on error", async () => {
-    const { deps } = makeDeps({
-      dispatchCommand: () => Promise.reject(new Error("server down")),
-    });
-    const result = await performLoopSetupSubmit(deps, {
-      threadId: THREAD_ID,
-      objective: "fix the tests",
-      budget: LOOP_DEFAULT_BUDGET_CHOICE,
-    });
-    expect(result).toEqual({ ok: false, message: "server down" });
   });
 });
