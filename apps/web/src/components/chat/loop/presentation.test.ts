@@ -239,14 +239,21 @@ describe("formatLoopStopReason", () => {
     ["user_stop", {}, 5, "Loop stopped", "5 turns", "Stopped by you"],
     ["toggled_off", {}, 5, "Loop stopped", "5 turns", "Future iterations disabled"],
     ["prompt_invalid", {}, 5, "Loop stopped", "The saved objective was invalid", null],
-    ["attachments_not_supported", {}, 5, "Loop stopped", "Loop prompts are text-only", null],
+    [
+      "attachments_not_supported",
+      {},
+      5,
+      "Loop stopped",
+      "Attachments aren't supported in loops",
+      "Your message ran as a normal turn instead",
+    ],
     [
       "replaced_by_manual_policy",
       {},
       5,
       "Loop stopped",
       "5 turns",
-      "Replaced by your manual message",
+      "Your message ran as a normal turn instead",
     ],
     ["thread_archived", {}, 5, "Loop stopped", "This thread was archived", null],
     ["thread_deleted", {}, 5, "Loop stopped", "This thread was deleted", null],
@@ -362,16 +369,29 @@ describe("formatLoopStopReasonShort", () => {
     expect(formatLoopStopReasonShort("consecutive_errors")).toEqual({
       title: "Loop stopped after repeated errors",
       description: "Review the latest error before restarting.",
+      tone: "error",
     });
     expect(formatLoopStopReasonShort("prompt_invalid")).toEqual({
       title: "Loop stopped",
       description: "The saved objective was invalid.",
+      tone: "error",
     });
     expect(formatLoopStopReasonShort("thread_unrunnable")).toEqual({
       title: "Loop stopped",
       description: "This thread is not available.",
+      tone: "error",
     });
     expect(formatLoopStopReasonShort("user_stop")).toBeNull();
     expect(formatLoopStopReasonShort("budget_iterations")).toBeNull();
+  });
+
+  it("toasts replaced-by-manual stops with a warning tone", () => {
+    const expected = {
+      title: "Loop stopped",
+      description: "Your message was sent as a normal message.",
+      tone: "warning",
+    };
+    expect(formatLoopStopReasonShort("attachments_not_supported")).toEqual(expected);
+    expect(formatLoopStopReasonShort("replaced_by_manual_policy")).toEqual(expected);
   });
 });

@@ -124,7 +124,12 @@ describe("useLoopStopErrorToast", () => {
   function render(
     currentThreadId: ThreadId | null,
     loop: ThreadLoop | null,
-    addToast: (toast: { title: string; description: string; threadId: ThreadId | null }) => void,
+    addToast: (toast: {
+      title: string;
+      description: string;
+      tone: "error" | "warning";
+      threadId: ThreadId | null;
+    }) => void,
   ) {
     reactHarness.beginRender();
     useLoopStopErrorToast(currentThreadId, loop, addToast);
@@ -150,12 +155,27 @@ describe("useLoopStopErrorToast", () => {
     "budget_iterations",
     "budget_duration",
     "hard_cap",
-    "replaced_by_manual_policy",
   ] as LoopStopReason[])("stays quiet when an active loop stops with %s", (reason) => {
     const addToast = vi.fn();
     render(threadId, makeLoop({ active: true }), addToast);
     render(threadId, makeLoop({ active: false, lastStopReason: reason }), addToast);
     expect(addToast).not.toHaveBeenCalled();
+  });
+
+  it("toasts a warning when a manual message replaces the loop", () => {
+    const addToast = vi.fn();
+    render(threadId, makeLoop({ active: true }), addToast);
+    render(
+      threadId,
+      makeLoop({ active: false, lastStopReason: "replaced_by_manual_policy" }),
+      addToast,
+    );
+    expect(addToast).toHaveBeenCalledTimes(1);
+    expect(addToast).toHaveBeenCalledWith({
+      ...formatLoopStopReasonShort("replaced_by_manual_policy"),
+      threadId,
+    });
+    expect(addToast.mock.calls[0]?.[0]?.tone).toBe("warning");
   });
 
   it("stays quiet for a loop already stopped on first render", () => {
