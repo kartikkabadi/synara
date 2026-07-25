@@ -168,12 +168,18 @@ export function useLoopActions(input: UseLoopActionsInput): LoopActions {
     ],
   );
 
-  // One error toast for exceptional loop auto-stops (repeated errors, invalid
-  // saved objective, unavailable thread); routine stops stay toast-free.
+  // One toast for exceptional loop auto-stops (repeated errors, invalid
+  // saved objective, unavailable thread) and informational replaced-by-manual
+  // stops; routine stops stay toast-free.
   const addLoopStopErrorToast = useCallback(
-    (toast: { title: string; description: string; threadId: ThreadId | null }) => {
+    (toast: {
+      title: string;
+      description: string;
+      tone: "error" | "warning";
+      threadId: ThreadId | null;
+    }) => {
       toastManager.add({
-        type: "error",
+        type: toast.tone,
         title: toast.title,
         description: toast.description,
         data: { threadId: toast.threadId },

@@ -9124,6 +9124,7 @@ export default function ChatView({
     actions: { stopAfterTurn: handleStopLoopAfterTurn, stopNow: handleStopLoopNow },
     ensureLoopThreadReady,
     isLoopOwnedTurnActive,
+    hasUnsupportedContext: hasUnsupportedLoopContext,
   } = loopController;
   const loopComposerModeOpen = loopComposer.mode.kind !== "closed";
 
@@ -10267,6 +10268,7 @@ export default function ChatView({
                 <ComposerInputBanners
                   roundedTopReset={false}
                   thread={activeThread}
+                  loopDraftUnsupported={hasUnsupportedLoopContext}
                   onStopLoopAfterTurn={handleStopLoopAfterTurn}
                   onStopLoopNow={handleStopLoopNow}
                   onEditLoop={loopComposer.openEdit}

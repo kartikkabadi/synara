@@ -1,5 +1,5 @@
 // FILE: useLoopStopErrorToast.ts
-// Purpose: One error toast when a `/loop` auto-stops exceptionally (spec §14.2).
+// Purpose: One toast when a `/loop` auto-stops exceptionally (spec §14.2).
 // Layer: Web chat composer controller
 // Routine lifecycle stops (budget, user stop, toggle) stay toast-free; the
 // runtime rail and transcript record communicate those.
@@ -28,7 +28,12 @@ export function shouldToastLoopStop(
 export function useLoopStopErrorToast(
   threadId: ThreadId | null,
   loop: ThreadLoop | null,
-  addToast: (toast: { title: string; description: string; threadId: ThreadId | null }) => void,
+  addToast: (toast: {
+    title: string;
+    description: string;
+    tone: "error" | "warning";
+    threadId: ThreadId | null;
+  }) => void,
 ): void {
   const previousRef = useRef<{ threadId: ThreadId | null; snapshot: LoopStopSnapshot | null }>({
     threadId: null,
