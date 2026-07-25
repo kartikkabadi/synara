@@ -30,11 +30,10 @@ import {
 import { validateLoopBudget } from "@synara/shared/loop";
 import { Schema } from "effect";
 
+import { chooseStopReason, isLoopBudgetExhausted, isLoopExpired } from "./loop/budget.ts";
 import {
   buildLoopContinuationThreadView,
-  chooseStopReason,
   decideLoopContinuation,
-  effectiveCap,
   RUNNING_SESSION_STATUSES,
 } from "./loopDecision.ts";
 
@@ -449,16 +448,12 @@ export function decideManualMessageWhileLoopActive(input: {
     // or mentions.
     return loopOff("attachments_not_supported");
   }
-  if (loop.endsAt !== null) {
-    const endsAtMs = Date.parse(loop.endsAt);
-    // Fail closed on unparseable endsAt, mirroring decideLoopContinuation.
-    if (!Number.isFinite(endsAtMs) || nowMs >= endsAtMs) {
-      // Duration budget has expired: stop the loop, but let the user's manual
-      // message continue as a normal turn.
-      return loopOff("budget_duration");
-    }
+  if (isLoopExpired(loop, nowMs)) {
+    // Duration budget has expired: stop the loop, but let the user's manual
+    // message continue as a normal turn.
+    return loopOff("budget_duration");
   }
-  if (loop.iteration >= effectiveCap(loop)) {
+  if (isLoopBudgetExhausted(loop)) {
     // Budget already exhausted: stop the loop, but let the user's manual
     // message continue as a normal turn.
     return loopOff(chooseStopReason(loop));
