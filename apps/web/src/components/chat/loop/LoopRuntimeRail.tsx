@@ -12,7 +12,7 @@ import type {
 } from "@synara/contracts";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { ChevronDownIcon, LoopIcon } from "~/lib/icons";
+import { ChevronDownIcon, LoopIcon, PencilIcon, SteerIcon, StopIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
 import { Menu, MenuItem, MenuPopupBase, MenuSeparator, MenuTrigger } from "../../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../ui/tooltip";
@@ -54,10 +54,10 @@ export const LOOP_STOP_NOW_DESCRIPTION = "Interrupt current work and stop the lo
 
 // Crossfade duration for label/detail swaps.
 const LABEL_CROSSFADE_MS = 150;
-// How long the transient "↳ Objective updated" detail stays before the
+// How long the transient "Objective updated" detail stays before the
 // regular detail crossfades back in.
 const OBJECTIVE_UPDATED_HOLD_MS = 4_000;
-export const LOOP_OBJECTIVE_UPDATED_DETAIL = "↳ Objective updated";
+export const LOOP_OBJECTIVE_UPDATED_DETAIL = "Objective updated";
 // Hold before surfacing transitional copy (`Loop on / Starting the next
 // turn…`) so quick turn-to-turn gaps don't flash it.
 const TRANSITIONAL_STABILIZE_MS = 250;
@@ -80,7 +80,7 @@ function iconClassName(color: LoopSemanticColor, spinning: boolean): string {
   return cn(
     "size-3.5 shrink-0",
     labelClassName(color),
-    spinning && "animate-[spin_3s_linear_infinite] motion-reduce:animate-none",
+    spinning && "animate-[pulse_2s_ease-in-out_infinite] motion-reduce:animate-none",
   );
 }
 
@@ -91,7 +91,7 @@ const RAIL_BUTTON_CLASS_NAME =
 // chevron segment the right, sharing the pill border so the pair reads as one
 // control.
 const RAIL_SPLIT_PRIMARY_CLASS_NAME =
-  "inline-flex shrink-0 items-center gap-1 rounded-l-full border border-r-0 border-[color:var(--color-border-light)] py-1 pr-1.5 pl-2.5 text-[11px] font-medium text-[var(--color-text-foreground-secondary)] transition-colors duration-150 hover:border-destructive/40 hover:bg-destructive/8 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-border)] dark:hover:bg-destructive/16";
+  "inline-flex shrink-0 items-center gap-1 rounded-l-full border border-r-0 border-[color:var(--color-border-light)] py-1 pr-1.5 pl-2.5 text-[11px] font-medium text-[var(--color-text-foreground-secondary)] transition-colors duration-150 hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-border)]";
 const RAIL_SPLIT_MENU_CLASS_NAME =
   "inline-flex shrink-0 items-center rounded-r-full border border-l border-[color:var(--color-border-light)] border-l-border/50 py-1 pr-2 pl-1.5 text-[11px] font-medium text-[var(--color-text-foreground-secondary)] transition-colors duration-150 hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-border)]";
 
@@ -184,13 +184,23 @@ function LoopStopSplitButton({
         </MenuTrigger>
         <MenuPopupBase align="end">
           <MenuItem onClick={onStopNow} variant="destructive">
-            <span className="flex flex-col items-start">
-              <span>Stop now</span>
-              <span className={MENU_ITEM_DESCRIPTION_CLASS_NAME}>{LOOP_STOP_NOW_DESCRIPTION}</span>
+            <span className="flex items-start gap-2">
+              <StopIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+              <span className="flex flex-col items-start">
+                <span>Stop now</span>
+                <span className={MENU_ITEM_DESCRIPTION_CLASS_NAME}>
+                  {LOOP_STOP_NOW_DESCRIPTION}
+                </span>
+              </span>
             </span>
           </MenuItem>
           <MenuSeparator />
-          <MenuItem onClick={onEditLoop}>Edit loop…</MenuItem>
+          <MenuItem onClick={onEditLoop}>
+            <span className="flex items-center gap-2">
+              <PencilIcon aria-hidden className="size-3.5 shrink-0" />
+              <span>Edit loop…</span>
+            </span>
+          </MenuItem>
         </MenuPopupBase>
       </Menu>
     </span>
@@ -198,7 +208,7 @@ function LoopStopSplitButton({
 }
 
 // Transient confirmation after a manual retarget: when `loop.prompt` changes
-// while the loop stays active, surface `↳ Objective updated` for a few
+// while the loop stays active, surface `Objective updated` for a few
 // seconds; the existing crossfade machinery animates it in and out. Resets
 // across loops (activationId) and clears on unmount.
 function useObjectiveUpdatedCue(loop: ThreadLoop): boolean {
@@ -411,7 +421,12 @@ export function LoopRuntimeRail({
           {displayLabel}
         </span>
         {displayDetail !== null ? (
-          <span className="truncate text-[11px] text-muted-foreground">{displayDetail}</span>
+          <span className="flex min-w-0 items-center gap-1 truncate text-[11px] text-muted-foreground">
+            {displayDetail === LOOP_OBJECTIVE_UPDATED_DETAIL ? (
+              <SteerIcon aria-hidden className="size-3 shrink-0" />
+            ) : null}
+            <span className="truncate">{displayDetail}</span>
+          </span>
         ) : null}
       </span>
     </>
