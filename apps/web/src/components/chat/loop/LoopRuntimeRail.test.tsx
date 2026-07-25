@@ -217,6 +217,12 @@ describe("LoopRuntimeRail", () => {
     expect(markup).toContain("motion-reduce:animate-none");
   });
 
+  it("renders the loop glyph from the Central repeat asset", () => {
+    const markup = renderRail();
+    expect(markup).toContain('data-testid="loop-rail-icon"');
+    expect(markup).toContain("/central-icons-reversed/repeat.svg");
+  });
+
   it("only spins the icon while running, not while starting", () => {
     const running = renderRail({ latestTurn: makeRunningLoopTurn() });
     expect(running).toContain("animate-[spin_3s_linear_infinite]");
@@ -265,9 +271,10 @@ describe("LoopRuntimeRail", () => {
     expect(waiting).not.toContain('data-slot="tooltip-trigger"');
   });
 
-  it("pulses only the current filled segment while running", () => {
+  it("pulses the icon and the current filled segment while running", () => {
     const running = renderRail({ latestTurn: makeRunningLoopTurn() });
-    expect(running.split("animate-[pulse_2s_ease-in-out_infinite]").length - 1).toBe(1);
+    // One pulse on the rail icon, one on the most recent filled segment.
+    expect(running.split("animate-[pulse_2s_ease-in-out_infinite]").length - 1).toBe(2);
     const ready = renderRail();
     expect(ready).not.toContain("animate-[pulse_2s_ease-in-out_infinite]");
   });
