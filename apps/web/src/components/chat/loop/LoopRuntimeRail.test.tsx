@@ -171,6 +171,17 @@ describe("LoopRuntimeRail", () => {
     expect(markup).not.toContain("Stop after turn");
   });
 
+  it("splits the stop control: primary safe-default button + chevron menu", () => {
+    const markup = renderRail({ latestTurn: makeRunningLoopTurn() });
+    // The primary segment is a plain button (one-click safe default), not the
+    // menu trigger; the chevron owns the menu.
+    expect(markup).toContain("Stop after turn</button>");
+    expect(markup).toContain('aria-label="More loop actions"');
+    const ready = renderRail();
+    expect(ready).toContain("Stop loop</button>");
+    expect(ready).toContain('aria-label="More loop actions"');
+  });
+
   it("renders armed state without progress and with the stop menu", () => {
     const markup = renderRail({ loop: makeLoop({ prompt: "" }) });
     expect(markup).toContain('data-slot="menu-trigger"');
