@@ -12,13 +12,13 @@ import {
 } from "@synara/contracts";
 import { buildPromptThreadTitleFallback } from "@synara/shared/chatThreads";
 import { useCallback, useRef } from "react";
-import { isLoopOwnedTurnRunning } from "../components/chat/loop/presentation";
-import { useLoopStopErrorToast } from "../components/chat/useLoopStopErrorToast";
-import { toastManager } from "../components/ui/toast";
-import { promoteThreadCreate } from "../lib/threadCreatePromotion";
-import { newCommandId } from "../lib/utils";
-import { readNativeApi } from "../nativeApi";
-import type { Project, Thread } from "../types";
+import { isLoopOwnedTurnRunning } from "./presentation";
+import { useLoopStopErrorToast } from "./useLoopStopErrorToast";
+import { toastManager } from "../../ui/toast";
+import { promoteThreadCreate } from "../../../lib/threadCreatePromotion";
+import { newCommandId } from "../../../lib/utils";
+import { readNativeApi } from "../../../nativeApi";
+import type { Project, Thread } from "../../../types";
 
 export interface UseLoopActionsInput {
   threadId: ThreadId;

@@ -56,7 +56,7 @@ vi.mock("react", () => ({
 }));
 
 import { shouldToastLoopStop, useLoopStopErrorToast } from "./useLoopStopErrorToast";
-import { formatLoopStopReasonShort } from "./loop/presentation";
+import { formatLoopStopReasonShort } from "./presentation";
 
 function makeLoop(overrides: Partial<ThreadLoop>): ThreadLoop {
   return makeLoopFixture({
