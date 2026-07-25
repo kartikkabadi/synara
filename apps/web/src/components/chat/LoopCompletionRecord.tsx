@@ -12,7 +12,7 @@ import { disclosureContentClassName } from "~/lib/disclosureMotion";
 import { cn } from "~/lib/utils";
 import { DisclosureChevron } from "../ui/DisclosureChevron";
 import { DisclosureRegion } from "../ui/DisclosureRegion";
-import { formatDuration, formatLoopStopReason, type LoopStopReasonCopy } from "./loopPresentation";
+import { formatDuration, formatLoopStopReason, type LoopStopReasonCopy } from "./loop/presentation";
 
 interface LoopCompletionRecordProps {
   loop: ThreadLoop;
