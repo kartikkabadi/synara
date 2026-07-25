@@ -4,7 +4,6 @@
 
 import {
   CommandId,
-  type LoopStopReason,
   type OrchestrationCommand,
   type OrchestrationThread,
   type OrchestrationThreadShell,
@@ -13,22 +12,13 @@ import {
 import { Effect, Layer, Option, Queue, Ref, Schedule, Stream } from "effect";
 
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+import { classifyLoopReactorEvent } from "../loop/reactorTriggers.ts";
 import { ProjectionThreadLoopRepository } from "../../persistence/Services/ProjectionThreadLoop.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "../Services/OrchestrationEngine.ts";
 import { LoopReactor, type LoopReactorShape } from "../Services/LoopReactor.ts";
-
-function isStartupReconciliationCommandId(commandId: string): boolean {
-  return commandId.startsWith("restart-reconcile:");
-}
-
-const BLOCKER_RESOLVED_ACTIVITY_KINDS = new Set(["approval.resolved", "user-input.resolved"]);
-
-function isBlockerResolvedActivity(activity: { kind: string }): boolean {
-  return BLOCKER_RESOLVED_ACTIVITY_KINDS.has(activity.kind);
-}
 
 // Unique continuation identity per trigger: the command payload carries a
 // `createdAt` timestamp, so the commandId must include it to avoid identity
@@ -281,89 +271,54 @@ const makeLoopReactor = Effect.gen(function* () {
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) =>
         Effect.gen(function* () {
-          if (event.type === "thread.loop-set") {
-            yield* trackLoopState(event.payload.threadId, event.payload.loop);
-            yield* syncDurationDeadline(event.payload.threadId, event.payload.loop);
-            yield* continueThread(event.payload.threadId, event.occurredAt);
-            return;
-          }
-
-          if (event.type === "thread.loop-continued" || event.type === "thread.loop-off") {
-            yield* trackLoopState(event.payload.threadId, event.payload.loop);
-            yield* syncDurationDeadline(event.payload.threadId, event.payload.loop);
-            return;
-          }
-
-          if (event.type === "thread.loop-wait-noted") {
-            // Deliberately non-triggering: a wait outcome must not feed back
-            // into another continuation dispatch. Only the tracked loop state
-            // (updatedAt rotation) is kept current.
-            yield* trackLoopState(event.payload.threadId, event.payload.loop);
-            yield* syncDurationDeadline(event.payload.threadId, event.payload.loop);
-            return;
-          }
-
-          if (event.type === "thread.activity-appended") {
-            if (!isBlockerResolvedActivity(event.payload.activity)) {
+          const trigger = classifyLoopReactorEvent(event);
+          switch (trigger.kind) {
+            case "ignore":
+              return;
+            case "sync": {
+              yield* trackLoopState(trigger.threadId, trigger.loop);
+              yield* syncDurationDeadline(trigger.threadId, trigger.loop);
               return;
             }
-            // Startup turn reconciliation emits blocker-resolved activities for
-            // stale pending requests. Ignore them here; restoreActiveLoops runs
-            // after reconciliation and will continue eligible loops exactly once.
-            if (isStartupReconciliationCommandId(String(event.commandId))) {
+            case "sync-and-continue": {
+              yield* trackLoopState(trigger.threadId, trigger.loop);
+              yield* syncDurationDeadline(trigger.threadId, trigger.loop);
+              yield* continueThread(trigger.threadId, event.occurredAt);
               return;
             }
-            yield* continueThread(event.payload.threadId, event.occurredAt);
-            return;
-          }
-
-          if (event.type === "thread.interaction-mode-set") {
-            yield* continueThread(event.payload.threadId, event.occurredAt);
-            return;
-          }
-
-          if (event.type === "thread.session-set") {
-            if (isStartupReconciliationCommandId(String(event.commandId))) {
-              // Do not continue during startup turn reconciliation; the orphaned
-              // turn is being interrupted and projection is being rebuilt.
-              // restoreActiveLoops runs after reconciliation and will issue the
-              // single startup continue for this thread if still eligible.
+            case "continue": {
+              yield* continueThread(trigger.threadId, event.occurredAt);
               return;
             }
-            yield* continueThread(event.payload.threadId, event.occurredAt);
-            return;
-          }
-
-          if (event.type === "thread.archived" || event.type === "thread.deleted") {
-            yield* trackLoopState(event.payload.threadId, null);
-            yield* syncDurationDeadline(event.payload.threadId, null);
-            const loopOption = yield* projectionThreadLoopRepository.getByThreadId({
-              threadId: event.payload.threadId,
-            });
-            if (Option.isNone(loopOption) || loopOption.value.loop.active !== true) {
+            case "lifecycle-off": {
+              yield* trackLoopState(trigger.threadId, null);
+              yield* syncDurationDeadline(trigger.threadId, null);
+              const loopOption = yield* projectionThreadLoopRepository.getByThreadId({
+                threadId: trigger.threadId,
+              });
+              if (Option.isNone(loopOption) || loopOption.value.loop.active !== true) {
+                return;
+              }
+              const command = {
+                type: "thread.loop.off" as const,
+                commandId: CommandId.makeUnsafe(
+                  `loop-off:${trigger.threadId}:${String(event.sequence)}`,
+                ),
+                threadId: trigger.threadId,
+                reason: trigger.reason,
+                createdAt: event.occurredAt,
+              } satisfies Extract<OrchestrationCommand, { type: "thread.loop.off" }>;
+              yield* orchestrationEngine.dispatch(command).pipe(
+                Effect.catch((error) =>
+                  Effect.logWarning("loop lifecycle off dispatch failed", {
+                    threadId: trigger.threadId,
+                    eventType: event.type,
+                    error: String(error),
+                  }),
+                ),
+              );
               return;
             }
-            const reason: LoopStopReason =
-              event.type === "thread.archived" ? "thread_archived" : "thread_deleted";
-            const command = {
-              type: "thread.loop.off" as const,
-              commandId: CommandId.makeUnsafe(
-                `loop-off:${event.payload.threadId}:${String(event.sequence)}`,
-              ),
-              threadId: event.payload.threadId,
-              reason,
-              createdAt: event.occurredAt,
-            } satisfies Extract<OrchestrationCommand, { type: "thread.loop.off" }>;
-            yield* orchestrationEngine.dispatch(command).pipe(
-              Effect.catch((error) =>
-                Effect.logWarning("loop lifecycle off dispatch failed", {
-                  threadId: event.payload.threadId,
-                  eventType: event.type,
-                  error: String(error),
-                }),
-              ),
-            );
-            return;
           }
         }).pipe(
           Effect.catch((error) =>
