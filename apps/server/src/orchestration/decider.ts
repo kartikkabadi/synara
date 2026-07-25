@@ -8,7 +8,6 @@ import type {
   ThreadId,
   ThreadLoop,
   ThreadMarker,
-  ThreadTurnPurpose,
 } from "@synara/contracts";
 import {
   EventId,
@@ -34,13 +33,10 @@ import { Effect } from "effect";
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import { hasNativeHandoffMessages } from "./handoff.ts";
 import { resolveStableMessageTurnId } from "./messageTurnId.ts";
-import {
-  decideInterruptLoopOff,
-  decideLoopCommand,
-  decideManualMessageWhileLoopActive,
-  type LoopEventDraft,
-} from "./loopDecider.ts";
-import { isLoopOwnedTurn } from "./loopOwnership.ts";
+import { decideLoopCommand } from "./loop/commandDecider.ts";
+import { decideInterruptLoopOff, resolveTurnStartLoopPolicy } from "./loop/manualTurnPolicy.ts";
+import { isLoopOwnedTurn } from "./loop/ownership.ts";
+import { buildLoopIterationTurnDrafts, type LoopEventDraft } from "./loop/turnEvents.ts";
 import {
   findSpaceById,
   isLegacyHomeChatContainerRow,
@@ -108,6 +104,28 @@ function withEventBase(
   };
 }
 
+// Materializes loop event drafts from the loop deciders into full events, chaining
+// each event's causation to the previous one in the batch.
+function materializeLoopEvents(
+  command: Pick<OrchestrationCommand, "commandId"> & { threadId: ThreadId; createdAt: string },
+  drafts: ReadonlyArray<LoopEventDraft>,
+): Array<Omit<OrchestrationEvent, "sequence">> {
+  const out: Array<Omit<OrchestrationEvent, "sequence">> = [];
+  for (const draft of drafts) {
+    const previous = out.at(-1);
+    out.push({
+      ...withEventBase({
+        aggregateKind: "thread",
+        aggregateId: command.threadId,
+        occurredAt: command.createdAt,
+        commandId: command.commandId,
+      }),
+      ...(previous !== undefined ? { causationEventId: previous.eventId } : {}),
+      ...draft,
+    });
+  }
+  return out;
+}
 function checkpointRevertSucceededEvent(input: {
   readonly commandId: OrchestrationCommand["commandId"];
   readonly threadId: Extract<OrchestrationCommand, { type: "thread.revert.complete" }>["threadId"];
@@ -137,29 +155,6 @@ function checkpointRevertSucceededEvent(input: {
       },
     },
   };
-}
-
-// Materializes loop event drafts from loopDecider into full events, chaining
-// each event's causation to the previous one in the batch.
-function materializeLoopEvents(
-  command: Pick<OrchestrationCommand, "commandId"> & { threadId: ThreadId; createdAt: string },
-  drafts: ReadonlyArray<LoopEventDraft>,
-): Array<Omit<OrchestrationEvent, "sequence">> {
-  const out: Array<Omit<OrchestrationEvent, "sequence">> = [];
-  for (const draft of drafts) {
-    const previous = out.at(-1);
-    out.push({
-      ...withEventBase({
-        aggregateKind: "thread",
-        aggregateId: command.threadId,
-        occurredAt: command.createdAt,
-        commandId: command.commandId,
-      }),
-      ...(previous !== undefined ? { causationEventId: previous.eventId } : {}),
-      ...draft,
-    });
-  }
-  return out;
 }
 
 function omitNullUserInputAnswers(
@@ -1559,7 +1554,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         sourceProposedPlan && sourceThread
           ? sourceThread.proposedPlans.find((entry) => entry.id === sourceProposedPlan.planId)
           : null;
-      let dispatchMode = command.dispatchMode ?? "queue";
       if (sourceProposedPlan && !sourcePlan) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -1573,41 +1567,35 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
 
-      const loop = targetThread.loop;
-      let loopContinuedEvent: Omit<OrchestrationEvent, "sequence"> | undefined;
-      let loopOffEvent: Omit<OrchestrationEvent, "sequence"> | undefined;
-      let purpose: ThreadTurnPurpose | undefined;
-
-      if (loop?.active === true) {
-        const manualDecision = decideManualMessageWhileLoopActive({
-          loop,
-          thread: targetThread,
-          message: {
-            text: command.message.text,
-            hasAttachments: command.message.attachments.length > 0,
-            hasStructuredReferences:
-              (command.message.skills?.length ?? 0) > 0 ||
-              (command.message.mentions?.length ?? 0) > 0,
-          },
-          createdAt: command.createdAt,
-        });
-        if (manualDecision.kind === "loop-off") {
-          [loopOffEvent] = materializeLoopEvents(command, [
-            { type: "thread.loop-off", payload: manualDecision.payload },
-          ]);
-        } else if (manualDecision.kind === "loop-continued") {
-          purpose = manualDecision.purpose;
-          [loopContinuedEvent] = materializeLoopEvents(command, [
-            { type: "thread.loop-continued", payload: manualDecision.payload },
-          ]);
-        }
-      }
-
-      if (purpose !== undefined) {
-        // Loop-owned turns always queue when a live turn is running so Codex and
-        // non-Codex providers share the same replacement semantics.
-        dispatchMode = "queue";
-      }
+      const loopResolution = resolveTurnStartLoopPolicy({
+        thread: targetThread,
+        message: {
+          text: command.message.text,
+          hasAttachments: command.message.attachments.length > 0,
+          hasStructuredReferences:
+            (command.message.skills?.length ?? 0) > 0 ||
+            (command.message.mentions?.length ?? 0) > 0,
+        },
+        createdAt: command.createdAt,
+      });
+      const purpose = loopResolution.purpose;
+      const dispatchMode =
+        loopResolution.dispatchModeOverride ?? command.dispatchMode ?? "queue";
+      const loopEvents = materializeLoopEvents(command, loopResolution.loopEvents);
+      // Loop-claimed turns start from the shared loop iteration draft shape so a
+      // new turn-start payload field only has to be added in one place.
+      const loopDrafts =
+        purpose !== undefined
+          ? buildLoopIterationTurnDrafts({
+              threadId: command.threadId,
+              messageId: command.message.messageId,
+              prompt: command.message.text,
+              purpose,
+              runtimeMode: command.runtimeMode,
+              interactionMode: command.interactionMode,
+              createdAt: command.createdAt,
+            })
+          : null;
 
       const userMessageEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...withEventBase({
@@ -1618,6 +1606,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         }),
         type: "thread.message-sent",
         payload: {
+          ...(loopDrafts !== null ? loopDrafts[0].payload : {}),
           threadId: command.threadId,
           messageId: command.message.messageId,
           role: "user",
@@ -1635,12 +1624,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           turnId: null,
           streaming: false,
           source: "native",
-          ...(purpose !== undefined ? { purpose } : {}),
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
       };
       const turnRequestPayload = {
+        ...(loopDrafts !== null ? loopDrafts[1].payload : {}),
         threadId: command.threadId,
         messageId: command.message.messageId,
         ...(command.modelSelection !== undefined ? { modelSelection: command.modelSelection } : {}),
@@ -1654,7 +1643,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         runtimeMode: command.runtimeMode,
         interactionMode: command.interactionMode,
         ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
-        ...(purpose !== undefined ? { purpose } : {}),
         createdAt: command.createdAt,
       } as const;
       const activeProvider =
@@ -1679,14 +1667,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: shouldQueue ? "thread.turn-queued" : "thread.turn-start-requested",
         payload: turnRequestPayload,
       };
-      const resultEvents: Array<Omit<OrchestrationEvent, "sequence">> = [];
-      if (loopOffEvent !== undefined) {
-        resultEvents.push(loopOffEvent);
-      }
-      if (loopContinuedEvent !== undefined) {
-        resultEvents.push(loopContinuedEvent);
-      }
-      resultEvents.push(userMessageEvent, queuedEvent);
+      const resultEvents: Array<Omit<OrchestrationEvent, "sequence">> = [
+        ...loopEvents,
+        userMessageEvent,
+        queuedEvent,
+      ];
       if (shouldQueue && dispatchMode === "steer") {
         resultEvents.push({
           ...withEventBase({

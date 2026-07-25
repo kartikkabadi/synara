@@ -1,4 +1,4 @@
-// FILE: loopDecision.ts
+// FILE: continuationPolicy.ts
 // Purpose: Pure continuation policy for thread-local `/loop` mode.
 // Layer: Orchestration decision logic
 // Depends on: @synara/contracts loop types
@@ -11,7 +11,7 @@ import {
   type ThreadTurnPurpose,
 } from "@synara/contracts";
 
-import { chooseStopReason, isLoopBudgetExhausted, isLoopExpired } from "./loop/budget.ts";
+import { chooseStopReason, isLoopBudgetExhausted, isLoopExpired } from "./budget.ts";
 
 export type LoopDecision =
   | {

@@ -1,4 +1,4 @@
-// FILE: loopOwnership.ts
+// FILE: ownership.ts
 // Purpose: Determine whether a turn is owned by a `/loop` activation.
 // Layer: Orchestration shared utility
 
