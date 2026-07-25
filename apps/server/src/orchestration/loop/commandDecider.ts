@@ -1,21 +1,15 @@
-// FILE: loopDecider.ts
-// Purpose: Single owner of every `/loop` command transition. `decider.ts` case
-//          arms delegate here so the continuation policy, budget validation,
-//          and stop semantics live in one module.
+// FILE: commandDecider.ts
+// Purpose: Single owner of every `/loop` command transition (set/off/toggle/
+//          continue). `decider.ts` case arms delegate here so the continuation
+//          policy, budget validation, and stop semantics live in one module.
 // Layer: Orchestration decision logic
-// Depends on: loopDecision.ts (pure continuation policy), @synara/shared/loop
+// Depends on: continuationPolicy.ts (pure continuation policy), @synara/shared/loop
 
 import type {
   OrchestrationCommand,
   OrchestrationThread,
   ThreadLoop,
-  ThreadLoopContinuedPayload,
-  ThreadLoopOffPayload,
-  ThreadLoopSetPayload,
-  ThreadLoopWaitNotedPayload,
-  ThreadMessageSentPayload,
   ThreadTurnPurpose,
-  ThreadTurnStartRequestedPayload,
 } from "@synara/contracts";
 import {
   LoopActivationId,
@@ -29,21 +23,8 @@ import {
 import { validateLoopBudget } from "@synara/shared/loop";
 import { Schema } from "effect";
 
-import { chooseStopReason, isLoopBudgetExhausted, isLoopExpired } from "./loop/budget.ts";
-import { buildLoopIterationTurnDrafts } from "./loop/turnEvents.ts";
-import {
-  buildLoopContinuationThreadView,
-  decideLoopContinuation,
-  RUNNING_SESSION_STATUSES,
-} from "./loopDecision.ts";
-
-export type LoopEventDraft =
-  | { type: "thread.loop-set"; payload: typeof ThreadLoopSetPayload.Type }
-  | { type: "thread.loop-off"; payload: typeof ThreadLoopOffPayload.Type }
-  | { type: "thread.loop-wait-noted"; payload: typeof ThreadLoopWaitNotedPayload.Type }
-  | { type: "thread.loop-continued"; payload: typeof ThreadLoopContinuedPayload.Type }
-  | { type: "thread.message-sent"; payload: typeof ThreadMessageSentPayload.Type }
-  | { type: "thread.turn-start-requested"; payload: typeof ThreadTurnStartRequestedPayload.Type };
+import { buildLoopContinuationThreadView, decideLoopContinuation } from "./continuationPolicy.ts";
+import { buildLoopIterationTurnDrafts, type LoopEventDraft } from "./turnEvents.ts";
 
 export type LoopCommandDecision =
   | { kind: "invalid"; detail: string }
@@ -375,141 +356,4 @@ export function decideLoopCommand(
     case "thread.loop.continue":
       return decideLoopContinue(command, thread);
   }
-}
-
-export type ManualMessageLoopDecision =
-  | { kind: "none" }
-  | { kind: "loop-off"; payload: typeof ThreadLoopOffPayload.Type }
-  | {
-      kind: "loop-continued";
-      payload: typeof ThreadLoopContinuedPayload.Type;
-      purpose: ThreadTurnPurpose;
-    };
-
-/**
- * Policy for a manual `thread.turn.start` while a loop is active: the message
- * either retires the loop (budget exhausted, unsupported content, racing
- * pending loop start, invalid prompt) or becomes the next loop-owned iteration
- * with the manual text as the new prompt. Shares the budget/expiry math with
- * `decideLoopContinuation` via the same helpers and clock anchor.
- */
-export function decideManualMessageWhileLoopActive(input: {
-  loop: ThreadLoop;
-  thread: OrchestrationThread;
-  message: { text: string; hasAttachments: boolean; hasStructuredReferences: boolean };
-  createdAt: string;
-}): ManualMessageLoopDecision {
-  const { loop, thread, message, createdAt } = input;
-  const nowMs = Date.parse(createdAt);
-  const loopOff = (
-    stopReason: NonNullable<ThreadLoop["lastStopReason"]>,
-  ): ManualMessageLoopDecision => ({
-    kind: "loop-off",
-    payload: {
-      threadId: thread.id,
-      stopReason,
-      loop: {
-        ...loop,
-        active: false,
-        lastStopReason: stopReason,
-        updatedAt: createdAt,
-      },
-    },
-  });
-
-  const pendingLoopStart =
-    thread.pendingTurnStart?.purpose?.kind === "loop-iteration" &&
-    thread.pendingTurnStart.purpose.activationId === loop.activationId;
-
-  if (message.hasAttachments || message.hasStructuredReferences) {
-    // Text-only v1: loop prompts cannot carry attachments, skill references,
-    // or mentions.
-    return loopOff("attachments_not_supported");
-  }
-  if (isLoopExpired(loop, nowMs)) {
-    // Duration budget has expired: stop the loop, but let the user's manual
-    // message continue as a normal turn.
-    return loopOff("budget_duration");
-  }
-  if (isLoopBudgetExhausted(loop)) {
-    // Budget already exhausted: stop the loop, but let the user's manual
-    // message continue as a normal turn.
-    return loopOff(chooseStopReason(loop));
-  }
-  if (pendingLoopStart) {
-    // A loop-owned turn start is already pending; a racing manual message
-    // wins and retires the loop rather than fighting the pending start.
-    return loopOff("replaced_by_manual_policy");
-  }
-
-  // A manual user message while the loop is active becomes (or replaces)
-  // the loop prompt and doubles as the next loop-owned iteration.
-  let manualPrompt: LoopPrompt;
-  try {
-    manualPrompt = Schema.decodeUnknownSync(LoopPrompt)(message.text);
-  } catch {
-    return loopOff("prompt_invalid");
-  }
-  const nextIteration = loop.iteration + 1;
-  const purpose: ThreadTurnPurpose = {
-    kind: "loop-iteration",
-    activationId: loop.activationId,
-    iteration: nextIteration,
-  };
-  return {
-    kind: "loop-continued",
-    purpose,
-    payload: {
-      threadId: thread.id,
-      nextIteration,
-      nextConsecutiveErrors: loop.consecutiveErrors,
-      loop: {
-        ...loop,
-        prompt: manualPrompt,
-        iteration: nextIteration,
-        lastStopReason: null,
-        updatedAt: createdAt,
-      },
-    },
-  };
-}
-
-/**
- * Stop-now atomicity: interrupting is inherently a stop intent. The loop turns
- * off when the interrupted turn is loop-owned, and also when no concrete turn
- * can be resolved but the session is live (starting/running/stopping) or a
- * loop-owned start is pending — otherwise the loop would silently survive a
- * user's Stop.
- */
-export function decideInterruptLoopOff(input: {
-  thread: OrchestrationThread;
-  interruptTurnId: string | undefined;
-  isLoopOwnedInterrupt: boolean;
-  createdAt: string;
-}): typeof ThreadLoopOffPayload.Type | null {
-  const { thread, interruptTurnId, isLoopOwnedInterrupt, createdAt } = input;
-  const loop = thread.loop;
-  if (loop?.active !== true) {
-    return null;
-  }
-  const pendingLoopStart =
-    thread.pendingTurnStart?.purpose?.kind === "loop-iteration" &&
-    thread.pendingTurnStart.purpose.activationId === loop.activationId;
-  const sessionLive =
-    thread.session !== null && RUNNING_SESSION_STATUSES.has(thread.session.status);
-  const shouldStop =
-    isLoopOwnedInterrupt || (interruptTurnId === undefined && (sessionLive || pendingLoopStart));
-  if (!shouldStop) {
-    return null;
-  }
-  return {
-    threadId: thread.id,
-    stopReason: "user_stop",
-    loop: {
-      ...loop,
-      active: false,
-      lastStopReason: "user_stop",
-      updatedAt: createdAt,
-    },
-  };
 }
