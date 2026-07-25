@@ -462,7 +462,7 @@ import { ComposerExtrasMenu } from "./chat/ComposerExtrasMenu";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { ComposerInputBanners } from "./chat/ComposerInputBanners";
 import { LoopComposerModeCta, LoopComposerModeHeader } from "./chat/loop/LoopComposerMode";
-import { deriveLoopComposerPlaceholder } from "./chat/composerPlaceholder";
+import { deriveLoopComposerPlaceholder, isLoopSteerSendSignal } from "./chat/composerPlaceholder";
 import { useLoopController } from "./chat/loop/useLoopController";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerVoiceButton } from "./chat/ComposerVoiceButton";
@@ -9359,10 +9359,10 @@ export default function ChatView({
     hasUnsupportedContext: hasUnsupportedLoopContext,
   } = loopController;
   const loopComposerModeOpen = loopComposer.mode.kind !== "closed";
-  // Send-slot `↳` signal: the send button only renders while no turn is
-  // running, so an active loop with a saved objective means Enter retargets.
-  const isLoopSteerSend =
-    activeThread?.loop?.active === true && activeThread.loop.prompt.trim().length > 0;
+  const isLoopSteerSend = isLoopSteerSendSignal({
+    loop: activeThread?.loop ?? null,
+    hasUnsupportedLoopContext,
+  });
 
   const composerPlaceholder = useMemo(
     () =>
