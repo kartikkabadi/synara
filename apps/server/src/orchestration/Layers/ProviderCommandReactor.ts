@@ -1147,9 +1147,11 @@ const make = Effect.gen(function* () {
     readonly runtimeMode?: RuntimeMode;
     readonly interactionMode?: "default" | "plan";
     readonly dispatchMode?: "queue" | "steer";
-    // Re-verified immediately before the external provider call: authority can
-    // be lost between preflight and dispatch (off/toggle/reconfigure racing a
-    // slow session start). Returning false aborts without starting a turn.
+    // Loop-owned turns carry their purpose so authority is re-verified
+    // immediately before the external provider call: authority can be lost
+    // between preflight and dispatch (off/toggle/reconfigure racing a slow
+    // session start). Losing authority aborts without starting a turn.
+    readonly purpose?: ThreadTurnPurpose;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
@@ -1580,6 +1582,16 @@ const make = Effect.gen(function* () {
           );
           return yield* sendQueuedProviderTurn(retryNormalizedInput);
         });
+      if (input.purpose?.kind === "loop-iteration") {
+        const authorized = yield* verifyLoopTurnAuthority({
+          threadId: input.threadId,
+          purpose: input.purpose,
+          createdAt: input.createdAt,
+        });
+        if (!authorized) {
+          return;
+        }
+      }
       const sentTurn = yield* sendQueuedProviderTurn(normalizedInput).pipe(
         Effect.catch((error) =>
           Effect.gen(function* () {
@@ -2105,6 +2117,7 @@ const make = Effect.gen(function* () {
           : {}),
         interactionMode: event.payload.interactionMode,
         dispatchMode: immediateDispatchMode,
+        ...(purpose !== undefined ? { purpose } : {}),
         createdAt: event.payload.createdAt,
       }).pipe(
         Effect.catchCause((cause) =>
