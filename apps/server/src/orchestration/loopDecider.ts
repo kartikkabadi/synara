@@ -18,7 +18,6 @@ import type {
   ThreadTurnStartRequestedPayload,
 } from "@synara/contracts";
 import {
-  DEFAULT_TURN_DISPATCH_MODE,
   LoopActivationId,
   MessageId,
   LOOP_DEFAULT_HARD_CAP,
@@ -31,6 +30,7 @@ import { validateLoopBudget } from "@synara/shared/loop";
 import { Schema } from "effect";
 
 import { chooseStopReason, isLoopBudgetExhausted, isLoopExpired } from "./loop/budget.ts";
+import { buildLoopIterationTurnDrafts } from "./loop/turnEvents.ts";
 import {
   buildLoopContinuationThreadView,
   decideLoopContinuation,
@@ -53,8 +53,6 @@ type LoopSetCommand = Extract<OrchestrationCommand, { type: "thread.loop.set" }>
 type LoopOffCommand = Extract<OrchestrationCommand, { type: "thread.loop.off" }>;
 type LoopToggleCommand = Extract<OrchestrationCommand, { type: "thread.loop.toggle" }>;
 type LoopContinueCommand = Extract<OrchestrationCommand, { type: "thread.loop.continue" }>;
-
-const DEFAULT_ASSISTANT_DELIVERY_MODE = "buffered" as const;
 
 function invalid(detail: string): LoopCommandDecision {
   return { kind: "invalid", detail };
@@ -342,35 +340,15 @@ export function decideLoopContinue(
     iteration: nextIteration,
   };
   return events([
-    {
-      type: "thread.message-sent",
-      payload: {
-        threadId: command.threadId,
-        messageId,
-        role: "user",
-        text: prompt,
-        dispatchMode: DEFAULT_TURN_DISPATCH_MODE,
-        turnId: null,
-        streaming: false,
-        source: "native",
-        purpose,
-        createdAt: command.createdAt,
-        updatedAt: command.createdAt,
-      },
-    },
-    {
-      type: "thread.turn-start-requested",
-      payload: {
-        threadId: command.threadId,
-        messageId,
-        assistantDeliveryMode: DEFAULT_ASSISTANT_DELIVERY_MODE,
-        dispatchMode: DEFAULT_TURN_DISPATCH_MODE,
-        runtimeMode: thread.runtimeMode,
-        interactionMode: thread.interactionMode,
-        purpose,
-        createdAt: command.createdAt,
-      },
-    },
+    ...buildLoopIterationTurnDrafts({
+      threadId: command.threadId,
+      messageId,
+      prompt,
+      purpose,
+      runtimeMode: thread.runtimeMode,
+      interactionMode: thread.interactionMode,
+      createdAt: command.createdAt,
+    }),
     {
       type: "thread.loop-continued",
       payload: {
