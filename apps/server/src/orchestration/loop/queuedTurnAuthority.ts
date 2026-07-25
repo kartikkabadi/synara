@@ -12,8 +12,8 @@ export function classifyLoopTurnAuthority(input: {
   readonly thread:
     | {
         readonly deletedAt: string | null;
-        readonly archivedAt: string | null;
-        readonly loop: ThreadLoop | null | undefined;
+        readonly archivedAt?: string | null | undefined;
+        readonly loop?: ThreadLoop | null | undefined;
       }
     | undefined;
   readonly purpose: ThreadTurnPurpose;

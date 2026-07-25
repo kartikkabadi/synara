@@ -1535,8 +1535,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         createdAt: command.createdAt,
       });
       const purpose = loopResolution.purpose;
-      const dispatchMode =
-        loopResolution.dispatchModeOverride ?? command.dispatchMode ?? "queue";
+      const dispatchMode = loopResolution.dispatchModeOverride ?? command.dispatchMode ?? "queue";
       const loopEvents = materializeLoopEvents(command, loopResolution.loopEvents);
       // Loop-claimed turns start from the shared loop iteration draft shape so a
       // new turn-start payload field only has to be added in one place.
