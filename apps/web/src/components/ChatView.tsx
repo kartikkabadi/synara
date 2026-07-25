@@ -291,6 +291,7 @@ import {
   ComposerSendArrowIcon,
   LayoutSidebarIcon,
   SteerIcon,
+  StopIcon,
   RefreshCwIcon,
   TemporaryThreadIcon,
 } from "~/lib/icons";
@@ -10818,10 +10819,7 @@ export default function ChatView({
                               : "Stop the current response. On Mac, press Ctrl+C to interrupt."
                           }
                         >
-                          <span
-                            aria-hidden="true"
-                            className="block size-2 rounded-[1px] bg-current"
-                          />
+                          <StopIcon aria-hidden className="size-3" />
                         </Button>
                       ) : pendingUserInputs.length === 0 &&
                         !isVoiceRecording &&
