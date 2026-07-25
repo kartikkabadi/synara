@@ -63,8 +63,9 @@ export interface DeriveLoopPresentationStateInput {
 
 // --- Progress ---
 
-const NORMALIZED_SEGMENT_COUNT = 5;
-const MAX_PER_TURN_SEGMENTS = 8;
+// Visual cap: budgets above this render proportionally across this many
+// segments instead of one segment per turn.
+const MAX_VISUAL_SEGMENTS = 12;
 
 function pluralizeTurns(count: number): string {
   return count === 1 ? "turn" : "turns";
@@ -82,10 +83,13 @@ export function isLoopOwnedTurnRunning(
   );
 }
 
-function normalizedSegments(fraction: number): number[] {
+// Distributes overall progress across `count` segments with fractional fills:
+// completed segments are 1, the boundary segment is partial, the rest 0.
+function proportionalSegments(fraction: number, count: number): number[] {
   const clamped = Math.min(1, Math.max(0, fraction));
-  const filled = Math.round(clamped * NORMALIZED_SEGMENT_COUNT);
-  return Array.from({ length: NORMALIZED_SEGMENT_COUNT }, (_, index) => (index < filled ? 1 : 0));
+  return Array.from({ length: count }, (_, index) =>
+    Math.min(1, Math.max(0, clamped * count - index)),
+  );
 }
 
 export function formatLoopRemainingTime(remainingSeconds: number): string {
@@ -156,10 +160,7 @@ export function deriveLoopProgress(loop: ThreadLoop, now: number): LoopProgress 
   if (loop.maxIterations !== null) {
     const max = loop.maxIterations;
     const iteration = Math.min(loop.iteration, max);
-    const segments =
-      max <= MAX_PER_TURN_SEGMENTS
-        ? Array.from({ length: max }, (_, index) => (index < iteration ? 1 : 0))
-        : normalizedSegments(iteration / max);
+    const segments = proportionalSegments(iteration / max, Math.min(max, MAX_VISUAL_SEGMENTS));
     return {
       kind: "count",
       segments,
@@ -181,7 +182,7 @@ export function deriveLoopProgress(loop: ThreadLoop, now: number): LoopProgress 
     const remainingSeconds = Math.max(0, (endsAtMs - now) / 1000);
     return {
       kind: "duration",
-      segments: normalizedSegments(elapsedMs / totalMs),
+      segments: proportionalSegments(elapsedMs / totalMs, MAX_VISUAL_SEGMENTS),
       counterText: formatLoopRemainingTime(remainingSeconds),
       detailText: null,
       tooltipText: `${formatWholeMinutes(elapsedMs)} elapsed of ${formatWholeMinutes(totalMs)}`,
