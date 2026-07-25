@@ -37,9 +37,9 @@ describe("deriveLoopComposerPlaceholder", () => {
   });
 
   it("keeps the armed placeholder while the objective is empty", () => {
-    expect(
-      deriveLoopComposerPlaceholder(makeInput({ loop: { active: true, prompt: "  " } })),
-    ).toBe(LOOP_OBJECTIVE_PLACEHOLDER);
+    expect(deriveLoopComposerPlaceholder(makeInput({ loop: { active: true, prompt: "  " } }))).toBe(
+      LOOP_OBJECTIVE_PLACEHOLDER,
+    );
   });
 
   it("offers to queue a new objective while a loop-owned turn streams", () => {
