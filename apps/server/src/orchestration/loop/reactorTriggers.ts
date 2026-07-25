@@ -4,12 +4,7 @@
 //          tracked loop state is declared in one place.
 // Layer: Orchestration decision logic
 
-import type {
-  LoopStopReason,
-  OrchestrationEvent,
-  ThreadId,
-  ThreadLoop,
-} from "@synara/contracts";
+import type { LoopStopReason, OrchestrationEvent, ThreadId, ThreadLoop } from "@synara/contracts";
 
 export type LoopReactorTrigger =
   | { kind: "sync"; threadId: ThreadId; loop: ThreadLoop }
