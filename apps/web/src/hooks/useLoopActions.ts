@@ -12,7 +12,7 @@ import {
 } from "@synara/contracts";
 import { buildPromptThreadTitleFallback } from "@synara/shared/chatThreads";
 import { useCallback, useRef } from "react";
-import { isLoopOwnedTurnRunning } from "../components/chat/loopPresentation";
+import { isLoopOwnedTurnRunning } from "../components/chat/loop/presentation";
 import { useLoopStopErrorToast } from "../components/chat/useLoopStopErrorToast";
 import { toastManager } from "../components/ui/toast";
 import { promoteThreadCreate } from "../lib/threadCreatePromotion";

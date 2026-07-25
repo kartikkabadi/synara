@@ -1,7 +1,8 @@
-// FILE: loopPresentation.ts
+// FILE: presentation.ts
 // Purpose: Pure derivation of `/loop` runtime presentation — state, copy, progress, tone, ARIA.
 // Layer: Web chat presentation helpers
 // No JSX, no hooks, no raw colors. Consumers map semantic tones to styling.
+// Grouped into three sections: progress, stop copy, and presentation state.
 
 import type {
   LoopStopReason,
@@ -9,7 +10,6 @@ import type {
   ProviderInteractionMode,
   ThreadLoop,
 } from "@synara/contracts";
-import { LOOP_OBJECTIVE_PLACEHOLDER, LOOP_SETUP_COMPOSER_PLACEHOLDER } from "~/lib/loop";
 
 export type LoopSemanticColor = "running" | "waiting" | "neutral" | "error";
 
@@ -61,44 +61,7 @@ export interface DeriveLoopPresentationStateInput {
   now: number;
 }
 
-// Composer placeholder while a loop with a saved objective is active (spec §9).
-export const LOOP_ACTIVE_COMPOSER_PLACEHOLDER = "Steer the next iteration…";
-
-export interface DeriveLoopComposerPlaceholderInput {
-  isApprovalState: boolean;
-  // null when no pending-progress question owns the composer.
-  pendingProgressQuestion: "free-form" | "with-options" | null;
-  loopSetupOpen: boolean;
-  showPlanFollowUp: boolean;
-  loop: Pick<ThreadLoop, "active" | "prompt"> | null;
-  isSubagentThread: boolean;
-  hasLiveTurn: boolean;
-  isDisconnected: boolean;
-}
-
-// Composer placeholder priority: approval → pending progress → loop setup →
-// plan follow-up → active loop → subagent → live turn → disconnected → default.
-export function deriveLoopComposerPlaceholder(input: DeriveLoopComposerPlaceholderInput): string {
-  if (input.isApprovalState) return "Resolve this approval request to continue";
-  if (input.pendingProgressQuestion !== null) {
-    return input.pendingProgressQuestion === "free-form"
-      ? "Type your answer to continue"
-      : "Type your own answer, or leave this blank to use the selected option";
-  }
-  if (input.loopSetupOpen) return LOOP_SETUP_COMPOSER_PLACEHOLDER;
-  if (input.showPlanFollowUp) {
-    return "Add feedback to refine the plan, or leave this blank to implement it";
-  }
-  if (input.loop?.active) {
-    return input.loop.prompt.trim().length === 0
-      ? LOOP_OBJECTIVE_PLACEHOLDER
-      : LOOP_ACTIVE_COMPOSER_PLACEHOLDER;
-  }
-  if (input.isSubagentThread) return "Message this subagent while it works";
-  if (input.hasLiveTurn) return "Ask for follow-up changes";
-  if (input.isDisconnected) return "Ask for follow-up changes or attach images";
-  return "Ask anything, @tag files/folders, or use / to show available commands";
-}
+// --- Progress ---
 
 const NORMALIZED_SEGMENT_COUNT = 5;
 const MAX_PER_TURN_SEGMENTS = 8;
@@ -244,6 +207,8 @@ export function deriveLoopProgress(loop: ThreadLoop, now: number): LoopProgress 
   };
 }
 
+// --- Stop copy ---
+
 export interface LoopStopReasonCopy {
   // "Loop completed" for budget outcomes, "Loop stopped" otherwise.
   title: string;
@@ -379,6 +344,8 @@ function stopReasonColor(reason: LoopStopReason): LoopSemanticColor {
       return "neutral";
   }
 }
+
+// --- Presentation state ---
 
 export function deriveLoopPresentationState(
   input: DeriveLoopPresentationStateInput,

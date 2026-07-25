@@ -20,7 +20,7 @@ import {
   deriveLoopPresentationState,
   isLoopOwnedTurnRunning,
   type LoopSemanticColor,
-} from "./loopPresentation";
+} from "./loop/presentation";
 
 export interface LoopRuntimeRailProps {
   loop: ThreadLoop;
