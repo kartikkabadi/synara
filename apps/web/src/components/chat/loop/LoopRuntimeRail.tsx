@@ -54,6 +54,10 @@ export const LOOP_STOP_NOW_DESCRIPTION = "Interrupt current work and stop the lo
 
 // Crossfade duration for label/detail swaps.
 const LABEL_CROSSFADE_MS = 150;
+// How long the transient "↳ Objective updated" detail stays before the
+// regular detail crossfades back in.
+const OBJECTIVE_UPDATED_HOLD_MS = 4_000;
+export const LOOP_OBJECTIVE_UPDATED_DETAIL = "↳ Objective updated";
 // Hold before surfacing transitional copy (`Loop on / Starting the next
 // turn…`) so quick turn-to-turn gaps don't flash it.
 const TRANSITIONAL_STABILIZE_MS = 250;
@@ -82,6 +86,14 @@ function iconClassName(color: LoopSemanticColor, spinning: boolean): string {
 
 const RAIL_BUTTON_CLASS_NAME =
   "inline-flex shrink-0 items-center gap-1 rounded-full border border-[color:var(--color-border-light)] px-2.5 py-1 text-[11px] font-medium text-[var(--color-text-foreground-secondary)] transition-colors duration-150 hover:border-destructive/40 hover:bg-destructive/8 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-border)] dark:hover:bg-destructive/16";
+
+// Split variant of the rail pill: primary segment keeps the left rounding,
+// chevron segment the right, sharing the pill border so the pair reads as one
+// control.
+const RAIL_SPLIT_PRIMARY_CLASS_NAME =
+  "inline-flex shrink-0 items-center gap-1 rounded-l-full border border-r-0 border-[color:var(--color-border-light)] py-1 pr-1.5 pl-2.5 text-[11px] font-medium text-[var(--color-text-foreground-secondary)] transition-colors duration-150 hover:border-destructive/40 hover:bg-destructive/8 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-border)] dark:hover:bg-destructive/16";
+const RAIL_SPLIT_MENU_CLASS_NAME =
+  "inline-flex shrink-0 items-center rounded-r-full border border-l border-[color:var(--color-border-light)] border-l-border/50 py-1 pr-2 pl-1.5 text-[11px] font-medium text-[var(--color-text-foreground-secondary)] transition-colors duration-150 hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--color-border)]";
 
 const MENU_ITEM_DESCRIPTION_CLASS_NAME = "text-[10.5px] text-muted-foreground/60";
 
@@ -144,7 +156,11 @@ function LoopProgressSegments({
   );
 }
 
-function LoopStopMenu({
+// Split stop control: the primary segment performs the safe default in one
+// click (`thread.loop.off` — the running turn finishes on its own), while the
+// chevron segment opens the menu with the destructive "Stop now" and "Edit
+// loop…".
+function LoopStopSplitButton({
   onStopAfterTurn,
   onStopNow,
   onEditLoop,
@@ -153,41 +169,69 @@ function LoopStopMenu({
   loopTurnRunning: boolean;
 }) {
   return (
-    <Menu>
-      <MenuTrigger className={RAIL_BUTTON_CLASS_NAME}>
+    <span className="inline-flex shrink-0 items-center">
+      <button
+        className={RAIL_SPLIT_PRIMARY_CLASS_NAME}
+        onClick={onStopAfterTurn}
+        title={loopTurnRunning ? LOOP_STOP_AFTER_TURN_DESCRIPTION : undefined}
+        type="button"
+      >
         {loopTurnRunning ? "Stop after turn" : "Stop loop"}
-        <ChevronDownIcon className="size-3" />
-      </MenuTrigger>
-      <MenuPopupBase align="end">
-        {loopTurnRunning ? (
-          <>
-            <MenuItem onClick={onStopAfterTurn}>
-              <span className="flex flex-col items-start">
-                <span>Stop after this turn</span>
-                <span className={MENU_ITEM_DESCRIPTION_CLASS_NAME}>
-                  {LOOP_STOP_AFTER_TURN_DESCRIPTION}
-                </span>
-              </span>
-            </MenuItem>
-            <MenuItem onClick={onStopNow} variant="destructive">
-              <span className="flex flex-col items-start">
-                <span>Stop now</span>
-                <span className={MENU_ITEM_DESCRIPTION_CLASS_NAME}>
-                  {LOOP_STOP_NOW_DESCRIPTION}
-                </span>
-              </span>
-            </MenuItem>
-          </>
-        ) : (
-          <MenuItem onClick={onStopAfterTurn} variant="destructive">
-            Stop loop
+      </button>
+      <Menu>
+        <MenuTrigger aria-label="More loop actions" className={RAIL_SPLIT_MENU_CLASS_NAME}>
+          <ChevronDownIcon className="size-3" />
+        </MenuTrigger>
+        <MenuPopupBase align="end">
+          <MenuItem onClick={onStopNow} variant="destructive">
+            <span className="flex flex-col items-start">
+              <span>Stop now</span>
+              <span className={MENU_ITEM_DESCRIPTION_CLASS_NAME}>{LOOP_STOP_NOW_DESCRIPTION}</span>
+            </span>
           </MenuItem>
-        )}
-        <MenuSeparator />
-        <MenuItem onClick={onEditLoop}>Edit loop…</MenuItem>
-      </MenuPopupBase>
-    </Menu>
+          <MenuSeparator />
+          <MenuItem onClick={onEditLoop}>Edit loop…</MenuItem>
+        </MenuPopupBase>
+      </Menu>
+    </span>
   );
+}
+
+// Transient confirmation after a manual retarget: when `loop.prompt` changes
+// while the loop stays active, surface `↳ Objective updated` for a few
+// seconds; the existing crossfade machinery animates it in and out. Resets
+// across loops (activationId) and clears on unmount.
+function useObjectiveUpdatedCue(loop: ThreadLoop): boolean {
+  const [showing, setShowing] = useState(false);
+  const previousRef = useRef<{ activationId: string; prompt: string; active: boolean } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    const previous = previousRef.current;
+    previousRef.current = {
+      activationId: loop.activationId,
+      prompt: loop.prompt,
+      active: loop.active,
+    };
+    if (
+      previous === null ||
+      previous.activationId !== loop.activationId ||
+      !previous.active ||
+      !loop.active ||
+      previous.prompt === loop.prompt
+    ) {
+      if (previous !== null && previous.activationId !== loop.activationId) {
+        setShowing(false);
+      }
+      return;
+    }
+    setShowing(true);
+    const id = setTimeout(() => setShowing(false), OBJECTIVE_UPDATED_HOLD_MS);
+    return () => clearTimeout(id);
+  }, [loop.activationId, loop.prompt, loop.active]);
+
+  return showing && loop.active;
 }
 
 // Crossfades label/detail swaps over 150 ms and holds transitional copy for a
@@ -293,11 +337,14 @@ export function LoopRuntimeRail({
 
   // The rail's secondary detail: running carries it in the counter; no-budget
   // loops surface the safety-limit line instead.
+  const showObjectiveUpdated = useObjectiveUpdatedCue(loop);
   const rawDetail =
     presentation === null
       ? null
-      : (presentation.progress?.detailText ??
-        (presentation.state.kind === "running" ? null : presentation.detail));
+      : showObjectiveUpdated
+        ? LOOP_OBJECTIVE_UPDATED_DETAIL
+        : (presentation.progress?.detailText ??
+          (presentation.state.kind === "running" ? null : presentation.detail));
   const { displayLabel, displayDetail, fading } = useCrossfadedStatusCopy(
     label,
     rawDetail,
@@ -328,7 +375,7 @@ export function LoopRuntimeRail({
   let control: React.ReactNode = null;
   if (controlKind === "menu") {
     control = (
-      <LoopStopMenu
+      <LoopStopSplitButton
         loopTurnRunning={loopTurnRunning}
         onEditLoop={onEditLoop}
         onStopAfterTurn={onStopAfterTurn}

@@ -283,11 +283,18 @@ function buildLatestTurn(params: {
   completedAt: string | null;
   assistantMessageId: NonNullable<Thread["latestTurn"]>["assistantMessageId"];
   sourceProposedPlan?: Thread["pendingSourceProposedPlan"];
+  purpose?: NonNullable<Thread["latestTurn"]>["purpose"];
 }): NonNullable<Thread["latestTurn"]> {
   const sourceProposedPlan =
     params.previous?.turnId === params.turnId
       ? (params.previous.sourceProposedPlan ?? params.sourceProposedPlan)
       : params.sourceProposedPlan;
+  // Same-turn updates keep the initiating message's purpose so loop-owned
+  // turns stay identifiable through streaming/settlement transitions.
+  const purpose =
+    params.previous?.turnId === params.turnId
+      ? (params.previous.purpose ?? params.purpose)
+      : params.purpose;
   return {
     turnId: params.turnId,
     state: params.state,
@@ -296,7 +303,23 @@ function buildLatestTurn(params: {
     completedAt: params.completedAt,
     assistantMessageId: params.assistantMessageId,
     ...(sourceProposedPlan ? { sourceProposedPlan } : {}),
+    ...(purpose !== undefined ? { purpose } : {}),
   };
+}
+
+// The turn's purpose lives on the initiating user message; look it up so
+// client-built latestTurn snapshots don't lose loop ownership.
+function findTurnPurpose(
+  messages: Thread["messages"],
+  turnId: NonNullable<Thread["latestTurn"]>["turnId"],
+): NonNullable<Thread["latestTurn"]>["purpose"] {
+  if (turnId == null) return undefined;
+  for (const message of messages) {
+    if (message.turnId === turnId && message.purpose !== undefined) {
+      return message.purpose;
+    }
+  }
+  return undefined;
 }
 
 function reconcileLatestTurnFromSession(
@@ -323,6 +346,7 @@ function reconcileLatestTurnFromSession(
           ? thread.latestTurn.assistantMessageId
           : null,
       sourceProposedPlan: thread.pendingSourceProposedPlan,
+      purpose: findTurnPurpose(thread.messages, session.activeTurnId),
     });
   }
 
@@ -713,6 +737,7 @@ function applyThreadMessageSentEvent(thread: Thread, event: ThreadMessageSentEve
       completedAt: payload.streaming ? (previousTurn?.completedAt ?? null) : payload.updatedAt,
       assistantMessageId: payload.messageId,
       sourceProposedPlan: thread.pendingSourceProposedPlan,
+      purpose: findTurnPurpose(messages, payload.turnId),
     });
   }
 

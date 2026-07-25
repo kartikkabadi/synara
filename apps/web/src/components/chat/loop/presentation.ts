@@ -277,14 +277,14 @@ export function formatLoopStopReason(
     case "attachments_not_supported":
       return {
         title: "Loop stopped",
-        summary: "Loop prompts are text-only",
-        reason: null,
+        summary: "Attachments aren't supported in loops",
+        reason: "Your message ran as a normal turn instead",
       };
     case "replaced_by_manual_policy":
       return {
         title: "Loop stopped",
         summary: `${iteration} ${pluralizeTurns(iteration)}`,
-        reason: "Replaced by your manual message",
+        reason: "Your message ran as a normal turn instead",
       };
     case "thread_archived":
       return {
@@ -310,25 +310,36 @@ export function formatLoopStopReason(
 }
 
 // Context-free stop copy for toasts and announcements. Returns null for
-// routine lifecycle stops that stay quiet (spec §14.2).
+// routine lifecycle stops that stay quiet (spec §14.2). `tone` separates
+// exceptional failures (error) from informational stops (warning).
 export function formatLoopStopReasonShort(
   reason: LoopStopReason,
-): { title: string; description: string } | null {
+): { title: string; description: string; tone: "error" | "warning" } | null {
   switch (reason) {
     case "consecutive_errors":
       return {
         title: "Loop stopped after repeated errors",
         description: "Review the latest error before restarting.",
+        tone: "error",
       };
     case "prompt_invalid":
       return {
         title: "Loop stopped",
         description: "The saved objective was invalid.",
+        tone: "error",
       };
     case "thread_unrunnable":
       return {
         title: "Loop stopped",
         description: "This thread is not available.",
+        tone: "error",
+      };
+    case "attachments_not_supported":
+    case "replaced_by_manual_policy":
+      return {
+        title: "Loop stopped",
+        description: "Your message was sent as a normal message.",
+        tone: "warning",
       };
     default:
       return null;

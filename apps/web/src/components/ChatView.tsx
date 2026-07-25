@@ -285,6 +285,7 @@ import {
   ChevronDownIcon,
   ComposerSendArrowIcon,
   LayoutSidebarIcon,
+  SteerIcon,
   RefreshCwIcon,
   TemporaryThreadIcon,
 } from "~/lib/icons";
@@ -455,7 +456,7 @@ import { ComposerExtrasMenu } from "./chat/ComposerExtrasMenu";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { ComposerInputBanners } from "./chat/ComposerInputBanners";
 import { LoopComposerModeCta, LoopComposerModeHeader } from "./chat/loop/LoopComposerMode";
-import { deriveLoopComposerPlaceholder } from "./chat/composerPlaceholder";
+import { deriveLoopComposerPlaceholder, isLoopSteerSendSignal } from "./chat/composerPlaceholder";
 import { useLoopController } from "./chat/loop/useLoopController";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerVoiceButton } from "./chat/ComposerVoiceButton";
@@ -9202,8 +9203,13 @@ export default function ChatView({
     actions: { stopAfterTurn: handleStopLoopAfterTurn, stopNow: handleStopLoopNow },
     ensureLoopThreadReady,
     isLoopOwnedTurnActive,
+    hasUnsupportedContext: hasUnsupportedLoopContext,
   } = loopController;
   const loopComposerModeOpen = loopComposer.mode.kind !== "closed";
+  const isLoopSteerSend = isLoopSteerSendSignal({
+    loop: activeThread?.loop ?? null,
+    hasUnsupportedLoopContext,
+  });
 
   const composerPlaceholder = useMemo(
     () =>
@@ -9217,6 +9223,7 @@ export default function ChatView({
         loopSetupOpen: loopComposerModeOpen,
         showPlanFollowUp: showPlanFollowUpPrompt && activeProposedPlan != null,
         loop: activeThread?.loop ?? null,
+        isLoopOwnedTurnRunning: isLoopOwnedTurnActive,
         isSubagentThread: activeThread?.parentThreadId != null,
         hasLiveTurn,
         isDisconnected: phase === "disconnected",
@@ -9228,6 +9235,7 @@ export default function ChatView({
       showPlanFollowUpPrompt,
       activeProposedPlan,
       activeThread?.loop,
+      isLoopOwnedTurnActive,
       activeThread?.parentThreadId,
       hasLiveTurn,
       phase,
@@ -10287,6 +10295,7 @@ export default function ChatView({
               ) : null}
               <ComposerQueuedHeader
                 queuedTurns={queuedComposerTurns}
+                loopActive={activeThread?.loop?.active === true}
                 onSteer={onSteerQueuedComposerTurn}
                 onRemove={removeQueuedComposerTurn}
                 onEdit={onEditQueuedComposerTurn}
@@ -10348,6 +10357,7 @@ export default function ChatView({
                 <ComposerInputBanners
                   roundedTopReset={false}
                   thread={activeThread}
+                  loopDraftUnsupported={hasUnsupportedLoopContext}
                   onStopLoopAfterTurn={handleStopLoopAfterTurn}
                   onStopLoopNow={handleStopLoopNow}
                   onEditLoop={loopComposer.openEdit}
@@ -10608,9 +10618,15 @@ export default function ChatView({
                           variant="prominent"
                           size="icon-xs"
                           className="sm:size-[26px]"
-                          onClick={() => void onInterrupt()}
-                          aria-label="Stop generation"
-                          title="Stop the current response. On Mac, press Ctrl+C to interrupt."
+                          onClick={() =>
+                            isLoopOwnedTurnActive ? void handleStopLoopNow() : void onInterrupt()
+                          }
+                          aria-label={isLoopOwnedTurnActive ? "Stop loop" : "Stop generation"}
+                          title={
+                            isLoopOwnedTurnActive
+                              ? "Stop the current iteration and end the loop. Use the loop bar to stop after this turn instead."
+                              : "Stop the current response. On Mac, press Ctrl+C to interrupt."
+                          }
                         >
                           <span
                             aria-hidden="true"
@@ -10707,7 +10723,9 @@ export default function ChatView({
                                       ? "Preparing worktree"
                                       : isSendBusy
                                         ? "Sending"
-                                        : "Send message"
+                                        : isLoopSteerSend
+                                          ? "Steer the loop"
+                                          : "Send message"
                               }
                             >
                               {isConnecting || isSendBusy ? (
@@ -10729,6 +10747,8 @@ export default function ChatView({
                                     strokeDasharray="20 12"
                                   />
                                 </svg>
+                              ) : isLoopSteerSend ? (
+                                <SteerIcon aria-hidden="true" className="size-4 shrink-0" />
                               ) : (
                                 <ComposerSendArrowIcon
                                   aria-hidden="true"
