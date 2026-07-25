@@ -9,14 +9,11 @@ import {
   type ThreadId,
 } from "@synara/contracts";
 import { buildPromptThreadTitleFallback } from "@synara/shared/chatThreads";
-import { type LoopBudget, type LoopParseErrorReason } from "@synara/shared/loop";
 import {
-  LOOP_DEFAULT_BUDGET_CHOICE,
-  interpretLoopInvocation,
-  loopBudgetChoiceFromParsed,
-  type LoopBudgetChoice,
-  type LoopSetupNote,
-} from "~/lib/loop";
+  resolveLoopMenuSelection,
+  useLoopSlashCommand,
+  type LoopSetupOptions,
+} from "../components/chat/loop/useLoopSlashCommand";
 import { deriveAssociatedWorktreeMetadata } from "@synara/shared/threadWorkspace";
 import { useCallback, useEffect, useState } from "react";
 import { newCommandId, newMessageId, newThreadId } from "../lib/utils";
@@ -56,71 +53,6 @@ type SlashCommandItem = Extract<ComposerCommandItem, { type: "slash-command" }>;
 
 function wasPromptReplacementApplied(result: number | false): boolean {
   return result !== false;
-}
-
-export function formatLoopParseError(reason: LoopParseErrorReason): string {
-  switch (reason) {
-    case "missing_budget":
-      return "Add a budget first, e.g. /loop 10 fix the tests or /loop 30m.";
-    case "invalid_budget":
-      return "That budget isn't valid. Use a count up to 100 (/loop 10) or a duration (/loop 30m, /loop 2h).";
-    case "ambiguous_second_budget":
-      return "The objective can't start with a second budget. Quote or reword it, e.g. /loop 10 run 5 checks.";
-    case "prompt_starts_with_slash":
-      return "The loop objective can't start with a slash. Try /loop 10 fix the tests.";
-    case "prompt_too_long":
-      return "That loop objective is too long. Shorten it and try again.";
-    default:
-      return reason satisfies never;
-  }
-}
-
-export type LoopSetupOptions = {
-  budget: LoopBudgetChoice;
-  objective: string;
-  note: LoopSetupNote | null;
-};
-
-// Selecting Loop from the command menu: active loop opens Edit Loop mode (it
-// never stops the running loop); inactive selection opens guided setup.
-export function resolveLoopMenuSelection(
-  loopActive: boolean,
-): { kind: "edit" } | { kind: "setup"; options: LoopSetupOptions } {
-  return loopActive
-    ? { kind: "edit" }
-    : {
-        kind: "setup",
-        options: { budget: LOOP_DEFAULT_BUDGET_CHOICE, objective: "", note: null },
-      };
-}
-
-// Parse errors stay recoverable: the toast carries a Configure Loop action
-// that reopens guided setup with the typed objective prefilled.
-export function buildLoopParseErrorToast(
-  trimmed: string,
-  reason: LoopParseErrorReason,
-  openLoopSetup: (options: LoopSetupOptions) => void,
-): {
-  type: "warning";
-  title: string;
-  description: string;
-  actionProps: { children: string; onClick: () => void };
-} {
-  const args = trimmed
-    .trimStart()
-    .replace(/^\/loop/i, "")
-    .trim();
-  return {
-    type: "warning",
-    title: "Invalid Loop budget",
-    description: formatLoopParseError(reason),
-    actionProps: {
-      children: "Configure Loop",
-      onClick: () => {
-        openLoopSetup({ budget: LOOP_DEFAULT_BUDGET_CHOICE, objective: args, note: null });
-      },
-    },
-  };
 }
 
 export function useComposerSlashCommands(input: {
@@ -685,148 +617,16 @@ export function useComposerSlashCommands(input: {
     });
   }, [canOfferExportCommand, threadId]);
 
-  // Active bare `/loop` retains the backend toggle shortcut: disable future
-  // iterations while letting a currently running turn finish.
-  const toggleActiveLoop = useCallback(
-    async (trimmed: string) => {
-      const api = readNativeApi();
-      if (!api || !activeThread) {
-        return;
-      }
-      editorActions.clearComposerSlashDraft();
-      try {
-        await api.orchestration.dispatchCommand({
-          type: "thread.loop.toggle",
-          commandId: newCommandId(),
-          threadId,
-          createdAt: new Date().toISOString(),
-        });
-        const snapshot = await api.orchestration.getShellSnapshot();
-        syncServerShellSnapshot(snapshot);
-      } catch {
-        editorActions.setComposerPromptValue(trimmed);
-        toastManager.add({
-          type: "error",
-          title: "Could not stop Loop",
-          description: "Couldn't stop the loop. Try again.",
-        });
-      }
-    },
-    [activeThread, editorActions, syncServerShellSnapshot, threadId],
-  );
-
-  // Power-user fast path: `/loop 5 fix the tests` starts immediately after
-  // validation, reusing new-chat thread promotion via ensureLoopThreadReady.
-  // Direct starts enforce the same text-only contract as guided setup: any
-  // unsupported context routes into setup with the objective prefilled.
-  const startLoopDirect = useCallback(
-    async (trimmed: string, budget: LoopBudget, prompt: string) => {
-      const api = readNativeApi();
-      if (!api) {
-        return;
-      }
-      if (hasUnsupportedLoopContext) {
-        openLoopSetup({
-          budget: loopBudgetChoiceFromParsed(budget),
-          objective: prompt,
-          note: "unsupported-context",
-        });
-        return;
-      }
-
-      const ready = await ensureLoopThreadReady(prompt);
-      if (!ready) {
-        toastManager.add({
-          type: "error",
-          title: "Could not start Loop",
-          description: "The thread isn't ready yet. Your objective has been preserved.",
-        });
-        return;
-      }
-
-      editorActions.clearComposerSlashDraft();
-      try {
-        await api.orchestration.dispatchCommand({
-          type: "thread.loop.set",
-          commandId: newCommandId(),
-          threadId,
-          prompt,
-          maxIterations: budget.kind === "count" ? budget.value : null,
-          durationSeconds: budget.kind === "duration" ? budget.seconds : null,
-          createdAt: new Date().toISOString(),
-        });
-        const snapshot = await api.orchestration.getShellSnapshot();
-        syncServerShellSnapshot(snapshot);
-      } catch (error) {
-        editorActions.setComposerPromptValue(trimmed);
-        toastManager.add({
-          type: "error",
-          title: "Could not start Loop",
-          description:
-            error instanceof Error
-              ? `${error.message} Your objective has been preserved.`
-              : "An error occurred while starting the loop. Your objective has been preserved.",
-        });
-      }
-    },
-    [
-      editorActions,
-      ensureLoopThreadReady,
-      hasUnsupportedLoopContext,
-      openLoopSetup,
-      syncServerShellSnapshot,
-      threadId,
-    ],
-  );
-
-  const runLoopSlashCommand = useCallback(
-    async (trimmed: string) => {
-      const api = readNativeApi();
-      if (!api || !activeProject || !activeThread) {
-        toastManager.add({
-          type: "warning",
-          title: "Loop is unavailable",
-          description: "Open a thread before starting a loop.",
-        });
-        return;
-      }
-      if (activeThread.parentThreadId != null) {
-        toastManager.add({
-          type: "warning",
-          title: "Loop is unavailable",
-          description: "Loops are only allowed on top-level threads.",
-        });
-        return;
-      }
-
-      const interpretation = interpretLoopInvocation(trimmed, {
-        loopActive: activeThread.loop?.active === true,
-      });
-      switch (interpretation.kind) {
-        case "not-loop":
-          return;
-        case "reject":
-          toastManager.add(buildLoopParseErrorToast(trimmed, interpretation.reason, openLoopSetup));
-          return;
-        case "toggle-off":
-          await toggleActiveLoop(trimmed);
-          return;
-        case "start-direct":
-          await startLoopDirect(trimmed, interpretation.budget, interpretation.prompt);
-          return;
-        case "open-setup":
-          openLoopSetup({
-            budget: interpretation.budget,
-            objective: interpretation.objective,
-            note: interpretation.note,
-          });
-          return;
-        default:
-          return interpretation satisfies never;
-      }
-    },
-    [activeProject, activeThread, openLoopSetup, startLoopDirect, toggleActiveLoop],
-  );
+  const { runLoopSlashCommand } = useLoopSlashCommand({
+    threadId,
+    activeProject,
+    activeThread,
+    hasUnsupportedLoopContext,
+    openLoopSetup,
+    ensureLoopThreadReady,
+    syncServerShellSnapshot,
+    editorActions,
+  });
 
   const openFeedbackDialog = useCallback(() => {
     openGlobalFeedbackDialog({

@@ -14,13 +14,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ChevronDownIcon, LoopIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
-import { Menu, MenuItem, MenuPopupBase, MenuSeparator, MenuTrigger } from "../ui/menu";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Menu, MenuItem, MenuPopupBase, MenuSeparator, MenuTrigger } from "../../ui/menu";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../../ui/tooltip";
 import {
   deriveLoopPresentationState,
   isLoopOwnedTurnRunning,
   type LoopSemanticColor,
-} from "./loopPresentation";
+} from "./presentation";
 
 export interface LoopRuntimeRailProps {
   loop: ThreadLoop;
@@ -124,12 +124,21 @@ function LoopProgressSegments({
           key={index}
           data-testid="loop-progress-segment"
           className={cn(
-            "h-1 flex-1 rounded-full transition-[background-color,opacity] duration-200 motion-reduce:transition-none",
-            fill > 0 ? filledSegmentClassName(color) : "bg-muted/60",
+            "relative h-1 flex-1 overflow-hidden rounded-full bg-muted/60",
             index === pulseIndex &&
               "animate-[pulse_2s_ease-in-out_infinite] motion-reduce:animate-none",
           )}
-        />
+        >
+          {/* Inner fill: partial widths make fractional progress visible. */}
+          <span
+            data-testid="loop-progress-segment-fill"
+            className={cn(
+              "absolute inset-y-0 left-0 rounded-full transition-[width,background-color] duration-200 motion-reduce:transition-none",
+              filledSegmentClassName(color),
+            )}
+            style={{ width: `${fill * 100}%` }}
+          />
+        </span>
       ))}
     </div>
   );

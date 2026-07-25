@@ -10,9 +10,9 @@ import { useEffect, useState } from "react";
 import { CircleAlertIcon, ClockIcon, LoopIcon, StopIcon, type LucideIcon } from "~/lib/icons";
 import { disclosureContentClassName } from "~/lib/disclosureMotion";
 import { cn } from "~/lib/utils";
-import { DisclosureChevron } from "../ui/DisclosureChevron";
-import { DisclosureRegion } from "../ui/DisclosureRegion";
-import { formatDuration, formatLoopStopReason, type LoopStopReasonCopy } from "./loopPresentation";
+import { DisclosureChevron } from "../../ui/DisclosureChevron";
+import { DisclosureRegion } from "../../ui/DisclosureRegion";
+import { formatDuration, formatLoopStopReason, type LoopStopReasonCopy } from "./presentation";
 
 interface LoopCompletionRecordProps {
   loop: ThreadLoop;

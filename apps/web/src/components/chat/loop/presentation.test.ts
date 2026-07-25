@@ -13,7 +13,7 @@ import {
   formatLoopStopReason,
   formatLoopStopReasonShort,
   getLoopTickIntervalMs,
-} from "./loopPresentation";
+} from "./presentation";
 
 const NOW = new Date("2026-01-01T12:00:00.000Z").getTime();
 
@@ -160,7 +160,7 @@ describe("deriveLoopPresentationState", () => {
 });
 
 describe("deriveLoopProgress", () => {
-  it("renders one segment per turn for count budgets up to eight", () => {
+  it("renders one segment per turn for small count budgets", () => {
     const progress = deriveLoopProgress(makeLoop({ iteration: 2, maxIterations: 5 }), NOW);
     expect(progress.kind).toBe("count");
     expect(progress.segments).toEqual([1, 1, 0, 0, 0]);
@@ -172,11 +172,29 @@ describe("deriveLoopProgress", () => {
     expect(progress.tickIntervalMs).toBeNull();
   });
 
-  it("normalizes count budgets above eight to five segments", () => {
+  it("renders one exact segment per turn up to the twelve-segment visual cap", () => {
+    const progress = deriveLoopProgress(makeLoop({ iteration: 3, maxIterations: 10 }), NOW);
+    expect(progress.segments).toEqual([1, 1, 1, 0, 0, 0, 0, 0, 0, 0]);
+    expect(progress.counterText).toBe("3/10");
+    expect(progress.ariaValueText).toBe("Turn 3 of 10");
+  });
+
+  it("spreads large count budgets proportionally across twelve segments", () => {
+    // 17/50 = 34%: four full segments plus a fractional boundary segment.
     const progress = deriveLoopProgress(makeLoop({ iteration: 17, maxIterations: 50 }), NOW);
-    expect(progress.segments).toEqual([1, 1, 0, 0, 0]);
+    expect(progress.segments).toHaveLength(12);
+    expect(progress.segments.slice(0, 4)).toEqual([1, 1, 1, 1]);
+    expect(progress.segments[4]).toBeCloseTo(0.08, 5);
+    expect(progress.segments.slice(5)).toEqual([0, 0, 0, 0, 0, 0, 0]);
     expect(progress.counterText).toBe("17/50");
     expect(progress.ariaValueText).toBe("Turn 17 of 50");
+  });
+
+  it("only fills every segment once a count budget completes", () => {
+    const partial = deriveLoopProgress(makeLoop({ iteration: 49, maxIterations: 50 }), NOW);
+    expect(partial.segments.some((fill) => fill < 1)).toBe(true);
+    const complete = deriveLoopProgress(makeLoop({ iteration: 50, maxIterations: 50 }), NOW);
+    expect(complete.segments).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
   });
 
   it("derives duration progress from elapsed time", () => {
@@ -188,7 +206,11 @@ describe("deriveLoopProgress", () => {
     });
     const progress = deriveLoopProgress(loop, NOW);
     expect(progress.kind).toBe("duration");
-    expect(progress.segments).toEqual([1, 1, 0, 0, 0]);
+    // 40% elapsed across twelve segments: 4.8 filled.
+    expect(progress.segments).toHaveLength(12);
+    expect(progress.segments.slice(0, 4)).toEqual([1, 1, 1, 1]);
+    expect(progress.segments[4]).toBeCloseTo(0.8, 5);
+    expect(progress.segments.slice(5)).toEqual([0, 0, 0, 0, 0, 0, 0]);
     expect(progress.counterText).toBe("18m left");
     expect(progress.tooltipText).toBe("12 minutes elapsed of 30 minutes");
     expect(progress.ariaValueText).toBe("18 minutes remaining");

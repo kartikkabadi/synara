@@ -64,7 +64,7 @@ import { pinActionLabel } from "~/lib/pin";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { CrossTaskOriginLabel, type CrossTaskOrigin } from "./CrossTaskOriginLabel";
-import { LoopCompletionRecord } from "./LoopCompletionRecord";
+import { LoopCompletionRecord } from "./loop/LoopCompletionRecord";
 import { SynaraThreadCreationCard } from "./SynaraThreadCreationCard";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
