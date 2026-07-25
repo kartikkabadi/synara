@@ -9,12 +9,16 @@
 
 import { type ReactNode } from "react";
 
+import { TriangleAlertIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
 import type { Thread } from "../../types";
 import { ComposerAutomationSetupBanner } from "./ComposerAutomationSetupBanner";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { isLoopRuntimeRailVisible, LoopRuntimeRail } from "./loop/LoopRuntimeRail";
 import { COMPOSER_INPUT_SURFACE_BANNER_CLASS_NAME } from "./composerPickerStyles";
+
+export const LOOP_DRAFT_WARNING_TEXT =
+  "Attachments aren't supported in loops — sending will stop the loop and run this as a normal message.";
 
 interface ComposerInputBannersProps {
   // Drop the rounded top when rows are stacked above the composer so the banner sits
@@ -26,6 +30,9 @@ interface ComposerInputBannersProps {
   // itself renders as bubbles in the transcript).
   automationSetup: { onCancel: () => void } | null;
   thread: Thread | null | undefined;
+  // True when the composer draft holds attachments/skills/mentions that a
+  // loop cannot carry — sending would stop the loop.
+  loopDraftUnsupported: boolean;
   onStopLoopAfterTurn: () => void;
   onStopLoopNow: () => void;
   onEditLoop: () => void;
@@ -36,6 +43,7 @@ export function ComposerInputBanners({
   planFollowUp,
   automationSetup,
   thread,
+  loopDraftUnsupported,
   onStopLoopAfterTurn,
   onStopLoopNow,
   onEditLoop,
@@ -68,6 +76,18 @@ export function ComposerInputBanners({
         onStopNow={onStopLoopNow}
       />,
     );
+    if (loop.active && loopDraftUnsupported) {
+      banners.push(
+        <div
+          key="loop-draft-warning"
+          className="flex items-center gap-2 px-4 py-1.5 text-[11px] text-warning"
+          role="status"
+        >
+          <TriangleAlertIcon aria-hidden className="size-3.5 shrink-0" />
+          <span className="min-w-0">{LOOP_DRAFT_WARNING_TEXT}</span>
+        </div>,
+      );
+    }
   }
 
   if (banners.length === 0) {
