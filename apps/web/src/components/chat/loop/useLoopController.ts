@@ -12,10 +12,7 @@ import {
   type ThreadLoop,
 } from "@synara/contracts";
 import { useEffect } from "react";
-import {
-  isUnsupportedLoopContext,
-  type LoopUnsupportedContextInput,
-} from "../../../lib/loop";
+import { isUnsupportedLoopContext, type LoopUnsupportedContextInput } from "../../../lib/loop";
 import type { Project, Thread } from "../../../types";
 import { isLoopOwnedTurnRunning } from "./presentation";
 import { useLoopActions } from "./useLoopActions";
