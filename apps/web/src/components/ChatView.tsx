@@ -290,6 +290,7 @@ import {
   ChevronDownIcon,
   ComposerSendArrowIcon,
   LayoutSidebarIcon,
+  SteerIcon,
   RefreshCwIcon,
   TemporaryThreadIcon,
 } from "~/lib/icons";
@@ -9358,6 +9359,10 @@ export default function ChatView({
     hasUnsupportedContext: hasUnsupportedLoopContext,
   } = loopController;
   const loopComposerModeOpen = loopComposer.mode.kind !== "closed";
+  // Send-slot `↳` signal: the send button only renders while no turn is
+  // running, so an active loop with a saved objective means Enter retargets.
+  const isLoopSteerSend =
+    activeThread?.loop?.active === true && activeThread.loop.prompt.trim().length > 0;
 
   const composerPlaceholder = useMemo(
     () =>
@@ -10802,9 +10807,17 @@ export default function ChatView({
                           variant="prominent"
                           size="icon-xs"
                           className="sm:size-[26px]"
-                          onClick={() => void onInterrupt()}
-                          aria-label="Stop generation"
-                          title="Stop the current response. On Mac, press Ctrl+C to interrupt."
+                          onClick={() =>
+                            isLoopOwnedTurnActive
+                              ? void handleStopLoopNow()
+                              : void onInterrupt()
+                          }
+                          aria-label={isLoopOwnedTurnActive ? "Stop loop" : "Stop generation"}
+                          title={
+                            isLoopOwnedTurnActive
+                              ? "Stop the current iteration and end the loop. Use the loop bar to stop after this turn instead."
+                              : "Stop the current response. On Mac, press Ctrl+C to interrupt."
+                          }
                         >
                           <span
                             aria-hidden="true"
@@ -10901,7 +10914,9 @@ export default function ChatView({
                                       ? "Preparing worktree"
                                       : isSendBusy
                                         ? "Sending"
-                                        : "Send message"
+                                        : isLoopSteerSend
+                                          ? "Steer the loop"
+                                          : "Send message"
                               }
                             >
                               {isConnecting || isSendBusy ? (
@@ -10923,6 +10938,8 @@ export default function ChatView({
                                     strokeDasharray="20 12"
                                   />
                                 </svg>
+                              ) : isLoopSteerSend ? (
+                                <SteerIcon aria-hidden="true" className="size-4 shrink-0" />
                               ) : (
                                 <ComposerSendArrowIcon
                                   aria-hidden="true"
