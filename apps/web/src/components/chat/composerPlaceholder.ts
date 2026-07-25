@@ -6,8 +6,13 @@
 import type { ThreadLoop } from "@synara/contracts";
 import { LOOP_OBJECTIVE_PLACEHOLDER, LOOP_SETUP_COMPOSER_PLACEHOLDER } from "~/lib/loop";
 
-// Composer placeholder while a loop with a saved objective is active (spec §9).
-export const LOOP_ACTIVE_COMPOSER_PLACEHOLDER = "Steer the next iteration…";
+// Composer placeholders while a loop with a saved objective is active (spec §9).
+// Streaming iteration: Enter queues a chip that replaces the objective when
+// the turn ends. Idle between iterations: Enter retargets immediately.
+export const LOOP_STREAMING_COMPOSER_PLACEHOLDER =
+  "Queue a new objective for the next iteration…";
+export const LOOP_IDLE_COMPOSER_PLACEHOLDER =
+  "Steer the loop — your message becomes the new objective";
 
 export interface DeriveLoopComposerPlaceholderInput {
   isApprovalState: boolean;
@@ -16,6 +21,9 @@ export interface DeriveLoopComposerPlaceholderInput {
   loopSetupOpen: boolean;
   showPlanFollowUp: boolean;
   loop: Pick<ThreadLoop, "active" | "prompt"> | null;
+  // Loop-owned precision: a non-loop turn racing the loop must not flip the
+  // placeholder to the streaming variant.
+  isLoopOwnedTurnRunning: boolean;
   isSubagentThread: boolean;
   hasLiveTurn: boolean;
   isDisconnected: boolean;
@@ -33,9 +41,10 @@ export function deriveLoopComposerPlaceholder(input: DeriveLoopComposerPlacehold
     return "Add feedback to refine the plan, or leave this blank to implement it";
   }
   if (input.loop?.active) {
-    return input.loop.prompt.trim().length === 0
-      ? LOOP_OBJECTIVE_PLACEHOLDER
-      : LOOP_ACTIVE_COMPOSER_PLACEHOLDER;
+    if (input.loop.prompt.trim().length === 0) return LOOP_OBJECTIVE_PLACEHOLDER;
+    return input.isLoopOwnedTurnRunning
+      ? LOOP_STREAMING_COMPOSER_PLACEHOLDER
+      : LOOP_IDLE_COMPOSER_PLACEHOLDER;
   }
   if (input.isSubagentThread) return "Message this subagent while it works";
   if (input.hasLiveTurn) return "Ask for follow-up changes";
