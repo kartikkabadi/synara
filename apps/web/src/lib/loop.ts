@@ -1,16 +1,12 @@
 // FILE: loop.ts
-// Purpose: Framework-free `/loop` parser, budget-choice, and dispatch helpers.
+// Purpose: Framework-free `/loop` parser, budget-choice, and validation helpers.
 // Layer: Web lib (pure TypeScript; no React, no Effect)
-// Shared by the composer-mode hook and slash-command handling.
+// Dispatch plumbing lives in components/chat/loop/dispatch.ts.
 
 import {
-  type ClientOrchestrationCommand,
-  type CommandId,
   LOOP_MAX_COUNT_BUDGET,
   LOOP_MAX_DURATION_SECONDS,
   LOOP_PROMPT_MAX_INPUT_CHARS,
-  type LoopActivationId,
-  type ThreadId,
   type ThreadLoop,
 } from "@synara/contracts";
 import { parseLoopCommand, type LoopBudget } from "@synara/shared/loop";
@@ -247,45 +243,3 @@ export function interpretLoopInvocation(
   };
 }
 
-type LoopSetCommand = Extract<ClientOrchestrationCommand, { type: "thread.loop.set" }>;
-
-export interface LoopSetupDispatchDeps {
-  dispatchCommand: (command: LoopSetCommand) => Promise<unknown>;
-  newCommandId: () => CommandId;
-  now: () => string;
-}
-
-export type LoopSetupSubmitResult = { ok: true } | { ok: false; message: string };
-
-export async function performLoopSetupSubmit(
-  deps: LoopSetupDispatchDeps,
-  input: {
-    threadId: ThreadId;
-    objective: string;
-    budget: LoopBudgetChoice;
-    expectedActivationId?: LoopActivationId;
-  },
-): Promise<LoopSetupSubmitResult> {
-  const fields = loopBudgetChoiceToDispatchFields(input.budget);
-  try {
-    await deps.dispatchCommand({
-      type: "thread.loop.set",
-      commandId: deps.newCommandId(),
-      threadId: input.threadId,
-      prompt: input.objective.trim(),
-      maxIterations: fields.maxIterations,
-      durationSeconds: fields.durationSeconds,
-      ...(input.expectedActivationId !== undefined
-        ? { expectedActivationId: input.expectedActivationId }
-        : {}),
-      createdAt: deps.now(),
-    });
-    return { ok: true };
-  } catch (error) {
-    return {
-      ok: false,
-      message:
-        error instanceof Error ? error.message : "An error occurred while starting the loop.",
-    };
-  }
-}

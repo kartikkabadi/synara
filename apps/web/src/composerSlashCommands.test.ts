@@ -22,7 +22,7 @@ import {
   buildLoopParseErrorToast,
   formatLoopParseError,
   resolveLoopMenuSelection,
-} from "./hooks/useComposerSlashCommands";
+} from "./components/chat/loop/useLoopSlashCommand";
 import { LoopIcon } from "./lib/icons";
 
 describe("composerSlashCommands", () => {

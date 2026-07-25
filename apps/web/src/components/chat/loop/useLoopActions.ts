@@ -12,6 +12,7 @@ import {
 } from "@synara/contracts";
 import { buildPromptThreadTitleFallback } from "@synara/shared/chatThreads";
 import { useCallback, useRef } from "react";
+import { dispatchLoopCommand } from "./dispatch";
 import { isLoopOwnedTurnRunning } from "./presentation";
 import { useLoopStopErrorToast } from "./useLoopStopErrorToast";
 import { toastManager } from "../../ui/toast";
@@ -67,8 +68,7 @@ export function useLoopActions(input: UseLoopActionsInput): LoopActions {
   const stopDispatchInFlightRef = useRef(false);
 
   const stopAfterTurn = useCallback(async () => {
-    const api = readNativeApi();
-    if (!api || !activeThread || activeThread.loop?.active !== true) {
+    if (!activeThread || activeThread.loop?.active !== true) {
       return;
     }
     if (stopDispatchInFlightRef.current) {
@@ -76,51 +76,45 @@ export function useLoopActions(input: UseLoopActionsInput): LoopActions {
     }
     stopDispatchInFlightRef.current = true;
     try {
-      await api.orchestration.dispatchCommand({
-        type: "thread.loop.off",
-        commandId: newCommandId(),
-        threadId: activeThread.id,
-        createdAt: new Date().toISOString(),
+      await dispatchLoopCommand({
+        command: {
+          type: "thread.loop.off",
+          commandId: newCommandId(),
+          threadId: activeThread.id,
+          createdAt: new Date().toISOString(),
+        },
+        syncServerShellSnapshot,
+        onError: addStopLoopErrorToast,
       });
-      const snapshot = await api.orchestration.getShellSnapshot();
-      syncServerShellSnapshot(snapshot);
-    } catch (error) {
-      addStopLoopErrorToast(error);
     } finally {
       stopDispatchInFlightRef.current = false;
     }
   }, [activeThread, syncServerShellSnapshot]);
 
   const stopNow = useCallback(async () => {
-    const api = readNativeApi();
     const loop = activeThread?.loop;
-    if (!api || !activeThread || loop == null) {
+    if (!activeThread || loop == null) {
       return;
     }
     if (stopDispatchInFlightRef.current) {
       return;
     }
+    const interruptRunningTurn = isLoopOwnedTurnRunning(loop, activeThread.latestTurn);
+    if (!interruptRunningTurn && !loop.active) {
+      return;
+    }
     stopDispatchInFlightRef.current = true;
     try {
-      if (isLoopOwnedTurnRunning(loop, activeThread.latestTurn)) {
-        await api.orchestration.dispatchCommand({
-          type: "thread.turn.interrupt",
+      await dispatchLoopCommand({
+        command: {
+          type: interruptRunningTurn ? "thread.turn.interrupt" : "thread.loop.off",
           commandId: newCommandId(),
           threadId: activeThread.id,
           createdAt: new Date().toISOString(),
-        });
-      } else if (loop.active) {
-        await api.orchestration.dispatchCommand({
-          type: "thread.loop.off",
-          commandId: newCommandId(),
-          threadId: activeThread.id,
-          createdAt: new Date().toISOString(),
-        });
-      }
-      const snapshot = await api.orchestration.getShellSnapshot();
-      syncServerShellSnapshot(snapshot);
-    } catch (error) {
-      addStopLoopErrorToast(error);
+        },
+        syncServerShellSnapshot,
+        onError: addStopLoopErrorToast,
+      });
     } finally {
       stopDispatchInFlightRef.current = false;
     }
