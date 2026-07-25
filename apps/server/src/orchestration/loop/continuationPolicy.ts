@@ -1,4 +1,4 @@
-// FILE: loopDecision.ts
+// FILE: continuationPolicy.ts
 // Purpose: Pure continuation policy for thread-local `/loop` mode.
 // Layer: Orchestration decision logic
 // Depends on: @synara/contracts loop types
@@ -10,6 +10,8 @@ import {
   type ThreadLoop,
   type ThreadTurnPurpose,
 } from "@synara/contracts";
+
+import { chooseStopReason, isLoopBudgetExhausted, isLoopExpired } from "./budget.ts";
 
 export type LoopDecision =
   | {
@@ -64,19 +66,6 @@ export function buildLoopContinuationThreadView(
 // way a manual turn can.
 export const RUNNING_SESSION_STATUSES = new Set(["starting", "running", "stopping"]);
 
-export function effectiveCap(loop: ThreadLoop): number {
-  // Explicit maxIterations is capped by the hard cap so a user-provided budget
-  // can never exceed the global ceiling.
-  return Math.min(loop.maxIterations ?? loop.hardCap, loop.hardCap);
-}
-
-export function chooseStopReason(loop: ThreadLoop): LoopStopReason {
-  if (loop.maxIterations !== null && loop.iteration >= loop.maxIterations) {
-    return "budget_iterations";
-  }
-  return "hard_cap";
-}
-
 /**
  * Pure continue-on-yield policy (issue #49 section 6). `loop.iteration` counts
  * loop-owned turns already accepted/dispatched in this activation; a continue
@@ -104,14 +93,10 @@ export function decideLoopContinuation(input: {
   if (thread.parentThreadId !== null) {
     return { type: "off", reason: "thread_unrunnable", ...unchanged };
   }
-  if (loop.endsAt !== null) {
-    const endsAtMs = Date.parse(loop.endsAt);
-    // Fail closed: an unparseable endsAt must expire immediately, not never.
-    if (!Number.isFinite(endsAtMs) || nowMs >= endsAtMs) {
-      return { type: "off", reason: "budget_duration", ...unchanged };
-    }
+  if (isLoopExpired(loop, nowMs)) {
+    return { type: "off", reason: "budget_duration", ...unchanged };
   }
-  if (loop.iteration >= effectiveCap(loop)) {
+  if (isLoopBudgetExhausted(loop)) {
     return { type: "off", reason: chooseStopReason(loop), ...unchanged };
   }
   if (loop.prompt === "") {

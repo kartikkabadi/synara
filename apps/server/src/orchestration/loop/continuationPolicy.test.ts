@@ -5,7 +5,7 @@ import {
 } from "@synara/shared/loopTestFixtures";
 import { describe, expect, it } from "vitest";
 
-import { decideLoopContinuation, type LoopContinuationThreadView } from "./loopDecision";
+import { decideLoopContinuation, type LoopContinuationThreadView } from "./continuationPolicy";
 
 const NOW = new Date("2026-07-19T12:00:00.000Z").getTime();
 const ACTIVATION_ID = LOOP_FIXTURE_ACTIVATION_ID;

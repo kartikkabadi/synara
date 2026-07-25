@@ -100,6 +100,7 @@ import {
   listImportedForkMessages,
   listPriorTranscriptMessages,
 } from "../handoff.ts";
+import { classifyLoopTurnAuthority } from "../loop/queuedTurnAuthority.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -659,32 +660,15 @@ const make = Effect.gen(function* () {
         : {}),
     });
 
-  // Minimal dispatch gate for loop-owned turns: the authoritative ThreadLoop
-  // must still be active on the same activation, and the turn must carry the
-  // activation's current dispatched iteration count. Pure check only — no side
-  // effects — so callers decide whether to retire promotions or retry.
+  // Thin effectful wrapper over the pure classification: resolves the thread
+  // projection, then delegates. Pure check only — no side effects — so callers
+  // decide whether to retire promotions or retry.
   const checkLoopTurnAuthority = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
     readonly purpose: ThreadTurnPurpose;
   }) {
     const thread = yield* resolveThread(input.threadId);
-    const loop = thread?.loop ?? null;
-    if (
-      thread === undefined ||
-      thread.deletedAt !== null ||
-      thread.archivedAt !== null ||
-      loop?.active !== true ||
-      input.purpose.activationId !== loop.activationId
-    ) {
-      return "stale_activation" as const;
-    }
-    if (input.purpose.iteration !== loop.iteration) {
-      // Same live activation but a different iteration count: the loop
-      // projection likely lags the event that dispatched this turn. This is
-      // transient, not a stale turn.
-      return "iteration_mismatch" as const;
-    }
-    return "authorized" as const;
+    return classifyLoopTurnAuthority({ thread, purpose: input.purpose });
   });
 
   // Side effect for a genuinely stale loop turn: retire the activation's
