@@ -51,6 +51,28 @@ export const ThreadTurnPurpose = Schema.Struct({
 });
 export type ThreadTurnPurpose = typeof ThreadTurnPurpose.Type;
 
+// Terminal outcome kinds a loop-owned attempt can settle with. `interrupted`
+// covers user interrupts, crash reconciliation, and exact start cancellations:
+// it advances the settlement watermark without touching the error streak.
+export const LoopSettledOutcome = Schema.Literals(["completed", "error", "interrupted"]);
+export type LoopSettledOutcome = typeof LoopSettledOutcome.Type;
+
+// Durable per-attempt settlement identity for one loop-owned iteration whose
+// terminal outcome has been observed but not yet consumed by continuation
+// accounting. Persisted on the ThreadLoop row so restarts rebuild the same
+// unaccounted settlement set; accounting removes entries in contiguous
+// iteration order and only then advances `lastSettledIteration`.
+export const LoopUnsettledOutcome = Schema.Struct({
+  activationId: LoopActivationId,
+  iteration: PositiveInt,
+  outcome: LoopSettledOutcome,
+  // Null when the attempt failed before a concrete TurnId existed.
+  turnId: Schema.NullOr(TrimmedNonEmptyString),
+  messageId: Schema.NullOr(TrimmedNonEmptyString),
+  settledAt: IsoDateTime,
+});
+export type LoopUnsettledOutcome = typeof LoopUnsettledOutcome.Type;
+
 export const ThreadLoop = Schema.Struct({
   active: Schema.Boolean,
 
@@ -84,6 +106,13 @@ export const ThreadLoop = Schema.Struct({
   // even when a replacement iteration is already queued or terminal events
   // arrive duplicated/out of order.
   lastSettledIteration: NonNegativeInt.pipe(Schema.withDecodingDefaultKey(() => 0)),
+
+  // Observed-but-unaccounted terminal outcomes of this activation, ordered by
+  // iteration. Written exactly once per attempt when the terminal state is
+  // projected, consumed in contiguous iteration order by continuation
+  // accounting, and independent of `latestTurn` so promoting a replacement
+  // never erases an earlier attempt's outcome.
+  unsettled: Schema.Array(LoopUnsettledOutcome).pipe(Schema.withDecodingDefaultKey(() => [])),
 
   // Short redacted reason when auto-off happens; null otherwise.
   lastStopReason: Schema.NullOr(LoopStopReason),
