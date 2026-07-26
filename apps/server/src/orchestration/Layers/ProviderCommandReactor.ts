@@ -688,8 +688,30 @@ const make = Effect.gen(function* () {
       })
       .pipe(Effect.ignore);
 
+  // Durable settlement for a persisted start that will never reach the
+  // provider: the decider only materializes the cancellation when the exact
+  // message is still the thread's current pending start, so a newer pending
+  // start (manual or fresh activation) is never cleared.
+  const settlePendingLoopStart = (input: {
+    readonly threadId: ThreadId;
+    readonly messageId: MessageId;
+    readonly purpose: ThreadTurnPurpose;
+    readonly createdAt: string;
+  }) =>
+    orchestrationEngine
+      .dispatch({
+        type: "thread.turn.cancel-start",
+        commandId: serverCommandId("cancel-pending-turn-start"),
+        threadId: input.threadId,
+        messageId: input.messageId,
+        purpose: input.purpose,
+        createdAt: input.createdAt,
+      })
+      .pipe(Effect.ignore);
+
   const verifyLoopTurnAuthority = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
+    readonly messageId: MessageId;
     readonly purpose: ThreadTurnPurpose;
     readonly createdAt: string;
   }) {
@@ -700,6 +722,9 @@ const make = Effect.gen(function* () {
     if (authority === "stale_activation") {
       yield* retireLoopActivationPromotions(input);
     }
+    // Either rejection means this persisted start is dropped without a
+    // provider call, so its pending projection row must settle durably.
+    yield* settlePendingLoopStart(input);
     return false;
   });
 
@@ -1585,6 +1610,7 @@ const make = Effect.gen(function* () {
       if (input.purpose?.kind === "loop-iteration") {
         const authorized = yield* verifyLoopTurnAuthority({
           threadId: input.threadId,
+          messageId: MessageId.makeUnsafe(input.messageId),
           purpose: input.purpose,
           createdAt: input.createdAt,
         });
@@ -1972,6 +1998,7 @@ const make = Effect.gen(function* () {
       if (purpose?.kind === "loop-iteration") {
         const authorized = yield* verifyLoopTurnAuthority({
           threadId: event.payload.threadId,
+          messageId: event.payload.messageId,
           purpose,
           createdAt: event.payload.createdAt,
         });
@@ -2235,10 +2262,17 @@ const make = Effect.gen(function* () {
             purpose: nextQueuedTurn.purpose,
           });
           if (authority === "stale_activation") {
+            const createdAt = new Date().toISOString();
             yield* retireLoopActivationPromotions({
               threadId,
               purpose: nextQueuedTurn.purpose,
-              createdAt: new Date().toISOString(),
+              createdAt,
+            });
+            yield* settlePendingLoopStart({
+              threadId,
+              messageId: nextQueuedTurn.messageId,
+              purpose: nextQueuedTurn.purpose,
+              createdAt,
             });
             // The cancellation retired the promotion row; the claim must not
             // be released back into the queue.
