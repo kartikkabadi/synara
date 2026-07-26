@@ -4030,6 +4030,221 @@ it.effect("retires only the exactly matching pending turn start on turn-start-ca
   ),
 );
 
+it.effect(
+  "preserves a queued replacement's pending start and durably records the settled attempt when an earlier loop turn errors",
+  () =>
+    Effect.gen(function* () {
+      const { dbPath } = yield* ServerConfig;
+      const persistenceLayer = makeSqlitePersistenceLive(dbPath);
+      const firstProjectionLayer = OrchestrationProjectionPipelineLive.pipe(
+        Layer.provideMerge(OrchestrationEventStoreLive),
+        Layer.provideMerge(persistenceLayer),
+      );
+      const secondProjectionLayer = OrchestrationProjectionPipelineLive.pipe(
+        Layer.provideMerge(OrchestrationEventStoreLive),
+        Layer.provideMerge(persistenceLayer),
+      );
+
+      const threadId = ThreadId.makeUnsafe("thread-replacement");
+      const turnA = TurnId.makeUnsafe("turn-attempt-a");
+      const messageA = MessageId.makeUnsafe("message-attempt-a");
+      const messageB = MessageId.makeUnsafe("message-replacement-b");
+      const activationId = "activation-replacement";
+      const baseLoop = {
+        active: true,
+        prompt: "keep going",
+        iteration: 1,
+        maxIterations: null,
+        endsAt: null,
+        durationSeconds: null,
+        hardCap: 100,
+        consecutiveErrors: 0,
+        lastSettledIteration: 0,
+        unsettled: [],
+        lastStopReason: null,
+        activationId,
+        createdAt: "2026-02-26T16:00:00.000Z",
+        updatedAt: "2026-02-26T16:00:00.000Z",
+      };
+
+      const readProjection = Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const pendingRows = yield* sql<{ readonly messageId: string }>`
+          SELECT pending_message_id AS "messageId"
+          FROM projection_turns
+          WHERE thread_id = ${threadId} AND turn_id IS NULL AND state = 'pending'
+        `;
+        const loopRows = yield* sql<{ readonly loopJson: string }>`
+          SELECT loop_json AS "loopJson"
+          FROM projection_thread_loop
+          WHERE thread_id = ${threadId}
+        `;
+        return { pendingRows, loopRows };
+      });
+
+      const assertProjection = (projection: {
+        readonly pendingRows: ReadonlyArray<{ readonly messageId: string }>;
+        readonly loopRows: ReadonlyArray<{ readonly loopJson: string }>;
+      }) => {
+        // The replacement B's pending marker survives attempt A's settlement,
+        // so continuation policy waits instead of creating an extra iteration.
+        assert.deepEqual(projection.pendingRows, [{ messageId: "message-replacement-b" }]);
+        assert.equal(projection.loopRows.length, 1);
+        const loop = JSON.parse(projection.loopRows[0]?.loopJson ?? "{}") as {
+          readonly unsettled: ReadonlyArray<{
+            readonly iteration: number;
+            readonly outcome: string;
+            readonly turnId: string | null;
+            readonly activationId: string;
+          }>;
+        };
+        // Attempt A's terminal outcome is durably recorded per-iteration,
+        // independent of the mutable latestTurn.
+        assert.deepEqual(
+          loop.unsettled.map((entry) => ({
+            iteration: entry.iteration,
+            outcome: entry.outcome,
+            turnId: entry.turnId,
+            activationId: entry.activationId,
+          })),
+          [{ iteration: 1, outcome: "error", turnId: "turn-attempt-a", activationId }],
+        );
+      };
+
+      const firstProjection = yield* Effect.gen(function* () {
+        const eventStore = yield* OrchestrationEventStore;
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+
+        let eventIndex = 0;
+        const append = (input: {
+          type:
+            | "thread.loop-set"
+            | "thread.loop-continued"
+            | "thread.turn-start-requested"
+            | "thread.turn-queued"
+            | "thread.session-set";
+          payload: Record<string, unknown>;
+          occurredAt: string;
+        }) => {
+          eventIndex += 1;
+          return eventStore.append({
+            type: input.type,
+            eventId: EventId.makeUnsafe(`evt-replacement-${eventIndex}`),
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            occurredAt: input.occurredAt,
+            commandId: CommandId.makeUnsafe(`cmd-replacement-${eventIndex}`),
+            causationEventId: null,
+            correlationId: CorrelationId.makeUnsafe(`cmd-replacement-${eventIndex}`),
+            metadata: {},
+            payload: input.payload as never,
+          });
+        };
+
+        // Loop activation dispatches attempt A (iteration 1).
+        yield* append({
+          type: "thread.loop-set",
+          occurredAt: "2026-02-26T16:00:00.000Z",
+          payload: { threadId, loop: baseLoop },
+        });
+        yield* append({
+          type: "thread.turn-start-requested",
+          occurredAt: "2026-02-26T16:00:01.000Z",
+          payload: {
+            threadId,
+            messageId: messageA,
+            purpose: { kind: "loop-iteration", activationId, iteration: 1 },
+            createdAt: "2026-02-26T16:00:01.000Z",
+          },
+        });
+        // A binds to a concrete running turn (its pending marker retires).
+        yield* append({
+          type: "thread.session-set",
+          occurredAt: "2026-02-26T16:00:02.000Z",
+          payload: {
+            threadId,
+            session: {
+              threadId,
+              status: "running",
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId: turnA,
+              lastError: null,
+              updatedAt: "2026-02-26T16:00:02.000Z",
+            },
+          },
+        });
+        // Manual replacement B is accepted while A runs: the loop advances to
+        // iteration 2 and B's start is queued.
+        yield* append({
+          type: "thread.loop-continued",
+          occurredAt: "2026-02-26T16:00:03.000Z",
+          payload: {
+            threadId,
+            nextIteration: 2,
+            nextConsecutiveErrors: 0,
+            loop: { ...baseLoop, iteration: 2, updatedAt: "2026-02-26T16:00:03.000Z" },
+          },
+        });
+        yield* append({
+          type: "thread.turn-queued",
+          occurredAt: "2026-02-26T16:00:03.000Z",
+          payload: {
+            threadId,
+            messageId: messageB,
+            purpose: { kind: "loop-iteration", activationId, iteration: 2 },
+            createdAt: "2026-02-26T16:00:03.000Z",
+          },
+        });
+        // Attempt A settles with a terminal provider error. A duplicate
+        // terminal notification must not fail B's pending marker or add a
+        // second ledger entry.
+        for (const _ of [0, 1]) {
+          yield* append({
+            type: "thread.session-set",
+            occurredAt: "2026-02-26T16:00:04.000Z",
+            payload: {
+              threadId,
+              session: {
+                threadId,
+                status: "error",
+                providerName: "codex",
+                runtimeMode: "full-access",
+                activeTurnId: null,
+                lastError: "provider exploded",
+                updatedAt: "2026-02-26T16:00:04.000Z",
+              },
+            },
+          });
+        }
+
+        yield* projectionPipeline.bootstrap;
+        return yield* readProjection;
+      }).pipe(Effect.provide(firstProjectionLayer));
+
+      assertProjection(firstProjection);
+
+      // Restart before accounting: replay rebuilds the same pending marker and
+      // the same unaccounted settlement set.
+      const secondProjection = yield* Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        yield* projectionPipeline.bootstrap;
+        return yield* readProjection;
+      }).pipe(Effect.provide(secondProjectionLayer));
+
+      assertProjection(secondProjection);
+    }).pipe(
+      Effect.provide(
+        Layer.provideMerge(
+          ServerConfig.layerTest(process.cwd(), {
+            prefix: "synara-projection-pipeline-replacement-",
+          }),
+          NodeServices.layer,
+        ),
+      ),
+    ),
+);
+
 const engineLayer = it.layer(
   OrchestrationEngineLive.pipe(
     Layer.provide(OrchestrationProjectionPipelineLive),

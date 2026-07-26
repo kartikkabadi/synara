@@ -58,6 +58,7 @@ import {
   ThreadTurnStartCancelledPayload,
   ThreadTurnStartRequestedPayload,
 } from "./Schemas.ts";
+import { recordLoopSettlement } from "./loop/settlement.ts";
 import { resolveStableMessageTurnId } from "./messageTurnId.ts";
 import { settleTurnStateFromSession } from "./turnLifecycle.ts";
 import { deriveTurnStartModelSelection, deriveTurnStartSession } from "./turnStartSession.ts";
@@ -927,11 +928,26 @@ export function projectEvent(
           if (!thread || thread.pendingTurnStart?.messageId !== payload.messageId) {
             return nextBase;
           }
+          // A cancelled loop-owned start settles its iteration as interrupted:
+          // the watermark can advance past it without treating the cancellation
+          // as a provider failure. Without this, a cancelled iteration would
+          // leave a permanent gap that blocks all later accounting.
+          const cancelledLoop =
+            payload.purpose?.kind === "loop-iteration" && thread.loop != null
+              ? recordLoopSettlement(thread.loop, {
+                  purpose: payload.purpose,
+                  outcome: "interrupted",
+                  turnId: null,
+                  messageId: payload.messageId,
+                  settledAt: payload.createdAt,
+                })
+              : null;
           return {
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
               hasPendingTurnStart: false,
               pendingTurnStart: null,
+              ...(cancelledLoop !== null ? { loop: cancelledLoop } : {}),
               updatedAt: payload.createdAt,
             }),
           };
@@ -1058,8 +1074,17 @@ export function projectEvent(
           return "interrupted";
         })();
 
+        // A repeated terminal notification for an attempt that already
+        // settled must not fail a later queued replacement's pending start:
+        // only a genuine transition into the terminal state can represent
+        // the pending start itself failing before a concrete turn existed.
+        const isRepeatedTerminalSession =
+          thread.session?.status === session.status &&
+          thread.session.updatedAt === session.updatedAt;
+
         const shouldCreateTerminalFromPendingStart =
           isTerminalBeforeRunning &&
+          !isRepeatedTerminalSession &&
           thread.latestTurn?.state !== "running" &&
           thread.pendingTurnStart !== null &&
           thread.pendingTurnStart !== undefined;
@@ -1106,17 +1131,53 @@ export function projectEvent(
               }
             : settleLatestTurnForSessionStatus(thread.latestTurn, session);
 
+        // A pending start is retired only when the terminal state represents
+        // that exact start failing before a concrete TurnId existed, or when
+        // the start binds to a new concrete running turn. An earlier concrete
+        // turn settling must never delete a later queued replacement's pending
+        // marker — continuation policy reads it to persist a wait instead of
+        // creating an extra iteration.
+        const bindsPendingToNewRunningTurn = isRunningWithActiveTurn && !isExistingActiveTurn;
+        const retiresPendingStart =
+          bindsPendingToNewRunningTurn || shouldCreateTerminalFromPendingStart;
+
+        // Record the settled attempt's terminal outcome on the loop's durable
+        // settlement ledger exactly once, keyed by its own dispatched
+        // iteration — not on the mutable latestTurn, which a queued
+        // replacement may overwrite before accounting runs.
+        const settledPurpose = shouldCreateTerminalFromPendingStart
+          ? thread.pendingTurnStart?.purpose
+          : !isRunningWithActiveTurn &&
+              thread.latestTurn?.state === "running" &&
+              nextLatestTurn !== null &&
+              nextLatestTurn.state !== "running"
+            ? thread.latestTurn.purpose
+            : undefined;
+        const settledLoop =
+          settledPurpose !== undefined &&
+          settledPurpose.kind === "loop-iteration" &&
+          thread.loop != null &&
+          nextLatestTurn !== null &&
+          nextLatestTurn.state !== "running"
+            ? recordLoopSettlement(thread.loop, {
+                purpose: settledPurpose,
+                outcome: nextLatestTurn.state,
+                turnId: shouldCreateTerminalFromPendingStart ? null : nextLatestTurn.turnId,
+                messageId: shouldCreateTerminalFromPendingStart
+                  ? (thread.pendingTurnStart?.messageId ?? null)
+                  : null,
+                settledAt: session.updatedAt,
+              })
+            : null;
+
         return {
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             session,
-            hasPendingTurnStart:
-              isRunningWithActiveTurn || isTerminalBeforeRunning
-                ? false
-                : thread.hasPendingTurnStart,
-            pendingTurnStart:
-              isRunningWithActiveTurn || isTerminalBeforeRunning ? null : thread.pendingTurnStart,
+            hasPendingTurnStart: retiresPendingStart ? false : thread.hasPendingTurnStart,
+            pendingTurnStart: retiresPendingStart ? null : thread.pendingTurnStart,
             latestTurn: nextLatestTurn,
+            ...(settledLoop !== null ? { loop: settledLoop } : {}),
             updatedAt: event.occurredAt,
           }),
         };
@@ -1251,11 +1312,31 @@ export function projectEvent(
                     : {}),
               };
 
+        // A diff completion that settles a running loop-owned turn records the
+        // terminal outcome on the loop's durable settlement ledger, exactly
+        // like session settlement.
+        const diffSettledLoop =
+          thread.latestTurn?.state === "running" &&
+          thread.latestTurn.turnId === payload.turnId &&
+          latestTurn !== null &&
+          latestTurn.state !== "running" &&
+          thread.latestTurn.purpose?.kind === "loop-iteration" &&
+          thread.loop != null
+            ? recordLoopSettlement(thread.loop, {
+                purpose: thread.latestTurn.purpose,
+                outcome: latestTurn.state,
+                turnId: payload.turnId,
+                messageId: null,
+                settledAt: payload.completedAt,
+              })
+            : null;
+
         return {
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             checkpoints,
             latestTurn,
+            ...(diffSettledLoop !== null ? { loop: diffSettledLoop } : {}),
             updatedAt: event.occurredAt,
           }),
         };
