@@ -1,4 +1,4 @@
-import { LoopActivationId, type ThreadLoop } from "@synara/contracts";
+import { LoopActivationId, type LoopUnsettledOutcome, type ThreadLoop } from "@synara/contracts";
 import {
   LOOP_FIXTURE_ACTIVATION_ID,
   makeLoop as makeLoopFixture,
@@ -40,14 +40,18 @@ function makeThread(
   };
 }
 
-function loopOwnedTerminal(
-  state: "completed" | "error" | "interrupted",
+function settled(
+  outcome: LoopUnsettledOutcome["outcome"],
   iteration: number,
   activationId: LoopActivationId = ACTIVATION_ID,
-): Partial<LoopContinuationThreadView> {
+): LoopUnsettledOutcome {
   return {
-    latestTurnState: state,
-    latestTurnPurpose: { kind: "loop-iteration", activationId, iteration },
+    activationId,
+    iteration,
+    outcome,
+    turnId: `turn-${iteration}`,
+    messageId: `message-${iteration}`,
+    settledAt: "2026-07-19T11:30:00.000Z",
   };
 }
 
@@ -63,6 +67,7 @@ describe("decideLoopContinuation", () => {
       nextIteration: 1,
       nextConsecutiveErrors: 0,
       nextLastSettledIteration: 0,
+      nextUnsettled: [],
     });
   });
 
@@ -112,6 +117,7 @@ describe("decideLoopContinuation", () => {
       type: "wait",
       nextConsecutiveErrors: 0,
       nextLastSettledIteration: 0,
+      nextUnsettled: [],
     });
   });
 
@@ -136,6 +142,7 @@ describe("decideLoopContinuation", () => {
       reason,
       nextConsecutiveErrors: 0,
       nextLastSettledIteration: 0,
+      nextUnsettled: [],
     });
   });
 
@@ -150,6 +157,7 @@ describe("decideLoopContinuation", () => {
       reason: "budget_duration",
       nextConsecutiveErrors: 0,
       nextLastSettledIteration: 0,
+      nextUnsettled: [],
     });
   });
 
@@ -164,35 +172,38 @@ describe("decideLoopContinuation", () => {
         reason: "budget_duration",
         nextConsecutiveErrors: 0,
         nextLastSettledIteration: 0,
+        nextUnsettled: [],
       });
     }
   });
 
   it("turns off when the count budget is exhausted", () => {
     const result = decideLoopContinuation({
-      loop: makeLoop({ maxIterations: 5, iteration: 5 }),
+      loop: makeLoop({ maxIterations: 5, iteration: 5, lastSettledIteration: 5 }),
       nowMs: NOW,
-      thread: makeThread(loopOwnedTerminal("completed", 5)),
+      thread: makeThread(),
     });
     expect(result).toEqual({
       type: "off",
       reason: "budget_iterations",
       nextConsecutiveErrors: 0,
-      nextLastSettledIteration: 0,
+      nextLastSettledIteration: 5,
+      nextUnsettled: [],
     });
   });
 
   it("turns off when the hard cap is reached", () => {
     const result = decideLoopContinuation({
-      loop: makeLoop({ iteration: 100 }),
+      loop: makeLoop({ iteration: 100, lastSettledIteration: 100 }),
       nowMs: NOW,
-      thread: makeThread(loopOwnedTerminal("completed", 100)),
+      thread: makeThread(),
     });
     expect(result).toEqual({
       type: "off",
       reason: "hard_cap",
       nextConsecutiveErrors: 0,
-      nextLastSettledIteration: 0,
+      nextLastSettledIteration: 100,
+      nextUnsettled: [],
     });
   });
 
@@ -208,49 +219,113 @@ describe("decideLoopContinuation", () => {
         nextIteration: 1,
         nextConsecutiveErrors: 0,
         nextLastSettledIteration: 0,
+        nextUnsettled: [],
       });
     }
   });
 
   it("continues after a completed loop-owned turn and resets the error counter", () => {
     const result = decideLoopContinuation({
-      loop: makeLoop({ iteration: 2, consecutiveErrors: 2 }),
+      loop: makeLoop({
+        iteration: 2,
+        consecutiveErrors: 2,
+        lastSettledIteration: 1,
+        unsettled: [settled("completed", 2)],
+      }),
       nowMs: NOW,
-      thread: makeThread(loopOwnedTerminal("completed", 2)),
+      thread: makeThread(),
     });
     expect(result).toEqual({
       type: "continue",
       nextIteration: 3,
       nextConsecutiveErrors: 0,
       nextLastSettledIteration: 2,
+      nextUnsettled: [],
     });
   });
 
   it("continues with incremented errors after fewer than three consecutive loop-owned errors", () => {
     const result = decideLoopContinuation({
-      loop: makeLoop({ iteration: 2, consecutiveErrors: 1 }),
+      loop: makeLoop({
+        iteration: 2,
+        consecutiveErrors: 1,
+        lastSettledIteration: 1,
+        unsettled: [settled("error", 2)],
+      }),
       nowMs: NOW,
-      thread: makeThread(loopOwnedTerminal("error", 2)),
+      thread: makeThread(),
     });
     expect(result).toEqual({
       type: "continue",
       nextIteration: 3,
       nextConsecutiveErrors: 2,
       nextLastSettledIteration: 2,
+      nextUnsettled: [],
     });
   });
 
   it("turns off after three consecutive loop-owned errors", () => {
     const result = decideLoopContinuation({
-      loop: makeLoop({ iteration: 3, consecutiveErrors: 2 }),
+      loop: makeLoop({
+        iteration: 3,
+        consecutiveErrors: 2,
+        lastSettledIteration: 2,
+        unsettled: [settled("error", 3)],
+      }),
       nowMs: NOW,
-      thread: makeThread(loopOwnedTerminal("error", 3)),
+      thread: makeThread(),
     });
     expect(result).toEqual({
       type: "off",
       reason: "consecutive_errors",
       nextConsecutiveErrors: 3,
       nextLastSettledIteration: 3,
+      nextUnsettled: [],
+    });
+  });
+
+  it("turns off exactly on the third error even when it settles across a replacement", () => {
+    // Iterations 1..3 all errored; 2 and 3 arrive together (e.g. after a
+    // restart or queue promotion). Accounting consumes them contiguously and
+    // auto-off fires on the third, leaving no outcome skipped.
+    const result = decideLoopContinuation({
+      loop: makeLoop({
+        iteration: 3,
+        consecutiveErrors: 1,
+        lastSettledIteration: 1,
+        unsettled: [settled("error", 3), settled("error", 2)],
+      }),
+      nowMs: NOW,
+      thread: makeThread(),
+    });
+    expect(result).toEqual({
+      type: "off",
+      reason: "consecutive_errors",
+      nextConsecutiveErrors: 3,
+      nextLastSettledIteration: 3,
+      nextUnsettled: [],
+    });
+  });
+
+  it("buffers outcomes above a gap and never advances the watermark across it", () => {
+    // Iteration 2's outcome is not yet observed: iteration 3's error stays
+    // buffered and unaccounted until 2 settles.
+    const result = decideLoopContinuation({
+      loop: makeLoop({
+        iteration: 3,
+        consecutiveErrors: 1,
+        lastSettledIteration: 1,
+        unsettled: [settled("error", 3)],
+      }),
+      nowMs: NOW,
+      thread: makeThread(),
+    });
+    expect(result).toEqual({
+      type: "continue",
+      nextIteration: 4,
+      nextConsecutiveErrors: 1,
+      nextLastSettledIteration: 1,
+      nextUnsettled: [settled("error", 3)],
     });
   });
 
@@ -265,113 +340,56 @@ describe("decideLoopContinuation", () => {
       nextIteration: 2,
       nextConsecutiveErrors: 2,
       nextLastSettledIteration: 0,
+      nextUnsettled: [],
     });
   });
 
-  it("does not reset errors for a non-loop-owned completed turn", () => {
+  it("counts an unsettled older-iteration error exactly once while its replacement is queued (A errors while B is queued)", () => {
+    // Replacement B (iteration 3) is queued when attempt A (iteration 2)
+    // errors: A is accounted from the durable ledger and the queued B makes
+    // the decision a wait — no extra iteration C is created.
     const result = decideLoopContinuation({
-      loop: makeLoop({ iteration: 2, consecutiveErrors: 1 }),
+      loop: makeLoop({
+        iteration: 3,
+        consecutiveErrors: 1,
+        lastSettledIteration: 1,
+        unsettled: [settled("error", 2)],
+      }),
       nowMs: NOW,
-      thread: makeThread({ latestTurnState: "completed", latestTurnPurpose: null }),
+      thread: makeThread({ hasQueuedTurnStart: true }),
     });
     expect(result).toEqual({
-      type: "continue",
-      nextIteration: 3,
-      nextConsecutiveErrors: 1,
-      nextLastSettledIteration: 0,
-    });
-  });
-
-  it("ignores stale-activation loop-owned terminal turns", () => {
-    const result = decideLoopContinuation({
-      loop: makeLoop({ iteration: 0, consecutiveErrors: 2 }),
-      nowMs: NOW,
-      thread: makeThread(
-        loopOwnedTerminal("error", 1, LoopActivationId.makeUnsafe("stale-activation")),
-      ),
-    });
-    expect(result).toEqual({
-      type: "continue",
-      nextIteration: 1,
-      nextConsecutiveErrors: 2,
-      nextLastSettledIteration: 0,
-    });
-  });
-
-  it("counts an unsettled older-iteration error exactly once (A errors while B is queued)", () => {
-    const result = decideLoopContinuation({
-      loop: makeLoop({ iteration: 3, consecutiveErrors: 1 }),
-      nowMs: NOW,
-      thread: makeThread(loopOwnedTerminal("error", 2)),
-    });
-    expect(result).toEqual({
-      type: "continue",
-      nextIteration: 4,
+      type: "wait",
       nextConsecutiveErrors: 2,
       nextLastSettledIteration: 2,
+      nextUnsettled: [],
     });
   });
 
   it("resets errors when an unsettled older iteration completed while the next was queued", () => {
     const result = decideLoopContinuation({
-      loop: makeLoop({ iteration: 2, consecutiveErrors: 2, lastSettledIteration: 0 }),
+      loop: makeLoop({
+        iteration: 2,
+        consecutiveErrors: 2,
+        lastSettledIteration: 0,
+        unsettled: [settled("completed", 1)],
+      }),
       nowMs: NOW,
-      thread: makeThread({ ...loopOwnedTerminal("completed", 1), hasQueuedTurnStart: true }),
+      thread: makeThread({ hasQueuedTurnStart: true }),
     });
     expect(result).toEqual({
       type: "wait",
       nextConsecutiveErrors: 0,
       nextLastSettledIteration: 1,
-    });
-  });
-
-  it("never recounts a duplicate terminal notification for a settled iteration", () => {
-    const result = decideLoopContinuation({
-      loop: makeLoop({ iteration: 2, consecutiveErrors: 1, lastSettledIteration: 2 }),
-      nowMs: NOW,
-      thread: makeThread(loopOwnedTerminal("error", 2)),
-    });
-    expect(result).toEqual({
-      type: "continue",
-      nextIteration: 3,
-      nextConsecutiveErrors: 1,
-      nextLastSettledIteration: 2,
-    });
-  });
-
-  it("ignores an out-of-order terminal event below the settlement watermark", () => {
-    const result = decideLoopContinuation({
-      loop: makeLoop({ iteration: 3, consecutiveErrors: 0, lastSettledIteration: 2 }),
-      nowMs: NOW,
-      thread: makeThread(loopOwnedTerminal("error", 1)),
-    });
-    expect(result).toEqual({
-      type: "continue",
-      nextIteration: 4,
-      nextConsecutiveErrors: 0,
-      nextLastSettledIteration: 2,
-    });
-  });
-
-  it("ignores a terminal event for an iteration never dispatched by this activation", () => {
-    const result = decideLoopContinuation({
-      loop: makeLoop({ iteration: 1, consecutiveErrors: 0 }),
-      nowMs: NOW,
-      thread: makeThread(loopOwnedTerminal("error", 5)),
-    });
-    expect(result).toEqual({
-      type: "continue",
-      nextIteration: 2,
-      nextConsecutiveErrors: 0,
-      nextLastSettledIteration: 0,
+      nextUnsettled: [],
     });
   });
 
   it("does not auto-count an interrupted loop-owned turn as an error", () => {
     const result = decideLoopContinuation({
-      loop: makeLoop({ iteration: 1 }),
+      loop: makeLoop({ iteration: 1, unsettled: [settled("interrupted", 1)] }),
       nowMs: NOW,
-      thread: makeThread(loopOwnedTerminal("interrupted", 1)),
+      thread: makeThread(),
     });
     // User-stop interrupts turn the loop off in the decider; a surviving
     // interrupted turn (e.g. restart reconciliation) neither counts as an
@@ -380,23 +398,27 @@ describe("decideLoopContinuation", () => {
       type: "continue",
       nextIteration: 2,
       nextConsecutiveErrors: 0,
-      nextLastSettledIteration: 0,
+      nextLastSettledIteration: 1,
+      nextUnsettled: [],
     });
   });
 
   it("persists error accounting on a wait so a queued replacement cannot erase it", () => {
     const result = decideLoopContinuation({
-      loop: makeLoop({ iteration: 1, consecutiveErrors: 1 }),
-      nowMs: NOW,
-      thread: makeThread({
-        ...loopOwnedTerminal("error", 1),
-        hasQueuedTurnStart: true,
+      loop: makeLoop({
+        iteration: 2,
+        consecutiveErrors: 1,
+        lastSettledIteration: 0,
+        unsettled: [settled("error", 1)],
       }),
+      nowMs: NOW,
+      thread: makeThread({ hasQueuedTurnStart: true }),
     });
     expect(result).toEqual({
       type: "wait",
       nextConsecutiveErrors: 2,
       nextLastSettledIteration: 1,
+      nextUnsettled: [],
     });
   });
 });

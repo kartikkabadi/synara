@@ -3,15 +3,16 @@
 // Layer: Orchestration decision logic
 // Depends on: @synara/contracts loop types
 
-import {
-  LOOP_DEFAULT_CONSECUTIVE_ERROR_THRESHOLD,
-  type LoopStopReason,
-  type OrchestrationThreadShell,
-  type ThreadLoop,
-  type ThreadTurnPurpose,
+import type {
+  LoopStopReason,
+  LoopUnsettledOutcome,
+  OrchestrationThreadShell,
+  ThreadLoop,
+  ThreadTurnPurpose,
 } from "@synara/contracts";
 
 import { chooseStopReason, isLoopBudgetExhausted, isLoopExpired } from "./budget.ts";
+import { consumeLoopSettlements } from "./settlement.ts";
 
 export type LoopDecision =
   | {
@@ -19,6 +20,7 @@ export type LoopDecision =
       reason: LoopStopReason;
       nextConsecutiveErrors: number;
       nextLastSettledIteration: number;
+      nextUnsettled: ReadonlyArray<LoopUnsettledOutcome>;
     }
   | {
       // Waits persist settlement accounting too: a terminal outcome observed
@@ -27,12 +29,14 @@ export type LoopDecision =
       type: "wait";
       nextConsecutiveErrors: number;
       nextLastSettledIteration: number;
+      nextUnsettled: ReadonlyArray<LoopUnsettledOutcome>;
     }
   | {
       type: "continue";
       nextIteration: number;
       nextConsecutiveErrors: number;
       nextLastSettledIteration: number;
+      nextUnsettled: ReadonlyArray<LoopUnsettledOutcome>;
     };
 
 export interface LoopContinuationThreadView {
@@ -78,9 +82,10 @@ export const RUNNING_SESSION_STATUSES = new Set(["starting", "running", "stoppin
 /**
  * Pure continue-on-yield policy (issue #49 section 6). `loop.iteration` counts
  * loop-owned turns already accepted/dispatched in this activation; a continue
- * decision proposes `loop.iteration + 1`. Consecutive-error accounting derives
- * from the latest loop-owned terminal turn of the current activation, and only
- * commits when a continue/off decision is persisted.
+ * decision proposes `loop.iteration + 1`. Consecutive-error accounting
+ * consumes the loop's durable unaccounted settlement ledger in contiguous
+ * iteration order, and only commits when a wait/continue/off decision is
+ * persisted.
  */
 export function decideLoopContinuation(input: {
   loop: ThreadLoop;
@@ -91,6 +96,7 @@ export function decideLoopContinuation(input: {
   const unchanged = {
     nextConsecutiveErrors: loop.consecutiveErrors,
     nextLastSettledIteration: loop.lastSettledIteration,
+    nextUnsettled: loop.unsettled,
   };
 
   if (!loop.active) {
@@ -115,43 +121,24 @@ export function decideLoopContinuation(input: {
     return { type: "wait", ...unchanged };
   }
 
-  // Error accounting from the latest loop-owned terminal turn of this
-  // activation. Settlement identity is the turn's own dispatched iteration
-  // against the monotone `lastSettledIteration` watermark, not the mutable
-  // `loop.iteration`: a manual replacement that already advanced the loop must
-  // not erase an older attempt's terminal outcome, and duplicate or
-  // out-of-order terminal notifications never recount a settled attempt.
-  let nextConsecutiveErrors = loop.consecutiveErrors;
-  let nextLastSettledIteration = loop.lastSettledIteration;
-  const purpose = thread.latestTurnPurpose;
-  const settledNewAttempt =
-    purpose !== null &&
-    purpose.kind === "loop-iteration" &&
-    purpose.activationId === loop.activationId &&
-    purpose.iteration > loop.lastSettledIteration &&
-    purpose.iteration <= loop.iteration;
-  if (settledNewAttempt) {
-    if (thread.latestTurnState === "completed") {
-      nextConsecutiveErrors = 0;
-      nextLastSettledIteration = purpose.iteration;
-    } else if (thread.latestTurnState === "error") {
-      // Interrupted settlements deliberately do not count: user interrupts
-      // turn the loop off in the decider before this policy sees them, and
-      // non-user interruptions (crash-restart reconciliation, provider aborts)
-      // are infrastructure events, not model failures — counting them could
-      // wrongly kill healthy loops across restarts. They neither increment
-      // nor reset the consecutive-error counter.
-      nextConsecutiveErrors = loop.consecutiveErrors + 1;
-      nextLastSettledIteration = purpose.iteration;
-      if (nextConsecutiveErrors >= LOOP_DEFAULT_CONSECUTIVE_ERROR_THRESHOLD) {
-        return {
-          type: "off",
-          reason: "consecutive_errors",
-          nextConsecutiveErrors,
-          nextLastSettledIteration,
-        };
-      }
-    }
+  // Error accounting consumes the loop's durable per-attempt settlement
+  // ledger, not the mutable `latestTurn`: a queued replacement that becomes
+  // latest before an earlier attempt is accounted can never erase that
+  // attempt's outcome, duplicate or out-of-order terminal notifications never
+  // recount a settled attempt, and the watermark only advances across
+  // contiguous accounted outcomes (a gap is never skipped).
+  const accounting = consumeLoopSettlements(loop);
+  const nextConsecutiveErrors = accounting.nextConsecutiveErrors;
+  const nextLastSettledIteration = accounting.nextLastSettledIteration;
+  const nextUnsettled = accounting.nextUnsettled;
+  if (accounting.errorThresholdReached) {
+    return {
+      type: "off",
+      reason: "consecutive_errors",
+      nextConsecutiveErrors,
+      nextLastSettledIteration,
+      nextUnsettled,
+    };
   }
   if (
     thread.sessionActiveTurnId !== null ||
@@ -162,7 +149,7 @@ export function decideLoopContinuation(input: {
     thread.interactionMode === "plan" ||
     (thread.sessionStatus !== null && RUNNING_SESSION_STATUSES.has(thread.sessionStatus))
   ) {
-    return { type: "wait", nextConsecutiveErrors, nextLastSettledIteration };
+    return { type: "wait", nextConsecutiveErrors, nextLastSettledIteration, nextUnsettled };
   }
 
   return {
@@ -170,5 +157,6 @@ export function decideLoopContinuation(input: {
     nextIteration: loop.iteration + 1,
     nextConsecutiveErrors,
     nextLastSettledIteration,
+    nextUnsettled,
   };
 }
