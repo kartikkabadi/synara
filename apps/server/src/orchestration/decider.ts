@@ -36,7 +36,11 @@ import { resolveStableMessageTurnId } from "./messageTurnId.ts";
 import { decideLoopCommand } from "./loop/commandDecider.ts";
 import { decideInterruptLoopOff, resolveTurnStartLoopPolicy } from "./loop/manualTurnPolicy.ts";
 import { isLoopOwnedTurn } from "./loop/ownership.ts";
-import { buildLoopIterationTurnDrafts, type LoopEventDraft } from "./loop/turnEvents.ts";
+import {
+  buildLoopIterationTurnDrafts,
+  buildPendingLoopStartCancellationDrafts,
+  type LoopEventDraft,
+} from "./loop/turnEvents.ts";
 import {
   findSpaceById,
   isLegacyHomeChatContainerRow,
@@ -1765,6 +1769,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (interruptLoopOff !== null) {
         turnInterruptEvents.push(
           ...materializeLoopEvents(command, [
+            // Stop now retires the activation's not-yet-running pending start
+            // durably so it cannot strand the thread after the loop is off.
+            ...buildPendingLoopStartCancellationDrafts({
+              thread: turnInterruptThread,
+              activationId: interruptLoopOff.loop.activationId,
+              createdAt: command.createdAt,
+            }),
             { type: "thread.loop-off", payload: interruptLoopOff },
           ]),
         );
@@ -2403,6 +2414,34 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           activity: command.activity,
+        },
+      };
+    }
+
+    case "thread.turn.cancel-start": {
+      // Server-internal settlement of a durable pending start that will never
+      // reach the provider (stale loop authority). Emits only when the exact
+      // pending message is still current, so a newer pending start (manual or
+      // a fresh activation) is never cleared.
+      const thread = findThreadById(readModel, command.threadId);
+      if (thread === undefined || thread.pendingTurnStart?.messageId !== command.messageId) {
+        return [];
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.turn-start-cancelled",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.messageId,
+          ...(thread.pendingTurnStart.purpose !== undefined
+            ? { purpose: thread.pendingTurnStart.purpose }
+            : {}),
+          createdAt: command.createdAt,
         },
       };
     }

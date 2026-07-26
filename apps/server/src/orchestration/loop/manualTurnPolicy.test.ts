@@ -100,6 +100,7 @@ describe("resolveTurnStartLoopPolicy", () => {
       thread: makeThread({
         loop: makeLoop(),
         pendingTurnStart: {
+          messageId: "message-pending-1",
           purpose: {
             kind: "loop-iteration",
             activationId: LOOP_FIXTURE_ACTIVATION_ID,
@@ -111,6 +112,7 @@ describe("resolveTurnStartLoopPolicy", () => {
       createdAt: now,
     });
     expect(result.loopEvents).toMatchObject([
+      { type: "thread.turn-start-cancelled", payload: { messageId: "message-pending-1" } },
       { type: "thread.loop-off", payload: { stopReason: "replaced_by_manual_policy" } },
     ]);
   });

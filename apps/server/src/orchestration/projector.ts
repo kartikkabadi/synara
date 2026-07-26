@@ -55,6 +55,7 @@ import {
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
+  ThreadTurnStartCancelledPayload,
   ThreadTurnStartRequestedPayload,
 } from "./Schemas.ts";
 import { resolveStableMessageTurnId } from "./messageTurnId.ts";
@@ -906,6 +907,31 @@ export function projectEvent(
                   ? { sourceProposedPlan: payload.sourceProposedPlan }
                   : {}),
               },
+              updatedAt: payload.createdAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.turn-start-cancelled":
+      return decodeForEvent(
+        ThreadTurnStartCancelledPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          // Clear only the exact cancelled pending start; a newer pending
+          // start (e.g. a racing manual message) must survive.
+          if (!thread || thread.pendingTurnStart?.messageId !== payload.messageId) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              hasPendingTurnStart: false,
+              pendingTurnStart: null,
               updatedAt: payload.createdAt,
             }),
           };
