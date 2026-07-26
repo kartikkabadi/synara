@@ -79,6 +79,12 @@ export const ThreadLoop = Schema.Struct({
   // Consecutive terminal errors on loop-owned turns since last success.
   consecutiveErrors: NonNegativeInt,
 
+  // Highest loop-owned iteration of this activation whose terminal outcome has
+  // been counted. Monotone: each dispatched iteration settles exactly once,
+  // even when a replacement iteration is already queued or terminal events
+  // arrive duplicated/out of order.
+  lastSettledIteration: NonNegativeInt.pipe(Schema.withDecodingDefaultKey(() => 0)),
+
   // Short redacted reason when auto-off happens; null otherwise.
   lastStopReason: Schema.NullOr(LoopStopReason),
 
