@@ -672,40 +672,43 @@ const make = Effect.gen(function* () {
   });
 
   // Side effect for a genuinely stale loop turn: retire the activation's
-  // queued promotion rows so they are not resurrected later.
+  // queued promotion rows so they are not resurrected later. Persistence
+  // failures propagate so the durable source intent is retried rather than
+  // acknowledged with the poison rows still queued.
   const retireLoopActivationPromotions = (input: {
     readonly threadId: ThreadId;
     readonly purpose: ThreadTurnPurpose;
     readonly createdAt: string;
   }) =>
-    queuedTurnPromotions
-      .cancelByActivation({
-        threadId: input.threadId,
-        activationId: input.purpose.activationId,
-        updatedAt: input.createdAt,
-      })
-      .pipe(Effect.ignore);
+    queuedTurnPromotions.cancelByActivation({
+      threadId: input.threadId,
+      activationId: input.purpose.activationId,
+      updatedAt: input.createdAt,
+    });
 
   // Durable settlement for a persisted start that will never reach the
   // provider: the decider only materializes the cancellation when the exact
   // message is still the thread's current pending start, so a newer pending
-  // start (manual or fresh activation) is never cleared.
+  // start (manual or fresh activation) is never cleared — a mismatch is a
+  // proven exact no-op and the dispatch succeeds without emitting events.
+  // Admission rejections, dispatch timeouts, and persistence failures all
+  // propagate: acknowledging the source intent while the pending row survives
+  // would leak it permanently, so the durable delivery machinery must retry
+  // until the row is actually retired.
   const settlePendingLoopStart = (input: {
     readonly threadId: ThreadId;
     readonly messageId: MessageId;
     readonly purpose: ThreadTurnPurpose;
     readonly createdAt: string;
   }) =>
-    orchestrationEngine
-      .dispatch({
-        type: "thread.turn.cancel-start",
-        commandId: serverCommandId("cancel-pending-turn-start"),
-        threadId: input.threadId,
-        messageId: input.messageId,
-        purpose: input.purpose,
-        createdAt: input.createdAt,
-      })
-      .pipe(Effect.ignore);
+    orchestrationEngine.dispatch({
+      type: "thread.turn.cancel-start",
+      commandId: serverCommandId("cancel-pending-turn-start"),
+      threadId: input.threadId,
+      messageId: input.messageId,
+      purpose: input.purpose,
+      createdAt: input.createdAt,
+    });
 
   const verifyLoopTurnAuthority = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
@@ -721,7 +724,8 @@ const make = Effect.gen(function* () {
       yield* retireLoopActivationPromotions(input);
     }
     // Either rejection means this persisted start is dropped without a
-    // provider call, so its pending projection row must settle durably.
+    // provider call, so its pending projection row must settle durably
+    // before the source intent may be acknowledged.
     yield* settlePendingLoopStart(input);
     return false;
   });
