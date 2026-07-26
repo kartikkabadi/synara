@@ -201,13 +201,24 @@ export function makeDispatchCommandNormalizer<E>(options: DispatchCommandNormali
       };
     }
 
+    // Manual steering also evaluates loop lifecycle: an interrupt turns an
+    // active loop off and a turn start can expire, replace, or continue a
+    // duration loop. Both are re-stamped with server time so a skewed client
+    // clock cannot steer lifecycle decisions.
+    if (input.command.type === "thread.turn.interrupt") {
+      return {
+        command: { ...input.command, createdAt: new Date().toISOString() },
+        prepareWorkspaceRoot: null,
+      };
+    }
+
     if (input.command.type !== "thread.turn.start") {
       return {
         command: input.command as OrchestrationCommand,
         prepareWorkspaceRoot: null,
       };
     }
-    const turnStartCommand = input.command;
+    const turnStartCommand = { ...input.command, createdAt: new Date().toISOString() };
 
     const normalizedAttachments = yield* Effect.forEach(
       turnStartCommand.message.attachments,
