@@ -105,6 +105,7 @@ import {
   listPriorTranscriptMessages,
 } from "../handoff.ts";
 import { classifyLoopTurnAuthority } from "../loop/queuedTurnAuthority.ts";
+import type { OrchestrationCommandInvariantError } from "../Errors.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -703,14 +704,29 @@ const make = Effect.gen(function* () {
     readonly purpose: ThreadTurnPurpose;
     readonly createdAt: string;
   }) =>
-    orchestrationEngine.dispatch({
-      type: "thread.turn.cancel-start",
-      commandId: serverCommandId("cancel-pending-turn-start"),
-      threadId: input.threadId,
-      messageId: input.messageId,
-      purpose: input.purpose,
-      createdAt: input.createdAt,
-    });
+    orchestrationEngine
+      .dispatch({
+        type: "thread.turn.cancel-start",
+        commandId: serverCommandId("cancel-pending-turn-start"),
+        threadId: input.threadId,
+        messageId: input.messageId,
+        purpose: input.purpose,
+        createdAt: input.createdAt,
+      })
+      .pipe(
+        // The decider emits no events exactly when this message is no longer
+        // the thread's current pending start (already retired or replaced) —
+        // the engine surfaces that as a "produced no events" invariant. That
+        // proven exact-message no-op is a successful settlement; every other
+        // failure still propagates so durable delivery retries the intent.
+        Effect.catchIf(
+          (error): error is OrchestrationCommandInvariantError =>
+            error._tag === "OrchestrationCommandInvariantError" &&
+            error.commandType === "thread.turn.cancel-start" &&
+            error.detail === "Command produced no events.",
+          () => Effect.void,
+        ),
+      );
 
   const verifyLoopTurnAuthority = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
