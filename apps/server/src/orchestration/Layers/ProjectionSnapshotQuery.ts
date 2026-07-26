@@ -27,6 +27,7 @@ import {
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
   type OrchestrationMessage,
+  type OrchestrationPendingTurnStart,
   type OrchestrationProposedPlan,
   type OrchestrationProject,
   type OrchestrationSession,
@@ -168,8 +169,13 @@ const ProjectionLatestTurnDbRowSchema = Schema.Struct({
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
   purpose: Schema.NullOr(Schema.fromJsonString(ThreadTurnPurpose)),
 });
-const ProjectionPendingTurnStartThreadIdRowSchema = Schema.Struct({
+const ProjectionPendingTurnStartRowSchema = Schema.Struct({
   threadId: ProjectionThread.fields.threadId,
+  messageId: MessageId,
+  requestedAt: IsoDateTime,
+  sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
+  sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
+  purpose: Schema.NullOr(Schema.fromJsonString(ThreadTurnPurpose)),
 });
 const ProjectionStateDbRowSchema = ProjectionState;
 const ProjectionCountsRowSchema = Schema.Struct({
@@ -252,9 +258,7 @@ type ProjectionThreadProposedPlanDbRow = Schema.Schema.Type<
 type ProjectionThreadActivityDbRow = Schema.Schema.Type<typeof ProjectionThreadActivityDbRowSchema>;
 type ProjectionCheckpointDbRow = Schema.Schema.Type<typeof ProjectionCheckpointDbRowSchema>;
 type ProjectionLatestTurnDbRow = Schema.Schema.Type<typeof ProjectionLatestTurnDbRowSchema>;
-type ProjectionPendingTurnStartThreadIdRow = Schema.Schema.Type<
-  typeof ProjectionPendingTurnStartThreadIdRowSchema
->;
+type ProjectionPendingTurnStartRow = Schema.Schema.Type<typeof ProjectionPendingTurnStartRowSchema>;
 type ProjectionThreadSessionDbRow = Schema.Schema.Type<typeof ProjectionThreadSessionDbRowSchema>;
 type ProjectionThreadLoopDbRow = Schema.Schema.Type<typeof ProjectionThreadLoopDbRowSchema>;
 type ProjectionStateDbRow = Schema.Schema.Type<typeof ProjectionStateDbRowSchema>;
@@ -428,6 +432,34 @@ function toProjectedLatestTurn(row: ProjectionLatestTurnDbRow): OrchestrationLat
       : {}),
     ...(row.purpose !== null ? { purpose: row.purpose } : {}),
   };
+}
+
+function toProjectedPendingTurnStart(
+  row: ProjectionPendingTurnStartRow,
+): OrchestrationPendingTurnStart {
+  return {
+    messageId: row.messageId,
+    requestedAt: row.requestedAt,
+    ...(row.purpose !== null ? { purpose: row.purpose } : {}),
+    ...(row.sourceProposedPlanThreadId !== null && row.sourceProposedPlanId !== null
+      ? {
+          sourceProposedPlan: {
+            threadId: row.sourceProposedPlanThreadId,
+            planId: row.sourceProposedPlanId,
+          },
+        }
+      : {}),
+  };
+}
+
+function collectPendingTurnStarts(
+  rows: ReadonlyArray<ProjectionPendingTurnStartRow>,
+): Map<ThreadId, OrchestrationPendingTurnStart> {
+  const byThread = new Map<ThreadId, OrchestrationPendingTurnStart>();
+  for (const row of rows) {
+    byThread.set(row.threadId, toProjectedPendingTurnStart(row));
+  }
+  return byThread;
 }
 
 function toProjectedSession(row: ProjectionThreadSessionDbRow): OrchestrationSession {
@@ -691,7 +723,7 @@ function toProjectedThread(input: {
   readonly checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>;
   readonly session: OrchestrationSession | null;
   readonly loop: ThreadLoop | null;
-  readonly hasPendingTurnStart: boolean;
+  readonly pendingTurnStart: OrchestrationPendingTurnStart | null;
 }): OrchestrationThread {
   const { threadRow } = input;
   const summary = deriveThreadSummaryMetadata(input);
@@ -733,8 +765,8 @@ function toProjectedThread(input: {
     hasPendingApprovals: summary.hasPendingApprovals,
     hasPendingUserInput: summary.hasPendingUserInput,
     hasActionableProposedPlan: summary.hasActionableProposedPlan,
-    hasPendingTurnStart: input.hasPendingTurnStart,
-    pendingTurnStart: null,
+    hasPendingTurnStart: input.pendingTurnStart !== null,
+    pendingTurnStart: input.pendingTurnStart,
     messages: input.messages,
     proposedPlans: input.proposedPlans,
     activities: input.activities,
@@ -1277,14 +1309,22 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
 
   const listPendingTurnStartRows = SqlSchema.findAll({
     Request: Schema.Void,
-    Result: ProjectionPendingTurnStartThreadIdRowSchema,
+    Result: ProjectionPendingTurnStartRowSchema,
     execute: () =>
       sql`
-        SELECT DISTINCT thread_id AS "threadId"
+        SELECT
+          thread_id AS "threadId",
+          pending_message_id AS "messageId",
+          requested_at AS "requestedAt",
+          source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
+          source_proposed_plan_id AS "sourceProposedPlanId",
+          purpose_json AS "purpose"
         FROM projection_turns
         WHERE turn_id IS NULL
           AND state = 'pending'
+          AND pending_message_id IS NOT NULL
           AND checkpoint_turn_count IS NULL
+        ORDER BY requested_at ASC
       `,
   });
 
@@ -1764,6 +1804,29 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       LIMIT 1
     `.pipe(Effect.map((rows) => (rows[0]?.hasPendingTurnStart ?? 0) > 0));
 
+  const getPendingTurnStartRowByThread = SqlSchema.findOneOption({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionPendingTurnStartRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          pending_message_id AS "messageId",
+          requested_at AS "requestedAt",
+          source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
+          source_proposed_plan_id AS "sourceProposedPlanId",
+          purpose_json AS "purpose"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND turn_id IS NULL
+          AND state = 'pending'
+          AND pending_message_id IS NOT NULL
+          AND checkpoint_turn_count IS NULL
+        ORDER BY requested_at DESC
+        LIMIT 1
+      `,
+  });
+
   const getThreadCheckpointContextThreadRow = SqlSchema.findOneOption({
     Request: ThreadIdLookupInput,
     Result: ProjectionThreadCheckpointContextThreadRowSchema,
@@ -2040,9 +2103,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ),
           ]);
 
-          const pendingTurnStartThreadIds = new Set(
-            pendingTurnStartRows.map((row) => row.threadId),
-          );
+          const pendingTurnStarts = collectPendingTurnStarts(pendingTurnStartRows);
 
           const messages = collectProjectedMessages(messageRows);
           const proposedPlans = collectProjectedProposedPlans(proposedPlanRows);
@@ -2076,7 +2137,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               checkpoints: checkpoints.byThread.get(row.threadId) ?? [],
               session: sessions.byThread.get(row.threadId) ?? null,
               loop: loops.byThread.get(row.threadId) ?? null,
-              hasPendingTurnStart: pendingTurnStartThreadIds.has(row.threadId),
+              pendingTurnStart: pendingTurnStarts.get(row.threadId) ?? null,
             }),
           );
 
@@ -2214,9 +2275,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ),
           ]);
 
-          const pendingTurnStartThreadIds = new Set(
-            pendingTurnStartRows.map((row) => row.threadId),
-          );
+          const pendingTurnStarts = collectPendingTurnStarts(pendingTurnStartRows);
 
           const proposedPlans = collectProjectedProposedPlans(proposedPlanRows);
           const checkpointRevertActivities = collectProjectedActivities(
@@ -2246,7 +2305,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               checkpoints: [],
               session: sessions.byThread.get(row.threadId) ?? null,
               loop: loops.byThread.get(row.threadId) ?? null,
-              hasPendingTurnStart: pendingTurnStartThreadIds.has(row.threadId),
+              pendingTurnStart: pendingTurnStarts.get(row.threadId) ?? null,
             }),
           );
 
@@ -2825,7 +2884,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         latestTurnRow,
         sessionRow,
         loopRow,
-        hasPendingTurnStart,
+        pendingTurnStartRow,
       ] = yield* Effect.all([
         listThreadMessageRowsByThread({ threadId, maxMessages: options.messageLimit }).pipe(
           Effect.mapError(
@@ -2891,9 +2950,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ),
           ),
         ),
-        hasPendingTurnStartForThread(threadId).pipe(
+        getPendingTurnStartRowByThread({ threadId }).pipe(
           Effect.mapError(
-            toPersistenceSqlError(`${options.tracePrefix}:hasPendingTurnStart:query`),
+            toPersistenceSqlOrDecodeError(
+              `${options.tracePrefix}:getPendingTurnStart:query`,
+              `${options.tracePrefix}:getPendingTurnStart:decodeRow`,
+            ),
           ),
         ),
       ]);
@@ -2917,7 +2979,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           onNone: () => null,
           onSome: (row) => row.loop,
         }),
-        hasPendingTurnStart,
+        pendingTurnStart: Option.match(pendingTurnStartRow, {
+          onNone: () => null,
+          onSome: (row) => toProjectedPendingTurnStart(row),
+        }),
       });
 
       return yield* decodeThreadDetail(thread).pipe(
