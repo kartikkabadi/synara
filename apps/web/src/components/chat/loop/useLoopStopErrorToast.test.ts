@@ -60,7 +60,11 @@ vi.mock("react", () => ({
   useRef: reactHarness.useRef,
 }));
 
-import { shouldToastLoopStop, useLoopStopErrorToast } from "./useLoopStopErrorToast";
+import {
+  resetLoopStopToastDedupeForTest,
+  shouldToastLoopStop,
+  useLoopStopErrorToast,
+} from "./useLoopStopErrorToast";
 import { formatLoopStopReasonShort } from "./presentation";
 
 function makeLoop(overrides: Partial<ThreadLoop>): ThreadLoop {
@@ -119,6 +123,7 @@ describe("useLoopStopErrorToast", () => {
 
   beforeEach(() => {
     reactHarness.reset();
+    resetLoopStopToastDedupeForTest();
   });
 
   function render(
@@ -222,5 +227,46 @@ describe("useLoopStopErrorToast", () => {
     render(threadId, stopped, addToast);
     render(threadId, makeLoop({ active: false, lastStopReason: "consecutive_errors" }), addToast);
     expect(addToast).toHaveBeenCalledTimes(1);
+  });
+
+  it("toasts once when the same activation stops with the same reason twice", () => {
+    const addToast = vi.fn();
+    render(threadId, makeLoop({ active: true }), addToast);
+    render(threadId, makeLoop({ active: false, lastStopReason: "consecutive_errors" }), addToast);
+    render(threadId, makeLoop({ active: true }), addToast);
+    render(threadId, makeLoop({ active: false, lastStopReason: "consecutive_errors" }), addToast);
+    expect(addToast).toHaveBeenCalledTimes(1);
+  });
+
+  it("toasts once across multiple mounted consumers observing the same stop", () => {
+    const addToast = vi.fn();
+    render(threadId, makeLoop({ active: true }), addToast);
+    render(threadId, makeLoop({ active: false, lastStopReason: "consecutive_errors" }), addToast);
+    // A second mount (fresh hook state) replaying the same transition.
+    reactHarness.reset();
+    render(threadId, makeLoop({ active: true }), addToast);
+    render(threadId, makeLoop({ active: false, lastStopReason: "consecutive_errors" }), addToast);
+    expect(addToast).toHaveBeenCalledTimes(1);
+  });
+
+  it("toasts again for a new activation that stops with the same reason", () => {
+    const addToast = vi.fn();
+    render(threadId, makeLoop({ active: true }), addToast);
+    render(threadId, makeLoop({ active: false, lastStopReason: "consecutive_errors" }), addToast);
+    render(
+      threadId,
+      makeLoop({ active: true, activationId: LoopActivationId.makeUnsafe("act-2") }),
+      addToast,
+    );
+    render(
+      threadId,
+      makeLoop({
+        active: false,
+        activationId: LoopActivationId.makeUnsafe("act-2"),
+        lastStopReason: "consecutive_errors",
+      }),
+      addToast,
+    );
+    expect(addToast).toHaveBeenCalledTimes(2);
   });
 });

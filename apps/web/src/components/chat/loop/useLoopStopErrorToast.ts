@@ -13,6 +13,16 @@ interface LoopStopSnapshot {
   active: boolean;
 }
 
+// ChatView (and this hook) can be mounted several times for the same thread
+// (single surface, editor chat pane, dock sidechats, split panes), and loop
+// state can flap active->inactive more than once for one activation. Toast at
+// most once per unique (thread, activation, reason) stop across all mounts.
+const toastedLoopStops = new Set<string>();
+
+export function resetLoopStopToastDedupeForTest(): void {
+  toastedLoopStops.clear();
+}
+
 // Only in-session transitions from an observed active loop toast; a loop that
 // is already stopped on mount (page refresh) stays quiet — the transcript
 // record covers it.
@@ -47,9 +57,14 @@ export function useLoopStopErrorToast(
       threadId,
       snapshot: loop == null ? null : { activationId: loop.activationId, active: loop.active },
     };
-    if (!shouldToastLoopStop(previous, loop)) return;
-    const copy = loop?.lastStopReason ? formatLoopStopReasonShort(loop.lastStopReason) : null;
+    if (loop == null || !shouldToastLoopStop(previous, loop)) return;
+    const reason = loop.lastStopReason;
+    if (reason == null) return;
+    const copy = formatLoopStopReasonShort(reason);
     if (copy === null) return;
+    const dedupeKey = `${threadId ?? "no-thread"}:${loop.activationId}:${reason}`;
+    if (toastedLoopStops.has(dedupeKey)) return;
+    toastedLoopStops.add(dedupeKey);
     addToast({ ...copy, threadId });
   }, [threadId, loop, addToast]);
 }
