@@ -1472,6 +1472,17 @@ const ThreadLoopToggleCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+// Internal settlement for a durable pending turn start that will never reach
+// the provider. Only server reactors and lifecycle paths dispatch it.
+const ThreadTurnCancelStartCommand = Schema.Struct({
+  type: Schema.Literal("thread.turn.cancel-start"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messageId: MessageId,
+  purpose: Schema.optional(ThreadTurnPurpose),
+  createdAt: IsoDateTime,
+});
+
 const ThreadLoopContinueCommand = Schema.Struct({
   type: Schema.Literal("thread.loop.continue"),
   commandId: CommandId,
@@ -1664,6 +1675,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadConversationRollbackCommand,
   ThreadConversationRollbackCompleteCommand,
   ThreadDispatchQueuedTurnCommand,
+  ThreadTurnCancelStartCommand,
   ThreadLoopContinueCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
@@ -1701,6 +1713,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.message-sent",
   "thread.turn-queued",
   "thread.turn-start-requested",
+  "thread.turn-start-cancelled",
   "thread.turn-interrupt-requested",
   "thread.task-stop-requested",
   "thread.task-background-requested",
@@ -1990,6 +2003,17 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
 
 export const ThreadTurnQueuedPayload = ThreadTurnStartRequestedPayload;
 
+// Durable settlement for a persisted turn start that will never reach the
+// provider (stale loop authority, loop off/reconfigure). Carries the exact
+// pending message identity so projectors retire only the matching pending
+// start and never an unrelated manual one.
+export const ThreadTurnStartCancelledPayload = Schema.Struct({
+  threadId: ThreadId,
+  messageId: MessageId,
+  purpose: Schema.optional(ThreadTurnPurpose),
+  createdAt: IsoDateTime,
+});
+
 export const ThreadTurnInterruptRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   turnId: Schema.optional(TurnId),
@@ -2271,6 +2295,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.turn-start-requested"),
     payload: ThreadTurnStartRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.turn-start-cancelled"),
+    payload: ThreadTurnStartCancelledPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

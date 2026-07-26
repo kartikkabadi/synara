@@ -16,6 +16,7 @@ export function makeLoop(overrides: Partial<ThreadLoop> = {}): ThreadLoop {
     durationSeconds: null,
     hardCap: 100,
     consecutiveErrors: 0,
+    lastSettledIteration: 0,
     lastStopReason: null,
     activationId: LOOP_FIXTURE_ACTIVATION_ID,
     createdAt: "2026-01-01T11:00:00.000Z",
