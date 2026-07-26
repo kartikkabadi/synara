@@ -13,6 +13,7 @@ import {
   formatLoopStopReason,
   formatLoopStopReasonShort,
   getLoopTickIntervalMs,
+  isAnyLoopOwnedTurnRunning,
 } from "./presentation";
 
 const NOW = new Date("2026-01-01T12:00:00.000Z").getTime();
@@ -156,6 +157,26 @@ describe("deriveLoopPresentationState", () => {
       loop: makeLoop({ active: false, lastStopReason: "consecutive_errors" }),
     });
     expect(presentation?.color).toBe("error");
+  });
+});
+
+describe("isAnyLoopOwnedTurnRunning", () => {
+  it("treats a running loop-owned turn from a stale activation as loop-owned", () => {
+    // Edit Loop mints a fresh activation while the previous attempt is still
+    // running: Stop now must still interrupt that concrete turn.
+    const latestTurn = makeRunningLoopTurn({
+      purpose: {
+        kind: "loop-iteration",
+        activationId: LoopActivationId.makeUnsafe("activation-stale"),
+        iteration: 7,
+      },
+    });
+    expect(isAnyLoopOwnedTurnRunning(latestTurn)).toBe(true);
+  });
+
+  it("ignores running turns without a loop purpose and non-running turns", () => {
+    expect(isAnyLoopOwnedTurnRunning(makeRunningLoopTurn({ purpose: undefined }))).toBe(false);
+    expect(isAnyLoopOwnedTurnRunning(null)).toBe(false);
   });
 });
 

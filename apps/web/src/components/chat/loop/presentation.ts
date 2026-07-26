@@ -76,10 +76,23 @@ export function isLoopOwnedTurnRunning(
   latestTurn: OrchestrationLatestTurn | null | undefined,
 ): boolean {
   return (
+    isAnyLoopOwnedTurnRunning(latestTurn) &&
+    latestTurn?.purpose?.kind === "loop-iteration" &&
+    latestTurn.purpose.activationId === loop.activationId
+  );
+}
+
+// Activation-agnostic ownership for destructive stop controls: after Edit Loop
+// creates a new activation, the still-running turn belongs to the old one, but
+// "Stop now" must interrupt it all the same. Current-activation matching
+// (isLoopOwnedTurnRunning) stays reserved for progress/iteration presentation.
+export function isAnyLoopOwnedTurnRunning(
+  latestTurn: OrchestrationLatestTurn | null | undefined,
+): boolean {
+  return (
     latestTurn?.state === "running" &&
     latestTurn.turnId != null &&
-    latestTurn.purpose?.kind === "loop-iteration" &&
-    latestTurn.purpose.activationId === loop.activationId
+    latestTurn.purpose?.kind === "loop-iteration"
   );
 }
 
