@@ -15,7 +15,18 @@ import type {
 import { LoopActivationId } from "@synara/contracts";
 import { makeLoop as makeLoopFixture } from "@synara/shared/loopTestFixtures";
 import { describe, expect, it } from "vitest";
-import { Effect, Exit, Layer, ManagedRuntime, Option, Queue, Ref, Scope, Stream } from "effect";
+import {
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  ManagedRuntime,
+  Option,
+  Queue,
+  Ref,
+  Scope,
+  Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 
 import {
@@ -653,5 +664,138 @@ describe("LoopReactor", () => {
       await advance(50);
       expect(await commandsOfType("thread.loop.continue")).toHaveLength(0);
     });
+  });
+
+  it("supervises a persistently failing restore dispatch until it resumes without unrelated events", async () => {
+    const loop = makeLoop();
+    const thread = makeThread({ loop });
+    const { eventQueue, dispatchLog, fakeSnapshotQuery, fakeProjectionThreadLoopRepository } =
+      makeFakes(makeSnapshot(thread), Option.some(thread));
+    // Fails the initial attempt, all bounded inline retries, and several
+    // supervised retries before recovering.
+    const failuresRemaining = Effect.runSync(Ref.make(8));
+    const failingEngine: OrchestrationEngineShape = {
+      dispatch: (command: OrchestrationCommand) =>
+        Ref.getAndUpdate(failuresRemaining, (count) => Math.max(0, count - 1)).pipe(
+          Effect.flatMap((count) =>
+            count > 0
+              ? Effect.fail(new Error("dispatch unavailable"))
+              : Ref.update(dispatchLog, (commands) => [...commands, command]).pipe(
+                  Effect.as({ sequence: 1 }),
+                ),
+          ),
+        ),
+      streamDomainEvents: Stream.fromQueue(eventQueue),
+    } as unknown as OrchestrationEngineShape;
+
+    const runtime = ManagedRuntime.make(
+      Layer.mergeAll(
+        Layer.provide(
+          LoopReactorLive,
+          Layer.mergeAll(
+            Layer.succeed(OrchestrationEngineService, failingEngine),
+            Layer.succeed(ProjectionSnapshotQuery, fakeSnapshotQuery),
+            Layer.succeed(ProjectionThreadLoopRepository, fakeProjectionThreadLoopRepository),
+          ),
+        ),
+        TestClock.layer(),
+      ),
+    );
+    try {
+      await runtime.runPromise(Effect.scoped(TestClock.setTime(Date.parse(now))));
+      const reactor = await runtime.runPromise(Effect.service(LoopReactor));
+      const restoreFiber = await runtime.runPromise(Effect.forkDetach(reactor.restoreActiveLoops));
+      // Drain the bounded inline retries (250ms exponential, 3 takes).
+      for (let i = 0; i < 8; i += 1) {
+        await runtime.runPromise(Effect.scoped(TestClock.adjust("1 second")));
+      }
+      await runtime.runPromise(Fiber.await(restoreFiber));
+      expect(await runtime.runPromise(Ref.get(dispatchLog))).toHaveLength(0);
+      // Supervised background retries keep going with no thread events until
+      // the engine recovers.
+      for (let i = 0; i < 10; i += 1) {
+        await runtime.runPromise(Effect.scoped(TestClock.adjust("30 seconds")));
+      }
+      const commands = await runtime.runPromise(Ref.get(dispatchLog));
+      expect(commands).toHaveLength(1);
+      expect(commands[0]).toMatchObject({
+        type: "thread.loop.continue",
+        threadId: thread.id,
+        expectedActivationId: loop.activationId,
+      });
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("stops supervised restore retries when the loop activation changes", async () => {
+    const loop = makeLoop();
+    const thread = makeThread({ loop });
+    const reconfigured = {
+      ...thread,
+      loop: makeLoop({ activationId: LoopActivationId.makeUnsafe("loop-activation-next") }),
+    } as OrchestrationThread;
+    const { eventQueue, dispatchLog, fakeProjectionThreadLoopRepository } = makeFakes(
+      makeSnapshot(thread),
+      Option.some(thread),
+    );
+    const failuresRemaining = Effect.runSync(Ref.make(8));
+    const failingEngine: OrchestrationEngineShape = {
+      dispatch: (command: OrchestrationCommand) =>
+        Ref.getAndUpdate(failuresRemaining, (count) => Math.max(0, count - 1)).pipe(
+          Effect.flatMap((count) =>
+            count > 0
+              ? Effect.fail(new Error("dispatch unavailable"))
+              : Ref.update(dispatchLog, (commands) => [...commands, command]).pipe(
+                  Effect.as({ sequence: 1 }),
+                ),
+          ),
+        ),
+      streamDomainEvents: Stream.fromQueue(eventQueue),
+    } as unknown as OrchestrationEngineShape;
+    // The startup snapshot still shows the old activation; supervised rechecks
+    // observe the reconfigured thread and must stand down.
+    const reconfiguredSnapshotQuery: ProjectionSnapshotQueryShape = {
+      getSnapshot: () => Effect.succeed(makeSnapshot(thread)),
+      getShellSnapshot: () =>
+        Effect.succeed({
+          threads: [thread] as unknown as ReadonlyArray<OrchestrationThreadShell>,
+          snapshotSequence: { sequence: 0, updatedAt: now },
+        } as unknown as never),
+      getThreadShellById: () =>
+        Effect.succeed(
+          Option.some(reconfigured) as unknown as Option.Option<OrchestrationThreadShell>,
+        ),
+    } as unknown as ProjectionSnapshotQueryShape;
+
+    const runtime = ManagedRuntime.make(
+      Layer.mergeAll(
+        Layer.provide(
+          LoopReactorLive,
+          Layer.mergeAll(
+            Layer.succeed(OrchestrationEngineService, failingEngine),
+            Layer.succeed(ProjectionSnapshotQuery, reconfiguredSnapshotQuery),
+            Layer.succeed(ProjectionThreadLoopRepository, fakeProjectionThreadLoopRepository),
+          ),
+        ),
+        TestClock.layer(),
+      ),
+    );
+    try {
+      await runtime.runPromise(Effect.scoped(TestClock.setTime(Date.parse(now))));
+      const reactor = await runtime.runPromise(Effect.service(LoopReactor));
+      const restoreFiber = await runtime.runPromise(Effect.forkDetach(reactor.restoreActiveLoops));
+      for (let i = 0; i < 8; i += 1) {
+        await runtime.runPromise(Effect.scoped(TestClock.adjust("1 second")));
+      }
+      await runtime.runPromise(Fiber.await(restoreFiber));
+      for (let i = 0; i < 10; i += 1) {
+        await runtime.runPromise(Effect.scoped(TestClock.adjust("30 seconds")));
+      }
+      // The stale activation is never re-driven.
+      expect(await runtime.runPromise(Ref.get(dispatchLog))).toHaveLength(0);
+    } finally {
+      await runtime.dispose();
+    }
   });
 });

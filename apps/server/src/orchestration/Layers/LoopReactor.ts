@@ -79,6 +79,14 @@ const EXPIRY_RETRY_BACKOFF_MS = 30_000;
 
 const RESTORE_SNAPSHOT_RETRY_SCHEDULE = Schedule.exponential("250 millis").pipe(Schedule.take(3));
 const RESTORE_DISPATCH_RETRY_SCHEDULE = Schedule.exponential("250 millis").pipe(Schedule.take(3));
+// Supervised restore retry: exponential backoff capped at 30s, unbounded. A
+// count/unbounded loop has no timer and may receive no unrelated event, so a
+// restore must keep retrying until the loop deactivates or its activation
+// changes — never abandon it.
+const RESTORE_SUPERVISED_RETRY_SCHEDULE = Schedule.either(
+  Schedule.exponential("1 second"),
+  Schedule.spaced("30 seconds"),
+);
 
 const makeLoopReactor = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -165,6 +173,43 @@ const makeLoopReactor = Effect.gen(function* () {
       });
     });
 
+  // Keeps retrying a failed restore dispatch under capped backoff until it
+  // succeeds, the loop becomes inactive, or its activation changes. Rechecks
+  // authority from the projection on every attempt so a loop stopped or
+  // reconfigured in the meantime is never re-driven.
+  const superviseRestoreDispatch = (
+    threadId: OrchestrationThreadShell["id"],
+    activationId: ThreadLoop["activationId"],
+  ) =>
+    Effect.gen(function* () {
+      const threadOption = yield* projectionSnapshotQuery.getThreadShellById(threadId);
+      if (Option.isNone(threadOption)) {
+        return;
+      }
+      const loop = threadOption.value.loop;
+      if (loop?.active !== true || loop.activationId !== activationId) {
+        return;
+      }
+      const createdAt = new Date(yield* Clock.currentTimeMillis).toISOString();
+      const dispatched = yield* dispatchLoopContinue({
+        orchestrationEngine,
+        thread: threadOption.value,
+        loop,
+        createdAt,
+      });
+      if (!dispatched) {
+        return yield* Effect.fail(new Error("supervised restore dispatch failed"));
+      }
+    }).pipe(
+      Effect.retry(RESTORE_SUPERVISED_RETRY_SCHEDULE),
+      Effect.catch((error) =>
+        Effect.logWarning("supervised loop restore retry failed", {
+          threadId,
+          error: String(error),
+        }),
+      ),
+    );
+
   const restoreActiveLoops: LoopReactorShape["restoreActiveLoops"] = Effect.gen(function* () {
     // Projection/query infrastructure failures must propagate: silently
     // treating them as an empty snapshot would skip loop restoration and
@@ -184,23 +229,27 @@ const makeLoopReactor = Effect.gen(function* () {
       }
       yield* syncDurationDeadline(thread.id, loop);
       // A failed restore dispatch strands the loop until the next unrelated
-      // trigger; retry with bounded backoff before giving up.
-      yield* dispatchLoopContinue({
+      // trigger; retry with bounded backoff inline, then hand persistent
+      // failures to a supervised background retry so startup still completes.
+      const dispatched = yield* dispatchLoopContinue({
         orchestrationEngine,
         thread,
         loop,
         createdAt: now,
       }).pipe(
-        Effect.flatMap((dispatched) =>
-          dispatched ? Effect.succeed(true) : Effect.fail(new Error("restore dispatch failed")),
+        Effect.flatMap((ok) =>
+          ok ? Effect.succeed(true) : Effect.fail(new Error("restore dispatch failed")),
         ),
         Effect.retry(RESTORE_DISPATCH_RETRY_SCHEDULE),
         Effect.catch(() =>
-          Effect.logWarning("loop restore dispatch failed after retries", {
+          Effect.logWarning("loop restore dispatch failed after retries; supervising", {
             threadId: thread.id,
           }).pipe(Effect.as(false)),
         ),
       );
+      if (!dispatched) {
+        yield* Effect.forkDetach(superviseRestoreDispatch(thread.id, loop.activationId));
+      }
     }
   });
 
