@@ -3921,6 +3921,115 @@ it.effect("restores pending turn-start metadata across projection pipeline resta
   ),
 );
 
+it.effect("retires only the exactly matching pending turn start on turn-start-cancelled", () =>
+  Effect.gen(function* () {
+    const { dbPath } = yield* ServerConfig;
+    const persistenceLayer = makeSqlitePersistenceLive(dbPath);
+    const projectionLayer = OrchestrationProjectionPipelineLive.pipe(
+      Layer.provideMerge(OrchestrationEventStoreLive),
+      Layer.provideMerge(persistenceLayer),
+    );
+
+    const loopThreadId = ThreadId.makeUnsafe("thread-cancel-loop");
+    const manualThreadId = ThreadId.makeUnsafe("thread-cancel-manual");
+    const loopMessageId = MessageId.makeUnsafe("message-cancel-loop");
+    const manualMessageId = MessageId.makeUnsafe("message-cancel-manual");
+    const requestedAt = "2026-02-26T15:00:00.000Z";
+    const cancelledAt = "2026-02-26T15:00:05.000Z";
+
+    const pendingRows = yield* Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const sql = yield* SqlClient.SqlClient;
+
+      let eventIndex = 0;
+      const append = (input: {
+        type: "thread.turn-start-requested" | "thread.turn-start-cancelled";
+        threadId: ThreadId;
+        payload: Record<string, unknown>;
+      }) => {
+        eventIndex += 1;
+        return eventStore.append({
+          type: input.type,
+          eventId: EventId.makeUnsafe(`evt-cancel-${eventIndex}`),
+          aggregateKind: "thread",
+          aggregateId: input.threadId,
+          occurredAt: requestedAt,
+          commandId: CommandId.makeUnsafe(`cmd-cancel-${eventIndex}`),
+          causationEventId: null,
+          correlationId: CorrelationId.makeUnsafe(`cmd-cancel-${eventIndex}`),
+          metadata: {},
+          payload: input.payload as never,
+        });
+      };
+
+      yield* append({
+        type: "thread.turn-start-requested",
+        threadId: loopThreadId,
+        payload: {
+          threadId: loopThreadId,
+          messageId: loopMessageId,
+          purpose: { kind: "loop-iteration", activationId: "activation-cancel", iteration: 1 },
+          createdAt: requestedAt,
+        },
+      });
+      yield* append({
+        type: "thread.turn-start-requested",
+        threadId: manualThreadId,
+        payload: {
+          threadId: manualThreadId,
+          messageId: manualMessageId,
+          createdAt: requestedAt,
+        },
+      });
+      // Cancellation with a non-matching message id must be a no-op.
+      yield* append({
+        type: "thread.turn-start-cancelled",
+        threadId: loopThreadId,
+        payload: {
+          threadId: loopThreadId,
+          messageId: MessageId.makeUnsafe("message-cancel-other"),
+          createdAt: cancelledAt,
+        },
+      });
+      yield* append({
+        type: "thread.turn-start-cancelled",
+        threadId: loopThreadId,
+        payload: {
+          threadId: loopThreadId,
+          messageId: loopMessageId,
+          purpose: { kind: "loop-iteration", activationId: "activation-cancel", iteration: 1 },
+          createdAt: cancelledAt,
+        },
+      });
+
+      yield* projectionPipeline.bootstrap;
+
+      return yield* sql<{ readonly threadId: string; readonly messageId: string }>`
+        SELECT thread_id AS "threadId", pending_message_id AS "messageId"
+        FROM projection_turns
+        WHERE turn_id IS NULL AND state = 'pending'
+        ORDER BY thread_id ASC
+      `;
+    }).pipe(Effect.provide(projectionLayer));
+
+    // The loop-owned pending start is durably retired; the unrelated manual
+    // pending start survives.
+    assert.deepEqual(pendingRows, [
+      { threadId: "thread-cancel-manual", messageId: "message-cancel-manual" },
+    ]);
+  }).pipe(
+    Effect.provide(
+      Layer.provideMerge(
+        ServerConfig.layerTest(process.cwd(), {
+          prefix: "synara-projection-pipeline-cancel-",
+        }),
+        NodeServices.layer,
+      ),
+    ),
+  ),
+);
+
 const engineLayer = it.layer(
   OrchestrationEngineLive.pipe(
     Layer.provide(OrchestrationProjectionPipelineLive),

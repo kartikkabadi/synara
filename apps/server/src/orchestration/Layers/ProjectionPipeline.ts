@@ -179,6 +179,7 @@ const THREAD_ACTIVITY_PROJECTION_EVENT_TYPES = new Set<OrchestrationEvent["type"
 const THREAD_TURN_PROJECTION_EVENT_TYPES = new Set<OrchestrationEvent["type"]>([
   "thread.turn-queued",
   "thread.turn-start-requested",
+  "thread.turn-start-cancelled",
   "thread.session-set",
   "thread.turn-diff-completed",
   "thread.reverted",
@@ -1338,6 +1339,16 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             sourceProposedPlanId: event.payload.sourceProposedPlan?.planId ?? null,
             purpose: event.payload.purpose ?? undefined,
             requestedAt: event.payload.createdAt,
+          });
+          return;
+        }
+
+        case "thread.turn-start-cancelled": {
+          // Settle exactly the cancelled pending start; a newer pending start
+          // for the same thread (e.g. a racing manual message) must survive.
+          yield* projectionTurnRepository.deletePendingTurnStartByMessageId({
+            threadId: event.payload.threadId,
+            messageId: event.payload.messageId,
           });
           return;
         }
