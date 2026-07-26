@@ -741,6 +741,83 @@ describe("decider loop commands", () => {
     expect(turnPayload.messageId).toBe(asMessageId("msg-user-replace-queued"));
   });
 
+  it("waits without creating an extra iteration when a queued replacement survives the settled attempt (LoopReactor first)", async () => {
+    // Attempt A (iteration 1) runs, replacement B (iteration 2) is accepted
+    // and queued, then A settles with a terminal error before B is promoted.
+    const running = await addActiveTurn(
+      await projectLoopSet(
+        await makeReadModelWithThread(),
+        makeLoop({ active: true, prompt: "fix tests", iteration: 1 }),
+      ),
+      {
+        turnId: "turn-loop-a",
+        messageId: "msg-loop-a",
+        purpose: LOOP_ITERATION_PURPOSE,
+      },
+    );
+    const withReplacement = await projectAll(running, [
+      makeEvent({
+        type: "thread.loop-continued",
+        payload: {
+          threadId: "thread-loop",
+          nextIteration: 2,
+          nextConsecutiveErrors: 0,
+          loop: makeLoop({ active: true, prompt: "try again", iteration: 2 }),
+        },
+      }),
+      makeTurnSignalEvent({
+        type: "thread.turn-queued",
+        messageId: "msg-loop-b",
+        purpose: {
+          kind: "loop-iteration",
+          activationId: LoopActivationId.makeUnsafe("test-activation"),
+          iteration: 2,
+        } as ThreadTurnPurpose,
+      }),
+    ]);
+    const terminalSessionEvent = () =>
+      makeEvent({
+        type: "thread.session-set",
+        payload: {
+          threadId: "thread-loop",
+          session: {
+            threadId: asThreadId("thread-loop"),
+            status: "error",
+            providerName: null,
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: "provider exploded",
+            updatedAt: NOW,
+          },
+        },
+      });
+    // A duplicate terminal notification must not double-count the error.
+    const readModel = await projectAll(withReplacement, [
+      terminalSessionEvent(),
+      terminalSessionEvent(),
+    ]);
+
+    // B's pending marker survived A's settlement.
+    expect(readModel.threads[0]?.hasPendingTurnStart).toBe(true);
+    expect(readModel.threads[0]?.pendingTurnStart?.messageId).toBe("msg-loop-b");
+
+    // LoopReactor fires first: the continuation accounts A exactly once and
+    // waits on the queued B instead of dispatching an automatic iteration C.
+    const events = await decide(readModel, loopContinueCommand("cmd-loop-continue-replacement"));
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe("thread.loop-wait-noted");
+    expect(events[0]?.payload).toMatchObject({
+      threadId: asThreadId("thread-loop"),
+      loop: {
+        active: true,
+        iteration: 2,
+        consecutiveErrors: 1,
+        lastSettledIteration: 1,
+        unsettled: [],
+      },
+    });
+  });
+
   it("emits thread.loop-off on thread.turn.interrupt when the active turn is loop-owned", async () => {
     const readModel = await addActiveTurn(await projectLoopSet(await makeReadModelWithThread()), {
       turnId: "turn-loop-1",
@@ -752,6 +829,35 @@ describe("decider loop commands", () => {
     expect(events).toHaveLength(2);
     expect(events[0]?.type).toBe("thread.loop-off");
     expect(events[1]?.type).toBe("thread.turn-interrupt-requested");
+  });
+
+  it("emits thread.loop-off and interrupts a loop-owned turn from a stale activation (Stop now after Edit Loop)", async () => {
+    // Attempt A runs under the original activation, then Edit Loop
+    // reconfigures the loop to a fresh activation while A keeps running.
+    const running = await addActiveTurn(await projectLoopSet(await makeReadModelWithThread()), {
+      turnId: "turn-loop-stale",
+      messageId: "msg-loop-user-stale",
+      purpose: LOOP_ITERATION_PURPOSE,
+    });
+    const readModel = await projectAll(running, [
+      makeEvent({
+        type: "thread.loop-set",
+        payload: {
+          threadId: "thread-loop",
+          loop: makeLoop({
+            active: true,
+            prompt: "new objective",
+            activationId: LoopActivationId.makeUnsafe("fresh-activation"),
+          }),
+        },
+      }),
+    ]);
+
+    const events = await decide(readModel, turnInterruptCommand("cmd-turn-interrupt-stale"));
+    expect(events).toHaveLength(2);
+    expect(events[0]?.type).toBe("thread.loop-off");
+    expect(events[1]?.type).toBe("thread.turn-interrupt-requested");
+    expect(events[1]?.payload).toMatchObject({ turnId: asTurnId("turn-loop-stale") });
   });
 
   it("does not emit thread.loop-off on thread.turn.interrupt for a manual turn", async () => {
