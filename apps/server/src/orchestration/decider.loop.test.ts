@@ -720,18 +720,23 @@ describe("decider loop commands", () => {
         "refine the prompt",
       ),
     );
-    expect(events[0]?.type).toBe("thread.loop-off");
+    expect(events[0]?.type).toBe("thread.turn-start-cancelled");
     expect(events[0]?.payload).toMatchObject({
+      threadId: asThreadId("thread-loop"),
+      messageId: asMessageId("msg-queued-1"),
+    });
+    expect(events[1]?.type).toBe("thread.loop-off");
+    expect(events[1]?.payload).toMatchObject({
       threadId: asThreadId("thread-loop"),
       stopReason: "replaced_by_manual_policy",
       loop: { active: false, lastStopReason: "replaced_by_manual_policy" },
     });
-    expect(events[1]?.type).toBe("thread.message-sent");
-    const messagePayload = events[1]?.payload as { purpose?: unknown; text?: string };
+    expect(events[2]?.type).toBe("thread.message-sent");
+    const messagePayload = events[2]?.payload as { purpose?: unknown; text?: string };
     expect(messagePayload.purpose).toBeUndefined();
     expect(messagePayload.text).toBe("refine the prompt");
-    expect(events[2]?.type).toBe("thread.turn-start-requested");
-    const turnPayload = events[2]?.payload as { purpose?: unknown; messageId?: string };
+    expect(events[3]?.type).toBe("thread.turn-start-requested");
+    const turnPayload = events[3]?.payload as { purpose?: unknown; messageId?: string };
     expect(turnPayload.purpose).toBeUndefined();
     expect(turnPayload.messageId).toBe(asMessageId("msg-user-replace-queued"));
   });
@@ -779,5 +784,135 @@ describe("decider loop commands", () => {
       purpose: { kind: "loop-iteration", iteration: 1 },
     });
     expect(events[2]?.payload).toMatchObject({ nextIteration: 1, nextConsecutiveErrors: 0 });
+  });
+});
+
+describe("durable pending loop start cancellation", () => {
+  async function readModelWithPendingLoopStart(options: { purpose?: ThreadTurnPurpose } = {}) {
+    return await projectAll(await projectLoopSet(await makeReadModelWithThread()), [
+      makeTurnSignalEvent({
+        type: "thread.turn-start-requested",
+        messageId: "msg-pending-loop-1",
+        purpose: options.purpose ?? LOOP_ITERATION_PURPOSE,
+      }),
+    ]);
+  }
+
+  it("thread.loop.off retires a pending loop-owned start durably", async () => {
+    const readModel = await readModelWithPendingLoopStart();
+    const events = await decide(readModel, loopOffCommand("cmd-loop-off-pending", "user_stop"));
+    expect(events[0]?.type).toBe("thread.turn-start-cancelled");
+    expect(events[0]?.payload).toMatchObject({
+      threadId: asThreadId("thread-loop"),
+      messageId: asMessageId("msg-pending-loop-1"),
+      purpose: LOOP_ITERATION_PURPOSE,
+    });
+    expect(events[1]?.type).toBe("thread.loop-off");
+  });
+
+  it("thread.loop.set reconfigure retires the outgoing activation's pending start", async () => {
+    const readModel = await readModelWithPendingLoopStart();
+    const events = await decide(
+      readModel,
+      loopSetCommand("cmd-loop-reconfigure-pending", { prompt: "new objective" }),
+    );
+    expect(events[0]?.type).toBe("thread.turn-start-cancelled");
+    expect(events[0]?.payload).toMatchObject({ messageId: asMessageId("msg-pending-loop-1") });
+    expect(events[1]?.type).toBe("thread.loop-set");
+    expect(events[1]?.payload).toMatchObject({
+      loop: { activationId: "cmd-loop-reconfigure-pending", iteration: 0 },
+    });
+  });
+
+  it("thread.loop.toggle off retires a pending loop-owned start", async () => {
+    const readModel = await readModelWithPendingLoopStart();
+    const events = await decide(readModel, loopToggleCommand("cmd-loop-toggle-pending"));
+    expect(events[0]?.type).toBe("thread.turn-start-cancelled");
+    expect(events[1]?.type).toBe("thread.loop-off");
+    expect(events[1]?.payload).toMatchObject({ stopReason: "toggled_off" });
+  });
+
+  it("does not cancel an unrelated manual pending start on loop off", async () => {
+    const readModel = await projectAll(await projectLoopSet(await makeReadModelWithThread()), [
+      makeTurnSignalEvent({
+        type: "thread.turn-start-requested",
+        messageId: "msg-pending-manual-1",
+      }),
+    ]);
+    const events = await decide(readModel, loopOffCommand("cmd-loop-off-manual", "user_stop"));
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe("thread.loop-off");
+  });
+
+  it("thread.turn.cancel-start settles the exact pending start", async () => {
+    const readModel = await readModelWithPendingLoopStart();
+    const events = await decide(readModel, {
+      type: "thread.turn.cancel-start",
+      commandId: asCommandId("cmd-cancel-start-1"),
+      threadId: asThreadId("thread-loop"),
+      messageId: asMessageId("msg-pending-loop-1"),
+      purpose: LOOP_ITERATION_PURPOSE,
+      createdAt: NOW,
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe("thread.turn-start-cancelled");
+    expect(events[0]?.payload).toMatchObject({
+      messageId: asMessageId("msg-pending-loop-1"),
+      purpose: LOOP_ITERATION_PURPOSE,
+    });
+  });
+
+  it("thread.turn.cancel-start is a no-op when a newer pending start replaced the message", async () => {
+    const readModel = await projectAll(await readModelWithPendingLoopStart(), [
+      makeTurnSignalEvent({
+        type: "thread.turn-start-requested",
+        messageId: "msg-pending-newer-1",
+      }),
+    ]);
+    const events = await decide(readModel, {
+      type: "thread.turn.cancel-start",
+      commandId: asCommandId("cmd-cancel-start-stale"),
+      threadId: asThreadId("thread-loop"),
+      messageId: asMessageId("msg-pending-loop-1"),
+      createdAt: NOW,
+    });
+    expect(events).toHaveLength(0);
+  });
+
+  it("projecting the cancellation clears the matching pending start only", async () => {
+    const readModel = await readModelWithPendingLoopStart();
+    const thread = readModel.threads.find((entry) => entry.id === asThreadId("thread-loop"));
+    expect(thread?.pendingTurnStart?.messageId).toBe(asMessageId("msg-pending-loop-1"));
+
+    const cleared = await projectAll(readModel, [
+      makeEvent({
+        type: "thread.turn-start-cancelled",
+        payload: {
+          threadId: "thread-loop",
+          messageId: "msg-pending-loop-1",
+          purpose: LOOP_ITERATION_PURPOSE,
+          createdAt: NOW,
+        },
+      }),
+    ]);
+    const clearedThread = cleared.threads.find((entry) => entry.id === asThreadId("thread-loop"));
+    expect(clearedThread?.pendingTurnStart).toBeNull();
+    expect(clearedThread?.hasPendingTurnStart).toBe(false);
+
+    // A cancellation for a different message never clears the pending start.
+    const mismatched = await projectAll(readModel, [
+      makeEvent({
+        type: "thread.turn-start-cancelled",
+        payload: {
+          threadId: "thread-loop",
+          messageId: "msg-other-1",
+          createdAt: NOW,
+        },
+      }),
+    ]);
+    const unchangedThread = mismatched.threads.find(
+      (entry) => entry.id === asThreadId("thread-loop"),
+    );
+    expect(unchangedThread?.pendingTurnStart?.messageId).toBe(asMessageId("msg-pending-loop-1"));
   });
 });

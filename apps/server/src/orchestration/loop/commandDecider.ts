@@ -24,7 +24,11 @@ import { validateLoopBudget } from "@synara/shared/loop";
 import { Schema } from "effect";
 
 import { buildLoopContinuationThreadView, decideLoopContinuation } from "./continuationPolicy.ts";
-import { buildLoopIterationTurnDrafts, type LoopEventDraft } from "./turnEvents.ts";
+import {
+  buildLoopIterationTurnDrafts,
+  buildPendingLoopStartCancellationDrafts,
+  type LoopEventDraft,
+} from "./turnEvents.ts";
 
 export type LoopCommandDecision =
   | { kind: "invalid"; detail: string }
@@ -99,8 +103,9 @@ export function decideLoopSet(
     return invalid(`Loop activation '${command.expectedActivationId}' is no longer active.`);
   }
   const isReconfigure = existingLoop !== null;
-  // Duration budget is anchored from server time so a stale client clock cannot
-  // artificially extend or shorten a loop run.
+  // Duration budget is anchored from server time: client-originated loop
+  // commands have `createdAt` re-stamped with the server clock at the dispatch
+  // boundary, so a skewed client clock cannot extend or shorten a loop run.
   const endsAt =
     command.durationSeconds !== null
       ? new Date(Date.parse(command.createdAt) + command.durationSeconds * 1000).toISOString()
@@ -142,12 +147,23 @@ export function decideLoopSet(
     durationSeconds: command.durationSeconds,
     hardCap: LOOP_DEFAULT_HARD_CAP,
     consecutiveErrors: 0,
+    lastSettledIteration: 0,
     lastStopReason: null,
     activationId: LoopActivationId.makeUnsafe(command.commandId),
     createdAt: isReconfigure ? existingLoop.createdAt : command.createdAt,
     updatedAt: command.createdAt,
   };
   return events([
+    // A reconfigure starts a new activation: durably retire the outgoing
+    // activation's pending start so it cannot linger if the provider never
+    // binds it to a concrete turn.
+    ...(isReconfigure
+      ? buildPendingLoopStartCancellationDrafts({
+          thread,
+          activationId: existingLoop.activationId,
+          createdAt: command.createdAt,
+        })
+      : []),
     {
       type: "thread.loop-set",
       payload: { threadId: command.threadId, loop },
@@ -167,6 +183,16 @@ export function decideLoopOff(
   }
   const stopReason = command.reason ?? "user_stop";
   return events([
+    // Off retires the activation's pending start durably: without this, a
+    // stop before the provider binds a concrete turn would strand the pending
+    // row forever.
+    ...(loop.active
+      ? buildPendingLoopStartCancellationDrafts({
+          thread,
+          activationId: loop.activationId,
+          createdAt: command.createdAt,
+        })
+      : []),
     {
       type: "thread.loop-off",
       payload: {
@@ -192,8 +218,14 @@ export function decideLoopToggle(
 ): LoopCommandDecision {
   if (thread.loop?.active === true) {
     // Bare `/loop` while active toggles future iterations off but leaves a
-    // currently running loop-owned turn alone to settle on its own.
+    // currently running loop-owned turn alone to settle on its own. A pending
+    // (not yet running) loop-owned start is durably retired with the loop.
     return events([
+      ...buildPendingLoopStartCancellationDrafts({
+        thread,
+        activationId: thread.loop.activationId,
+        createdAt: command.createdAt,
+      }),
       {
         type: "thread.loop-off",
         payload: {
@@ -225,6 +257,7 @@ export function decideLoopToggle(
     durationSeconds: null,
     hardCap: LOOP_DEFAULT_HARD_CAP,
     consecutiveErrors: 0,
+    lastSettledIteration: 0,
     lastStopReason: null,
     activationId: LoopActivationId.makeUnsafe(command.commandId),
     createdAt: command.createdAt,
@@ -259,17 +292,21 @@ export function decideLoopContinue(
   }
   const decision = decideLoopContinuation({
     loop: thread.loop,
-    // Anchored to the command, not wall clock, so replays classify identically.
+    // `thread.loop.continue` is server-dispatched only, so `createdAt` is
+    // already server time; anchoring to the command (not wall clock) keeps
+    // at-least-once replays classifying identically.
     nowMs: Date.parse(command.createdAt),
     thread: buildLoopContinuationThreadView(thread),
   });
 
   if (decision.type === "wait") {
-    // Waits persist no accounting, but must still produce an event: a
-    // zero-event command is rejected with a durable receipt, permanently
-    // burning this deterministic commandId. The dedicated wait-noted event
-    // bumps updatedAt to rotate the next continuation commandId without
-    // re-triggering LoopReactor the way thread.loop-set would.
+    // Waits persist settlement accounting (a terminal outcome can arrive
+    // while the next iteration is already queued) and must still produce an
+    // event: a zero-event command is rejected with a durable receipt,
+    // permanently burning this deterministic commandId. The dedicated
+    // wait-noted event bumps updatedAt to rotate the next continuation
+    // commandId without re-triggering LoopReactor the way thread.loop-set
+    // would.
     return events([
       {
         type: "thread.loop-wait-noted",
@@ -277,6 +314,8 @@ export function decideLoopContinue(
           threadId: command.threadId,
           loop: {
             ...thread.loop,
+            consecutiveErrors: decision.nextConsecutiveErrors,
+            lastSettledIteration: decision.nextLastSettledIteration,
             updatedAt: command.createdAt,
           },
         },
@@ -285,6 +324,11 @@ export function decideLoopContinue(
   }
   if (decision.type === "off") {
     return events([
+      ...buildPendingLoopStartCancellationDrafts({
+        thread,
+        activationId: thread.loop.activationId,
+        createdAt: command.createdAt,
+      }),
       {
         type: "thread.loop-off",
         payload: {
@@ -295,6 +339,7 @@ export function decideLoopContinue(
             active: false,
             lastStopReason: decision.reason,
             consecutiveErrors: decision.nextConsecutiveErrors,
+            lastSettledIteration: decision.nextLastSettledIteration,
             updatedAt: command.createdAt,
           },
         },
@@ -312,6 +357,7 @@ export function decideLoopContinue(
     ...thread.loop,
     iteration: nextIteration,
     consecutiveErrors: decision.nextConsecutiveErrors,
+    lastSettledIteration: decision.nextLastSettledIteration,
     lastStopReason: null,
     updatedAt: command.createdAt,
   } satisfies ThreadLoop;

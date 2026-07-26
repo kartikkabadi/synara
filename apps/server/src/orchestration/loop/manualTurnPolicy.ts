@@ -15,7 +15,7 @@ import { Schema } from "effect";
 
 import { chooseStopReason, isLoopBudgetExhausted, isLoopExpired } from "./budget.ts";
 import { RUNNING_SESSION_STATUSES } from "./continuationPolicy.ts";
-import type { LoopEventDraft } from "./turnEvents.ts";
+import { buildPendingLoopStartCancellationDrafts, type LoopEventDraft } from "./turnEvents.ts";
 
 export type ManualMessageLoopDecision =
   | { kind: "none" }
@@ -149,7 +149,16 @@ export function resolveTurnStartLoopPolicy(input: {
     case "loop-off":
       return {
         purpose: undefined,
-        loopEvents: [{ type: "thread.loop-off", payload: decision.payload }],
+        // The manual message wins the race: durably retire the loop-owned
+        // pending start alongside the loop so it can never strand the thread.
+        loopEvents: [
+          ...buildPendingLoopStartCancellationDrafts({
+            thread: input.thread,
+            activationId: loop.activationId,
+            createdAt: input.createdAt,
+          }),
+          { type: "thread.loop-off", payload: decision.payload },
+        ],
         dispatchModeOverride: null,
       };
     case "loop-continued":
