@@ -1322,6 +1322,7 @@ describe("deriveMessagesTimelineRows", () => {
     hardCap: 100,
     consecutiveErrors: 0,
     lastSettledIteration: 0,
+    unsettled: [],
     lastStopReason: "budget_iterations",
     activationId: LoopActivationId.makeUnsafe("activation-1"),
     createdAt: "2026-01-01T00:00:00Z",
