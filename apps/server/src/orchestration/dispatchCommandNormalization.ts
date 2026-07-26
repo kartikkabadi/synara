@@ -180,11 +180,25 @@ export function makeDispatchCommandNormalizer<E>(options: DispatchCommandNormali
       };
     }
 
+    // Loop lifecycle time (duration budget anchors, expiry decisions) is
+    // server-authoritative: re-stamp `createdAt` at the dispatch boundary so a
+    // skewed or malicious client clock can neither expire a duration loop
+    // immediately nor extend it past the requested budget.
+    if (input.command.type === "thread.loop.set" || input.command.type === "thread.loop.toggle") {
+      return {
+        command: { ...input.command, createdAt: new Date().toISOString() },
+        prepareWorkspaceRoot: null,
+      };
+    }
+
     if (input.command.type === "thread.loop.off") {
       // A client-initiated loop off is always a user action; the diagnostic
       // stop reason is reserved for server lifecycle and policy paths.
       const { reason: _reason, ...command } = input.command;
-      return { command, prepareWorkspaceRoot: null };
+      return {
+        command: { ...command, createdAt: new Date().toISOString() },
+        prepareWorkspaceRoot: null,
+      };
     }
 
     if (input.command.type !== "thread.turn.start") {
