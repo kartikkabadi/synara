@@ -62,6 +62,7 @@ describe("decideLoopContinuation", () => {
       type: "continue",
       nextIteration: 1,
       nextConsecutiveErrors: 0,
+      nextLastSettledIteration: 0,
     });
   });
 
@@ -107,7 +108,11 @@ describe("decideLoopContinuation", () => {
       nowMs: NOW,
       thread: makeThread(threadOverrides),
     });
-    expect(result).toEqual({ type: "wait" });
+    expect(result).toEqual({
+      type: "wait",
+      nextConsecutiveErrors: 0,
+      nextLastSettledIteration: 0,
+    });
   });
 
   it.each<[string, Partial<ThreadLoop>, Partial<LoopContinuationThreadView>, string]>([
@@ -126,7 +131,12 @@ describe("decideLoopContinuation", () => {
       nowMs: NOW,
       thread: makeThread(threadOverrides),
     });
-    expect(result).toEqual({ type: "off", reason, nextConsecutiveErrors: 0 });
+    expect(result).toEqual({
+      type: "off",
+      reason,
+      nextConsecutiveErrors: 0,
+      nextLastSettledIteration: 0,
+    });
   });
 
   it("fails closed on a malformed endsAt", () => {
@@ -139,6 +149,7 @@ describe("decideLoopContinuation", () => {
       type: "off",
       reason: "budget_duration",
       nextConsecutiveErrors: 0,
+      nextLastSettledIteration: 0,
     });
   });
 
@@ -152,6 +163,7 @@ describe("decideLoopContinuation", () => {
         type: "off",
         reason: "budget_duration",
         nextConsecutiveErrors: 0,
+        nextLastSettledIteration: 0,
       });
     }
   });
@@ -166,6 +178,7 @@ describe("decideLoopContinuation", () => {
       type: "off",
       reason: "budget_iterations",
       nextConsecutiveErrors: 0,
+      nextLastSettledIteration: 0,
     });
   });
 
@@ -179,6 +192,7 @@ describe("decideLoopContinuation", () => {
       type: "off",
       reason: "hard_cap",
       nextConsecutiveErrors: 0,
+      nextLastSettledIteration: 0,
     });
   });
 
@@ -193,6 +207,7 @@ describe("decideLoopContinuation", () => {
         type: "continue",
         nextIteration: 1,
         nextConsecutiveErrors: 0,
+        nextLastSettledIteration: 0,
       });
     }
   });
@@ -207,6 +222,7 @@ describe("decideLoopContinuation", () => {
       type: "continue",
       nextIteration: 3,
       nextConsecutiveErrors: 0,
+      nextLastSettledIteration: 2,
     });
   });
 
@@ -220,6 +236,7 @@ describe("decideLoopContinuation", () => {
       type: "continue",
       nextIteration: 3,
       nextConsecutiveErrors: 2,
+      nextLastSettledIteration: 2,
     });
   });
 
@@ -233,6 +250,7 @@ describe("decideLoopContinuation", () => {
       type: "off",
       reason: "consecutive_errors",
       nextConsecutiveErrors: 3,
+      nextLastSettledIteration: 3,
     });
   });
 
@@ -246,6 +264,7 @@ describe("decideLoopContinuation", () => {
       type: "continue",
       nextIteration: 2,
       nextConsecutiveErrors: 2,
+      nextLastSettledIteration: 0,
     });
   });
 
@@ -259,6 +278,7 @@ describe("decideLoopContinuation", () => {
       type: "continue",
       nextIteration: 3,
       nextConsecutiveErrors: 1,
+      nextLastSettledIteration: 0,
     });
   });
 
@@ -274,10 +294,11 @@ describe("decideLoopContinuation", () => {
       type: "continue",
       nextIteration: 1,
       nextConsecutiveErrors: 2,
+      nextLastSettledIteration: 0,
     });
   });
 
-  it("ignores loop-owned terminal turns from an older iteration", () => {
+  it("counts an unsettled older-iteration error exactly once (A errors while B is queued)", () => {
     const result = decideLoopContinuation({
       loop: makeLoop({ iteration: 3, consecutiveErrors: 1 }),
       nowMs: NOW,
@@ -286,7 +307,63 @@ describe("decideLoopContinuation", () => {
     expect(result).toEqual({
       type: "continue",
       nextIteration: 4,
+      nextConsecutiveErrors: 2,
+      nextLastSettledIteration: 2,
+    });
+  });
+
+  it("resets errors when an unsettled older iteration completed while the next was queued", () => {
+    const result = decideLoopContinuation({
+      loop: makeLoop({ iteration: 2, consecutiveErrors: 2, lastSettledIteration: 0 }),
+      nowMs: NOW,
+      thread: makeThread({ ...loopOwnedTerminal("completed", 1), hasQueuedTurnStart: true }),
+    });
+    expect(result).toEqual({
+      type: "wait",
+      nextConsecutiveErrors: 0,
+      nextLastSettledIteration: 1,
+    });
+  });
+
+  it("never recounts a duplicate terminal notification for a settled iteration", () => {
+    const result = decideLoopContinuation({
+      loop: makeLoop({ iteration: 2, consecutiveErrors: 1, lastSettledIteration: 2 }),
+      nowMs: NOW,
+      thread: makeThread(loopOwnedTerminal("error", 2)),
+    });
+    expect(result).toEqual({
+      type: "continue",
+      nextIteration: 3,
       nextConsecutiveErrors: 1,
+      nextLastSettledIteration: 2,
+    });
+  });
+
+  it("ignores an out-of-order terminal event below the settlement watermark", () => {
+    const result = decideLoopContinuation({
+      loop: makeLoop({ iteration: 3, consecutiveErrors: 0, lastSettledIteration: 2 }),
+      nowMs: NOW,
+      thread: makeThread(loopOwnedTerminal("error", 1)),
+    });
+    expect(result).toEqual({
+      type: "continue",
+      nextIteration: 4,
+      nextConsecutiveErrors: 0,
+      nextLastSettledIteration: 2,
+    });
+  });
+
+  it("ignores a terminal event for an iteration never dispatched by this activation", () => {
+    const result = decideLoopContinuation({
+      loop: makeLoop({ iteration: 1, consecutiveErrors: 0 }),
+      nowMs: NOW,
+      thread: makeThread(loopOwnedTerminal("error", 5)),
+    });
+    expect(result).toEqual({
+      type: "continue",
+      nextIteration: 2,
+      nextConsecutiveErrors: 0,
+      nextLastSettledIteration: 0,
     });
   });
 
@@ -303,10 +380,11 @@ describe("decideLoopContinuation", () => {
       type: "continue",
       nextIteration: 2,
       nextConsecutiveErrors: 0,
+      nextLastSettledIteration: 0,
     });
   });
 
-  it("waits without persisting error accounting while blocked", () => {
+  it("persists error accounting on a wait so a queued replacement cannot erase it", () => {
     const result = decideLoopContinuation({
       loop: makeLoop({ iteration: 1, consecutiveErrors: 1 }),
       nowMs: NOW,
@@ -315,6 +393,10 @@ describe("decideLoopContinuation", () => {
         hasQueuedTurnStart: true,
       }),
     });
-    expect(result).toEqual({ type: "wait" });
+    expect(result).toEqual({
+      type: "wait",
+      nextConsecutiveErrors: 2,
+      nextLastSettledIteration: 1,
+    });
   });
 });

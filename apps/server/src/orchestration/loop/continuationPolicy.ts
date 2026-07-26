@@ -18,12 +18,21 @@ export type LoopDecision =
       type: "off";
       reason: LoopStopReason;
       nextConsecutiveErrors: number;
+      nextLastSettledIteration: number;
     }
-  | { type: "wait" }
+  | {
+      // Waits persist settlement accounting too: a terminal outcome observed
+      // while the next iteration is already queued must still be counted
+      // exactly once, not deferred until the loop happens to continue.
+      type: "wait";
+      nextConsecutiveErrors: number;
+      nextLastSettledIteration: number;
+    }
   | {
       type: "continue";
       nextIteration: number;
       nextConsecutiveErrors: number;
+      nextLastSettledIteration: number;
     };
 
 export interface LoopContinuationThreadView {
@@ -79,10 +88,13 @@ export function decideLoopContinuation(input: {
   thread: LoopContinuationThreadView;
 }): LoopDecision {
   const { loop, nowMs, thread } = input;
-  const unchanged = { nextConsecutiveErrors: loop.consecutiveErrors };
+  const unchanged = {
+    nextConsecutiveErrors: loop.consecutiveErrors,
+    nextLastSettledIteration: loop.lastSettledIteration,
+  };
 
   if (!loop.active) {
-    return { type: "wait" };
+    return { type: "wait", ...unchanged };
   }
   if (thread.deletedAt !== null) {
     return { type: "off", reason: "thread_deleted", ...unchanged };
@@ -100,22 +112,28 @@ export function decideLoopContinuation(input: {
     return { type: "off", reason: chooseStopReason(loop), ...unchanged };
   }
   if (loop.prompt === "") {
-    return { type: "wait" };
+    return { type: "wait", ...unchanged };
   }
 
   // Error accounting from the latest loop-owned terminal turn of this
-  // activation. The turn was dispatched as iteration `loop.iteration`, so a
-  // later continue (which advances `iteration`) never recounts it.
+  // activation. Settlement identity is the turn's own dispatched iteration
+  // against the monotone `lastSettledIteration` watermark, not the mutable
+  // `loop.iteration`: a manual replacement that already advanced the loop must
+  // not erase an older attempt's terminal outcome, and duplicate or
+  // out-of-order terminal notifications never recount a settled attempt.
   let nextConsecutiveErrors = loop.consecutiveErrors;
+  let nextLastSettledIteration = loop.lastSettledIteration;
   const purpose = thread.latestTurnPurpose;
-  const settledCurrentIteration =
+  const settledNewAttempt =
     purpose !== null &&
     purpose.kind === "loop-iteration" &&
     purpose.activationId === loop.activationId &&
-    purpose.iteration === loop.iteration;
-  if (settledCurrentIteration) {
+    purpose.iteration > loop.lastSettledIteration &&
+    purpose.iteration <= loop.iteration;
+  if (settledNewAttempt) {
     if (thread.latestTurnState === "completed") {
       nextConsecutiveErrors = 0;
+      nextLastSettledIteration = purpose.iteration;
     } else if (thread.latestTurnState === "error") {
       // Interrupted settlements deliberately do not count: user interrupts
       // turn the loop off in the decider before this policy sees them, and
@@ -124,8 +142,14 @@ export function decideLoopContinuation(input: {
       // wrongly kill healthy loops across restarts. They neither increment
       // nor reset the consecutive-error counter.
       nextConsecutiveErrors = loop.consecutiveErrors + 1;
+      nextLastSettledIteration = purpose.iteration;
       if (nextConsecutiveErrors >= LOOP_DEFAULT_CONSECUTIVE_ERROR_THRESHOLD) {
-        return { type: "off", reason: "consecutive_errors", nextConsecutiveErrors };
+        return {
+          type: "off",
+          reason: "consecutive_errors",
+          nextConsecutiveErrors,
+          nextLastSettledIteration,
+        };
       }
     }
   }
@@ -138,12 +162,13 @@ export function decideLoopContinuation(input: {
     thread.interactionMode === "plan" ||
     (thread.sessionStatus !== null && RUNNING_SESSION_STATUSES.has(thread.sessionStatus))
   ) {
-    return { type: "wait" };
+    return { type: "wait", nextConsecutiveErrors, nextLastSettledIteration };
   }
 
   return {
     type: "continue",
     nextIteration: loop.iteration + 1,
     nextConsecutiveErrors,
+    nextLastSettledIteration,
   };
 }
