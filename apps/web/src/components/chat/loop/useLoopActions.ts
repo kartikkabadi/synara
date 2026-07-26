@@ -13,7 +13,7 @@ import {
 import { buildPromptThreadTitleFallback } from "@synara/shared/chatThreads";
 import { useCallback, useRef } from "react";
 import { dispatchLoopCommand } from "./dispatch";
-import { isLoopOwnedTurnRunning } from "./presentation";
+import { isAnyLoopOwnedTurnRunning } from "./presentation";
 import { useLoopStopErrorToast } from "./useLoopStopErrorToast";
 import { toastManager } from "../../ui/toast";
 import { promoteThreadCreate } from "../../../lib/threadCreatePromotion";
@@ -99,7 +99,12 @@ export function useLoopActions(input: UseLoopActionsInput): LoopActions {
     if (stopDispatchInFlightRef.current) {
       return;
     }
-    const interruptRunningTurn = isLoopOwnedTurnRunning(loop, activeThread.latestTurn);
+    // Activation-agnostic on purpose: after Edit Loop creates a new
+    // activation, the running turn still belongs to the old one but "Stop
+    // now" promises to interrupt current work. The server decider atomically
+    // interrupts the concrete turn and turns the active loop off, even for a
+    // stale-activation loop-owned turn.
+    const interruptRunningTurn = isAnyLoopOwnedTurnRunning(activeThread.latestTurn);
     if (!interruptRunningTurn && !loop.active) {
       return;
     }
