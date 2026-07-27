@@ -526,7 +526,12 @@ const makeOfficialSdkClient = Effect.fnUntraced(function* (
         request(acpSdk.methods.agent.authenticate, payload),
       logout: (payload: Acp.LogoutRequest) => request(acpSdk.methods.agent.logout, payload),
       createSession: (payload: Acp.NewSessionRequest) =>
-        request(acpSdk.methods.agent.session.new, payload),
+        // Agents may emit session/update notifications before answering session/new.
+        // Their async dispatch races the response otherwise, so drain them here the
+        // same way prompt() does — callers must observe those updates before acting.
+        request(acpSdk.methods.agent.session.new, payload).pipe(
+          Effect.tap(() => fromPromise(awaitSessionUpdateDrain)),
+        ),
       loadSession: (payload: Acp.LoadSessionRequest) =>
         request(acpSdk.methods.agent.session.load, payload).pipe(
           Effect.map((response) => response ?? {}),
