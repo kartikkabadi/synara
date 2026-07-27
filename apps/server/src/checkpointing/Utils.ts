@@ -11,6 +11,8 @@ import { resolveThreadWorkspaceCwd as resolveSharedThreadWorkspaceCwd } from "@s
 
 export const CHECKPOINT_REFS_PREFIX = "refs/synara/checkpoints";
 
+export const RESCUE_REFS_PREFIX = "refs/synara-rescue";
+
 const MANAGED_CHECKPOINT_REF_PATTERN =
   /^refs\/([A-Za-z0-9._-]+)\/checkpoints\/([A-Za-z0-9_-]+)\/(turn|message-start|turn-start|turn-live)\/([A-Za-z0-9_-]+)$/;
 
@@ -82,6 +84,18 @@ export function checkpointRefForThreadTurnStartInManagedFamily(
   if (parsed?.threadToken !== Encoding.encodeBase64Url(threadId)) return null;
   return CheckpointRef.makeUnsafe(
     `${parsed.familyPrefix}/turn-start/${Encoding.encodeBase64Url(turnId)}`,
+  );
+}
+
+// Pre-revert safety snapshot for the checkpoint-revert compensated saga: captured
+// before a revert mutates the workspace so a failed/uncertain revert can be
+// compensated by restoring the pre-revert workspace state.
+export function rescueCheckpointRefForThread(
+  threadId: ThreadId,
+  timestampMs: number,
+): CheckpointRef {
+  return CheckpointRef.makeUnsafe(
+    `${RESCUE_REFS_PREFIX}/${Encoding.encodeBase64Url(threadId)}/${timestampMs}`,
   );
 }
 

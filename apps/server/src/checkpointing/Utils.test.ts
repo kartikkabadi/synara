@@ -1,12 +1,15 @@
 import { ProjectId, ThreadId, TurnId } from "@synara/contracts";
 import { describe, expect, it } from "vitest";
 
+import { Encoding } from "effect";
+
 import {
   checkpointRefForThreadTurn,
   checkpointRefForThreadTurnInManagedFamily,
   checkpointRefForThreadTurnStartInManagedFamily,
   isManagedCheckpointRefForThread,
   parseManagedCheckpointRef,
+  rescueCheckpointRefForThread,
   resolveProjectCwdForKind,
   resolveThreadWorkspaceCwd,
 } from "./Utils.ts";
@@ -51,6 +54,20 @@ describe("managed checkpoint refs", () => {
         TurnId.makeUnsafe("turn-1"),
       ),
     ).toMatch(/^refs\/historical\/checkpoints\/.+\/turn-start\//);
+  });
+});
+
+describe("rescueCheckpointRefForThread", () => {
+  const threadId = ThreadId.makeUnsafe("thread-1");
+
+  it("creates rescue refs under the rescue namespace with the encoded thread id", () => {
+    expect(rescueCheckpointRefForThread(threadId, 1_700_000_000_000)).toBe(
+      `refs/synara-rescue/${Encoding.encodeBase64Url(threadId)}/1700000000000`,
+    );
+  });
+
+  it("is not a managed checkpoint ref, so checkpoint cleanup never touches it", () => {
+    expect(parseManagedCheckpointRef(rescueCheckpointRefForThread(threadId, 42))).toBeNull();
   });
 });
 
