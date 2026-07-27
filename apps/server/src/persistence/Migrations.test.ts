@@ -491,11 +491,12 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
         [85, "AutomationSettings"],
         [86, "NormalizeStudioThreadWorkspaces"],
         [87, "DropUnusedOrchestrationEventIndexes"],
+        [88, "ThreadCompactionOperations"],
       ]);
 
       const tracker = yield* trackerRows(sql);
       assert.deepStrictEqual(
-        tracker.slice(-18).map((row) => [row.migration_id, row.name]),
+        tracker.slice(-19).map((row) => [row.migration_id, row.name]),
         [
           [70, "AgentGatewayOperations"],
           [71, "ProjectionThreadsGatewayProvenance"],
@@ -515,6 +516,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [85, "AutomationSettings"],
           [86, "NormalizeStudioThreadWorkspaces"],
           [87, "DropUnusedOrchestrationEventIndexes"],
+          [88, "ThreadCompactionOperations"],
         ],
       );
 
@@ -592,11 +594,12 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
         [85, "AutomationSettings"],
         [86, "NormalizeStudioThreadWorkspaces"],
         [87, "DropUnusedOrchestrationEventIndexes"],
+        [88, "ThreadCompactionOperations"],
       ]);
 
       const tracker = yield* trackerRows(sql);
       assert.deepStrictEqual(
-        tracker.slice(-14).map((row) => [row.migration_id, row.name]),
+        tracker.slice(-15).map((row) => [row.migration_id, row.name]),
         [
           [74, "ExternalMcpIntegrations"],
           [75, "ExternalMcpActiveCapacity"],
@@ -612,6 +615,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [85, "AutomationSettings"],
           [86, "NormalizeStudioThreadWorkspaces"],
           [87, "DropUnusedOrchestrationEventIndexes"],
+          [88, "ThreadCompactionOperations"],
         ],
       );
       const preservedSpaces = yield* sql<{ readonly spaceId: string }>`
