@@ -255,7 +255,7 @@ function checkout(paths: ManagedBuildPaths, commit: string): void {
 }
 
 function build(paths: ManagedBuildPaths): void {
-  run("bun", ["install", "--frozen-lockfile"], paths.source);
+  run("sfw", ["bun", "install", "--frozen-lockfile"], paths.source);
   run("bun", ["run", "build:desktop"], paths.source);
   run("bun", ["run", "release:smoke"], paths.source);
 }
