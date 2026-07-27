@@ -439,7 +439,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   activeTurnInProgress,
   activeTurnStartedAt,
   worktreeSetup: worktreeSetupProp,
-  loop = null,
+  loop: loopProp,
   followLiveOutput: followLiveOutputProp,
   listRef,
   controllerRef,
@@ -463,7 +463,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onUndoTurnFiles,
   onEditUserMessage,
   activeTurnId,
-  activeTurnPurpose = null,
+  activeTurnPurpose: activeTurnPurposeProp,
   isRevertingCheckpoint,
   onImageExpand,
   onIsAtEndChange,
@@ -495,6 +495,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const threadMarkers = threadMarkersProp ?? EMPTY_MESSAGE_MARKERS;
   const enteringUserMessageIds = enteringUserMessageIdsProp ?? EMPTY_MESSAGE_ID_SET;
   const crossTaskOrigin = crossTaskOriginProp ?? null;
+  const loop = loopProp ?? null;
+  const activeTurnPurpose = activeTurnPurposeProp ?? null;
   const normalizedChatFontSizePx = normalizeChatFontSizePx(
     chatFontSizePxProp ?? DEFAULT_CHAT_FONT_SIZE_PX,
   );

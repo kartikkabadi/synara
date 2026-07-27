@@ -857,6 +857,7 @@ describe("PROVIDER_OPTIONS", () => {
     const cursor = PROVIDER_OPTIONS.find((option) => option.value === "cursor");
     const grok = PROVIDER_OPTIONS.find((option) => option.value === "grok");
     const droid = PROVIDER_OPTIONS.find((option) => option.value === "droid");
+    const devin = PROVIDER_OPTIONS.find((option) => option.value === "devin");
     const kilo = PROVIDER_OPTIONS.find((option) => option.value === "kilo");
     const opencode = PROVIDER_OPTIONS.find((option) => option.value === "opencode");
     const pi = PROVIDER_OPTIONS.find((option) => option.value === "pi");
@@ -867,6 +868,7 @@ describe("PROVIDER_OPTIONS", () => {
       { value: "antigravity", label: "Antigravity", available: true },
       { value: "grok", label: "Grok", available: true },
       { value: "droid", label: "Droid", available: true },
+      { value: "devin", label: "Devin", available: true },
       { value: "kilo", label: "Kilo", available: true },
       { value: "opencode", label: "OpenCode", available: true },
       { value: "pi", label: "Pi", available: true },
@@ -889,6 +891,11 @@ describe("PROVIDER_OPTIONS", () => {
     expect(droid).toEqual({
       value: "droid",
       label: "Droid",
+      available: true,
+    });
+    expect(devin).toEqual({
+      value: "devin",
+      label: "Devin",
       available: true,
     });
     expect(kilo).toEqual({
