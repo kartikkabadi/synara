@@ -2073,7 +2073,7 @@ export function makeDroidAdapter(
         // Probe live sessions for an ACP-advertised compact/compress command
         // instead of hard-coding support; today's Factory ACP never advertises
         // one, so the descriptor stays unsupported until droid does.
-        const advertisedCommands: Array<EffectAcpSchema.AvailableCommand> = [];
+        const advertisedCommands: Array<Acp.AvailableCommand> = [];
         for (const ctx of sessions.values()) {
           if (ctx.stopped) continue;
           advertisedCommands.push(...(yield* ctx.acp.getAvailableCommands));

@@ -14,6 +14,7 @@ import {
   EventId,
   MODEL_OPTIONS_BY_PROVIDER,
   type ProviderApprovalDecision,
+  type ProviderCompactionCapabilities,
   type ProviderComposerCapabilities,
   type ProviderInteractionMode,
   type ProviderListModelsResult,
@@ -1776,6 +1777,24 @@ export function makeDevinAdapter(
         return c !== undefined && !c.stopped;
       });
 
+    // Devin sessions run remotely; the CLI exposes no compaction surface.
+    const compaction: ProviderCompactionCapabilities = {
+      manual: {
+        mode: "unsupported",
+        mechanism: "unsupported",
+        supportsInstructions: false,
+      },
+      automatic: {
+        mode: "unknown",
+        statusVisibility: "none",
+        triggerVisibility: "opaque",
+      },
+      telemetry: {
+        lifecycle: "none",
+        contextUsage: "none",
+      },
+    };
+
     const getComposerCapabilities: NonNullable<DevinAdapterShape["getComposerCapabilities"]> = () =>
       Effect.succeed({
         provider: PROVIDER,
@@ -1785,6 +1804,7 @@ export function makeDevinAdapter(
         supportsPluginMentions: false,
         supportsPluginDiscovery: false,
         supportsRuntimeModelList: true,
+        compaction,
         supportsThreadCompaction: false,
         supportsThreadImport: false,
       } satisfies ProviderComposerCapabilities);
