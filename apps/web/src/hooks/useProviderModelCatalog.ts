@@ -111,6 +111,7 @@ export function useProviderModelCatalog(input: {
   const antigravityModelDiscoveryEnabled = shouldDiscoverProvider("antigravity");
   const grokModelDiscoveryEnabled = shouldDiscoverProvider("grok");
   const droidModelDiscoveryEnabled = shouldDiscoverProvider("droid", false);
+  const devinModelDiscoveryEnabled = shouldDiscoverProvider("devin", false);
   const kiloModelDiscoveryEnabled = shouldDiscoverProvider("kilo");
   const openCodeModelDiscoveryEnabled = shouldDiscoverProvider("opencode");
   const piModelDiscoveryEnabled = shouldDiscoverProvider("pi");
@@ -158,6 +159,14 @@ export function useProviderModelCatalog(input: {
       // Droid probes every model through a disposable ACP session. Keep it
       // provider-scoped instead of warming it from unrelated picker/settings UI.
       enabled: droidModelDiscoveryEnabled,
+    }),
+  );
+  const devinDynamicModelsQuery = useQuery(
+    providerModelsQueryOptions({
+      provider: "devin",
+      binaryPath: settings.devinBinaryPath || null,
+      cwd: discoveryCwd,
+      enabled: devinModelDiscoveryEnabled,
     }),
   );
   const openCodeDynamicModelsQuery = useQuery(
@@ -236,6 +245,13 @@ export function useProviderModelCatalog(input: {
     droidModelDiscoveryEnabled &&
     !hasResolvedDroidModelDiscovery &&
     isInitialModelDiscoveryPending(droidDynamicModelsQuery);
+  const hasResolvedDevinModelDiscovery =
+    devinDynamicModelsQuery.data?.source === "devin-acp" &&
+    (devinDynamicModelsQuery.data.models.length ?? 0) > 0;
+  const devinModelDiscoveryPending =
+    devinModelDiscoveryEnabled &&
+    !hasResolvedDevinModelDiscovery &&
+    isInitialModelDiscoveryPending(devinDynamicModelsQuery);
   const hasResolvedKiloModelDiscovery =
     (kiloDynamicModelsQuery.data?.source === "kilo-cli" ||
       kiloDynamicModelsQuery.data?.source === "kilo") &&
@@ -287,6 +303,7 @@ export function useProviderModelCatalog(input: {
       ),
       grok: getAppModelOptions("grok", customModelsByProvider.grok, modelHintByProvider?.grok),
       droid: getAppModelOptions("droid", customModelsByProvider.droid, modelHintByProvider?.droid),
+      devin: getAppModelOptions("devin", customModelsByProvider.devin, modelHintByProvider?.devin),
       kilo: getAppModelOptions("kilo", customModelsByProvider.kilo, modelHintByProvider?.kilo),
       opencode: getAppModelOptions(
         "opencode",
@@ -309,6 +326,7 @@ export function useProviderModelCatalog(input: {
       antigravity: antigravityModelsQuery.data,
       grok: grokDynamicModelsQuery.data,
       droid: droidDynamicModelsQuery.data,
+      devin: devinDynamicModelsQuery.data,
       kilo: kiloDynamicModelsQuery.data,
       opencode: openCodeDynamicModelsQuery.data,
       pi: piDynamicModelsQuery.data,
@@ -320,6 +338,7 @@ export function useProviderModelCatalog(input: {
       "antigravity",
       "grok",
       "droid",
+      "devin",
       "kilo",
       "opencode",
       "pi",
@@ -341,6 +360,7 @@ export function useProviderModelCatalog(input: {
     cursorDynamicModelsQuery.data,
     cursorRuntimeModels,
     customModelsByProvider,
+    devinDynamicModelsQuery.data,
     droidDynamicModelsQuery.data,
     grokDynamicModelsQuery.data,
     kiloDynamicModelsQuery.data,
@@ -354,6 +374,7 @@ export function useProviderModelCatalog(input: {
       antigravity: antigravityModelDiscoveryPending,
       cursor: cursorModelDiscoveryPending,
       droid: droidModelDiscoveryPending,
+      devin: devinModelDiscoveryPending,
       kilo: kiloModelDiscoveryPending,
       opencode: openCodeModelDiscoveryPending,
       pi: piModelDiscoveryPending,
@@ -361,6 +382,7 @@ export function useProviderModelCatalog(input: {
     [
       antigravityModelDiscoveryPending,
       cursorModelDiscoveryPending,
+      devinModelDiscoveryPending,
       droidModelDiscoveryPending,
       kiloModelDiscoveryPending,
       openCodeModelDiscoveryPending,
@@ -378,6 +400,7 @@ export function useProviderModelCatalog(input: {
       antigravity: antigravityModelsQuery.data?.models ?? [],
       grok: grokDynamicModelsQuery.data?.models ?? [],
       droid: droidDynamicModelsQuery.data?.models ?? [],
+      devin: devinDynamicModelsQuery.data?.models ?? [],
       kilo: kiloDynamicModelsQuery.data?.models ?? [],
       opencode: openCodeDynamicModelsQuery.data?.models ?? [],
       pi: piDynamicModelsQuery.data?.models ?? [],
@@ -387,6 +410,7 @@ export function useProviderModelCatalog(input: {
       claudeDynamicModelsQuery.data?.models,
       codexDynamicModelsQuery.data?.models,
       cursorRuntimeModels,
+      devinDynamicModelsQuery.data?.models,
       droidDynamicModelsQuery.data?.models,
       grokDynamicModelsQuery.data?.models,
       kiloDynamicModelsQuery.data?.models,
@@ -438,11 +462,13 @@ export function useProviderModelCatalog(input: {
               ? grokDynamicModelsQuery
               : selectedProvider === "droid"
                 ? droidDynamicModelsQuery
-                : selectedProvider === "kilo"
-                  ? kiloDynamicModelsQuery
-                  : selectedProvider === "opencode"
-                    ? openCodeDynamicModelsQuery
-                    : piDynamicModelsQuery;
+                : selectedProvider === "devin"
+                  ? devinDynamicModelsQuery
+                  : selectedProvider === "kilo"
+                    ? kiloDynamicModelsQuery
+                    : selectedProvider === "opencode"
+                      ? openCodeDynamicModelsQuery
+                      : piDynamicModelsQuery;
   const selectedProviderModelsLoading =
     selectedProviderRuntimeModelDiscoveryPending ||
     (loadingModelProviders[selectedProvider] === undefined &&

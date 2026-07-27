@@ -1229,7 +1229,7 @@ export function sessionConfigOptionsFromSetup(
 }
 
 // Flattens grouped ACP select options so semantic configuration lookup stays provider-agnostic.
-function flattenSessionConfigSelectOptions(
+export function flattenSessionConfigSelectOptions(
   options:
     | ReadonlyArray<Acp.SessionConfigSelectOption>
     | ReadonlyArray<Acp.SessionConfigSelectGroup>,

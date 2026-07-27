@@ -252,6 +252,7 @@ describe("resolveAppModelSelection", () => {
           antigravity: [],
           grok: [],
           droid: [],
+          devin: [],
           kilo: [],
           opencode: [],
           pi: [],
@@ -272,6 +273,7 @@ describe("resolveAppModelSelection", () => {
           antigravity: [],
           grok: [],
           droid: [],
+          devin: [],
           kilo: [],
           opencode: [],
           pi: [],
@@ -292,6 +294,7 @@ describe("resolveAppModelSelection", () => {
           antigravity: [],
           grok: [],
           droid: [],
+          devin: [],
           kilo: [],
           opencode: [],
           pi: [],
@@ -312,6 +315,7 @@ describe("resolveAppModelSelection", () => {
           antigravity: [],
           grok: [],
           droid: [],
+          devin: [],
           kilo: [],
           opencode: [],
           pi: [],
@@ -332,6 +336,7 @@ describe("resolveAppModelSelection", () => {
           antigravity: [],
           grok: [],
           droid: [],
+          devin: [],
           kilo: [],
           opencode: [],
           pi: [],
@@ -448,6 +453,7 @@ describe("normalizeStoredAppSettings", () => {
         antigravityBinaryPath: "agy",
         grokBinaryPath: "grok",
         droidBinaryPath: "droid",
+        devinBinaryPath: "devin",
         kiloBinaryPath: "kilo",
         openCodeBinaryPath: "opencode",
         piBinaryPath: "pi",
@@ -462,6 +468,7 @@ describe("normalizeStoredAppSettings", () => {
       antigravityBinaryPath: "",
       grokBinaryPath: "",
       droidBinaryPath: "",
+      devinBinaryPath: "",
       kiloBinaryPath: "",
       openCodeBinaryPath: "",
       piBinaryPath: "",
@@ -490,6 +497,7 @@ describe("getProviderStartOptions", () => {
         antigravityBinaryPath: "/usr/local/bin/agy",
         grokBinaryPath: "/usr/local/bin/grok",
         droidBinaryPath: "",
+        devinBinaryPath: "",
         kiloBinaryPath: "",
         kiloServerUrl: "",
         openCodeBinaryPath: "",
@@ -529,6 +537,7 @@ describe("getProviderStartOptions", () => {
         antigravityBinaryPath: "",
         grokBinaryPath: "",
         droidBinaryPath: "",
+        devinBinaryPath: "",
         kiloBinaryPath: "",
         kiloServerUrl: "",
         openCodeBinaryPath: "",
@@ -551,6 +560,7 @@ describe("getProviderStartOptions", () => {
         antigravityBinaryPath: "agy",
         grokBinaryPath: "grok",
         droidBinaryPath: "droid",
+        devinBinaryPath: "devin",
         kiloBinaryPath: "kilo",
         kiloServerUrl: "",
         openCodeBinaryPath: "opencode",
@@ -571,6 +581,7 @@ describe("provider-indexed custom model settings", () => {
     customAntigravityModels: ["Gemini 3.5 Flash (Experimental)"],
     customGrokModels: ["grok/custom-fast"],
     customDroidModels: ["claude-opus-4-8-custom"],
+    customDevinModels: ["devin/custom-swe"],
     customKiloModels: ["kilo/kilo-auto/free"],
     customOpenCodeModels: ["openrouter/gpt-oss-120b"],
     customPiModels: ["anthropic/custom-pi"],
@@ -584,6 +595,7 @@ describe("provider-indexed custom model settings", () => {
       "antigravity",
       "grok",
       "droid",
+      "devin",
       "kilo",
       "opencode",
       "pi",
@@ -615,6 +627,7 @@ describe("provider-indexed custom model settings", () => {
       customAntigravityModels: ["Gemini 3.5 Flash (Experimental)"],
       customGrokModels: ["grok/default-fast"],
       customDroidModels: ["droid/default-model"],
+      customDevinModels: ["devin/default-swe"],
       customKiloModels: ["kilo/default-auto"],
       customOpenCodeModels: ["openai/gpt-5"],
       customPiModels: ["anthropic/default-pi"],
@@ -665,6 +678,12 @@ describe("provider-indexed custom model settings", () => {
     });
   });
 
+  it("patches custom models for devin", () => {
+    expect(patchCustomModels("devin", ["devin/custom-swe"])).toEqual({
+      customDevinModels: ["devin/custom-swe"],
+    });
+  });
+
   it("patches custom models for cursor", () => {
     expect(patchCustomModels("cursor", ["cursor/custom-model"])).toEqual({
       customCursorModels: ["cursor/custom-model"],
@@ -697,6 +716,7 @@ describe("provider-indexed custom model settings", () => {
       antigravity: ["Gemini 3.5 Flash (Experimental)"],
       grok: ["grok/custom-fast"],
       droid: ["claude-opus-4-8-custom"],
+      devin: ["devin/custom-swe"],
       kilo: ["kilo/kilo-auto/free"],
       opencode: ["openrouter/gpt-oss-120b"],
       pi: ["anthropic/custom-pi"],
@@ -746,6 +766,7 @@ describe("provider-indexed custom model settings", () => {
       ],
       customGrokModels: [" grok-build ", "grok/custom-fast", "grok/custom-fast"],
       customDroidModels: [" opus ", "droid/custom-model", "droid/custom-model"],
+      customDevinModels: [" swe-1-7 ", "devin/custom-swe", "devin/custom-swe"],
       customKiloModels: [" kilo/kilo-auto/free ", "kilo/kilo-auto/free"],
       customOpenCodeModels: [
         " openai/gpt-5 ",
@@ -772,6 +793,10 @@ describe("provider-indexed custom model settings", () => {
     expect(
       modelOptionsByProvider.droid.filter((option) => option.slug === "droid/custom-model"),
     ).toHaveLength(1);
+    expect(
+      modelOptionsByProvider.devin.filter((option) => option.slug === "devin/custom-swe"),
+    ).toHaveLength(1);
+    expect(modelOptionsByProvider.devin.some((option) => option.slug === "swe-1-7")).toBe(true);
     expect(
       modelOptionsByProvider.cursor.filter((option) => option.slug === "cursor/custom-model"),
     ).toHaveLength(1);
@@ -872,6 +897,7 @@ describe("AppSettingsSchema", () => {
       customCursorModels: [],
       customGrokModels: [],
       customDroidModels: [],
+      customDevinModels: [],
       customKiloModels: [],
       customOpenCodeModels: [],
       customPiModels: [],

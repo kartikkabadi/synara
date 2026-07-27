@@ -18,6 +18,22 @@
  */
 import { Effect, Fiber, Scope } from "effect";
 
+/**
+ * ACP session-event tags that prove the agent is still doing turn work.
+ */
+export function isAcpTurnProgressEventTag(tag: string): boolean {
+  switch (tag) {
+    case "ContentDelta":
+    case "ToolCallUpdated":
+    case "PlanUpdated":
+    case "AssistantItemStarted":
+    case "AssistantItemCompleted":
+      return true;
+    default:
+      return false;
+  }
+}
+
 export interface AcpTurnIdleWatchdogParams {
   /** How long the turn may go without any inbound ACP activity before it is force-failed. */
   readonly idleTimeoutMs: number;

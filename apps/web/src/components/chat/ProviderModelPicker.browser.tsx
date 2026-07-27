@@ -32,6 +32,12 @@ const MODEL_OPTIONS_BY_PROVIDER = {
     },
     { slug: "custom:GPT-5.6-Luna-0", name: "Custom GPT-5.6 Luna" },
   ],
+  devin: [
+    {
+      slug: "swe-1-7",
+      name: "SWE-1.7",
+    },
+  ],
   kilo: [
     {
       slug: "kilo/kilo-auto/free",

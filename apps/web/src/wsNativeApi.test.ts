@@ -310,6 +310,7 @@ describe("wsNativeApi", () => {
           antigravity: { enabled: true, binaryPath: "agy", customModels: [] },
           grok: { enabled: true, binaryPath: "grok", customModels: [] },
           droid: { enabled: true, binaryPath: "droid", customModels: [] },
+          devin: { enabled: true, binaryPath: "devin", customModels: [] },
           kilo: {
             enabled: true,
             binaryPath: "kilo",

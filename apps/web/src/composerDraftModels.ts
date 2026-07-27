@@ -8,6 +8,7 @@ import {
   type ClaudeCodeEffort,
   type CodexReasoningEffort,
   type CursorModelOptions,
+  type DevinModelOptions,
   type DroidReasoningEffort,
   type GrokReasoningEffort,
   type ModelSelection,
@@ -34,6 +35,7 @@ export const COMPOSER_PROVIDER_KINDS = [
   "antigravity",
   "grok",
   "droid",
+  "devin",
   "kilo",
   "opencode",
   "pi",
@@ -183,6 +185,14 @@ export function makeModelSelection(
           ? { options: options as Extract<ModelSelection, { provider: "droid" }>["options"] }
           : {}),
       };
+    case "devin":
+      return {
+        provider,
+        model,
+        ...(options
+          ? { options: options as Extract<ModelSelection, { provider: "devin" }>["options"] }
+          : {}),
+      };
     case "kilo":
       return {
         provider,
@@ -239,6 +249,10 @@ export function normalizeProviderModelOptions(
   const droidCandidate =
     candidate?.droid && typeof candidate.droid === "object"
       ? (candidate.droid as Record<string, unknown>)
+      : null;
+  const devinCandidate =
+    candidate?.devin && typeof candidate.devin === "object"
+      ? (candidate.devin as Record<string, unknown>)
       : null;
   const openCodeCandidate =
     candidate?.opencode && typeof candidate.opencode === "object"
@@ -359,6 +373,35 @@ export function normalizeProviderModelOptions(
   );
   const droid =
     droidReasoningEffort !== undefined ? { reasoningEffort: droidReasoningEffort } : undefined;
+  const devinReasoningEffort = trimStringOrUndefined(devinCandidate?.reasoningEffort);
+  const devinFastMode =
+    devinCandidate?.fastMode === true
+      ? true
+      : devinCandidate?.fastMode === false
+        ? false
+        : undefined;
+  const devinThinking =
+    devinCandidate?.thinking === true
+      ? true
+      : devinCandidate?.thinking === false
+        ? false
+        : undefined;
+  const devinContextWindow = trimStringOrUndefined(devinCandidate?.contextWindow);
+  const devinVariant = trimStringOrUndefined(devinCandidate?.variant);
+  const devin: DevinModelOptions | undefined =
+    devinReasoningEffort !== undefined ||
+    devinFastMode !== undefined ||
+    devinThinking !== undefined ||
+    devinContextWindow !== undefined ||
+    devinVariant !== undefined
+      ? {
+          ...(devinReasoningEffort !== undefined ? { reasoningEffort: devinReasoningEffort } : {}),
+          ...(devinFastMode !== undefined ? { fastMode: devinFastMode } : {}),
+          ...(devinThinking !== undefined ? { thinking: devinThinking } : {}),
+          ...(devinContextWindow !== undefined ? { contextWindow: devinContextWindow } : {}),
+          ...(devinVariant !== undefined ? { variant: devinVariant } : {}),
+        }
+      : undefined;
   const openCodeVariant = trimStringOrUndefined(openCodeCandidate?.variant);
   const openCodeAgent = trimStringOrUndefined(openCodeCandidate?.agent);
   const opencode =
@@ -394,6 +437,7 @@ export function normalizeProviderModelOptions(
     !antigravity &&
     !grok &&
     !droid &&
+    !devin &&
     !kilo &&
     !opencode &&
     !pi
@@ -407,6 +451,7 @@ export function normalizeProviderModelOptions(
     ...(antigravity ? { antigravity } : {}),
     ...(grok ? { grok } : {}),
     ...(droid ? { droid } : {}),
+    ...(devin ? { devin } : {}),
     ...(kilo ? { kilo } : {}),
     ...(opencode ? { opencode } : {}),
     ...(pi ? { pi } : {}),
@@ -475,15 +520,17 @@ export function normalizeModelSelection(
             ? modelOptions?.grok
             : provider === "droid"
               ? modelOptions?.droid
-              : provider === "kilo"
-                ? modelOptions?.kilo
-                : provider === "cursor"
-                  ? modelOptions?.cursor
-                  : provider === "opencode"
-                    ? modelOptions?.opencode
-                    : provider === "pi"
-                      ? modelOptions?.pi
-                      : undefined;
+              : provider === "devin"
+                ? modelOptions?.devin
+                : provider === "kilo"
+                  ? modelOptions?.kilo
+                  : provider === "cursor"
+                    ? modelOptions?.cursor
+                    : provider === "opencode"
+                      ? modelOptions?.opencode
+                      : provider === "pi"
+                        ? modelOptions?.pi
+                        : undefined;
   const normalizedOptions =
     provider === "antigravity" && hasLegacyAntigravityEffort
       ? {

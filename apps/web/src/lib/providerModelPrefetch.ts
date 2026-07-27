@@ -25,6 +25,7 @@ export type ProviderModelPrefetchSettings = Pick<
   | "antigravityBinaryPath"
   | "grokBinaryPath"
   | "droidBinaryPath"
+  | "devinBinaryPath"
   | "kiloBinaryPath"
   | "openCodeBinaryPath"
   | "piBinaryPath"
@@ -96,6 +97,12 @@ export function providerModelsPrefetchQueryOptions(input: {
       return providerModelsQueryOptions({
         provider: "droid",
         binaryPath: settings.droidBinaryPath || null,
+        cwd,
+      });
+    case "devin":
+      return providerModelsQueryOptions({
+        provider: "devin",
+        binaryPath: settings.devinBinaryPath || null,
         cwd,
       });
     case "kilo":

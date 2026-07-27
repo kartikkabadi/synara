@@ -36,6 +36,10 @@ describe("providerStartOptionsFromServerSettings", () => {
           ...DEFAULT_SERVER_SETTINGS.providers.droid,
           binaryPath: "",
         },
+        devin: {
+          ...DEFAULT_SERVER_SETTINGS.providers.devin,
+          binaryPath: "",
+        },
         kilo: {
           ...DEFAULT_SERVER_SETTINGS.providers.kilo,
           binaryPath: "",
@@ -70,6 +74,7 @@ describe("providerStartOptionsFromServerSettings", () => {
     expect(providerOptions.antigravity).toEqual({});
     expect(providerOptions.grok).toEqual({});
     expect(providerOptions.droid).toEqual({});
+    expect(providerOptions.devin).toEqual({});
     expect(providerOptions.kilo).toEqual({});
     expect(providerOptions.opencode).toEqual({ experimentalWebSockets: false });
     expect(providerOptions.pi).toEqual({});

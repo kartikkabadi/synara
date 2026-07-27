@@ -113,6 +113,7 @@ const CURSOR_PROVIDER = "cursor" as const;
 const ANTIGRAVITY_PROVIDER = "antigravity" as const;
 const GROK_PROVIDER = "grok" as const;
 const DROID_PROVIDER = "droid" as const;
+const DEVIN_PROVIDER = "devin" as const;
 const KILO_PROVIDER = "kilo" as const;
 const OPENCODE_PROVIDER = "opencode" as const;
 const PI_PROVIDER = "pi" as const;
@@ -127,6 +128,7 @@ const PROVIDERS = [
   ANTIGRAVITY_PROVIDER,
   GROK_PROVIDER,
   DROID_PROVIDER,
+  DEVIN_PROVIDER,
   KILO_PROVIDER,
   OPENCODE_PROVIDER,
   PI_PROVIDER,
@@ -2148,6 +2150,8 @@ export function makeProviderHealthLive(options?: { readonly providerUpdateTimeou
             return settings.providers.grok.binaryPath;
           case "droid":
             return settings.providers.droid.binaryPath;
+          case "devin":
+            return settings.providers.devin.binaryPath;
           case "kilo":
             return settings.providers.kilo.binaryPath;
           case "opencode":

@@ -12,6 +12,7 @@ type ModelProviderKind =
   | "antigravity"
   | "grok"
   | "droid"
+  | "devin"
   | "kilo"
   | "opencode"
   | "pi";
@@ -75,6 +76,9 @@ function inferProviderFromLabel(label: string): ModelProviderKind | undefined {
   if (lowerLabel.includes("droid") || lowerLabel.includes("factory")) {
     return "droid";
   }
+  if (lowerLabel.includes("devin") || lowerLabel.includes("windsurf")) {
+    return "devin";
+  }
   if (lowerLabel.includes("codex")) {
     return "codex";
   }
@@ -89,6 +93,7 @@ function inferLegacyModelProvider(provider: unknown, model: string): ModelProvid
     provider === "antigravity" ||
     provider === "grok" ||
     provider === "droid" ||
+    provider === "devin" ||
     provider === "kilo" ||
     provider === "opencode" ||
     provider === "pi"
@@ -118,6 +123,9 @@ function inferLegacyModelProvider(provider: unknown, model: string): ModelProvid
   }
   if (lowerModel.includes("grok")) {
     return "grok";
+  }
+  if (lowerModel.includes("devin") || lowerModel.includes("windsurf")) {
+    return "devin";
   }
   return "codex";
 }

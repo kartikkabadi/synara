@@ -49,6 +49,7 @@ export const PROVIDER_DESCRIPTORS = [
   },
   { kind: "grok", displayName: PROVIDER_DISPLAY_NAMES.grok, available: true, usage: null },
   { kind: "droid", displayName: PROVIDER_DISPLAY_NAMES.droid, available: true, usage: null },
+  { kind: "devin", displayName: PROVIDER_DISPLAY_NAMES.devin, available: true, usage: null },
   { kind: "kilo", displayName: PROVIDER_DISPLAY_NAMES.kilo, available: true, usage: null },
   {
     kind: "opencode",

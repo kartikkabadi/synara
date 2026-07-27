@@ -12,6 +12,8 @@ import type {
   CodexModelSelection,
   CursorModelOptions,
   CursorModelSelection,
+  DevinModelOptions,
+  DevinModelSelection,
   DroidModelOptions,
   DroidModelSelection,
   GrokModelOptions,
@@ -344,6 +346,11 @@ export function buildModelSelection(
   options?: DroidModelOptions | null | undefined,
 ): DroidModelSelection;
 export function buildModelSelection(
+  provider: "devin",
+  model: string,
+  options?: DevinModelOptions | null | undefined,
+): DevinModelSelection;
+export function buildModelSelection(
   provider: "opencode",
   model: string,
   options?: OpenCodeModelOptions | null | undefined,
@@ -415,6 +422,14 @@ export function buildModelSelection(
             provider,
             model,
             options: options as DroidModelOptions,
+          }
+        : { provider, model };
+    case "devin":
+      return options
+        ? {
+            provider,
+            model,
+            options: options as DevinModelOptions,
           }
         : { provider, model };
     case "kilo":

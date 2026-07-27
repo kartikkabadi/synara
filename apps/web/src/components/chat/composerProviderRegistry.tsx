@@ -210,6 +210,43 @@ function getProviderStateFromCapabilities(
       normalizedOptions = reasoningEffort ? { reasoningEffort } : undefined;
       break;
     }
+    case "devin": {
+      const providerOptions = modelOptions?.devin;
+      rawEffort = trimOrNull(providerOptions?.reasoningEffort);
+      const defaultReasoningEffort = getDefaultEffort(caps);
+      const reasoningEffort =
+        rawEffort && hasEffortLevel(caps, rawEffort) && rawEffort !== defaultReasoningEffort
+          ? rawEffort
+          : undefined;
+      const rawContextWindow = trimOrNull(providerOptions?.contextWindow);
+      const defaultContextWindow = getDefaultContextWindow(caps);
+      const contextWindow =
+        rawContextWindow &&
+        hasContextWindowOption(caps, rawContextWindow) &&
+        rawContextWindow !== defaultContextWindow
+          ? rawContextWindow
+          : undefined;
+      const fastModeEnabled = caps.supportsFastMode && providerOptions?.fastMode === true;
+      const thinking =
+        caps.supportsThinkingToggle && providerOptions?.thinking !== undefined
+          ? providerOptions.thinking
+          : undefined;
+      const rawVariant = trimOrNull(providerOptions?.variant);
+      const variantOptions = caps.variantOptions ?? [];
+      const variant =
+        rawVariant && variantOptions.some((option) => option.value === rawVariant)
+          ? rawVariant
+          : undefined;
+      const nextOptions = {
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+        ...(fastModeEnabled ? { fastMode: true } : {}),
+        ...(thinking !== undefined ? { thinking } : {}),
+        ...(contextWindow ? { contextWindow } : {}),
+        ...(variant ? { variant } : {}),
+      };
+      normalizedOptions = Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+      break;
+    }
     case "kilo":
     case "opencode": {
       const providerOptions = provider === "kilo" ? modelOptions?.kilo : modelOptions?.opencode;
@@ -303,6 +340,11 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
     getState: (input) => getProviderStateFromCapabilities(input),
     renderTraitsMenuContent: (input) => renderTraitsMenuContentForProvider("droid", input),
     renderTraitsPicker: (input) => renderTraitsPickerForProvider("droid", input),
+  },
+  devin: {
+    getState: (input) => getProviderStateFromCapabilities(input),
+    renderTraitsMenuContent: (input) => renderTraitsMenuContentForProvider("devin", input),
+    renderTraitsPicker: (input) => renderTraitsPickerForProvider("devin", input),
   },
   kilo: {
     getState: (input) => getProviderStateFromCapabilities(input),

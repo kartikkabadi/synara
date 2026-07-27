@@ -877,6 +877,8 @@ function getProviderStartOptionsCustomBinaryPath(
       return normalizeCustomBinaryPath(providerOptions?.grok?.binaryPath);
     case "droid":
       return normalizeCustomBinaryPath(providerOptions?.droid?.binaryPath);
+    case "devin":
+      return normalizeCustomBinaryPath(providerOptions?.devin?.binaryPath);
     case "kilo":
       return normalizeCustomBinaryPath(providerOptions?.kilo?.binaryPath);
     case "opencode":
@@ -2127,6 +2129,7 @@ export default function ChatView({
       antigravity: resolveHint("antigravity"),
       grok: resolveHint("grok"),
       droid: resolveHint("droid"),
+      devin: resolveHint("devin"),
       kilo: resolveHint("kilo"),
       opencode: resolveHint("opencode"),
       pi: resolveHint("pi"),
@@ -2225,6 +2228,7 @@ export default function ChatView({
     selectedProvider === "cursor" ||
     selectedProvider === "antigravity" ||
     selectedProvider === "droid" ||
+    selectedProvider === "devin" ||
     selectedProvider === "kilo" ||
     selectedProvider === "opencode" ||
     selectedProvider === "pi";

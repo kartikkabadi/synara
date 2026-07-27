@@ -144,6 +144,15 @@ export const DroidModelOptions = Schema.Struct({
 });
 export type DroidModelOptions = typeof DroidModelOptions.Type;
 
+export const DevinModelOptions = Schema.Struct({
+  reasoningEffort: Schema.optional(TrimmedNonEmptyString),
+  fastMode: Schema.optional(Schema.Boolean),
+  thinking: Schema.optional(Schema.Boolean),
+  contextWindow: Schema.optional(Schema.String),
+  variant: Schema.optional(TrimmedNonEmptyString),
+});
+export type DevinModelOptions = typeof DevinModelOptions.Type;
+
 export const ProviderModelOptions = Schema.Struct({
   codex: Schema.optional(CodexModelOptions),
   claudeAgent: Schema.optional(ClaudeModelOptions),
@@ -151,6 +160,7 @@ export const ProviderModelOptions = Schema.Struct({
   antigravity: Schema.optional(AntigravityModelOptions),
   grok: Schema.optional(GrokModelOptions),
   droid: Schema.optional(DroidModelOptions),
+  devin: Schema.optional(DevinModelOptions),
   kilo: Schema.optional(OpenCodeModelOptions),
   opencode: Schema.optional(OpenCodeModelOptions),
   pi: Schema.optional(PiModelOptions),
@@ -743,6 +753,43 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
       capabilities: DROID_CORE_HIGH_ONLY_CAPABILITIES,
     },
   ],
+  // Devin ACP exposes a live model list via session/get_config_options; this is a
+  // small static fallback for when the CLI is unreachable.
+  devin: [
+    {
+      slug: "adaptive",
+      name: "Adaptive",
+      capabilities: {
+        reasoningEffortLevels: [],
+        supportsFastMode: false,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+        contextWindowOptions: [],
+      },
+    },
+    {
+      slug: "swe-1-6",
+      name: "SWE 1.6",
+      capabilities: {
+        reasoningEffortLevels: [],
+        supportsFastMode: true,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+        contextWindowOptions: [],
+      },
+    },
+    {
+      slug: "swe-1-7",
+      name: "SWE 1.7",
+      capabilities: {
+        reasoningEffortLevels: [],
+        supportsFastMode: true,
+        supportsThinkingToggle: false,
+        promptInjectedEffortLevels: [],
+        contextWindowOptions: [],
+      },
+    },
+  ],
   opencode: [
     {
       slug: "openai/gpt-5",
@@ -842,6 +889,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderWithDefaultModel, ModelSl
   antigravity: "Gemini 3.5 Flash",
   grok: "grok-build",
   droid: "claude-opus-4-8",
+  devin: "adaptive",
   kilo: "kilo/kilo-auto/free",
   opencode: "openai/gpt-5",
 };
@@ -940,6 +988,15 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     deepseek: "deepseek-v4-pro",
     minimax: "minimax-m3",
   },
+  devin: {
+    adaptive: "adaptive",
+    swe: "swe-1-6",
+    "swe-1-6": "swe-1-6",
+    "swe-1-7": "swe-1-7",
+    opus: "claude-opus-4-8",
+    sonnet: "claude-sonnet-5",
+    fable: "claude-fable-5",
+  },
   grok: {
     grok: "grok-build-0.1",
     build: "grok-build-0.1",
@@ -990,6 +1047,7 @@ export const PROVIDER_DISPLAY_NAMES: Record<ProviderKind, string> = {
   antigravity: "Antigravity",
   grok: "Grok",
   droid: "Droid",
+  devin: "Devin",
   kilo: "Kilo",
   opencode: "OpenCode",
   pi: "Pi",
