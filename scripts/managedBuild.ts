@@ -58,8 +58,7 @@ export function resolveManagedBuildPaths(
   );
   const cacheBase = env.XDG_CACHE_HOME?.trim() || Path.join(homeDirectory, ".cache");
   const source = Path.resolve(
-    env[config.sourceEnvVar]?.trim() ||
-      Path.join(cacheBase, config.cacheSourceDirName, "source"),
+    env[config.sourceEnvVar]?.trim() || Path.join(cacheBase, config.cacheSourceDirName, "source"),
   );
   return {
     home,
@@ -102,10 +101,7 @@ export function resolveManagedBuildRef(
   return input.ref ?? (input.command === "update" ? trackedRef : null) ?? defaultRef;
 }
 
-export function managedBuildCloneArgs(
-  originUrl: string,
-  source: string,
-): ReadonlyArray<string> {
+export function managedBuildCloneArgs(originUrl: string, source: string): ReadonlyArray<string> {
   return ["clone", "--", originUrl, source];
 }
 
@@ -149,8 +145,7 @@ function readState(paths: ManagedBuildPaths): ManagedBuildState | null {
       typeof state.currentCommit !== "string" ||
       !COMMIT_PATTERN.test(state.currentCommit) ||
       (state.previousCommit !== null &&
-        (typeof state.previousCommit !== "string" ||
-          !COMMIT_PATTERN.test(state.previousCommit))) ||
+        (typeof state.previousCommit !== "string" || !COMMIT_PATTERN.test(state.previousCommit))) ||
       typeof state.trackedRef !== "string" ||
       typeof state.updatedAt !== "string"
     ) {
@@ -342,7 +337,9 @@ function startManagedBuild(config: ManagedBuildConfig, paths: ManagedBuildPaths)
     }
     child.unref();
     FS.writeFileSync(paths.pid, `${String(child.pid)}\n`, { mode: 0o600 });
-    console.log(`Started ${config.displayName} at ${commit.slice(0, 12)} (pid ${String(child.pid)}).`);
+    console.log(
+      `Started ${config.displayName} at ${commit.slice(0, 12)} (pid ${String(child.pid)}).`,
+    );
     console.log(`Log: ${paths.log}`);
   } finally {
     FS.closeSync(logDescriptor);
@@ -378,7 +375,9 @@ function updateManagedBuild(
     build(paths);
   } catch (error) {
     if (previousCommit !== null && previousCommit !== targetCommit) {
-      console.error(`${config.displayName} update failed; restoring ${previousCommit.slice(0, 12)}.`);
+      console.error(
+        `${config.displayName} update failed; restoring ${previousCommit.slice(0, 12)}.`,
+      );
       checkout(paths, previousCommit);
       build(paths);
       startManagedBuild(config, paths);
@@ -410,7 +409,9 @@ function rollbackManagedBuild(config: ManagedBuildConfig, paths: ManagedBuildPat
     checkout(paths, rollbackCommit);
     build(paths);
   } catch (error) {
-    console.error(`${config.displayName} rollback failed; restoring ${state.currentCommit.slice(0, 12)}.`);
+    console.error(
+      `${config.displayName} rollback failed; restoring ${state.currentCommit.slice(0, 12)}.`,
+    );
     checkout(paths, state.currentCommit);
     build(paths);
     startManagedBuild(config, paths);

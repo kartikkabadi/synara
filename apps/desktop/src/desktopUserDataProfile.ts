@@ -110,10 +110,8 @@ function readBridgeProfileManifest(targetPath: string): BridgeProfileManifest | 
     record.sourceBrowserPartitionName === undefined
       ? undefined
       : String(record.sourceBrowserPartitionName);
-  const sourceScheme =
-    record.sourceScheme === undefined ? undefined : String(record.sourceScheme);
-  const targetScheme =
-    record.targetScheme === undefined ? undefined : String(record.targetScheme);
+  const sourceScheme = record.sourceScheme === undefined ? undefined : String(record.sourceScheme);
+  const targetScheme = record.targetScheme === undefined ? undefined : String(record.targetScheme);
   if ((sourceScheme === undefined) !== (targetScheme === undefined)) {
     return null;
   }
@@ -165,7 +163,11 @@ function readFileUtf8(filePath: string): string | null {
   }
 }
 
-function replaceOriginInTextFile(filePath: string, sourceScheme: string, targetScheme: string): boolean {
+function replaceOriginInTextFile(
+  filePath: string,
+  sourceScheme: string,
+  targetScheme: string,
+): boolean {
   const content = readFileUtf8(filePath);
   if (content === null) return false;
   if (!content.includes(sourceScheme)) return false;
@@ -194,7 +196,11 @@ function rewritePlistOrigin(filePath: string, sourceScheme: string, targetScheme
   }
 }
 
-function rewriteTopLevelScheme(targetPath: string, sourceScheme: string, targetScheme: string): void {
+function rewriteTopLevelScheme(
+  targetPath: string,
+  sourceScheme: string,
+  targetScheme: string,
+): void {
   const networkStatePath = Path.join(targetPath, "Network Persistent State");
   if (FS.existsSync(networkStatePath)) {
     replaceOriginInTextFile(networkStatePath, sourceScheme, targetScheme);
