@@ -350,6 +350,14 @@ const DROID_CORE_HIGH_ONLY_CAPABILITIES: ModelCapabilities = {
   contextWindowOptions: [],
 };
 
+const DEVIN_DEFAULT_CAPABILITIES: ModelCapabilities = {
+  reasoningEffortLevels: [],
+  supportsFastMode: true,
+  supportsThinkingToggle: false,
+  promptInjectedEffortLevels: [],
+  contextWindowOptions: [],
+};
+
 // Shared Claude building blocks. Capability shapes repeat across Claude
 // generations, so declare them once and let each model entry override only the
 // fields that genuinely differ (mirrors the CODEX_GPT_5_* pattern above).
@@ -754,41 +762,710 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
     },
   ],
   // Devin ACP exposes a live model list via session/get_config_options; this is a
-  // small static fallback for when the CLI is unreachable.
+  // static fallback for when the CLI is unreachable.
   devin: [
     {
-      slug: "adaptive",
-      name: "Adaptive",
-      capabilities: {
-        reasoningEffortLevels: [],
-        supportsFastMode: false,
-        supportsThinkingToggle: false,
-        promptInjectedEffortLevels: [],
-        contextWindowOptions: [],
-      },
+      slug: "claude-opus-5-medium",
+      name: "Claude Opus 5 Medium",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
     },
     {
-      slug: "swe-1-6",
-      name: "SWE 1.6",
-      capabilities: {
-        reasoningEffortLevels: [],
-        supportsFastMode: true,
-        supportsThinkingToggle: false,
-        promptInjectedEffortLevels: [],
-        contextWindowOptions: [],
-      },
+      slug: "claude-opus-5-low",
+      name: "Claude Opus 5 Low",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
     },
     {
-      slug: "swe-1-7",
-      name: "SWE 1.7",
-      capabilities: {
-        reasoningEffortLevels: [],
-        supportsFastMode: true,
-        supportsThinkingToggle: false,
-        promptInjectedEffortLevels: [],
-        contextWindowOptions: [],
-      },
+      slug: "claude-opus-5-high",
+      name: "Claude Opus 5 High",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
     },
+    {
+      slug: "claude-opus-5-xhigh",
+      name: "Claude Opus 5 XHigh",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-5-max",
+      name: "Claude Opus 5 Max",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-5-low-fast",
+      name: "Claude Opus 5 Low Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-5-medium-fast",
+      name: "Claude Opus 5 Medium Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-5-high-fast",
+      name: "Claude Opus 5 High Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-5-xhigh-fast",
+      name: "Claude Opus 5 XHigh Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-5-max-fast",
+      name: "Claude Opus 5 Max Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-5-fable-medium",
+      name: "Claude Fable 5 Medium",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-5-fable-low",
+      name: "Claude Fable 5 Low",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-5-fable-high",
+      name: "Claude Fable 5 High",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-5-fable-xhigh",
+      name: "Claude Fable 5 XHigh",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-5-fable-max",
+      name: "Claude Fable 5 Max",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-sonnet-5-medium",
+      name: "Claude Sonnet 5 Medium",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-sonnet-5-low",
+      name: "Claude Sonnet 5 Low",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-sonnet-5-high",
+      name: "Claude Sonnet 5 High",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-sonnet-5-xhigh",
+      name: "Claude Sonnet 5 XHigh",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-sonnet-5-max",
+      name: "Claude Sonnet 5 Max",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-sol-medium",
+      name: "GPT-5.6 Sol Medium Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-sol-none",
+      name: "GPT-5.6 Sol No Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-sol-low",
+      name: "GPT-5.6 Sol Low Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-sol-high",
+      name: "GPT-5.6 Sol High Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-sol-xhigh",
+      name: "GPT-5.6 Sol XHigh Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-sol-max",
+      name: "GPT-5.6 Sol Max Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-sol-none-priority",
+      name: "GPT-5.6 Sol No Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-sol-low-priority",
+      name: "GPT-5.6 Sol Low Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-sol-medium-priority",
+      name: "GPT-5.6 Sol Medium Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-sol-high-priority",
+      name: "GPT-5.6 Sol High Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-sol-xhigh-priority",
+      name: "GPT-5.6 Sol XHigh Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-luna-medium",
+      name: "GPT-5.6 Luna Medium Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-luna-none",
+      name: "GPT-5.6 Luna No Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-luna-low",
+      name: "GPT-5.6 Luna Low Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-luna-high",
+      name: "GPT-5.6 Luna High Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-luna-xhigh",
+      name: "GPT-5.6 Luna XHigh Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-luna-max",
+      name: "GPT-5.6 Luna Max Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-luna-none-priority",
+      name: "GPT-5.6 Luna No Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-luna-low-priority",
+      name: "GPT-5.6 Luna Low Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-luna-medium-priority",
+      name: "GPT-5.6 Luna Medium Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-luna-high-priority",
+      name: "GPT-5.6 Luna High Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-luna-xhigh-priority",
+      name: "GPT-5.6 Luna XHigh Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    { slug: "glm-5-2", name: "GLM-5.2 High", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "glm-5-2-max", name: "GLM-5.2 Max", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "glm-5-2-1m", name: "GLM-5.2 High 1M", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "glm-5-2-max-1m", name: "GLM-5.2 Max 1M", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "glm-5-2-none", name: "GLM-5.2 No Thinking", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    {
+      slug: "glm-5-2-none-1m",
+      name: "GLM-5.2 No Thinking 1M",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    { slug: "swe-1-7", name: "SWE 1.7", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "swe-1-7-medium", name: "SWE-1.7 Medium", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    {
+      slug: "swe-1-7-lightning",
+      name: "SWE-1.7 Lightning",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    { slug: "kimi-k2-7", name: "Kimi K2.7", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "adaptive", name: "Adaptive", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    {
+      slug: "claude-opus-4-7-medium",
+      name: "Claude Opus 4.7 Medium",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-7-low",
+      name: "Claude Opus 4.7 Low",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-7-high",
+      name: "Claude Opus 4.7 High",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-7-xhigh",
+      name: "Claude Opus 4.7 XHigh",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-7-max",
+      name: "Claude Opus 4.7 Max",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-8-medium",
+      name: "Claude Opus 4.8 Medium",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-8-low",
+      name: "Claude Opus 4.8 Low",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-8-high",
+      name: "Claude Opus 4.8 High",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-8-xhigh",
+      name: "Claude Opus 4.8 XHigh",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-8-max",
+      name: "Claude Opus 4.8 Max",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-8-low-fast",
+      name: "Claude Opus 4.8 Low Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-8-medium-fast",
+      name: "Claude Opus 4.8 Medium Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-8-high-fast",
+      name: "Claude Opus 4.8 High Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-8-xhigh-fast",
+      name: "Claude Opus 4.8 XHigh Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-8-max-fast",
+      name: "Claude Opus 4.8 Max Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gemini-3-5-flash-minimal",
+      name: "Gemini 3.5 Flash Minimal",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gemini-3-5-flash-low",
+      name: "Gemini 3.5 Flash Low",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gemini-3-5-flash-medium",
+      name: "Gemini 3.5 Flash Medium",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gemini-3-5-flash-high",
+      name: "Gemini 3.5 Flash High",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gemini-3-6-flash-minimal",
+      name: "Gemini 3.6 Flash Minimal",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gemini-3-6-flash-low",
+      name: "Gemini 3.6 Flash Low",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gemini-3-6-flash-medium",
+      name: "Gemini 3.6 Flash Medium",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gemini-3-6-flash-high",
+      name: "Gemini 3.6 Flash High",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-terra-none",
+      name: "GPT-5.6 Terra No Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-terra-low",
+      name: "GPT-5.6 Terra Low Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-terra-medium",
+      name: "GPT-5.6 Terra Medium Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-terra-high",
+      name: "GPT-5.6 Terra High Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-terra-xhigh",
+      name: "GPT-5.6 Terra XHigh Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-terra-max",
+      name: "GPT-5.6 Terra Max Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-terra-none-priority",
+      name: "GPT-5.6 Terra No Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-terra-low-priority",
+      name: "GPT-5.6 Terra Low Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-terra-medium-priority",
+      name: "GPT-5.6 Terra Medium Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-terra-high-priority",
+      name: "GPT-5.6 Terra High Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-6-terra-xhigh-priority",
+      name: "GPT-5.6 Terra XHigh Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    { slug: "grok-4-5-low", name: "Grok 4.5 Low", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "grok-4-5-medium", name: "Grok 4.5 Medium", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "grok-4-5-high", name: "Grok 4.5 High", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "inkling-none", name: "Inkling None", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "inkling-low", name: "Inkling Low", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "inkling-medium", name: "Inkling Medium", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "inkling-high", name: "Inkling High", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "inkling-xhigh", name: "Inkling X-High", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "inkling-max", name: "Inkling Max", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "claude-opus-4-6", name: "Claude Opus 4.6", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    {
+      slug: "claude-opus-4-6-thinking",
+      name: "Claude Opus 4.6 Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-6-1m",
+      name: "Claude Opus 4.6 1M",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-opus-4-6-thinking-1m",
+      name: "Claude Opus 4.6 Thinking 1M",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    { slug: "gpt-5-4-none", name: "GPT-5.4 No Thinking", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "gpt-5-4-low", name: "GPT-5.4 Low Thinking", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    {
+      slug: "gpt-5-4-medium",
+      name: "GPT-5.4 Medium Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-4-high",
+      name: "GPT-5.4 High Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-4-xhigh",
+      name: "GPT-5.4 XHigh Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-4-none-priority",
+      name: "GPT-5.4 No Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-4-low-priority",
+      name: "GPT-5.4 Low Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-4-medium-priority",
+      name: "GPT-5.4 Medium Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-4-high-priority",
+      name: "GPT-5.4 High Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-4-xhigh-priority",
+      name: "GPT-5.4 XHigh Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    { slug: "gpt-5-5-none", name: "GPT-5.5 No Thinking", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "gpt-5-5-low", name: "GPT-5.5 Low Thinking", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    {
+      slug: "gpt-5-5-medium",
+      name: "GPT-5.5 Medium Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-5-high",
+      name: "GPT-5.5 High Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-5-xhigh",
+      name: "GPT-5.5 XHigh Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-5-none-priority",
+      name: "GPT-5.5 No Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-5-low-priority",
+      name: "GPT-5.5 Low Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-5-medium-priority",
+      name: "GPT-5.5 Medium Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-5-high-priority",
+      name: "GPT-5.5 High Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-5-xhigh-priority",
+      name: "GPT-5.5 XHigh Thinking Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-4-mini-low",
+      name: "GPT-5.4 Mini Low Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-4-mini-medium",
+      name: "GPT-5.4 Mini Medium Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-4-mini-high",
+      name: "GPT-5.4 Mini High Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-4-mini-xhigh",
+      name: "GPT-5.4 Mini XHigh Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-sonnet-4-6",
+      name: "Claude Sonnet 4.6",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-sonnet-4-6-thinking",
+      name: "Claude Sonnet 4.6 Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-sonnet-4-6-1m",
+      name: "Claude Sonnet 4.6 1M",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "claude-sonnet-4-6-thinking-1m",
+      name: "Claude Sonnet 4.6 Thinking 1M",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_GPT_5_2_LOW",
+      name: "GPT-5.2 Low Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_GPT_5_2_MEDIUM",
+      name: "GPT-5.2 Medium Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_GPT_5_2_NONE",
+      name: "GPT-5.2 No Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_GPT_5_2_HIGH",
+      name: "GPT-5.2 High Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_GPT_5_2_XHIGH",
+      name: "GPT-5.2 XHigh Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_CLAUDE_4_5_OPUS",
+      name: "Claude Opus 4.5",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_CLAUDE_4_5_OPUS_THINKING",
+      name: "Claude Opus 4.5 Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_PRIVATE_11",
+      name: "Claude Haiku 4.5",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_PRIVATE_2",
+      name: "Claude Sonnet 4.5",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_PRIVATE_3",
+      name: "Claude Sonnet 4.5 Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_CHAT_GPT_4_1_2025_04_14",
+      name: "GPT-4.1",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_PRIVATE_12",
+      name: "GPT-5.1 No Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_PRIVATE_13",
+      name: "GPT-5.1 Low Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_PRIVATE_14",
+      name: "GPT-5.1 Medium Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_PRIVATE_15",
+      name: "GPT-5.1 High Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-3-codex-low",
+      name: "GPT-5.3-Codex Low",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-3-codex-medium",
+      name: "GPT-5.3-Codex Medium",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-3-codex-high",
+      name: "GPT-5.3-Codex High",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-3-codex-xhigh",
+      name: "GPT-5.3-Codex X-High",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-3-codex-low-priority",
+      name: "GPT-5.3-Codex Low Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-3-codex-medium-priority",
+      name: "GPT-5.3-Codex Medium Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-3-codex-high-priority",
+      name: "GPT-5.3-Codex High Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gpt-5-3-codex-xhigh-priority",
+      name: "GPT-5.3-Codex XHigh Fast",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    { slug: "kimi-k2-6", name: "Kimi K2.6", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    {
+      slug: "nemotron-3-ultra-nvfp4",
+      name: "Nemotron 3 Ultra",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    { slug: "swe-1-6", name: "SWE 1.6", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    { slug: "swe-1-6-fast", name: "SWE-1.6 Fast", capabilities: DEVIN_DEFAULT_CAPABILITIES },
+    {
+      slug: "gemini-3-1-pro-low",
+      name: "Gemini 3.1 Pro Low Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "gemini-3-1-pro-high",
+      name: "Gemini 3.1 Pro High Thinking",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_GOOGLE_GEMINI_3_0_FLASH_MINIMAL",
+      name: "Gemini 3 Flash Minimal",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_GOOGLE_GEMINI_3_0_FLASH_LOW",
+      name: "Gemini 3 Flash Low",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_GOOGLE_GEMINI_3_0_FLASH_MEDIUM",
+      name: "Gemini 3 Flash Medium",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    {
+      slug: "MODEL_GOOGLE_GEMINI_3_0_FLASH_HIGH",
+      name: "Gemini 3 Flash High",
+      capabilities: DEVIN_DEFAULT_CAPABILITIES,
+    },
+    { slug: "deepseek-v4", name: "DeepSeek V4 Pro", capabilities: DEVIN_DEFAULT_CAPABILITIES },
   ],
   opencode: [
     {

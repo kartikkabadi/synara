@@ -811,11 +811,9 @@ function runDevinModelsList(
   return Effect.gen(function* () {
     const executable = resolveDevinBinaryPath(binaryPath);
     const childEnv = buildProviderChildEnvironment({ provider: "devin" });
-    const prepared = prepareWindowsSafeProcess(
-      executable,
-      ["models", "list", "--format", "json"],
-      { env: childEnv },
-    );
+    const prepared = prepareWindowsSafeProcess(executable, ["models", "list", "--format", "json"], {
+      env: childEnv,
+    });
     const child = yield* childProcessSpawner.spawn(
       ChildProcess.make(prepared.command, prepared.args, {
         shell: prepared.shell,

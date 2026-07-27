@@ -246,7 +246,8 @@ export function useProviderModelCatalog(input: {
     !hasResolvedDroidModelDiscovery &&
     isInitialModelDiscoveryPending(droidDynamicModelsQuery);
   const hasResolvedDevinModelDiscovery =
-    devinDynamicModelsQuery.data?.source === "devin-acp" &&
+    (devinDynamicModelsQuery.data?.source === "devin-acp" ||
+      devinDynamicModelsQuery.data?.source === "devin.models-cli") &&
     (devinDynamicModelsQuery.data.models.length ?? 0) > 0;
   const devinModelDiscoveryPending =
     devinModelDiscoveryEnabled &&
