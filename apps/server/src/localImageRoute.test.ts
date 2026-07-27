@@ -191,7 +191,10 @@ describe("localImageEffectRouteLayer", () => {
     writeFileSync(imagePath, Buffer.from("%PDF-1.7"));
     const config = makeServerConfig({ cwd: workspace });
 
-    const grant = await createLocalPreviewGrant({ requestedPath: imagePath });
+    const grant = await createLocalPreviewGrant({
+      requestedPath: imagePath,
+      allowedRoots: [externalRoot],
+    });
 
     await withEffectServer(config, localImageEffectRouteLayer, async (origin) => {
       const params = new URLSearchParams({ path: imagePath, cwd: workspace, grant: grant.grant });
