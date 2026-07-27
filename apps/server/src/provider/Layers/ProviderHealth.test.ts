@@ -22,6 +22,7 @@ import {
   checkAntigravityProviderStatus,
   checkCodexProviderStatus,
   checkCursorProviderStatus,
+  checkDevinProviderStatus,
   checkGrokProviderStatus,
   checkOpenCodeProviderStatus,
   checkPiProviderStatus,
@@ -380,7 +381,7 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
       );
       const codex = statuses.find((status) => status.provider === "codex");
 
-      assert.strictEqual(statuses.length, 9);
+      assert.strictEqual(statuses.length, 10);
       assert.strictEqual(codex?.available, false);
       assert.strictEqual(codex?.message, "Provider is disabled in Synara settings.");
     });
@@ -515,7 +516,7 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
         const providerHealth = yield* ProviderHealth;
         const statuses = yield* providerHealth.refresh;
 
-        assert.strictEqual(statuses.length, 9);
+        assert.strictEqual(statuses.length, 10);
         for (const status of statuses) {
           assert.strictEqual(status.available, false);
           assert.strictEqual(status.message, "Provider is disabled in Synara settings.");
@@ -2266,6 +2267,73 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
               throw new Error(`Unexpected args: ${joined}`);
             }),
           ),
+        ),
+      ),
+    );
+  });
+
+  // ── checkDevinProviderStatus ───────────────────────────────────────
+
+  describe("checkDevinProviderStatus", () => {
+    it.effect("returns ready when Devin CLI is installed and authenticated", () =>
+      Effect.gen(function* () {
+        const status = yield* checkDevinProviderStatus;
+        assert.strictEqual(status.provider, "devin");
+        assert.strictEqual(status.status, "ready");
+        assert.strictEqual(status.available, true);
+        assert.strictEqual(status.authStatus, "authenticated");
+      }).pipe(
+        Effect.provide(
+          mockSpawnerLayer((args, command) => {
+            assert.strictEqual(command, "devin");
+            const joined = args.join(" ");
+            if (joined === "--version") {
+              return { stdout: "devin 3000.2.17 (2c489dfc)\n", stderr: "", code: 0 };
+            }
+            if (joined === "auth status") {
+              return { stdout: "Logged in (via Devin).\n", stderr: "", code: 0 };
+            }
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("returns unavailable when Devin CLI is missing", () =>
+      Effect.gen(function* () {
+        const status = yield* checkDevinProviderStatus;
+        assert.strictEqual(status.provider, "devin");
+        assert.strictEqual(status.status, "error");
+        assert.strictEqual(status.available, false);
+        assert.strictEqual(status.authStatus, "unknown");
+        assert.strictEqual(status.message, "Devin CLI (`devin`) is not installed or not on PATH.");
+      }).pipe(Effect.provide(failingSpawnerLayer("spawn devin ENOENT"))),
+    );
+
+    it.effect("returns unauthenticated when Devin CLI is installed but not logged in", () =>
+      Effect.gen(function* () {
+        const status = yield* checkDevinProviderStatus;
+        assert.strictEqual(status.provider, "devin");
+        assert.strictEqual(status.status, "error");
+        assert.strictEqual(status.available, true);
+        assert.strictEqual(status.authStatus, "unauthenticated");
+        assert.match(status.message ?? "", /not logged in/i);
+      }).pipe(
+        Effect.provide(
+          mockSpawnerLayer((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") {
+              return { stdout: "devin 3000.2.17 (2c489dfc)\n", stderr: "", code: 0 };
+            }
+            if (joined === "auth status") {
+              return {
+                stdout: "",
+                stderr: "Not logged in. Run `devin auth login`.\n",
+                code: 1,
+              };
+            }
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
         ),
       ),
     );
