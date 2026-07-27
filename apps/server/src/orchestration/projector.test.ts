@@ -189,6 +189,7 @@ describe("orchestration projector", () => {
         loop: null,
         hasPendingTurnStart: false,
         pendingTurnStart: null,
+        revertSaga: null,
         createdAt: now,
         updatedAt: now,
         archivedAt: null,

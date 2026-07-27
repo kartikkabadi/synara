@@ -393,6 +393,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           forkSourceThreadId: null,
           sidechatSourceThreadId: null,
           lastKnownPr: null,
+          revertSaga: null,
           latestUserMessageAt: "2026-02-24T00:00:03.500Z",
           hasPendingApprovals: true,
           hasPendingUserInput: true,
