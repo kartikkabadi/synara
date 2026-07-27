@@ -118,7 +118,7 @@ describe("desktopUserDataProfile", () => {
       status: "repaired",
       sourcePath,
       targetPath,
-      copiedEntries: ["Cookies", "Cookies-journal"],
+      copiedEntries: ["Cookies", "Cookies-journal", "Local Storage"],
     });
     expect(FS.readFileSync(Path.join(targetPartitionPath, "Cookies"), "utf8")).toBe(
       "bridge-cookie",
