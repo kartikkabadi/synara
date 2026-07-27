@@ -208,6 +208,13 @@ export const ServerSettingsPatch = Schema.Struct({
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
+// Island overlay settings persisted by the Electron main process (userData JSON).
+// `enabled: null` means "use the platform default": on for macOS/Windows, off for Linux.
+export const DesktopIslandSettings = Schema.Struct({
+  enabled: Schema.NullOr(Schema.Boolean).pipe(Schema.withDecodingDefault(() => null)),
+});
+export type DesktopIslandSettings = typeof DesktopIslandSettings.Type;
+
 export class ServerSettingsError extends Schema.TaggedErrorClass<ServerSettingsError>()(
   "ServerSettingsError",
   {

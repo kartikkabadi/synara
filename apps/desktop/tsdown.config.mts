@@ -33,4 +33,8 @@ export default defineConfig([
     ...shared,
     entry: ["src/preload.ts"],
   },
+  {
+    ...shared,
+    entry: ["src/islandPreload.ts"],
+  },
 ]);

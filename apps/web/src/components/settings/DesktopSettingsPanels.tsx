@@ -163,6 +163,7 @@ export function NotificationsSettingsPanel({
 
   return (
     <div className="space-y-6">
+      <IslandSettingsSection />
       <SettingsSection title="Activity alerts">
         <SettingsRow
           title="Activity toasts"
@@ -225,6 +226,46 @@ export function NotificationsSettingsPanel({
         />
       </SettingsSection>
     </div>
+  );
+}
+
+function IslandSettingsSection() {
+  const islandBridge = window.desktopBridge?.island;
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!islandBridge) return;
+    let cancelled = false;
+    void islandBridge.getEnabled().then((value) => {
+      if (!cancelled) setEnabled(value);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [islandBridge]);
+
+  if (!islandBridge) return null;
+
+  return (
+    <SettingsSection title="Island">
+      <SettingsRow
+        title="Dynamic Island overlay"
+        description="Show a compact always-on-top pill with live agent session status. Hover to preview, click or press Ctrl/Cmd+Shift+I to expand, click a session to jump to its thread."
+        status="Defaults on for macOS and Windows. On Linux the overlay is off by default and degraded: hover click-through is unavailable and Wayland may ignore always-on-top."
+        control={
+          <Switch
+            checked={enabled ?? false}
+            disabled={enabled === null}
+            onCheckedChange={(checked) => {
+              const next = Boolean(checked);
+              setEnabled(next);
+              void islandBridge.setEnabled(next).then(setEnabled);
+            }}
+            aria-label="Dynamic Island overlay"
+          />
+        }
+      />
+    </SettingsSection>
   );
 }
 
