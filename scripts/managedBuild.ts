@@ -254,10 +254,21 @@ function checkout(paths: ManagedBuildPaths, commit: string): void {
   run("git", ["checkout", "--detach", "--force", commit], paths.source);
 }
 
+function findElectronInstallScript(paths: ManagedBuildPaths): string | null {
+  const bunCachePath = Path.join(paths.source, "node_modules", ".bun");
+  if (!FS.existsSync(bunCachePath)) return null;
+  for (const entry of FS.readdirSync(bunCachePath)) {
+    if (!entry.startsWith("electron@")) continue;
+    const installPath = Path.join(bunCachePath, entry, "node_modules", "electron", "install.js");
+    if (FS.existsSync(installPath)) return installPath;
+  }
+  return null;
+}
+
 function build(paths: ManagedBuildPaths): void {
   run("sfw", ["bun", "install", "--frozen-lockfile"], paths.source);
-  const electronInstallPath = Path.join(paths.source, "node_modules", "electron", "install.js");
-  if (FS.existsSync(electronInstallPath)) {
+  const electronInstallPath = findElectronInstallScript(paths);
+  if (electronInstallPath !== null) {
     run("node", [electronInstallPath], paths.source);
   }
   run("bun", ["run", "build:desktop"], paths.source);
