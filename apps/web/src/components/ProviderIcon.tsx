@@ -13,6 +13,7 @@ import {
   AntigravityIcon,
   ClaudeAI,
   CursorIcon,
+  DevinIcon,
   DroidIcon,
   GrokIcon,
   type Icon,
@@ -20,7 +21,6 @@ import {
   OpenAI,
   OpenCodeIcon,
   PiIcon,
-  WindsurfIcon,
 } from "./Icons";
 
 export type ProviderIconTone = "default" | "header";
@@ -71,7 +71,7 @@ export const PROVIDER_ICON_COMPONENT_BY_PROVIDER: Record<ProviderKind, Icon> = {
   antigravity: AntigravityIcon,
   grok: GrokIcon,
   droid: DroidIcon,
-  devin: WindsurfIcon,
+  devin: DevinIcon,
   kilo: KiloIcon,
   opencode: OpenCodeProviderIcon,
   pi: PiIcon,

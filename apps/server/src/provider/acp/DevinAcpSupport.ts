@@ -30,7 +30,7 @@ export interface DevinAcpRuntimeInput extends Omit<
 }
 
 export const DEVIN_WINDSURF_API_KEY_AUTH_METHOD_ID = "windsurf-api-key";
-export const DEVIN_BROWSER_LOGIN_AUTH_METHOD_ID = "browser_login";
+export const DEVIN_BROWSER_LOGIN_AUTH_METHOD_ID = "devin-browser";
 // Accept both the canonical uppercase `WINDSURF_API_KEY` and the lowercase
 // `windsurf_api_key` that some secret/credential injectors provide.
 export const DEVIN_API_KEY_ENV_KEYS = ["WINDSURF_API_KEY", "windsurf_api_key"] as const;
@@ -99,30 +99,6 @@ export const resolveDevinAcpAuthMethodId = (
         detail: hasApiKey
           ? "Devin did not advertise Windsurf API key authentication."
           : "Run `devin auth login`, or set WINDSURF_API_KEY.",
-      },
-    });
-  });
-
-export const resolveDevinAcpAuthMethodIdForDiscovery = (
-  initializeResult: Acp.InitializeResponse,
-  env: NodeJS.ProcessEnv = process.env,
-): Effect.Effect<string, AcpErrors.AcpError> =>
-  Effect.gen(function* () {
-    const authMethodIds = availableAuthMethodIds(initializeResult);
-    const hasApiKey = hasDevinApiKeyEnv(env);
-
-    if (hasApiKey && authMethodIds.has(DEVIN_WINDSURF_API_KEY_AUTH_METHOD_ID)) {
-      return DEVIN_WINDSURF_API_KEY_AUTH_METHOD_ID;
-    }
-
-    return yield* new AcpErrors.AcpRequestError({
-      code: -32602,
-      errorMessage: "Devin ACP model discovery requires non-interactive authentication.",
-      data: {
-        authMethods: [...authMethodIds],
-        detail: hasApiKey
-          ? "Devin did not advertise Windsurf API key authentication."
-          : "Set WINDSURF_API_KEY to enable model discovery, or run `devin auth login` from a terminal.",
       },
     });
   });

@@ -46,8 +46,10 @@ import {
   Scope,
   Stream,
 } from "effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import type * as Acp from "@agentclientprotocol/sdk";
+import { prepareWindowsSafeProcess } from "@synara/shared/windowsProcess";
+import { buildProviderChildEnvironment } from "../../providerChildEnvironment.ts";
 
 import { buildAcpSynaraMcpServers } from "../../agentGateway/mcpInjection.ts";
 import {
@@ -120,7 +122,7 @@ import {
 import {
   type DevinAcpRuntimeSettings,
   makeDevinAcpRuntime,
-  resolveDevinAcpAuthMethodIdForDiscovery,
+  resolveDevinBinaryPath,
 } from "../acp/DevinAcpSupport.ts";
 import { makeEventNdjsonLogger, type EventNdjsonLogger } from "../Layers/EventNdjsonLogger.ts";
 import {
@@ -741,6 +743,106 @@ export function buildDevinProviderModelDescriptors(
       defaultReasoningEffort: caps.reasoningEffortLevels.find((o) => o.isDefault)?.value,
     };
   });
+}
+
+const collectStreamAsString = <E>(stream: Stream.Stream<Uint8Array, E>): Effect.Effect<string, E> =>
+  Stream.runFold(
+    stream,
+    () => "",
+    (acc, chunk) => acc + new TextDecoder().decode(chunk),
+  );
+
+interface DevinModelsListEntry {
+  readonly slug: string;
+  readonly name: string;
+}
+
+function devinModelDescriptorFromEntry(entry: DevinModelsListEntry): ProviderModelDescriptor {
+  const staticMatch = MODEL_OPTIONS_BY_PROVIDER.devin.find((m) => m.slug === entry.slug);
+  const caps = staticMatch ? staticMatch.capabilities : getModelCapabilities(PROVIDER, entry.slug);
+  return {
+    slug: entry.slug,
+    name: staticMatch?.name ?? entry.name,
+    optionDescriptors: getProviderOptionDescriptors({
+      provider: PROVIDER,
+      caps,
+    }),
+    supportsFastMode: caps.supportsFastMode,
+    supportsThinkingToggle: caps.supportsThinkingToggle,
+    contextWindowOptions: caps.contextWindowOptions,
+    supportedReasoningEfforts: caps.reasoningEffortLevels,
+    defaultReasoningEffort: caps.reasoningEffortLevels.find((o) => o.isDefault)?.value,
+  };
+}
+
+function parseDevinModelsList(stdout: string): ReadonlyArray<DevinModelsListEntry> {
+  const parsed = JSON.parse(stdout) as unknown;
+  if (!parsed || typeof parsed !== "object" || !("families" in parsed)) {
+    return [];
+  }
+  const { families } = parsed as Record<string, unknown>;
+  if (!Array.isArray(families)) {
+    return [];
+  }
+
+  const entries: Array<DevinModelsListEntry> = [];
+  for (const family of families) {
+    if (!family || typeof family !== "object") continue;
+    const { variants } = family as Record<string, unknown>;
+    if (!Array.isArray(variants)) continue;
+    for (const variant of variants) {
+      if (!variant || typeof variant !== "object") continue;
+      const { model_uid, label } = variant as Record<string, unknown>;
+      if (typeof model_uid !== "string" || !model_uid.trim()) continue;
+      entries.push({
+        slug: model_uid.trim(),
+        name: typeof label === "string" && label.trim() ? label.trim() : model_uid.trim(),
+      });
+    }
+  }
+  return entries;
+}
+
+function runDevinModelsList(
+  childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  binaryPath: string | undefined,
+  cwd: string,
+) {
+  return Effect.gen(function* () {
+    const executable = resolveDevinBinaryPath(binaryPath);
+    const childEnv = buildProviderChildEnvironment({ provider: "devin" });
+    const prepared = prepareWindowsSafeProcess(
+      executable,
+      ["models", "list", "--format", "json"],
+      { env: childEnv },
+    );
+    const child = yield* childProcessSpawner.spawn(
+      ChildProcess.make(prepared.command, prepared.args, {
+        shell: prepared.shell,
+        ...(prepared.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
+        env: childEnv,
+        stdin: "ignore",
+      }),
+    );
+    const [stdout, stderr, exitCode] = yield* Effect.all(
+      [
+        collectStreamAsString(child.stdout),
+        collectStreamAsString(child.stderr),
+        child.exitCode.pipe(Effect.map(Number)),
+      ],
+      { concurrency: "unbounded" },
+    );
+    if (exitCode !== 0) {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method: "model/list",
+        detail:
+          stderr.trim() ||
+          `Devin model discovery failed because '${executable} models list --format json' exited with code ${exitCode}.`,
+      });
+    }
+    return parseDevinModelsList(stdout);
+  }).pipe(Effect.scoped);
 }
 
 function buildDevinPromptParts(input: {
@@ -1695,17 +1797,15 @@ export function makeDevinAdapter(
         const cwd = input.cwd ?? serverConfig.cwd;
 
         const discovery = Effect.gen(function* () {
-          const runtime = yield* makeDevinAcpRuntime({
-            devinSettings: binaryPath ? { binaryPath } : undefined,
-            childProcessSpawner,
-            cwd,
-            clientInfo: { name: "Synara", version: "0.0.0" },
-            clientCapabilities: { elicitation: { form: {} } },
-            resolveAuthMethodId: resolveDevinAcpAuthMethodIdForDiscovery,
-          });
-          yield* runtime.start();
-          const configOptions = yield* runtime.getConfigOptions;
-          return buildDevinProviderModelDescriptors(configOptions);
+          const entries = yield* runDevinModelsList(childProcessSpawner, binaryPath, cwd);
+          if (entries.length === 0) {
+            return yield* new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "model/list",
+              detail: "Devin model discovery returned no models.",
+            });
+          }
+          return entries.map(devinModelDescriptorFromEntry);
         }).pipe(Effect.scoped, Effect.timeout(DEVIN_MODEL_DISCOVERY_TIMEOUT_MS));
 
         const dynamicResult = yield* discovery.pipe(
@@ -1731,7 +1831,7 @@ export function makeDevinAdapter(
 
         return {
           models,
-          source: dynamicResult.models.length > 0 ? "devin.acp" : "devin.static",
+          source: dynamicResult.models.length > 0 ? "devin.models-cli" : "devin.static",
           cached: false,
           ...(dynamicResult.error !== undefined ? { error: dynamicResult.error } : {}),
         } satisfies ProviderListModelsResult;
