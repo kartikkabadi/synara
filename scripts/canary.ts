@@ -2,6 +2,7 @@
 // Purpose: Thin entry point for the upstream Synara Canary managed build.
 // Layer: Local developer tooling
 
+import * as OS from "node:os";
 import * as Path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,6 +14,7 @@ import {
   resolveManagedBuildRef,
   runManagedBuildCommand,
 } from "./managedBuild";
+import type { ManagedBuildPaths, ParsedManagedBuildArgs } from "./managedBuild";
 
 export const canaryConfig = {
   name: "canary",
@@ -40,10 +42,17 @@ if (isMain) {
   }
 }
 
-export {
-  managedBuildCloneArgs as canaryCloneArgs,
-  managedBuildStartArgs as canaryStartArgs,
-  parseManagedBuildArgs as parseCanaryArgs,
-  resolveManagedBuildPaths as resolveCanaryPaths,
-  resolveManagedBuildRef as resolveCanaryRef,
-};
+export function resolveCanaryPaths(
+  env: NodeJS.ProcessEnv = process.env,
+  homeDirectory = OS.homedir(),
+): ManagedBuildPaths {
+  return resolveManagedBuildPaths(canaryConfig, env, homeDirectory);
+}
+
+export function resolveCanaryRef(input: ParsedManagedBuildArgs, trackedRef: string | null): string {
+  return resolveManagedBuildRef(input, trackedRef, canaryConfig.defaultRef);
+}
+
+export { managedBuildCloneArgs as canaryCloneArgs };
+export { managedBuildStartArgs as canaryStartArgs };
+export { parseManagedBuildArgs as parseCanaryArgs };

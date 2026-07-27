@@ -2,6 +2,7 @@
 // Purpose: Thin entry point for the personal Synara Dogfood managed build.
 // Layer: Local developer tooling
 
+import * as OS from "node:os";
 import * as Path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,6 +14,7 @@ import {
   resolveManagedBuildRef,
   runManagedBuildCommand,
 } from "./managedBuild";
+import type { ManagedBuildPaths, ParsedManagedBuildArgs } from "./managedBuild";
 
 export const dogfoodConfig = {
   name: "dogfood",
@@ -40,10 +42,20 @@ if (isMain) {
   }
 }
 
-export {
-  managedBuildCloneArgs as dogfoodCloneArgs,
-  managedBuildStartArgs as dogfoodStartArgs,
-  parseManagedBuildArgs as parseDogfoodArgs,
-  resolveManagedBuildPaths as resolveDogfoodPaths,
-  resolveManagedBuildRef as resolveDogfoodRef,
-};
+export function resolveDogfoodPaths(
+  env: NodeJS.ProcessEnv = process.env,
+  homeDirectory = OS.homedir(),
+): ManagedBuildPaths {
+  return resolveManagedBuildPaths(dogfoodConfig, env, homeDirectory);
+}
+
+export function resolveDogfoodRef(
+  input: ParsedManagedBuildArgs,
+  trackedRef: string | null,
+): string {
+  return resolveManagedBuildRef(input, trackedRef, dogfoodConfig.defaultRef);
+}
+
+export { managedBuildCloneArgs as dogfoodCloneArgs };
+export { managedBuildStartArgs as dogfoodStartArgs };
+export { parseManagedBuildArgs as parseDogfoodArgs };

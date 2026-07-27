@@ -97,6 +97,7 @@ describe("desktopUserDataProfile", () => {
     FS.writeFileSync(Path.join(sourcePartitionPath, "Cookies"), "bridge-cookie");
     FS.writeFileSync(Path.join(sourcePartitionPath, "Cookies-journal"), "bridge-journal");
     FS.writeFileSync(Path.join(sourcePartitionPath, "Local Storage", "state"), "bridge-state");
+    FS.mkdirSync(targetPath, { recursive: true });
     FS.writeFileSync(
       Path.join(targetPath, "synara-profile-seed.json"),
       JSON.stringify({
