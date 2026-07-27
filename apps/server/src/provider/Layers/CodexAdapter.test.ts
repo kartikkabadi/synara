@@ -96,6 +96,8 @@ class FakeCodexManager extends CodexAppServerManager {
 
   public stopAllImpl = vi.fn(() => undefined);
 
+  public compactThreadImpl = vi.fn(async (_threadId: ThreadId): Promise<void> => undefined);
+
   override startSession(input: CodexAppServerStartSessionInput): Promise<ProviderSession> {
     return this.startSessionImpl(input);
   }
@@ -122,6 +124,10 @@ class FakeCodexManager extends CodexAppServerManager {
 
   override rollbackThread(threadId: ThreadId, numTurns: number) {
     return this.rollbackThreadImpl(threadId, numTurns);
+  }
+
+  override compactThread(threadId: ThreadId): Promise<void> {
+    return this.compactThreadImpl(threadId);
   }
 
   override respondToRequest(
@@ -196,6 +202,41 @@ validationLayer("CodexAdapterLive validation", (it) => {
         }),
       );
       assert.equal(validationManager.startSessionImpl.mock.calls.length, 0);
+    }),
+  );
+  it.effect("rejects compaction instructions and returns same-session on compactThread", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const compactThread = adapter.compactThread;
+      assert.notEqual(compactThread, undefined);
+      if (!compactThread) {
+        return;
+      }
+
+      const rejected = yield* compactThread({
+        requestId: "compact-req-1",
+        threadId: asThreadId("thread-1"),
+        trigger: "manual",
+        instructions: "Keep the plan",
+      }).pipe(Effect.result);
+      assert.equal(rejected._tag, "Failure");
+      assert.deepStrictEqual(
+        rejected._tag === "Failure" ? rejected.failure : undefined,
+        new ProviderAdapterValidationError({
+          provider: "codex",
+          operation: "compactThread",
+          issue: "Codex context compaction does not support custom instructions.",
+        }),
+      );
+      assert.equal(validationManager.compactThreadImpl.mock.calls.length, 0);
+
+      const result = yield* compactThread({
+        requestId: "compact-req-2",
+        threadId: asThreadId("thread-1"),
+        trigger: "manual",
+      });
+      assert.deepStrictEqual(result, { kind: "same-session" });
+      assert.deepStrictEqual(validationManager.compactThreadImpl.mock.calls[0]?.[0], "thread-1");
     }),
   );
   it.effect("maps codex model options before starting a session", () =>
@@ -1433,6 +1474,20 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         lastOutputTokens: 6,
         lastReasoningOutputTokens: 0,
         compactsAutomatically: true,
+        context: {
+          usedTokens: 126,
+          maxTokens: 258_400,
+          usedPercent: (126 / 258_400) * 100,
+          measurement: "provider-reported",
+          confidence: "high",
+        },
+        cumulative: { totalProcessedTokens: 11_839 },
+        lastTurn: {
+          inputTokens: 120,
+          cachedInputTokens: 0,
+          outputTokens: 6,
+          reasoningOutputTokens: 0,
+        },
       });
     }),
   );

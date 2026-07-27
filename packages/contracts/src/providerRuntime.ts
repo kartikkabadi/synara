@@ -312,6 +312,39 @@ const ThreadMetadataUpdatedPayload = Schema.Struct({
 });
 export type ThreadMetadataUpdatedPayload = typeof ThreadMetadataUpdatedPayload.Type;
 
+// How a context-occupancy number was obtained and how much to trust it.
+export const ContextUsageSnapshot = Schema.Struct({
+  usedTokens: NonNegativeInt,
+  maxTokens: Schema.optional(PositiveInt),
+  usedPercent: Schema.optional(
+    Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)).check(Schema.isLessThanOrEqualTo(100)),
+  ),
+  measurement: Schema.Literals(["provider-reported", "provider-estimated", "synara-estimated"]),
+  confidence: Schema.Literals(["exact", "high", "medium", "low"]),
+});
+export type ContextUsageSnapshot = typeof ContextUsageSnapshot.Type;
+
+// Lifetime totals across the whole thread; never context occupancy.
+export const CumulativeUsageSnapshot = Schema.Struct({
+  inputTokens: Schema.optional(NonNegativeInt),
+  cachedInputTokens: Schema.optional(NonNegativeInt),
+  outputTokens: Schema.optional(NonNegativeInt),
+  reasoningOutputTokens: Schema.optional(NonNegativeInt),
+  totalProcessedTokens: Schema.optional(NonNegativeInt),
+});
+export type CumulativeUsageSnapshot = typeof CumulativeUsageSnapshot.Type;
+
+// Usage attributable to the most recent turn only.
+export const LastTurnUsageSnapshot = Schema.Struct({
+  inputTokens: Schema.optional(NonNegativeInt),
+  cachedInputTokens: Schema.optional(NonNegativeInt),
+  outputTokens: Schema.optional(NonNegativeInt),
+  reasoningOutputTokens: Schema.optional(NonNegativeInt),
+  durationMs: Schema.optional(NonNegativeInt),
+  toolUses: Schema.optional(NonNegativeInt),
+});
+export type LastTurnUsageSnapshot = typeof LastTurnUsageSnapshot.Type;
+
 export const ThreadTokenUsageSnapshot = Schema.Struct({
   usedTokens: NonNegativeInt,
   usedPercent: Schema.optional(
@@ -331,8 +364,205 @@ export const ThreadTokenUsageSnapshot = Schema.Struct({
   toolUses: Schema.optional(NonNegativeInt),
   durationMs: Schema.optional(NonNegativeInt),
   compactsAutomatically: Schema.optional(Schema.Boolean),
+
+  // V2 nested semantics: flat fields above stay for backward compatibility.
+  context: Schema.optional(ContextUsageSnapshot),
+  cumulative: Schema.optional(CumulativeUsageSnapshot),
+  lastTurn: Schema.optional(LastTurnUsageSnapshot),
 });
 export type ThreadTokenUsageSnapshot = typeof ThreadTokenUsageSnapshot.Type;
+
+// How a compaction pass is (or would be) triggered for a thread.
+export const CompactionTrigger = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("percent"), percent: Schema.Number }),
+  Schema.Struct({ kind: Schema.Literal("remaining-tokens"), reserveTokens: Schema.Number }),
+  Schema.Struct({ kind: Schema.Literal("absolute-used-tokens"), usedTokens: Schema.Number }),
+  Schema.Struct({ kind: Schema.Literal("opaque") }),
+]);
+export type CompactionTrigger = typeof CompactionTrigger.Type;
+
+export const CompactionOperationSummary = Schema.Struct({
+  requestId: Schema.optional(TrimmedNonEmptyStringSchema),
+  owner: Schema.Literals(["provider", "synara"]),
+  trigger: Schema.Literals(["manual", "provider-auto", "synara-auto"]),
+  result: Schema.Literals(["completed", "failed"]),
+  sessionEffect: Schema.Literals(["same-session", "session-rollover", "runtime-restart"]),
+  startedAt: Schema.optional(TrimmedNonEmptyStringSchema),
+  completedAt: Schema.optional(TrimmedNonEmptyStringSchema),
+  beforeUsage: Schema.optional(ThreadTokenUsageSnapshot),
+  afterUsage: Schema.optional(ThreadTokenUsageSnapshot),
+  failureDetail: Schema.optional(TrimmedNonEmptyStringSchema),
+});
+export type CompactionOperationSummary = typeof CompactionOperationSummary.Type;
+
+// Live control-state view of one thread's compaction pass, projected so the
+// client can show progress and failures without replaying lifecycle events.
+export const ThreadCompactionPhase = Schema.Struct({
+  status: Schema.Literals(["idle", "pending", "running", "uncertain", "suspended"]),
+  reason: Schema.optional(TrimmedNonEmptyStringSchema),
+  detail: Schema.optional(TrimmedNonEmptyStringSchema),
+  retryable: Schema.optional(Schema.Boolean),
+});
+export type ThreadCompactionPhase = typeof ThreadCompactionPhase.Type;
+
+// Per-thread runtime view of compaction: who owns it, whether manual
+// compaction is currently available, and what the last pass did.
+export const ThreadCompactionRuntimeStatus = Schema.Struct({
+  owner: Schema.Literals(["provider", "synara", "none"]),
+  providerAutoEnabled: Schema.NullOr(Schema.Boolean),
+  manualAvailability: Schema.Struct({
+    available: Schema.Boolean,
+    reason: Schema.optional(TrimmedNonEmptyStringSchema),
+  }),
+  trigger: Schema.optional(CompactionTrigger),
+  phase: Schema.optional(ThreadCompactionPhase),
+  lastCompaction: Schema.optional(CompactionOperationSummary),
+});
+export type ThreadCompactionRuntimeStatus = typeof ThreadCompactionRuntimeStatus.Type;
+
+// Correlates one manual/auto compaction pass across request, runtime events,
+// and the persisted operation summary.
+export const CompactionRequestId = TrimmedNonEmptyStringSchema;
+export type CompactionRequestId = typeof CompactionRequestId.Type;
+
+export const ProviderCompactionRequest = Schema.Struct({
+  requestId: CompactionRequestId,
+  threadId: ThreadId,
+  trigger: Schema.Literals(["manual", "synara-auto"]),
+  instructions: Schema.optional(TrimmedNonEmptyStringSchema),
+  expectedLifecycleGeneration: Schema.optional(TrimmedNonEmptyStringSchema),
+});
+export type ProviderCompactionRequest = typeof ProviderCompactionRequest.Type;
+
+export const ProviderCompactionResult = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("same-session"),
+    resumeCursor: Schema.optional(TrimmedNonEmptyStringSchema),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("session-rollover"),
+    resumeCursor: TrimmedNonEmptyStringSchema,
+    providerThreadId: Schema.optional(TrimmedNonEmptyStringSchema),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("runtime-restart-required"),
+    resumeCursor: Schema.optional(TrimmedNonEmptyStringSchema),
+  }),
+]);
+export type ProviderCompactionResult = typeof ProviderCompactionResult.Type;
+
+// Canonical compaction orchestration lifecycle. These events describe one
+// compaction pass end to end and drive the durable compaction control state.
+export const ThreadCompactionRequestedPayload = Schema.Struct({
+  requestId: CompactionRequestId,
+  trigger: Schema.Literals(["manual", "synara-auto"]),
+  instructions: Schema.optional(TrimmedNonEmptyStringSchema),
+  createdAt: TrimmedNonEmptyStringSchema,
+});
+export type ThreadCompactionRequestedPayload = typeof ThreadCompactionRequestedPayload.Type;
+
+export const ThreadCompactionStartedPayload = Schema.Struct({
+  requestId: CompactionRequestId,
+  owner: Schema.Literals(["provider", "synara"]),
+  trigger: Schema.Literals(["manual", "provider-auto", "synara-auto"]),
+  beforeUsage: Schema.optional(ThreadTokenUsageSnapshot),
+  createdAt: TrimmedNonEmptyStringSchema,
+});
+export type ThreadCompactionStartedPayload = typeof ThreadCompactionStartedPayload.Type;
+
+export const ThreadCompactionCompletedPayload = Schema.Struct({
+  requestId: CompactionRequestId,
+  sessionEffect: Schema.Literals(["same-session", "session-rollover", "runtime-restart"]),
+  beforeUsage: Schema.optional(ThreadTokenUsageSnapshot),
+  afterUsage: Schema.optional(ThreadTokenUsageSnapshot),
+  durationMs: Schema.optional(NonNegativeInt),
+  createdAt: TrimmedNonEmptyStringSchema,
+});
+export type ThreadCompactionCompletedPayload = typeof ThreadCompactionCompletedPayload.Type;
+
+export const ThreadCompactionFailedPayload = Schema.Struct({
+  requestId: CompactionRequestId,
+  outcomeKnown: Schema.Boolean,
+  retryable: Schema.Boolean,
+  failureKind: TrimmedNonEmptyStringSchema,
+  detail: Schema.optional(TrimmedNonEmptyStringSchema),
+  createdAt: TrimmedNonEmptyStringSchema,
+});
+export type ThreadCompactionFailedPayload = typeof ThreadCompactionFailedPayload.Type;
+
+export const ThreadCompactionSuspendedPayload = Schema.Struct({
+  reason: TrimmedNonEmptyStringSchema,
+  detail: Schema.optional(TrimmedNonEmptyStringSchema),
+  createdAt: TrimmedNonEmptyStringSchema,
+});
+export type ThreadCompactionSuspendedPayload = typeof ThreadCompactionSuspendedPayload.Type;
+
+export const ThreadCompactionLifecycleEvent = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("thread.compaction-requested"),
+    threadId: ThreadId,
+    payload: ThreadCompactionRequestedPayload,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.compaction-started"),
+    threadId: ThreadId,
+    payload: ThreadCompactionStartedPayload,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.compaction-completed"),
+    threadId: ThreadId,
+    payload: ThreadCompactionCompletedPayload,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.compaction-failed"),
+    threadId: ThreadId,
+    payload: ThreadCompactionFailedPayload,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.compaction-suspended"),
+    threadId: ThreadId,
+    payload: ThreadCompactionSuspendedPayload,
+  }),
+]);
+export type ThreadCompactionLifecycleEvent = typeof ThreadCompactionLifecycleEvent.Type;
+
+// Per-thread Synara-managed auto-compaction policy: whether Synara should
+// compact on its own, at what trigger, and how long to wait between passes.
+export const ThreadCompactionSettings = Schema.Struct({
+  autoEnabled: Schema.Boolean,
+  trigger: Schema.optional(CompactionTrigger),
+  cooldownSeconds: Schema.optional(NonNegativeInt),
+});
+export type ThreadCompactionSettings = typeof ThreadCompactionSettings.Type;
+
+// Evaluable trigger for Synara-managed auto-compaction. Unlike
+// `CompactionTrigger` there is no `opaque` member: Synara can only act on a
+// threshold it can compute from token usage.
+export const SynaraAutoCompactionTrigger = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("percent"), percent: Schema.Number }),
+  Schema.Struct({ kind: Schema.Literal("remaining-tokens"), reserveTokens: NonNegativeInt }),
+  Schema.Struct({ kind: Schema.Literal("absolute-used-tokens"), usedTokens: NonNegativeInt }),
+]);
+export type SynaraAutoCompactionTrigger = typeof SynaraAutoCompactionTrigger.Type;
+
+// Fully-resolved policy the auto-compaction decider evaluates for one thread.
+export const SynaraAutoCompactionOptions = Schema.Struct({
+  enabled: Schema.Boolean,
+  trigger: SynaraAutoCompactionTrigger,
+  cooldownMs: Schema.optional(NonNegativeInt),
+});
+export type SynaraAutoCompactionOptions = typeof SynaraAutoCompactionOptions.Type;
+
+export const ProviderSetCompactionSettingsInput = Schema.Struct({
+  threadId: ThreadId,
+  settings: ThreadCompactionSettings,
+});
+export type ProviderSetCompactionSettingsInput = typeof ProviderSetCompactionSettingsInput.Type;
+
+// Thread-activity kind under which compaction runtime status snapshots are
+// projected to clients (payload: ThreadCompactionRuntimeStatus).
+export const THREAD_COMPACTION_RUNTIME_STATUS_ACTIVITY_KIND =
+  "thread.compaction-runtime-status.updated" as const;
 
 const ThreadTokenUsageUpdatedPayload = Schema.Struct({
   usage: ThreadTokenUsageSnapshot,

@@ -5217,6 +5217,8 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
             maxTokens: 200_000,
             toolUses: 2,
             durationMs: 654,
+            cumulative: { totalProcessedTokens: 321 },
+            lastTurn: { durationMs: 654, toolUses: 2 },
           },
         });
       }
@@ -5288,6 +5290,12 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
             inputTokens: 23863,
             outputTokens: 679,
             maxTokens: 200000,
+            cumulative: {
+              inputTokens: 23863,
+              outputTokens: 679,
+              totalProcessedTokens: 24542,
+            },
+            lastTurn: { inputTokens: 23863, outputTokens: 679 },
           },
         });
       }
@@ -5351,6 +5359,8 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
             lastUsedTokens: 200000,
             totalProcessedTokens: 535000,
             maxTokens: 200000,
+            cumulative: { totalProcessedTokens: 535000 },
+            lastTurn: {},
           },
         });
       }
@@ -5431,6 +5441,8 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
               lastUsedTokens: 190000,
               totalProcessedTokens: 535000,
               maxTokens: 200000,
+              cumulative: { totalProcessedTokens: 535000 },
+              lastTurn: {},
             },
           });
         }
@@ -5510,6 +5522,8 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
             lastUsedTokens: 190000,
             totalProcessedTokens: 535000,
             maxTokens: 200000,
+            cumulative: { totalProcessedTokens: 535000 },
+            lastTurn: {},
           },
         });
       }
@@ -5588,6 +5602,8 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
             lastUsedTokens: 190000,
             maxTokens: 200_000,
             totalProcessedTokens: 535000,
+            cumulative: { totalProcessedTokens: 535000 },
+            lastTurn: {},
           },
         });
       }
@@ -7573,6 +7589,8 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
             usedTokens: 23_000,
             lastUsedTokens: 23_000,
             maxTokens: 1_000_000,
+            cumulative: { totalProcessedTokens: 23_000 },
+            lastTurn: {},
           },
         });
       }
@@ -7656,6 +7674,8 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
             usedTokens: 23_000,
             lastUsedTokens: 23_000,
             maxTokens: 1_000_000,
+            cumulative: { totalProcessedTokens: 23_000 },
+            lastTurn: {},
           },
         });
       }

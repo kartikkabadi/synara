@@ -807,9 +807,9 @@ export function projectProviderRuntimeActivities(
             kind: "context-compaction",
             summary:
               event.type === "item.updated"
-                ? "Compacting conversation..."
+                ? "Compacting context…"
                 : failed
-                  ? "Context compaction failed"
+                  ? "Compaction failed"
                   : "Context compacted",
             payload: toActivityPayload({
               itemType: event.payload.itemType,

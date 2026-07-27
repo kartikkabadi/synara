@@ -5676,15 +5676,13 @@ describe("ProviderRuntimeIngestion", () => {
     const thread = await waitForThread(harness.engine, (entry) =>
       entry.activities.some(
         (activity: ProviderRuntimeTestActivity) =>
-          activity.kind === "context-compaction" &&
-          activity.summary === "Compacting conversation...",
+          activity.kind === "context-compaction" && activity.summary === "Compacting context…",
       ),
     );
 
     const activity = thread.activities.find(
       (candidate: ProviderRuntimeTestActivity) =>
-        candidate.kind === "context-compaction" &&
-        candidate.summary === "Compacting conversation...",
+        candidate.kind === "context-compaction" && candidate.summary === "Compacting context…",
     );
     expect(activity?.tone).toBe("info");
   });
@@ -5720,8 +5718,7 @@ describe("ProviderRuntimeIngestion", () => {
     const thread = await waitForThread(harness.engine, (entry) =>
       entry.activities.some(
         (activity: ProviderRuntimeTestActivity) =>
-          activity.kind === "context-compaction" &&
-          activity.summary === "Context compaction failed",
+          activity.kind === "context-compaction" && activity.summary === "Compaction failed",
       ),
     );
 
@@ -5732,8 +5729,7 @@ describe("ProviderRuntimeIngestion", () => {
     expect(completed?.tone).toBe("info");
     const failed = thread.activities.find(
       (candidate: ProviderRuntimeTestActivity) =>
-        candidate.kind === "context-compaction" &&
-        candidate.summary === "Context compaction failed",
+        candidate.kind === "context-compaction" && candidate.summary === "Compaction failed",
     );
     expect(failed?.tone).toBe("error");
   });

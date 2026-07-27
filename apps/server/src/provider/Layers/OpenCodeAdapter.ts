@@ -4,7 +4,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EventId,
   type ProviderKind,
+  type ProviderCompactionCapabilities,
   type ProviderComposerCapabilities,
+  supportsThreadCompactionFromCompaction,
   type ProviderListCommandsResult,
   type ProviderRuntimeEvent,
   type ProviderSession,
@@ -1054,6 +1056,31 @@ export function normalizeOpenCodeTokenUsage(
     lastCachedInputTokens: cachedInputTokens,
     lastOutputTokens: outputTokens,
     lastReasoningOutputTokens: reasoningOutputTokens,
+    // The SDK only reports cumulative processed tokens; there is no reliable
+    // per-request context count, so the context claim is a low-confidence
+    // Synara estimate derived from that cumulative value.
+    context: {
+      usedTokens,
+      ...(normalizedMaxTokens !== undefined ? { maxTokens: normalizedMaxTokens } : {}),
+      ...(normalizedMaxTokens !== undefined
+        ? { usedPercent: Math.min(100, (usedTokens / normalizedMaxTokens) * 100) }
+        : {}),
+      measurement: "synara-estimated",
+      confidence: "low",
+    },
+    cumulative: {
+      inputTokens,
+      cachedInputTokens,
+      outputTokens,
+      reasoningOutputTokens,
+      totalProcessedTokens,
+    },
+    lastTurn: {
+      inputTokens,
+      cachedInputTokens,
+      outputTokens,
+      reasoningOutputTokens,
+    },
   };
 }
 
@@ -4030,9 +4057,16 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         },
       );
 
-      const compactThread: NonNullable<OpenCodeAdapterShape["compactThread"]> = (threadId) =>
+      const compactThread: NonNullable<OpenCodeAdapterShape["compactThread"]> = (input) =>
         Effect.gen(function* () {
-          const context = ensureAdapterSessionContext(threadId);
+          if (input.instructions !== undefined) {
+            return yield* new ProviderAdapterValidationError({
+              provider,
+              operation: "compactThread",
+              issue: `${adapterConfig.displayName} context compaction does not support custom instructions.`,
+            });
+          }
+          const context = ensureAdapterSessionContext(input.threadId);
           const parsedModel = parseOpenCodeModelSlug(context.session.model);
           if (!parsedModel) {
             return yield* new ProviderAdapterValidationError({
@@ -4049,6 +4083,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
               modelID: parsedModel.modelID,
             }),
           ).pipe(Effect.mapError(toAdapterRequestError));
+          return { kind: "same-session" } as const;
         });
 
       const forkThread: NonNullable<OpenCodeAdapterShape["forkThread"]> = (input) =>
@@ -4403,6 +4438,30 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         );
       };
 
+      // Built per provider (`opencode` vs `kilo`) so the two providers never
+      // silently share one descriptor. Both currently compact manually via the
+      // `session.summarize` SDK call and compact natively with
+      // `part.type === "compaction"` / `session.compacted` events; the current
+      // usage normalizer reports cumulative processed tokens, not exact
+      // occupancy, so context usage is provider-estimated.
+      const compaction: ProviderCompactionCapabilities = {
+        manual: {
+          mode: "same-session",
+          mechanism: "native-sdk",
+          supportsInstructions: false,
+        },
+        automatic: {
+          mode: "native",
+          enabledByDefault: true,
+          statusVisibility: "exact",
+          triggerVisibility: "exact",
+        },
+        telemetry: {
+          lifecycle: "native",
+          contextUsage: "provider-estimated",
+        },
+      };
+
       const getComposerCapabilities: NonNullable<
         OpenCodeAdapterShape["getComposerCapabilities"]
       > = () =>
@@ -4414,7 +4473,8 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           supportsPluginMentions: false,
           supportsPluginDiscovery: false,
           supportsRuntimeModelList: true,
-          supportsThreadCompaction: true,
+          compaction,
+          supportsThreadCompaction: supportsThreadCompactionFromCompaction(compaction),
           supportsThreadImport: true,
         } satisfies ProviderComposerCapabilities);
 

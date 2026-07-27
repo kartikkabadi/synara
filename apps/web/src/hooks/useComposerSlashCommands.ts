@@ -57,6 +57,7 @@ export function useComposerSlashCommands(input: {
   isServerThread: boolean;
   supportsFastSlashCommand: boolean;
   canOfferCompactCommand: boolean;
+  compactionSupportsInstructions?: boolean;
   canOfferSideCommand: boolean;
   canOfferExportCommand: boolean;
   supportsTextNativeReviewCommand: boolean;
@@ -108,6 +109,7 @@ export function useComposerSlashCommands(input: {
     isServerThread,
     supportsFastSlashCommand,
     canOfferCompactCommand,
+    compactionSupportsInstructions,
     canOfferSideCommand,
     canOfferExportCommand,
     supportsTextNativeReviewCommand,
@@ -142,49 +144,66 @@ export function useComposerSlashCommands(input: {
     providerNativeCommandNames,
   });
 
-  const compactProviderThread = useCallback(async (): Promise<boolean> => {
-    const api = readNativeApi();
-    if (
-      !api ||
-      !canOfferCompactCommand ||
-      !isServerThread ||
-      !activeThread?.session ||
-      activeThread.session.status === "closed"
-    ) {
-      toastManager.add({
-        type: "warning",
-        title: "Compact is unavailable",
-        description: "Open an active supported server thread before compacting context.",
-      });
-      return false;
-    }
-
-    try {
-      void api.provider
-        .compactThread({
-          threadId: activeThread.id,
-        })
-        .catch((error) => {
-          toastManager.add({
-            type: "error",
-            title: "Could not compact thread",
-            description:
-              error instanceof Error
-                ? error.message
-                : "An error occurred while compacting context.",
-          });
+  // Manual memoization kept: this file does not compile under React Compiler (see compile-report).
+  const compactProviderThread = useCallback(
+    async (instructions?: string): Promise<boolean> => {
+      const api = readNativeApi();
+      if (
+        !api ||
+        !canOfferCompactCommand ||
+        !isServerThread ||
+        !activeThread?.session ||
+        activeThread.session.status === "closed"
+      ) {
+        toastManager.add({
+          type: "warning",
+          title: "Compact is unavailable",
+          description: "Open an active supported server thread before compacting context.",
         });
-      return true;
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Could not compact thread",
-        description:
-          error instanceof Error ? error.message : "An error occurred while compacting context.",
-      });
-      return false;
-    }
-  }, [activeThread, canOfferCompactCommand, isServerThread]);
+        return false;
+      }
+
+      const trimmedInstructions = instructions?.trim();
+      if (trimmedInstructions && compactionSupportsInstructions === false) {
+        toastManager.add({
+          type: "warning",
+          title: "Compaction instructions unsupported",
+          description: "This provider does not accept custom compaction instructions.",
+        });
+        return false;
+      }
+
+      try {
+        void api.provider
+          .compactThread({
+            requestId: crypto.randomUUID(),
+            threadId: activeThread.id,
+            trigger: "manual",
+            ...(trimmedInstructions ? { instructions: trimmedInstructions } : {}),
+          })
+          .catch((error) => {
+            toastManager.add({
+              type: "error",
+              title: "Could not compact thread",
+              description:
+                error instanceof Error
+                  ? error.message
+                  : "An error occurred while compacting context.",
+            });
+          });
+        return true;
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Could not compact thread",
+          description:
+            error instanceof Error ? error.message : "An error occurred while compacting context.",
+        });
+        return false;
+      }
+    },
+    [activeThread, canOfferCompactCommand, compactionSupportsInstructions, isServerThread],
+  );
 
   const setFastModeFromSlashCommand = useCallback(
     (enabled: boolean) => {
@@ -657,7 +676,7 @@ export function useComposerSlashCommands(input: {
       }
       if (slashInvocation.command === "compact") {
         editorActions.clearComposerSlashDraft();
-        await compactProviderThread();
+        await compactProviderThread(slashInvocation.args);
         return true;
       }
       if (slashInvocation.command === "plan" || slashInvocation.command === "default") {

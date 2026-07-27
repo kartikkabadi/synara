@@ -27,6 +27,8 @@ import type {
   ProviderListSkillsResult,
   ProviderListSkillsInput,
   ProviderStartReviewInput,
+  ProviderCompactionRequest,
+  ProviderCompactionResult,
   ProviderUserInputAnswers,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
@@ -241,7 +243,9 @@ export interface ProviderAdapterShape<TError> {
   /**
    * Trigger provider-native context compaction for a thread when supported.
    */
-  readonly compactThread?: (threadId: ThreadId) => Effect.Effect<void, TError>;
+  readonly compactThread?: (
+    input: ProviderCompactionRequest,
+  ) => Effect.Effect<ProviderCompactionResult, TError>;
 
   /**
    * Fork one provider thread into another persisted thread cursor when supported.

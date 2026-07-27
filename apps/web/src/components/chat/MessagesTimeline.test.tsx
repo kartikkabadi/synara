@@ -1116,7 +1116,7 @@ describe("MessagesTimeline", () => {
             entry: {
               id: "work-compacting",
               createdAt: "2026-03-17T19:12:28.000Z",
-              label: "Compacting conversation...",
+              label: "Compacting context…",
               tone: "info",
             },
           },
@@ -1137,7 +1137,7 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("Compacting conversation...");
+    expect(markup).toContain("Compacting context…");
     expect(markup).toContain("Working for");
     expect(markup).not.toContain("h-px flex-1 bg-border");
   });
@@ -1188,6 +1188,32 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain(formatShortTimestamp(assistantCreatedAt, "locale"));
     expect(markup).toMatch(/class="[^"]*\bpb-1\b[^"]*" data-timeline-row-kind="message"/);
   });
+
+  it("renders a failed compaction entry", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...makeTimelineBaseProps()}
+        timelineEntries={[
+          {
+            id: "entry-compaction-failed",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-compaction-failed",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Compaction failed",
+              tone: "error",
+            },
+          },
+        ]}
+        resolvedTheme="light"
+      />,
+    );
+
+    expect(markup).toContain("Compaction failed");
+  });
+
 
   it("folds work log summaries above the next assistant message footer", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");

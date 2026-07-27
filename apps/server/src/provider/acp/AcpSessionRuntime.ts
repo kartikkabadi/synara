@@ -127,6 +127,17 @@ export interface AcpSessionRuntimeOptions {
    */
   readonly buildMcpServers?: (initializeResult: Acp.InitializeResponse) => Array<Acp.McpServer>;
   readonly authenticateMeta?: Record<string, unknown>;
+  /**
+   * Whether usage snapshots from this provider's `usage_update` notifications
+   * may truthfully claim the provider compacts its context automatically.
+   * Omit when there is no evidence of observable automatic compaction.
+   */
+  readonly usageCompactsAutomatically?: boolean;
+  /**
+   * How much to trust the provider's ACP `used`/`size` context estimate.
+   * Defaults to "medium" (an estimate, but grounded in real counts).
+   */
+  readonly usageContextConfidence?: "medium" | "low";
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
     readonly logIncoming?: boolean;
@@ -769,6 +780,8 @@ const makeAcpSessionRuntime = (
               assistantSegmentRef,
               runtimeInstanceId,
               params: notification,
+              usageCompactsAutomatically: options.usageCompactsAutomatically,
+              usageContextConfidence: options.usageContextConfidence,
             }),
           ),
         );
@@ -1287,6 +1300,8 @@ const handleSessionUpdate = ({
   assistantSegmentRef,
   runtimeInstanceId,
   params,
+  usageCompactsAutomatically,
+  usageContextConfidence,
 }: {
   readonly offer: (event: AcpParsedSessionEvent) => Effect.Effect<void>;
   readonly modeStateRef: Ref.Ref<AcpSessionModeState | undefined>;
@@ -1294,9 +1309,14 @@ const handleSessionUpdate = ({
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
   readonly runtimeInstanceId: string;
   readonly params: Acp.SessionNotification;
+  readonly usageCompactsAutomatically?: boolean | undefined;
+  readonly usageContextConfidence?: "medium" | "low" | undefined;
 }): Effect.Effect<void> =>
   Effect.gen(function* () {
-    const parsed = parseSessionUpdateEvent(params);
+    const parsed = parseSessionUpdateEvent(params, {
+      usageCompactsAutomatically,
+      usageContextConfidence,
+    });
     if (parsed.modeId) {
       yield* Ref.update(modeStateRef, (current) =>
         current === undefined ? current : updateModeState(current, parsed.modeId!),

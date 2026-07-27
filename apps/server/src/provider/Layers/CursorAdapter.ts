@@ -9,7 +9,9 @@ import {
   ApprovalRequestId,
   type CursorModelOptions,
   EventId,
+  type ProviderCompactionCapabilities,
   type ProviderComposerCapabilities,
+  supportsThreadCompactionFromCompaction,
   type ProviderApprovalDecision,
   type ProviderInteractionMode,
   type ProviderListModelsResult,
@@ -120,6 +122,28 @@ import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogg
 import { discoverCursorSkills } from "../cursorSkillsDiscovery.ts";
 
 const PROVIDER = "cursor" as const;
+
+// Cursor documents `/compress` (alias `/compact`, id `summarize`) in the
+// interactive TUI only. The `cursor-agent acp` surface advertises no
+// compaction RPC in its initialize capabilities and its ACP bundle carries no
+// compaction method, so Synara must not claim manual compaction. Native
+// automatic compaction is assumed but not observable over ACP.
+export const cursorCompaction: ProviderCompactionCapabilities = {
+  manual: {
+    mode: "unsupported",
+    mechanism: "unsupported",
+    supportsInstructions: false,
+  },
+  automatic: {
+    mode: "native",
+    statusVisibility: "none",
+    triggerVisibility: "opaque",
+  },
+  telemetry: {
+    lifecycle: "none",
+    contextUsage: "provider-estimated",
+  },
+};
 
 export const takeCursorSynaraHarnessPolicyTextPart = (
   state: SynaraHarnessPolicyDeliveryState,
@@ -631,6 +655,11 @@ export function makeCursorAdapter(
             ...(input.accountLaunch !== undefined ? { accountLaunch: input.accountLaunch } : {}),
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientInfo: { name: "Synara", version: "0.0.0" },
+            // Cursor's ACP surface gives no evidence of automatic compaction,
+            // so usage snapshots must not claim it.
+            usageCompactsAutomatically: false,
+            // Cursor's ACP usage carries no exact token counts.
+            usageContextConfidence: "low",
             ...(agentGatewayCredentials
               ? {
                   buildMcpServers: (initializeResult) =>
@@ -1366,7 +1395,8 @@ export function makeCursorAdapter(
         supportsPluginMentions: false,
         supportsPluginDiscovery: false,
         supportsRuntimeModelList: true,
-        supportsThreadCompaction: false,
+        compaction: cursorCompaction,
+        supportsThreadCompaction: supportsThreadCompactionFromCompaction(cursorCompaction),
         supportsThreadImport: true,
       } satisfies ProviderComposerCapabilities);
 

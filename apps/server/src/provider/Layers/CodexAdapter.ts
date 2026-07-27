@@ -287,6 +287,26 @@ function normalizeCodexTokenUsage(value: unknown): ThreadTokenUsageSnapshot | un
       ? { lastReasoningOutputTokens: reasoningOutputTokens }
       : {}),
     compactsAutomatically: true,
+    // The last request's total is the closest provider-reported proxy for
+    // context occupancy; the lifetime total is cumulative, never context.
+    context: {
+      usedTokens,
+      ...(maxTokens !== undefined
+        ? {
+            maxTokens,
+            usedPercent: Math.min(100, (usedTokens / maxTokens) * 100),
+          }
+        : {}),
+      measurement: "provider-reported",
+      confidence: "high",
+    },
+    ...(totalProcessedTokens !== undefined ? { cumulative: { totalProcessedTokens } } : {}),
+    lastTurn: {
+      ...(inputTokens !== undefined ? { inputTokens } : {}),
+      ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+      ...(outputTokens !== undefined ? { outputTokens } : {}),
+      ...(reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
+    },
   };
 }
 
@@ -1899,10 +1919,20 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
       );
     };
 
-    const compactThread: NonNullable<CodexAdapterShape["compactThread"]> = (threadId) =>
-      Effect.tryPromise({
-        try: () => manager.compactThread(threadId),
-        catch: (cause) => toRequestError(threadId, "thread/compact/start", cause),
+    const compactThread: NonNullable<CodexAdapterShape["compactThread"]> = (input) =>
+      Effect.gen(function* () {
+        if (input.instructions !== undefined) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "compactThread",
+            issue: "Codex context compaction does not support custom instructions.",
+          });
+        }
+        yield* Effect.tryPromise({
+          try: () => manager.compactThread(input.threadId),
+          catch: (cause) => toRequestError(input.threadId, "thread/compact/start", cause),
+        });
+        return { kind: "same-session" } as const;
       });
 
     const forkThread: CodexAdapterShape["forkThread"] = (input) =>

@@ -60,6 +60,7 @@ export function hasGrokApiKeyEnv(env: NodeJS.ProcessEnv = process.env): boolean 
 
 export function runGrokAcpCompactionCommand(
   runtime: Pick<AcpSessionRuntimeShape, "getAvailableCommands" | "prompt">,
+  instructions?: string,
 ): Effect.Effect<Acp.PromptResponse, AcpErrors.AcpError> {
   return Effect.gen(function* () {
     const commands = yield* runtime.getAvailableCommands;
@@ -82,7 +83,15 @@ export function runGrokAcpCompactionCommand(
     // behind by an earlier turn. Grok uses this metadata to reconcile its
     // interaction mode; the normal default-mode prompt path does the same.
     return yield* runtime.prompt({
-      prompt: [{ type: "text", text: GROK_COMPACT_PROMPT }],
+      prompt: [
+        {
+          type: "text",
+          text:
+            instructions === undefined
+              ? GROK_COMPACT_PROMPT
+              : `${GROK_COMPACT_PROMPT} ${instructions}`,
+        },
+      ],
       _meta: { mode: "agent" },
     });
   });

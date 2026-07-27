@@ -9,6 +9,9 @@ import path from "node:path";
 
 import type {
   ProviderApprovalDecision,
+  ProviderCompactionRequest,
+  ProviderCompactionResult,
+  ProviderComposerCapabilities,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
   ProviderSession,
@@ -235,7 +238,32 @@ function makeFakeCodexAdapter(
   );
 
   const compactThread = vi.fn(
-    (_threadId: ThreadId): Effect.Effect<void, ProviderAdapterError> => Effect.void,
+    (
+      _input: ProviderCompactionRequest,
+    ): Effect.Effect<ProviderCompactionResult, ProviderAdapterError> =>
+      Effect.succeed({ kind: "same-session" } as const),
+  );
+
+  const getComposerCapabilities = vi.fn(
+    (): Effect.Effect<ProviderComposerCapabilities, ProviderAdapterError> =>
+      Effect.succeed({
+        provider,
+        supportsSkillMentions: false,
+        supportsSkillDiscovery: false,
+        supportsNativeSlashCommandDiscovery: false,
+        supportsPluginMentions: false,
+        supportsPluginDiscovery: false,
+        supportsRuntimeModelList: false,
+        compaction: {
+          manual: {
+            mode: "same-session",
+            mechanism: "native-rpc",
+            supportsInstructions: false,
+          },
+          automatic: { mode: "none", statusVisibility: "none", triggerVisibility: "opaque" },
+          telemetry: { lifecycle: "none", contextUsage: "none" },
+        },
+      } satisfies ProviderComposerCapabilities),
   );
 
   const stopAll = vi.fn(
@@ -267,6 +295,7 @@ function makeFakeCodexAdapter(
     readThread,
     rollbackThread,
     compactThread,
+    getComposerCapabilities,
     stopAll,
     streamEvents: Stream.fromPubSub(runtimeEventPubSub),
   };
@@ -312,6 +341,7 @@ function makeFakeCodexAdapter(
     readThread,
     rollbackThread,
     compactThread,
+    getComposerCapabilities,
     stopAll,
   };
 }
@@ -359,6 +389,7 @@ function makeProviderServiceLayer(
     readonly includeRestartRollbackDroid?: boolean;
     readonly includePi?: boolean;
   },
+  analyticsLayer?: Layer.Layer<AnalyticsService>,
 ) {
   const codex = makeFakeCodexAdapter();
   const claude = makeFakeCodexAdapter("claudeAgent");
@@ -398,7 +429,7 @@ function makeProviderServiceLayer(
     makeProviderServiceLive(options).pipe(
       Layer.provide(providerAdapterLayer),
       Layer.provide(directoryLayer),
-      Layer.provideMerge(AnalyticsService.layerTest),
+      Layer.provideMerge(analyticsLayer ?? AnalyticsService.layerTest),
     ),
     directoryLayer,
     runtimeRepositoryLayer,
@@ -3441,7 +3472,7 @@ idleCleanup.layer("ProviderServiceLive idle cleanup", (it) => {
     }),
   );
 
-  it.effect("reschedules idle cleanup after successful compact work", () =>
+  it.effect("does not schedule idle cleanup after same-session compaction", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService;
       const runtimeRepository = yield* ProviderSessionRuntimeRepository;
@@ -3485,24 +3516,31 @@ idleCleanup.layer("ProviderServiceLive idle cleanup", (it) => {
       );
 
       idleCleanup.codex.stopSession.mockClear();
-      idleCleanup.codex.compactThread.mockImplementationOnce((inputThreadId) =>
+      idleCleanup.codex.compactThread.mockImplementationOnce((input) =>
         Effect.sync(() => {
-          idleCleanup.codex.updateSession(inputThreadId, (existing) => ({
+          idleCleanup.codex.updateSession(input.threadId, (existing) => ({
             ...existing,
             status: "running",
             activeTurnId: undefined,
           }));
+          return { kind: "same-session" } as const;
         }),
       );
-      yield* provider.compactThread({ threadId });
+      yield* provider.compactThread({
+        requestId: "compact-req-1",
+        threadId,
+        trigger: "manual",
+      });
 
-      yield* waitUntil(
-        () => idleCleanup.codex.stopSession.mock.calls.length > 0,
-        500,
-        20,
-        "idle runtime stop after successful compact",
-      );
-      assert.deepEqual(idleCleanup.codex.stopSession.mock.calls[0]?.[0], threadId);
+      // Idle stop window is 100ms in this suite; the binding must stay active.
+      yield* sleep(300);
+      assert.equal(idleCleanup.codex.stopSession.mock.calls.length, 0);
+      const directory = yield* ProviderSessionDirectory;
+      const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+      assert.equal(binding?.status, "running");
+      const payload = asRuntimePayloadRecord(binding?.runtimePayload);
+      assert.equal(payload.lastRuntimeEvent, "provider.compactThread");
+      assert.equal(payload.activeTurnId, null);
     }),
   );
 
@@ -3867,6 +3905,138 @@ validation.layer("ProviderServiceLive validation", (it) => {
     }),
   );
 
+  it.effect("passes the full compaction request through and returns the adapter result", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-compact-result");
+
+      yield* provider.startSession(threadId, {
+        provider: "codex",
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      validation.codex.compactThread.mockClear();
+      validation.codex.compactThread.mockImplementationOnce(() =>
+        Effect.succeed({
+          kind: "session-rollover",
+          resumeCursor: "cursor-after-rollover",
+          providerThreadId: "provider-thread-9",
+        } as const),
+      );
+
+      const request = {
+        requestId: "compact-req-rollover",
+        threadId,
+        trigger: "manual",
+      } as const;
+      const result = yield* provider.compactThread(request);
+
+      assert.deepEqual(result, {
+        kind: "session-rollover",
+        resumeCursor: "cursor-after-rollover",
+        providerThreadId: "provider-thread-9",
+      });
+      assert.deepEqual(validation.codex.compactThread.mock.calls[0]?.[0], request);
+
+      validation.codex.compactThread.mockImplementationOnce(() =>
+        Effect.succeed({ kind: "runtime-restart-required" } as const),
+      );
+      const restart = yield* provider.compactThread({
+        requestId: "compact-req-restart",
+        threadId,
+        trigger: "synara-auto",
+      });
+      assert.deepEqual(restart, { kind: "runtime-restart-required" });
+    }),
+  );
+
+  it.effect("rejects compaction instructions when the adapter does not support them", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-compact-instructions");
+
+      yield* provider.startSession(threadId, {
+        provider: "codex",
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      validation.codex.compactThread.mockClear();
+      const failure = yield* Effect.result(
+        provider.compactThread({
+          requestId: "compact-req-instr",
+          threadId,
+          trigger: "manual",
+          instructions: "Focus on the refactor",
+        }),
+      );
+
+      assert.equal(failure._tag, "Failure");
+      if (failure._tag !== "Failure") {
+        return;
+      }
+      assert.equal(failure.failure._tag, "ProviderValidationError");
+      if (failure.failure._tag !== "ProviderValidationError") {
+        return;
+      }
+      assert.equal(failure.failure.operation, "ProviderService.compactThread");
+      assert.equal(
+        failure.failure.issue.includes("does not support compaction instructions"),
+        true,
+      );
+      assert.equal(validation.codex.compactThread.mock.calls.length, 0);
+    }),
+  );
+
+  it.effect("passes instructions through when the adapter supports them", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-compact-instructions-ok");
+
+      yield* provider.startSession(threadId, {
+        provider: "codex",
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      validation.codex.compactThread.mockClear();
+      validation.codex.getComposerCapabilities.mockImplementationOnce(() =>
+        Effect.succeed({
+          provider: "codex",
+          supportsSkillMentions: false,
+          supportsSkillDiscovery: false,
+          supportsNativeSlashCommandDiscovery: false,
+          supportsPluginMentions: false,
+          supportsPluginDiscovery: false,
+          supportsRuntimeModelList: false,
+          compaction: {
+            manual: {
+              mode: "same-session",
+              mechanism: "control-command",
+              supportsInstructions: true,
+            },
+            automatic: { mode: "none", statusVisibility: "none", triggerVisibility: "opaque" },
+            telemetry: { lifecycle: "none", contextUsage: "none" },
+          },
+        } satisfies ProviderComposerCapabilities),
+      );
+
+      const result = yield* provider.compactThread({
+        requestId: "compact-req-instr-ok",
+        threadId,
+        trigger: "manual",
+        instructions: "Focus on the refactor",
+      });
+
+      assert.deepEqual(result, { kind: "same-session" });
+      assert.equal(
+        validation.codex.compactThread.mock.calls[0]?.[0]?.instructions,
+        "Focus on the refactor",
+      );
+    }),
+  );
+
   it.effect("fails loudly when the adapter does not support stopping a task", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService;
@@ -4118,3 +4288,269 @@ liveFallback.layer("ProviderServiceLive live-fallback settled turns", (it) => {
     }),
   );
 });
+
+const compactionAnalyticsEvents: Array<{
+  readonly event: string;
+  readonly properties: Record<string, unknown> | undefined;
+}> = [];
+const compactionAnalyticsLayer = Layer.succeed(AnalyticsService, {
+  record: (event: string, properties?: Readonly<Record<string, unknown>>) =>
+    Effect.sync(() => {
+      compactionAnalyticsEvents.push({ event, properties: properties && { ...properties } });
+    }),
+  flush: Effect.void,
+});
+const compaction = makeProviderServiceLayer(undefined, undefined, compactionAnalyticsLayer);
+compaction.layer("ProviderServiceLive compaction semantics", (it) => {
+  it.effect("keeps the binding active after same-session compaction and records analytics", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const directory = yield* ProviderSessionDirectory;
+      const threadId = asThreadId("thread-compact-same-session");
+
+      yield* provider.startSession(threadId, {
+        provider: "codex",
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      compaction.codex.compactThread.mockClear();
+      compaction.codex.readThread.mockClear();
+      compactionAnalyticsEvents.length = 0;
+
+      const result = yield* provider.compactThread({
+        requestId: "compact-same-session",
+        threadId,
+        trigger: "synara-auto",
+      });
+      assert.deepEqual(result, { kind: "same-session" });
+
+      const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+      assert.equal(binding?.status, "running");
+      const payload = asRuntimePayloadRecord(binding?.runtimePayload);
+      assert.equal(payload.lastRuntimeEvent, "provider.compactThread");
+      assert.equal(payload.activeTurnId, null);
+      assert.equal(compaction.codex.readThread.mock.calls.length, 1);
+
+      const record = compactionAnalyticsEvents.find(
+        (entry) => entry.event === "provider.thread.compacted",
+      );
+      assert.equal(record?.properties?.provider, "codex");
+      assert.equal(record?.properties?.resultKind, "same-session");
+      assert.equal(record?.properties?.owner, "provider");
+      assert.equal(record?.properties?.trigger, "synara-auto");
+      assert.equal(typeof record?.properties?.durationMs, "number");
+    }),
+  );
+
+  it.effect("marks the binding stopped when compaction requires a runtime restart", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const directory = yield* ProviderSessionDirectory;
+      const threadId = asThreadId("thread-compact-restart");
+
+      yield* provider.startSession(threadId, {
+        provider: "codex",
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      compactionAnalyticsEvents.length = 0;
+      compaction.codex.compactThread.mockImplementationOnce(() =>
+        Effect.succeed({ kind: "runtime-restart-required" } as const),
+      );
+
+      const result = yield* provider.compactThread({
+        requestId: "compact-restart",
+        threadId,
+        trigger: "manual",
+      });
+      assert.deepEqual(result, { kind: "runtime-restart-required" });
+
+      const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+      assert.equal(binding?.status, "stopped");
+      const payload = asRuntimePayloadRecord(binding?.runtimePayload);
+      assert.equal(payload.lastRuntimeEvent, "provider.compactThread");
+
+      const record = compactionAnalyticsEvents.find(
+        (entry) => entry.event === "provider.thread.compacted",
+      );
+      assert.equal(record?.properties?.resultKind, "runtime-restart-required");
+      assert.equal(record?.properties?.trigger, "manual");
+    }),
+  );
+
+  it.effect("replaces the session identity and increments the generation on session-rollover", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const directory = yield* ProviderSessionDirectory;
+      const threadId = asThreadId("thread-compact-rollover");
+
+      yield* provider.startSession(threadId, {
+        provider: "codex",
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const beforeBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+      const beforeGeneration = beforeBinding?.lifecycleGeneration;
+      assert.equal(typeof beforeGeneration, "string");
+
+      compaction.codex.stopSession.mockClear();
+      compaction.codex.compactThread.mockImplementationOnce(() =>
+        Effect.succeed({
+          kind: "session-rollover",
+          resumeCursor: "cursor-after-rollover",
+          providerThreadId: "provider-thread-rolled",
+        } as const),
+      );
+
+      const result = yield* provider.compactThread({
+        requestId: "compact-rollover",
+        threadId,
+        trigger: "manual",
+        ...(beforeGeneration !== undefined
+          ? { expectedLifecycleGeneration: beforeGeneration }
+          : {}),
+      });
+      assert.equal(result.kind, "session-rollover");
+
+      const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+      assert.deepEqual(binding?.resumeCursor, "cursor-after-rollover");
+      assert.equal(typeof binding?.lifecycleGeneration, "string");
+      assert.notEqual(binding?.lifecycleGeneration, beforeGeneration);
+      assert.equal(binding?.status, "stopped");
+      const payload = asRuntimePayloadRecord(binding?.runtimePayload);
+      assert.equal(payload.providerThreadId, "provider-thread-rolled");
+      assert.equal(payload.lifecycleGeneration, binding?.lifecycleGeneration);
+      assert.equal(compaction.codex.stopSession.mock.calls.length, 1);
+      assert.deepEqual(compaction.codex.stopSession.mock.calls[0]?.[0], threadId);
+    }),
+  );
+
+  it.effect("rejects compaction requests with a stale lifecycle generation", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-compact-stale-generation");
+
+      yield* provider.startSession(threadId, {
+        provider: "codex",
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      compaction.codex.compactThread.mockClear();
+      const failure = yield* Effect.result(
+        provider.compactThread({
+          requestId: "compact-stale",
+          threadId,
+          trigger: "manual",
+          expectedLifecycleGeneration: "generation-that-no-longer-exists",
+        }),
+      );
+
+      assert.equal(failure._tag, "Failure");
+      if (failure._tag !== "Failure") {
+        return;
+      }
+      assert.equal(failure.failure._tag, "ProviderValidationError");
+      if (failure.failure._tag !== "ProviderValidationError") {
+        return;
+      }
+      assert.equal(failure.failure.operation, "ProviderService.compactThread");
+      assert.equal(failure.failure.issue.includes("stale"), true);
+      assert.equal(compaction.codex.compactThread.mock.calls.length, 0);
+    }),
+  );
+
+  it.effect("rejects compaction while a turn is active", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-compact-active-turn");
+
+      yield* provider.startSession(threadId, {
+        provider: "codex",
+        threadId,
+        runtimeMode: "full-access",
+      });
+      compaction.codex.updateSession(threadId, (existing) => ({
+        ...existing,
+        status: "running",
+        activeTurnId: asTurnId("turn-active"),
+      }));
+
+      compaction.codex.compactThread.mockClear();
+      const failure = yield* Effect.result(
+        provider.compactThread({
+          requestId: "compact-active-turn",
+          threadId,
+          trigger: "manual",
+        }),
+      );
+
+      assert.equal(failure._tag, "Failure");
+      if (failure._tag !== "Failure") {
+        return;
+      }
+      assert.equal(failure.failure._tag, "ProviderValidationError");
+      if (failure.failure._tag !== "ProviderValidationError") {
+        return;
+      }
+      assert.equal(failure.failure.operation, "ProviderService.compactThread");
+      assert.equal(failure.failure.issue.includes("turn is active"), true);
+      assert.equal(compaction.codex.compactThread.mock.calls.length, 0);
+    }),
+  );
+});
+
+it.effect("ProviderServiceLive rejects compaction when the adapter lacks compactThread", () =>
+  Effect.gen(function* () {
+    const codex = makeFakeCodexAdapter();
+    const { compactThread: _omittedCompactThread, ...adapterWithoutCompact } = codex.adapter;
+    const registry: typeof ProviderAdapterRegistry.Service = {
+      getByProvider: (provider) =>
+        provider === "codex"
+          ? Effect.succeed(adapterWithoutCompact)
+          : Effect.fail(new ProviderUnsupportedError({ provider })),
+      listProviders: () => Effect.succeed(["codex"]),
+    };
+    const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+      Layer.provide(SqlitePersistenceMemory),
+    );
+    const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
+    const providerLayer = makeProviderServiceLive().pipe(
+      Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
+      Layer.provide(directoryLayer),
+      Layer.provide(AnalyticsService.layerTest),
+    );
+
+    yield* Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const threadId = asThreadId("thread-compact-unsupported");
+      yield* provider.startSession(threadId, {
+        provider: "codex",
+        threadId,
+        runtimeMode: "full-access",
+      });
+
+      const failure = yield* Effect.result(
+        provider.compactThread({
+          requestId: "compact-unsupported",
+          threadId,
+          trigger: "manual",
+        }),
+      );
+
+      assert.equal(failure._tag, "Failure");
+      if (failure._tag !== "Failure") {
+        return;
+      }
+      assert.equal(failure.failure._tag, "ProviderValidationError");
+      if (failure.failure._tag !== "ProviderValidationError") {
+        return;
+      }
+      assert.equal(failure.failure.operation, "ProviderService.compactThread");
+      assert.equal(failure.failure.issue.includes("unavailable"), true);
+    }).pipe(Effect.provide(providerLayer));
+  }),
+);

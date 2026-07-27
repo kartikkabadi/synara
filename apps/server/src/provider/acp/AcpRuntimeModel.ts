@@ -201,9 +201,16 @@ function normalizeToolCallStatus(
 }
 
 // Converts ACP's unstable usage updates into Synara's context-window snapshot shape.
+// `compactsAutomatically` is a per-provider claim, so callers must supply it
+// explicitly; when absent, the snapshot makes no automatic-compaction claim.
+// ACP `used`/`size` describe context occupancy, but only as a provider-side
+// estimate; per-provider `contextConfidence` says how much to trust it. The
+// values are never a cumulative-usage claim.
 function tokenUsageSnapshotFromAcpUsageUpdate(input: {
   readonly size: unknown;
   readonly used: unknown;
+  readonly compactsAutomatically?: boolean | undefined;
+  readonly contextConfidence?: "medium" | "low" | undefined;
 }): ThreadTokenUsageSnapshot | undefined {
   const usedTokens = nonNegativeInteger(input.used);
   if (usedTokens === undefined) {
@@ -215,7 +222,16 @@ function tokenUsageSnapshotFromAcpUsageUpdate(input: {
     usedTokens,
     ...(usedPercent !== undefined ? { usedPercent } : {}),
     ...(maxTokens !== undefined ? { maxTokens } : {}),
-    compactsAutomatically: true,
+    ...(input.compactsAutomatically !== undefined
+      ? { compactsAutomatically: input.compactsAutomatically }
+      : {}),
+    context: {
+      usedTokens,
+      ...(maxTokens !== undefined ? { maxTokens } : {}),
+      ...(usedPercent !== undefined ? { usedPercent } : {}),
+      measurement: "provider-estimated",
+      confidence: input.contextConfidence ?? "medium",
+    },
   };
 }
 
@@ -558,7 +574,13 @@ export function parsePermissionRequest(params: Acp.RequestPermissionRequest): Ac
   };
 }
 
-export function parseSessionUpdateEvent(params: Acp.SessionNotification): {
+export function parseSessionUpdateEvent(
+  params: Acp.SessionNotification,
+  options?: {
+    readonly usageCompactsAutomatically?: boolean | undefined;
+    readonly usageContextConfidence?: "medium" | "low" | undefined;
+  },
+): {
   readonly modeId?: string;
   readonly events: ReadonlyArray<AcpParsedSessionEvent>;
 } {
@@ -647,6 +669,8 @@ export function parseSessionUpdateEvent(params: Acp.SessionNotification): {
       const usage = tokenUsageSnapshotFromAcpUsageUpdate({
         size: upd.size,
         used: upd.used,
+        compactsAutomatically: options?.usageCompactsAutomatically,
+        contextConfidence: options?.usageContextConfidence,
       });
       if (usage) {
         events.push({
