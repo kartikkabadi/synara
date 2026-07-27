@@ -1045,8 +1045,6 @@ export const WsProviderAccountsGetThreadBindingRpc = Rpc.make(
   },
 );
 
-||||||| 43cade51
-=======
 export const WsControlPlaneListUncertainRevertJobsRpc = Rpc.make(
   WS_METHODS.controlPlaneListUncertainRevertJobs,
   {
