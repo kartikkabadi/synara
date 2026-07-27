@@ -157,6 +157,12 @@ function sanitizeRemoteName(value: string): string {
 }
 
 function normalizeRemoteUrl(value: string): string {
+  // GitHub remotes normalize to their `owner/repository` identity so equivalent URL forms
+  // (ssh vs https, or rewritten via `url.<base>.insteadOf` proxies) compare equal.
+  const nameWithOwner = parseGitHubRepositoryNameWithOwnerFromRemoteUrl(value);
+  if (nameWithOwner !== null) {
+    return `github.com/${nameWithOwner.toLowerCase()}`;
+  }
   return value
     .trim()
     .replace(/\/+$/g, "")

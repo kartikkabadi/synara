@@ -13,7 +13,15 @@ import { it } from "@effect/vitest";
 import { Deferred, Effect, Exit, Fiber, Schema, Stream } from "effect";
 import { afterEach, describe, expect, it as test } from "vitest";
 
+import { resolveExecutable } from "../../executableLookup.ts";
 import { AcpSessionRuntime } from "./AcpSessionRuntime.ts";
+
+// The `.ts` fixture agents need a TypeScript-capable runtime. Under `bun run test` that is
+// `process.execPath`, but when Vitest itself runs under Node the fixtures must be spawned
+// with the `bun` binary from PATH instead.
+const fixtureRuntime = path.basename(process.execPath, path.extname(process.execPath)).toLowerCase().startsWith("bun")
+  ? process.execPath
+  : (resolveExecutable("bun") ?? process.execPath);
 
 const fixturePath = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -86,7 +94,7 @@ function captureByteStream(
 function runtimeLayer(logPath: string, env: Record<string, string> = {}) {
   return AcpSessionRuntime.layer({
     spawn: {
-      command: process.execPath,
+      command: fixtureRuntime,
       args: [fixturePath],
       env: {
         VITEST: "true",
@@ -345,7 +353,7 @@ describe("official ACP SDK client against the official SDK mock agent", () => {
   test("completes initialize, authentication, session, prompt, updates, stop, and teardown", async () => {
     const requestLogPath = createFixtureLog();
     const exitLogPath = createFixtureLog();
-    const child = spawn(process.execPath, [officialMockFixturePath], {
+    const child = spawn(fixtureRuntime, [officialMockFixturePath], {
       cwd: process.cwd(),
       env: {
         ...process.env,
