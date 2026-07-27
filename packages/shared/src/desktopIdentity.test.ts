@@ -9,6 +9,9 @@ import {
   SYNARA_DESKTOP_ORIGIN,
   SYNARA_DESKTOP_UPDATE_CHANNEL,
   SYNARA_DEVELOPMENT_BUNDLE_ID,
+  SYNARA_DOGFOOD_BUNDLE_ID,
+  SYNARA_DOGFOOD_DESKTOP_ENTRY_URL,
+  SYNARA_DOGFOOD_DESKTOP_ORIGIN,
   SYNARA_PRODUCTION_BUNDLE_ID,
   synaraBundleId,
   synaraDesktopIdentity,
@@ -48,7 +51,25 @@ describe("desktopIdentity", () => {
     });
   });
 
-  it("selects Canary explicitly without changing normal dev and production defaults", () => {
+  it("gives Dogfood a fully separate desktop identity, storage profile, and icon", () => {
+    expect(SYNARA_DOGFOOD_BUNDLE_ID).toBe("com.emanueledipietro.synara.dogfood");
+    expect(SYNARA_DOGFOOD_DESKTOP_ORIGIN).toBe("synara-dogfood://app");
+    expect(SYNARA_DOGFOOD_DESKTOP_ENTRY_URL).toBe("synara-dogfood://app/index.html");
+    expect(synaraDesktopIdentity("dogfood")).toEqual({
+      flavor: "dogfood",
+      displayName: "Synara Dogfood",
+      bundleId: SYNARA_DOGFOOD_BUNDLE_ID,
+      scheme: "synara-dogfood",
+      origin: SYNARA_DOGFOOD_DESKTOP_ORIGIN,
+      entryUrl: SYNARA_DOGFOOD_DESKTOP_ENTRY_URL,
+      userDataDirectoryName: "synara-dogfood",
+      defaultHomeDirectoryName: ".synara-dogfood",
+      usesScriptedUpdates: true,
+      iconFileName: "icon-dogfood.icns",
+    });
+  });
+
+  it("selects Canary and Dogfood explicitly without changing normal dev and production defaults", () => {
     expect(resolveSynaraDesktopFlavor({ isDevelopment: false })).toBe("production");
     expect(resolveSynaraDesktopFlavor({ isDevelopment: true })).toBe("development");
     expect(resolveSynaraDesktopFlavor({ isDevelopment: false, requestedFlavor: " canary " })).toBe(
@@ -56,6 +77,12 @@ describe("desktopIdentity", () => {
     );
     expect(resolveSynaraDesktopFlavor({ isDevelopment: true, requestedFlavor: "canary" })).toBe(
       "canary",
+    );
+    expect(resolveSynaraDesktopFlavor({ isDevelopment: false, requestedFlavor: "dogfood" })).toBe(
+      "dogfood",
+    );
+    expect(resolveSynaraDesktopFlavor({ isDevelopment: true, requestedFlavor: " dogfood " })).toBe(
+      "dogfood",
     );
   });
 });

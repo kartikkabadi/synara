@@ -1,6 +1,7 @@
 // FILE: desktopUserDataProfile.ts
 // Purpose: Resolves Synara's Electron userData paths and completes bridge profile repair.
 
+import * as ChildProcess from "node:child_process";
 import * as FS from "node:fs";
 import * as OS from "node:os";
 import * as Path from "node:path";
@@ -31,6 +32,19 @@ export interface BrowserProfileBridgeRepairResult {
   readonly error?: unknown;
 }
 
+interface BridgeProfileManifest {
+  readonly sourcePath: string;
+  readonly sourceBrowserPartitionName?: string | undefined;
+  readonly sourceScheme?: string | undefined;
+  readonly targetScheme?: string | undefined;
+}
+
+interface RunCommandResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly status: number | null;
+}
+
 export function resolveDesktopAppDataBase(input?: {
   readonly platform?: NodeJS.Platform;
   readonly env?: NodeJS.ProcessEnv;
@@ -56,23 +70,34 @@ export function resolveDesktopUserDataPath(input: {
   return Path.join(input.appDataBase, input.userDataDirectoryName);
 }
 
-function readBridgeProfileSourcePath(targetPath: string): string | null {
+function runCommand(command: string, args: ReadonlyArray<string>): RunCommandResult {
+  const result = ChildProcess.spawnSync(command, [...args], { encoding: "utf8" });
+  return {
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+    status: result.status ?? null,
+  };
+}
+
+function readBridgeProfileManifest(targetPath: string): BridgeProfileManifest | null {
   const manifestPath = Path.join(targetPath, BRIDGE_PROFILE_MANIFEST_FILE_NAME);
   if (!FS.existsSync(manifestPath)) return null;
 
-  let parsed: { readonly sourcePath?: unknown };
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(FS.readFileSync(manifestPath, "utf8")) as {
-      readonly sourcePath?: unknown;
-    };
+    parsed = JSON.parse(FS.readFileSync(manifestPath, "utf8")) as unknown;
   } catch {
     return null;
   }
-  if (typeof parsed.sourcePath !== "string" || !Path.isAbsolute(parsed.sourcePath)) {
+  if (typeof parsed !== "object" || parsed === null) {
+    return null;
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.sourcePath !== "string" || !Path.isAbsolute(record.sourcePath)) {
     return null;
   }
 
-  const sourcePath = Path.resolve(parsed.sourcePath);
+  const sourcePath = Path.resolve(record.sourcePath);
   const resolvedTargetPath = Path.resolve(targetPath);
   if (
     sourcePath === resolvedTargetPath ||
@@ -80,12 +105,41 @@ function readBridgeProfileSourcePath(targetPath: string): string | null {
   ) {
     return null;
   }
-  return sourcePath;
+
+  const sourceBrowserPartitionName =
+    record.sourceBrowserPartitionName === undefined
+      ? undefined
+      : String(record.sourceBrowserPartitionName);
+  const sourceScheme =
+    record.sourceScheme === undefined ? undefined : String(record.sourceScheme);
+  const targetScheme =
+    record.targetScheme === undefined ? undefined : String(record.targetScheme);
+  if ((sourceScheme === undefined) !== (targetScheme === undefined)) {
+    return null;
+  }
+
+  return { sourcePath, sourceBrowserPartitionName, sourceScheme, targetScheme };
 }
 
-function findBridgeBrowserPartitionPaths(sourceProfilePath: string): string[] {
+function findBridgeBrowserPartitionPaths(
+  sourceProfilePath: string,
+  explicitPartitionName?: string | undefined,
+): string[] {
   const partitionsPath = Path.join(sourceProfilePath, "Partitions");
   if (!FS.existsSync(partitionsPath)) return [];
+
+  if (explicitPartitionName !== undefined) {
+    const explicitPath = Path.join(partitionsPath, explicitPartitionName);
+    if (
+      FS.existsSync(explicitPath) &&
+      BROWSER_PARTITION_SEED_ENTRY_NAMES.some((entryName) =>
+        FS.existsSync(Path.join(explicitPath, entryName)),
+      )
+    ) {
+      return [explicitPath];
+    }
+    return [];
+  }
 
   return FS.readdirSync(partitionsPath, { withFileTypes: true })
     .filter(
@@ -103,6 +157,58 @@ function findBridgeBrowserPartitionPaths(sourceProfilePath: string): string[] {
     .sort((left, right) => FS.statSync(right).mtimeMs - FS.statSync(left).mtimeMs);
 }
 
+function readFileUtf8(filePath: string): string | null {
+  try {
+    return FS.readFileSync(filePath, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+function replaceOriginInTextFile(filePath: string, sourceScheme: string, targetScheme: string): boolean {
+  const content = readFileUtf8(filePath);
+  if (content === null) return false;
+  if (!content.includes(sourceScheme)) return false;
+  FS.writeFileSync(filePath, content.split(sourceScheme).join(targetScheme));
+  return true;
+}
+
+function rewritePlistOrigin(filePath: string, sourceScheme: string, targetScheme: string): boolean {
+  if (!FS.existsSync(filePath)) return false;
+  const tempXmlPath = `${filePath}.synara-bridge-xml`;
+  try {
+    const convertOut = runCommand("plutil", ["-convert", "xml1", "-o", tempXmlPath, filePath]);
+    if (convertOut.status !== 0) return false;
+    const xmlContent = readFileUtf8(tempXmlPath);
+    if (xmlContent === null || !xmlContent.includes(sourceScheme)) {
+      FS.rmSync(tempXmlPath, { force: true });
+      return false;
+    }
+    FS.writeFileSync(tempXmlPath, xmlContent.split(sourceScheme).join(targetScheme));
+    const convertBack = runCommand("plutil", ["-convert", "binary1", "-o", filePath, tempXmlPath]);
+    FS.rmSync(tempXmlPath, { force: true });
+    return convertBack.status === 0;
+  } catch {
+    FS.rmSync(tempXmlPath, { force: true });
+    return false;
+  }
+}
+
+function rewriteTopLevelScheme(targetPath: string, sourceScheme: string, targetScheme: string): void {
+  const networkStatePath = Path.join(targetPath, "Network Persistent State");
+  if (FS.existsSync(networkStatePath)) {
+    replaceOriginInTextFile(networkStatePath, sourceScheme, targetScheme);
+  }
+  const preferencesPath = Path.join(targetPath, "Preferences");
+  if (FS.existsSync(preferencesPath)) {
+    rewritePlistOrigin(preferencesPath, sourceScheme, targetScheme);
+  }
+  const transportSecurityPath = Path.join(targetPath, "TransportSecurity");
+  if (FS.existsSync(transportSecurityPath)) {
+    rewritePlistOrigin(transportSecurityPath, sourceScheme, targetScheme);
+  }
+}
+
 /**
  * Finishes any browser-partition copy described by the compatibility bridge.
  *
@@ -116,17 +222,21 @@ export function repairBrowserProfileFromBridgeManifest(
   let sourcePath: string | null = null;
   const copiedEntries: string[] = [];
   try {
-    sourcePath = readBridgeProfileSourcePath(targetPath);
-    if (!sourcePath || !FS.existsSync(sourcePath)) {
+    const manifest = readBridgeProfileManifest(targetPath);
+    if (!manifest || !FS.existsSync(manifest.sourcePath)) {
       return {
         status: "bridge-unavailable",
-        sourcePath,
+        sourcePath: manifest?.sourcePath ?? null,
         targetPath,
         copiedEntries: [],
       };
     }
+    sourcePath = manifest.sourcePath;
 
-    const sourcePartitionPath = findBridgeBrowserPartitionPaths(sourcePath)[0];
+    const sourcePartitionPath = findBridgeBrowserPartitionPaths(
+      sourcePath,
+      manifest.sourceBrowserPartitionName,
+    )[0];
     if (!sourcePartitionPath) {
       return {
         status: "not-needed",
@@ -228,6 +338,10 @@ export function repairBrowserProfileFromBridgeManifest(
       } finally {
         FS.rmSync(stagedGroupPath, { recursive: true, force: true });
       }
+    }
+
+    if (manifest.sourceScheme !== undefined && manifest.targetScheme !== undefined) {
+      rewriteTopLevelScheme(targetPath, manifest.sourceScheme, manifest.targetScheme);
     }
 
     return {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   canaryCloneArgs,
+  canaryConfig,
   canaryStartArgs,
   parseCanaryArgs,
   resolveCanaryPaths,
@@ -37,12 +38,13 @@ describe("canary tooling", () => {
     });
   });
 
-  it("tracks main by default and accepts a stacked PR ref", () => {
+  it("tracks upstream/main by default and accepts a stacked PR ref", () => {
     expect(parseCanaryArgs(["update"])).toEqual({ command: "update", ref: null });
     expect(parseCanaryArgs(["setup", "--ref", "codex/synara-canary"])).toEqual({
       command: "setup",
       ref: "codex/synara-canary",
     });
+    expect(canaryConfig.defaultRef).toBe("upstream/main");
   });
 
   it("checks out the managed source during clone so the cleanliness guard starts clean", () => {
@@ -58,16 +60,18 @@ describe("canary tooling", () => {
     expect(canaryStartArgs()).toEqual(["apps/desktop/scripts/start-electron.mjs"]);
   });
 
-  it("keeps updating the selected stacked ref until explicitly moved to main", () => {
-    expect(resolveCanaryRef(parseCanaryArgs(["setup"]), null)).toBe("main");
+  it("keeps updating the selected stacked ref until explicitly moved to upstream/main", () => {
+    expect(resolveCanaryRef(parseCanaryArgs(["setup"]), null)).toBe("upstream/main");
     expect(resolveCanaryRef(parseCanaryArgs(["update"]), "codex/synara-canary")).toBe(
       "codex/synara-canary",
     );
-    expect(resolveCanaryRef(parseCanaryArgs(["update", "--ref", "main"]), "old-ref")).toBe("main");
+    expect(resolveCanaryRef(parseCanaryArgs(["update", "--ref", "upstream/main"]), "old-ref")).toBe(
+      "upstream/main",
+    );
   });
 
   it("rejects unsupported commands and incomplete refs", () => {
-    expect(() => parseCanaryArgs(["reset"])).toThrow(/Unknown Canary command/u);
+    expect(() => parseCanaryArgs(["reset"])).toThrow(/Unknown managed build command/u);
     expect(() => parseCanaryArgs(["update", "--ref"])).toThrow(/Missing value/u);
   });
 });

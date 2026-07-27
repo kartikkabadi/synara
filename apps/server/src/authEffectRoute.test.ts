@@ -376,6 +376,40 @@ describe("binaryUploadEffectRouteLayer", () => {
     }
   });
 
+  it("allows credentialed Dogfood attachment upload preflights", async () => {
+    const config = {
+      host: "127.0.0.1",
+      attachmentsDir: fs.mkdtempSync(path.join(os.tmpdir(), "synara-upload-cors-")),
+    } as ServerConfigShape;
+    try {
+      await withAuthEffectServer(
+        config,
+        makeServerAuth({ count: 0 }),
+        async (serverOrigin) => {
+          const response = await fetch(`${serverOrigin}${ATTACHMENT_UPLOAD_ROUTE_PATH}`, {
+            method: "OPTIONS",
+            headers: {
+              Origin: "synara-dogfood://app",
+              "Access-Control-Request-Method": "POST",
+              "Access-Control-Request-Headers": "content-type",
+            },
+          });
+
+          expect(response.status).toBe(204);
+          expect(response.headers.get("access-control-allow-origin")).toBe("synara-dogfood://app");
+          expect(response.headers.get("access-control-allow-credentials")).toBe("true");
+          expect(response.headers.get("access-control-allow-methods")).toContain("POST");
+          expect(response.headers.get("access-control-allow-headers")?.toLowerCase()).toContain(
+            "content-type",
+          );
+        },
+        binaryUploadEffectRouteLayer,
+      );
+    } finally {
+      fs.rmSync(config.attachmentsDir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects ambient cookie uploads without an origin and accepts explicit bearer auth", async () => {
     const attachmentsDir = fs.mkdtempSync(path.join(os.tmpdir(), "synara-upload-route-"));
     const config = {

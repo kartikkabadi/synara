@@ -36,6 +36,9 @@ describe("desktopUserDataProfile", () => {
     expect(
       resolveDesktopUserDataPath({ appDataBase, userDataDirectoryName: "synara-canary" }),
     ).toBe("/Users/tester/Library/Application Support/synara-canary");
+    expect(
+      resolveDesktopUserDataPath({ appDataBase, userDataDirectoryName: "synara-dogfood" }),
+    ).toBe("/Users/tester/Library/Application Support/synara-dogfood");
   });
 
   it("uses XDG_CONFIG_HOME on Linux when available", () => {
@@ -82,6 +85,49 @@ describe("desktopUserDataProfile", () => {
     expect(FS.readFileSync(Path.join(targetPartitionPath, "Local Storage", "state"), "utf8")).toBe(
       "current-state",
     );
+  });
+
+  it("copies an explicit browser partition and rewrites the desktop origin scheme", () => {
+    const appDataBase = makeTempDir();
+    const targetPath = Path.join(appDataBase, "synara-dogfood");
+    const sourcePath = Path.join(appDataBase, "synara-canary");
+    const sourcePartitionPath = Path.join(sourcePath, "Partitions", "synara-browser");
+    const targetPartitionPath = Path.join(targetPath, "Partitions", "synara-browser");
+    FS.mkdirSync(Path.join(sourcePartitionPath, "Local Storage"), { recursive: true });
+    FS.writeFileSync(Path.join(sourcePartitionPath, "Cookies"), "bridge-cookie");
+    FS.writeFileSync(Path.join(sourcePartitionPath, "Cookies-journal"), "bridge-journal");
+    FS.writeFileSync(Path.join(sourcePartitionPath, "Local Storage", "state"), "bridge-state");
+    FS.writeFileSync(
+      Path.join(targetPath, "synara-profile-seed.json"),
+      JSON.stringify({
+        sourcePath,
+        sourceBrowserPartitionName: "synara-browser",
+        sourceScheme: "synara-canary",
+        targetScheme: "synara-dogfood",
+      }),
+    );
+    FS.writeFileSync(
+      Path.join(targetPath, "Network Persistent State"),
+      JSON.stringify({ synaraCanary: "synara-canary://app" }),
+    );
+
+    const result = repairBrowserProfileFromBridgeManifest(targetPath);
+
+    expect(result).toMatchObject({
+      status: "repaired",
+      sourcePath,
+      targetPath,
+      copiedEntries: ["Cookies", "Cookies-journal"],
+    });
+    expect(FS.readFileSync(Path.join(targetPartitionPath, "Cookies"), "utf8")).toBe(
+      "bridge-cookie",
+    );
+    expect(FS.readFileSync(Path.join(targetPartitionPath, "Cookies-journal"), "utf8")).toBe(
+      "bridge-journal",
+    );
+    expect(
+      JSON.parse(FS.readFileSync(Path.join(targetPath, "Network Persistent State"), "utf8")),
+    ).toEqual({ synaraCanary: "synara-dogfood://app" });
   });
 
   it("rejects bridge manifests that point outside the Synara profile parent", () => {
