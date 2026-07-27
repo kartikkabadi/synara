@@ -46,6 +46,8 @@ import { ProviderService } from "../src/provider/Services/ProviderService.ts";
 import { AnalyticsService } from "../src/telemetry/Services/AnalyticsService.ts";
 import { ServerSettingsService } from "../src/serverSettings.ts";
 import { CheckpointReactorLive } from "../src/orchestration/Layers/CheckpointReactor.ts";
+import { RevertSagaWorkerLive } from "../src/orchestration/Layers/RevertSagaWorker.ts";
+import { ControlPlaneKernelLive } from "../src/persistence/Layers/ControlPlaneKernel.ts";
 import { StudioOutputReactorLive } from "../src/orchestration/Layers/StudioOutputReactor.ts";
 import { OrchestrationEngineLive } from "../src/orchestration/Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "../src/orchestration/Layers/ProjectionPipeline.ts";
@@ -328,6 +330,7 @@ export const makeOrchestrationIntegrationHarness = (
     );
     const checkpointReactorLayer = CheckpointReactorLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),
+      Layer.provideMerge(RevertSagaWorkerLive.pipe(Layer.provide(ControlPlaneKernelLive))),
     );
     const compactionReactorLayer = Layer.succeed(CompactionReactor, {
       start: Effect.void,
