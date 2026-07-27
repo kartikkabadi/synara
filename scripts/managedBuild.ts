@@ -256,6 +256,10 @@ function checkout(paths: ManagedBuildPaths, commit: string): void {
 
 function build(paths: ManagedBuildPaths): void {
   run("sfw", ["bun", "install", "--frozen-lockfile"], paths.source);
+  const electronInstallPath = Path.join(paths.source, "node_modules", "electron", "install.js");
+  if (FS.existsSync(electronInstallPath)) {
+    run("node", [electronInstallPath], paths.source);
+  }
   run("bun", ["run", "build:desktop"], paths.source);
   run("bun", ["run", "release:smoke"], paths.source);
 }
