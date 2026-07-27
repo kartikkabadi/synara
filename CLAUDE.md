@@ -9,7 +9,7 @@
 
 ## Project Snapshot
 
-Synara is a minimal web GUI for using coding agents. It is multi-provider: `ProviderKind` currently spans 9 providers — Codex, Claude (`claudeAgent`), Cursor, Antigravity, Grok, Factory Droid (`droid`), Kilo, OpenCode, and Pi. Each provider has its own model options and capabilities (reasoning effort, thinking budget/level, context window, fast mode), defined in `packages/contracts` and resolved in `packages/shared/src/model.ts`.
+Synara is a minimal web GUI for using coding agents. It is multi-provider: `ProviderKind` currently spans 9 providers — Codex, Claude (`claudeAgent`), Cursor, Antigravity, Grok, Factory Droid (`droid`), Kilo, OpenCode, and Pi. Each provider has its own model options and capabilities (reasoning effort, thinking budget/level, context window, fast mode), defined in `packages/contracts` (`ProviderKind` in `packages/contracts/src/orchestration.ts`) and resolved in `packages/shared/src/model.ts`.
 
 Codex was the first integration and remains the most fleshed-out reference (see the Codex App Server section), but Synara is not Codex-only.
 
@@ -93,8 +93,8 @@ Codex was the first provider integration and is the most complete reference for 
 How we use it in this codebase:
 
 - Session startup/resume and turn lifecycle are brokered in `apps/server/src/codexAppServerManager.ts`.
-- Provider dispatch and thread event logging are coordinated in `apps/server/src/providerManager.ts`.
-- WebSocket server routes NativeApi methods in `apps/server/src/wsServer.ts`.
+- Provider dispatch and thread event logging are coordinated in `apps/server/src/provider/Layers/ProviderService.ts`.
+- WebSocket/NativeApi method routing lives in `apps/server/src/wsRpc.ts`.
 - Web app consumes orchestration domain events via WebSocket push on channel `orchestration.domainEvent` (provider runtime activity is projected into orchestration events server-side).
 
 Docs:

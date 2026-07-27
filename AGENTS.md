@@ -11,7 +11,7 @@
 
 ## Project Snapshot
 
-Synara is a minimal web GUI for using coding agents like Codex and Claude.
+Synara is a minimal web GUI for using coding agents. It is multi-provider: `ProviderKind` (`packages/contracts/src/orchestration.ts`) currently spans 9 providers — Codex, Claude (`claudeAgent`), Cursor, Antigravity, Grok, Factory Droid (`droid`), Kilo, OpenCode, and Pi. Each provider has its own model options and capabilities, defined in `packages/contracts` and resolved in `packages/shared/src/model.ts`.
 
 This repository is a VERY EARLY WIP. Proposing sweeping changes that improve long-term maintainability is encouraged.
 
@@ -105,13 +105,13 @@ Reference usage: opening/closing a project and the sidebar sections in `apps/web
 
 ## Codex App Server (Important)
 
-Synara is currently Codex-first. The server starts `codex app-server` (JSON-RPC over stdio) per provider session, then streams structured events to the browser through WebSocket push messages.
+Codex was the first provider integration and is the most complete reference for how a provider session works end to end. For Codex sessions, the server starts `codex app-server` (JSON-RPC over stdio) per session, then streams structured events to the browser through WebSocket push messages. Other providers follow the same dispatch/event-projection shape but plug in their own runtimes.
 
 How we use it in this codebase:
 
 - Session startup/resume and turn lifecycle are brokered in `apps/server/src/codexAppServerManager.ts`.
-- Provider dispatch and thread event logging are coordinated in `apps/server/src/providerManager.ts`.
-- WebSocket server routes NativeApi methods in `apps/server/src/wsServer.ts`.
+- Provider dispatch and thread event logging are coordinated in `apps/server/src/provider/Layers/ProviderService.ts`.
+- WebSocket/NativeApi method routing lives in `apps/server/src/wsRpc.ts`.
 - Web app consumes orchestration domain events via WebSocket push on channel `orchestration.domainEvent` (provider runtime activity is projected into orchestration events server-side).
 
 Docs:
