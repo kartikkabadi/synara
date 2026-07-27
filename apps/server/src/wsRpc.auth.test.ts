@@ -3,12 +3,82 @@ import { Effect } from "effect";
 import { vi } from "vitest";
 
 import { AuthError } from "./auth/Services/ServerAuth";
-import { authenticateRpcWebSocketUpgrade, canManageExternalMcp } from "./wsRpc";
+import {
+  getControlPlaneJob,
+  listUncertainRevertJobs,
+  resolveUncertainRevertJob,
+} from "./controlPlaneOperator";
+import { makeDisabledKernel } from "./persistence/Layers/ControlPlaneKernel";
+import type { ControlPlaneKernelShape } from "./persistence/Services/ControlPlaneKernel";
+import { CurrentWsSessionRole } from "./wsConnectionSessions";
+import {
+  authenticateRpcWebSocketUpgrade,
+  canManageExternalMcp,
+  requireControlPlaneOperator,
+} from "./wsRpc";
 
 it("reserves external MCP management for owner sessions", () => {
   assert.isTrue(canManageExternalMcp("owner"));
   assert.isFalse(canManageExternalMcp("client"));
 });
+
+const makeTrackedKernel = () => {
+  let touches = 0;
+  const kernel: ControlPlaneKernelShape = {
+    ...makeDisabledKernel("unused"),
+    mode: "on",
+    job: () => Effect.sync(() => ((touches += 1), null)),
+    jobsPage: () => Effect.sync(() => ((touches += 1), { jobs: [], nextAfterSequence: 0 })),
+    resolveUncertainJobs: () =>
+      Effect.sync(
+        () => ((touches += 1), { transactionId: "t", transactionSequence: 1, committedAtMs: 0 }),
+      ),
+  };
+  return { kernel, kernelTouches: () => touches };
+};
+
+it.effect(
+  "rejects control-plane operator calls from non-owner sessions without touching the kernel",
+  () =>
+    Effect.gen(function* () {
+      const { kernel, kernelTouches } = makeTrackedKernel();
+      const guarded = [
+        requireControlPlaneOperator.pipe(
+          Effect.andThen(listUncertainRevertJobs(kernel, {})),
+          Effect.asVoid,
+        ),
+        requireControlPlaneOperator.pipe(
+          Effect.andThen(getControlPlaneJob(kernel, { jobId: "a".repeat(32) })),
+          Effect.asVoid,
+        ),
+        requireControlPlaneOperator.pipe(
+          Effect.andThen(
+            resolveUncertainRevertJob(kernel, { jobId: "a".repeat(32), resolution: "retry" }),
+          ),
+          Effect.asVoid,
+        ),
+      ];
+      for (const effect of guarded) {
+        const error = yield* effect.pipe(
+          Effect.provideService(CurrentWsSessionRole, "client"),
+          Effect.flip,
+        );
+        assert.equal(error.message, "Owner authorization is required for this operation.");
+      }
+      assert.equal(kernelTouches(), 0);
+    }),
+);
+
+it.effect("allows control-plane operator calls from owner sessions", () =>
+  Effect.gen(function* () {
+    const { kernel, kernelTouches } = makeTrackedKernel();
+    yield* requireControlPlaneOperator.pipe(
+      Effect.andThen(listUncertainRevertJobs(kernel, {})),
+      Effect.provideService(CurrentWsSessionRole, "owner"),
+    );
+    assert.equal(kernelTouches(), 1);
+  }),
+);
 
 it.effect("rejects an unauthorized websocket upgrade on a non-loopback bind", () =>
   Effect.gen(function* () {

@@ -24,6 +24,7 @@ import {
   type KernelCommitReceipt,
   type KernelClaimRequest,
   type KernelJobInfo,
+  type KernelJobsPage,
   type KernelLeaseExtensionReceipt,
   type KernelPersistedEvent,
   type KernelTransactionRecovery,
@@ -48,6 +49,13 @@ interface NativeStore {
     state: string | undefined | null,
     limit: number,
   ): Array<KernelJobInfo>;
+  job(jobId: string): KernelJobInfo | null;
+  jobsPage(
+    queue: string | undefined | null,
+    state: string | undefined | null,
+    afterSequence: number,
+    limit: number,
+  ): KernelJobsPage;
   projectionGet(projection: string, key: Uint8Array): Uint8Array | null;
   projectionVersion(projection: string): number;
   streamVersion(streamId: string): number;
@@ -113,6 +121,13 @@ function makeKernelFromStore(
     recoverTransaction: (transactionId) =>
       call("recoverTransaction", () => store.recoverTransaction(transactionId)),
     jobs: ({ queue, state, limit }) => call("jobs", () => store.jobs(queue, state, limit)),
+    job: (jobId) => call("job", () => store.job(jobId)),
+    jobsPage: ({ queue, state, afterSequence, limit }) =>
+      call("jobsPage", () => store.jobsPage(queue, state, afterSequence, limit)),
+    resolveUncertainJobs: ({ committedAtMs, resolutions }) =>
+      call("resolveUncertainJobs", () =>
+        store.commit({ committedAtMs, resolveUncertainJobs: resolutions }),
+      ),
     projectionGet: ({ projection, key }) =>
       call("projectionGet", () => store.projectionGet(projection, key)),
     projectionVersion: (projection) =>
@@ -123,7 +138,7 @@ function makeKernelFromStore(
   };
 }
 
-function makeDisabledKernel(detail: string): ControlPlaneKernelShape {
+export function makeDisabledKernel(detail: string): ControlPlaneKernelShape {
   const disabled = (operation: string) =>
     Effect.fail(new ControlPlaneKernelError({ operation, code: "KernelDisabled", detail }));
   return {
@@ -134,6 +149,9 @@ function makeDisabledKernel(detail: string): ControlPlaneKernelShape {
     recoverClaim: () => disabled("recoverClaim"),
     recoverTransaction: () => disabled("recoverTransaction"),
     jobs: () => disabled("jobs"),
+    job: () => disabled("job"),
+    jobsPage: () => disabled("jobsPage"),
+    resolveUncertainJobs: () => disabled("resolveUncertainJobs"),
     projectionGet: () => disabled("projectionGet"),
     projectionVersion: () => disabled("projectionVersion"),
     streamVersion: () => disabled("streamVersion"),
