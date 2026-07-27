@@ -1,8 +1,3 @@
-// FILE: settingsNavigation.ts
-// Purpose: Share the settings topic taxonomy between the main sidebar and the settings screen.
-// Layer: Route/UI support
-// Exports: section ids, nav items, and search normalization helper
-
 export const SETTINGS_SECTION_IDS = [
   "general",
   "profile",
@@ -13,6 +8,7 @@ export const SETTINGS_SECTION_IDS = [
   "shortcuts",
   "worktrees",
   "archived",
+  "accounts",
   "models",
   "providers",
   "skills",
@@ -111,6 +107,14 @@ export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
     description: "See remaining quota and credits for every signed-in provider.",
     icon: "gauge",
     eyebrow: "Provider limits",
+  },
+  {
+    id: "accounts",
+    group: "personal",
+    label: "Accounts",
+    description: "Connected provider accounts and the active numbered slot per provider.",
+    icon: "user",
+    eyebrow: "Identities",
   },
   {
     id: "appsnap",

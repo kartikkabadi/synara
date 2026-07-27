@@ -4518,7 +4518,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
       }),
     });
 
-    const findDispatchedCommand = (type: string) =>
+    const findDispatchedCommand = (
+      type: string,
+      predicate: (command: Record<string, unknown>) => boolean = () => true,
+    ) =>
       wsRequests
         .map((request) =>
           request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
@@ -4530,7 +4533,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
             ? (request.command as Record<string, unknown>)
             : null,
         )
-        .find(Boolean);
+        .find((command) => command !== null && predicate(command));
 
     try {
       await page.getByRole("button", { name: "Add project", exact: true }).click();
@@ -4565,20 +4568,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         () => {
-          const projectCreateCommand = wsRequests
-            .map((request) =>
-              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
-              "command" in request &&
-              request.command &&
-              typeof request.command === "object" &&
-              "type" in request.command &&
-              request.command.type === "project.create"
-                ? (request.command as Record<string, unknown>)
-                : null,
-            )
-            .find((command) => command?.workspaceRoot === "/repo/spaced-project");
+          // The home-chat prewarm can dispatch its own project.create for the
+          // home directory, so match the dialog's command by workspace root.
+          const projectCreateCommand = findDispatchedCommand(
+            "project.create",
+            (command) => command.workspaceRoot === "/repo/spaced-project",
+          );
           expect(projectCreateCommand).toBeDefined();
-          expect(projectCreateCommand?.workspaceRoot).toBe("/repo/spaced-project");
           expect(projectCreateCommand?.spaceId).toBe(createdSpaceId);
         },
         { timeout: 8_000, interval: 16 },
