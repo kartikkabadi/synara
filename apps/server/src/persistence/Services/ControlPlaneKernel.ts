@@ -73,6 +73,12 @@ export interface KernelJobAck {
   readonly resultDigest?: Uint8Array;
 }
 
+export interface KernelJobResolution {
+  readonly jobId: string;
+  /** "retry", "markSucceeded", or "markDead". */
+  readonly resolution: string;
+}
+
 export interface KernelCommitBatch {
   /**
    * 32-char hex; generated when omitted. Supply one to be able to recover
@@ -85,6 +91,8 @@ export interface KernelCommitBatch {
   readonly projectionPatches?: ReadonlyArray<KernelProjectionPatch>;
   readonly enqueueJobs?: ReadonlyArray<KernelJobSpec>;
   readonly ackJobs?: ReadonlyArray<KernelJobAck>;
+  /** Explicit operator resolutions for jobs in the Uncertain state. */
+  readonly resolveUncertainJobs?: ReadonlyArray<KernelJobResolution>;
 }
 
 export interface KernelCommitReceipt {
