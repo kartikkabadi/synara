@@ -280,6 +280,10 @@ function isThreadDetailEventFor(threadId: ThreadId, event: OrchestrationEvent): 
       event.type === "thread.reverted" ||
       event.type === "thread.conversation-rolled-back" ||
       event.type === "thread.session-set" ||
+      event.type === "thread.loop-set" ||
+      event.type === "thread.loop-off" ||
+      event.type === "thread.loop-continued" ||
+      event.type === "thread.loop-wait-noted" ||
       event.type === "thread.meta-updated" ||
       event.type === "thread.pinned-message-added" ||
       event.type === "thread.pinned-message-removed" ||

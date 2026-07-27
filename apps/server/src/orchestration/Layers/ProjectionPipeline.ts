@@ -1,4 +1,12 @@
-import { ApprovalRequestId, CommandId, type OrchestrationEvent } from "@synara/contracts";
+import {
+  ApprovalRequestId,
+  CommandId,
+  type LoopUnsettledOutcome,
+  type OrchestrationEvent,
+  type ThreadId,
+  type ThreadTurnPurpose,
+  type TurnId,
+} from "@synara/contracts";
 import {
   addPinnedMessage,
   removePinnedMessage,
@@ -35,6 +43,7 @@ import {
   type ProjectionThreadProposedPlanRepositoryShape,
   ProjectionThreadProposedPlanRepository,
 } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
+import { ProjectionThreadLoopRepository } from "../../persistence/Services/ProjectionThreadLoop.ts";
 import { ProjectionThreadSessionRepository } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import {
   type ProjectionTurn,
@@ -52,6 +61,7 @@ import { ProjectionThreadActivityRepositoryLive } from "../../persistence/Layers
 import { ProjectionThreadMessageRepositoryLive } from "../../persistence/Layers/ProjectionThreadMessages.ts";
 import { ProjectionThreadProposedPlanRepositoryLive } from "../../persistence/Layers/ProjectionThreadProposedPlans.ts";
 import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/ProjectionThreadSessions.ts";
+import { ProjectionThreadLoopRepositoryLive } from "../../persistence/Layers/ProjectionThreadLoop.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
 import { ManagedAttachmentRepositoryLive } from "../../persistence/Layers/ManagedAttachments.ts";
@@ -68,6 +78,7 @@ import {
 } from "../projectMetadataProjection.ts";
 import { applySpaceMetadataProjection } from "../spaceMetadataProjection.ts";
 import { resolveStableMessageTurnId } from "../messageTurnId.ts";
+import { recordLoopSettlement } from "../loop/settlement.ts";
 import { settleTurnStateFromSession } from "../turnLifecycle.ts";
 import { deriveTurnStartModelSelection, deriveTurnStartSession } from "../turnStartSession.ts";
 import {
@@ -90,6 +101,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   threadProposedPlans: "projection.thread-proposed-plans",
   threadActivities: "projection.thread-activities",
   threadSessions: "projection.thread-sessions",
+  threadLoop: "projection.thread-loop",
   threadTurns: "projection.thread-turns",
   checkpoints: "projection.checkpoints",
   // Preserve the established cursor identity. Migration 062 resets it so the
@@ -167,7 +179,9 @@ const THREAD_ACTIVITY_PROJECTION_EVENT_TYPES = new Set<OrchestrationEvent["type"
 ]);
 
 const THREAD_TURN_PROJECTION_EVENT_TYPES = new Set<OrchestrationEvent["type"]>([
+  "thread.turn-queued",
   "thread.turn-start-requested",
+  "thread.turn-start-cancelled",
   "thread.session-set",
   "thread.turn-diff-completed",
   "thread.reverted",
@@ -467,12 +481,76 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
   const projectionThreadProposedPlanRepository = yield* ProjectionThreadProposedPlanRepository;
   const projectionThreadActivityRepository = yield* ProjectionThreadActivityRepository;
   const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository;
+  const projectionThreadLoopRepository = yield* ProjectionThreadLoopRepository;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const projectionPendingInteractionRepository = yield* ProjectionPendingInteractionRepository;
 
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig;
+
+  const resolveAssistantTurnPurpose = (input: {
+    threadId: ThreadId;
+    turnId: TurnId | null;
+    eventPurpose: ThreadTurnPurpose | undefined;
+  }) =>
+    Effect.gen(function* () {
+      if (input.eventPurpose != null) {
+        return input.eventPurpose;
+      }
+      if (input.turnId !== null) {
+        const existingTurn = yield* projectionTurnRepository.getByTurnId({
+          threadId: input.threadId,
+          turnId: input.turnId,
+        });
+        if (Option.isSome(existingTurn) && existingTurn.value.purpose != null) {
+          return existingTurn.value.purpose;
+        }
+      }
+      const pendingStart = yield* projectionTurnRepository.getPendingTurnStartByThreadId({
+        threadId: input.threadId,
+      });
+      if (Option.isSome(pendingStart) && pendingStart.value.purpose != null) {
+        return pendingStart.value.purpose;
+      }
+      return undefined;
+    });
+
+  // Durable per-attempt settlement ledger (see loop/settlement.ts): a terminal
+  // outcome for a loop-owned attempt is appended to the persisted loop row
+  // exactly once, so restarts rebuild the same unaccounted settlement set and a
+  // replacement becoming latest can never erase an earlier attempt's outcome.
+  const recordDurableLoopSettlement = (input: {
+    threadId: ThreadId;
+    purpose: ThreadTurnPurpose;
+    outcome: LoopUnsettledOutcome["outcome"];
+    turnId: string | null;
+    messageId: string | null;
+    settledAt: string;
+  }) =>
+    Effect.gen(function* () {
+      const loopRow = yield* projectionThreadLoopRepository.getByThreadId({
+        threadId: input.threadId,
+      });
+      if (Option.isNone(loopRow)) {
+        return;
+      }
+      const settledLoop = recordLoopSettlement(loopRow.value.loop, {
+        purpose: input.purpose,
+        outcome: input.outcome,
+        turnId: input.turnId,
+        messageId: input.messageId,
+        settledAt: input.settledAt,
+      });
+      if (settledLoop === null) {
+        return;
+      }
+      yield* projectionThreadLoopRepository.upsert({
+        threadId: input.threadId,
+        loop: settledLoop,
+        updatedAt: input.settledAt,
+      });
+    });
 
   const applyProjectsProjection: ProjectorDefinition["apply"] = (event, _attachmentSideEffects) => {
     switch (event.type) {
@@ -758,6 +836,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             updatedAt: event.payload.updatedAt,
           }));
 
+        case "thread.turn-queued":
         case "thread.turn-start-requested": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
@@ -1007,6 +1086,14 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
               : Option.isSome(existingMessage)
                 ? existingMessage.value.attachments
                 : undefined;
+          const assistantPurpose =
+            event.payload.role === "assistant"
+              ? yield* resolveAssistantTurnPurpose({
+                  threadId: event.payload.threadId,
+                  turnId: event.payload.turnId,
+                  eventPurpose: event.payload.purpose,
+                })
+              : event.payload.purpose;
           yield* projectionThreadMessageRepository.upsert({
             messageId: event.payload.messageId,
             threadId: event.payload.threadId,
@@ -1032,6 +1119,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
               : {}),
             isStreaming: event.payload.streaming,
             source: event.payload.source,
+            ...(assistantPurpose != null ? { purpose: assistantPurpose } : {}),
             sequence: Option.isSome(existingMessage)
               ? (existingMessage.value.sequence ?? event.sequence)
               : event.sequence,
@@ -1255,20 +1343,65 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
       }
     });
 
+  const applyThreadLoopProjection: ProjectorDefinition["apply"] = (event) =>
+    Effect.gen(function* () {
+      switch (event.type) {
+        case "thread.loop-set":
+        case "thread.loop-off":
+        case "thread.loop-continued":
+        case "thread.loop-wait-noted": {
+          yield* projectionThreadLoopRepository.upsert({
+            threadId: event.payload.threadId,
+            loop: event.payload.loop,
+            updatedAt: event.occurredAt,
+          });
+          return;
+        }
+
+        default:
+          return;
+      }
+    });
+
   const applyThreadTurnsProjection: ProjectorDefinition["apply"] = (
     event,
     _attachmentSideEffects,
   ) =>
     Effect.gen(function* () {
       switch (event.type) {
+        case "thread.turn-queued":
         case "thread.turn-start-requested": {
           yield* projectionTurnRepository.replacePendingTurnStart({
             threadId: event.payload.threadId,
             messageId: event.payload.messageId,
             sourceProposedPlanThreadId: event.payload.sourceProposedPlan?.threadId ?? null,
             sourceProposedPlanId: event.payload.sourceProposedPlan?.planId ?? null,
+            purpose: event.payload.purpose ?? undefined,
             requestedAt: event.payload.createdAt,
           });
+          return;
+        }
+
+        case "thread.turn-start-cancelled": {
+          // Settle exactly the cancelled pending start; a newer pending start
+          // for the same thread (e.g. a racing manual message) must survive.
+          yield* projectionTurnRepository.deletePendingTurnStartByMessageId({
+            threadId: event.payload.threadId,
+            messageId: event.payload.messageId,
+          });
+          // A cancelled loop-owned start settles its iteration as interrupted
+          // on the durable ledger so the settlement watermark can advance past
+          // it rather than blocking on a permanent gap.
+          if (event.payload.purpose?.kind === "loop-iteration") {
+            yield* recordDurableLoopSettlement({
+              threadId: event.payload.threadId,
+              purpose: event.payload.purpose,
+              outcome: "interrupted",
+              turnId: null,
+              messageId: event.payload.messageId,
+              settledAt: event.payload.createdAt,
+            });
+          }
           return;
         }
 
@@ -1281,35 +1414,82 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
               // the thread is no longer running. Error sessions may retain the
               // failed turn id for attribution, so prefer that exact open turn
               // before falling back to the newest open row.
-              const openTurns = (yield* projectionTurnRepository.listByThreadId({
+              const allTurns = yield* projectionTurnRepository.listByThreadId({
                 threadId: event.payload.threadId,
-              }))
-                .filter(
-                  (
-                    row,
-                  ): row is ProjectionTurn & {
-                    turnId: Exclude<ProjectionTurn["turnId"], null>;
-                  } => row.turnId !== null && row.completedAt === null,
-                )
-                .toSorted(
-                  (left, right) =>
+              });
+              const openTurns = allTurns
+                .filter((row) => row.checkpointTurnCount === null && row.completedAt === null)
+                .toSorted((left, right) => {
+                  // Prefer the concrete running turn over a queued pending-start
+                  // placeholder so a terminal session finalizes the in-flight turn,
+                  // not a later-queued manual message.
+                  const leftConcrete = left.turnId !== null ? 1 : 0;
+                  const rightConcrete = right.turnId !== null ? 1 : 0;
+                  return (
+                    rightConcrete - leftConcrete ||
                     right.requestedAt.localeCompare(left.requestedAt) ||
-                    right.turnId.localeCompare(left.turnId),
-                );
+                    (right.turnId ?? "").localeCompare(left.turnId ?? "")
+                  );
+                });
+              // A repeated terminal notification for an attempt that already
+              // settled must not finalize (and delete) a later queued
+              // replacement's pending-start placeholder: a placeholder may
+              // only fail when this terminal moment did not already finalize
+              // a concrete turn.
+              const terminalAlreadyFinalizedConcreteTurn = allTurns.some(
+                (row) => row.turnId !== null && row.completedAt === event.payload.session.updatedAt,
+              );
               const turnToFinalize =
                 (turnId === null ? undefined : openTurns.find((row) => row.turnId === turnId)) ??
-                openTurns.at(0);
+                openTurns.find(
+                  (row) => row.turnId !== null || !terminalAlreadyFinalizedConcreteTurn,
+                );
 
               if (turnToFinalize) {
+                const finalizedState =
+                  settleTurnStateFromSession(event.payload.session, turnToFinalize.state) ??
+                  turnToFinalize.state;
                 yield* projectionTurnRepository.upsertByTurnId({
                   ...turnToFinalize,
-                  state:
-                    settleTurnStateFromSession(event.payload.session, turnToFinalize.state) ??
-                    turnToFinalize.state,
+                  state: finalizedState,
                   startedAt: turnToFinalize.startedAt ?? event.payload.session.updatedAt,
                   requestedAt: turnToFinalize.requestedAt ?? event.payload.session.updatedAt,
                   completedAt: event.payload.session.updatedAt,
                 });
+                if (
+                  turnToFinalize.purpose?.kind === "loop-iteration" &&
+                  (finalizedState === "completed" ||
+                    finalizedState === "error" ||
+                    finalizedState === "interrupted")
+                ) {
+                  yield* recordDurableLoopSettlement({
+                    threadId: event.payload.threadId,
+                    purpose: turnToFinalize.purpose,
+                    outcome: finalizedState,
+                    turnId: turnToFinalize.turnId,
+                    messageId: turnToFinalize.pendingMessageId,
+                    settledAt: event.payload.session.updatedAt,
+                  });
+                }
+
+                // Retire a pending start only when the terminal state
+                // represents that exact start failing before a concrete TurnId
+                // existed. An earlier concrete turn settling must never delete
+                // a later queued replacement's pending marker — continuation
+                // policy reads it to persist a wait instead of creating an
+                // extra iteration.
+                if (
+                  turnToFinalize.turnId === null &&
+                  turnToFinalize.pendingMessageId !== null &&
+                  (event.payload.session.status === "error" ||
+                    event.payload.session.status === "interrupted" ||
+                    event.payload.session.status === "stopped")
+                ) {
+                  yield* projectionTurnRepository.deletePendingTurnStartByMessageId({
+                    threadId: event.payload.threadId,
+                    messageId: turnToFinalize.pendingMessageId,
+                  });
+                }
               }
             }
             return;
@@ -1343,6 +1523,9 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
                 (Option.isSome(pendingTurnStart)
                   ? pendingTurnStart.value.sourceProposedPlanId
                   : null),
+              purpose:
+                existingTurn.value.purpose ??
+                (Option.isSome(pendingTurnStart) ? pendingTurnStart.value.purpose : undefined),
               startedAt:
                 existingTurn.value.startedAt ?? event.payload.session.updatedAt ?? event.occurredAt,
               requestedAt:
@@ -1364,6 +1547,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
               sourceProposedPlanId: Option.isSome(pendingTurnStart)
                 ? pendingTurnStart.value.sourceProposedPlanId
                 : null,
+              purpose: Option.isSome(pendingTurnStart) ? pendingTurnStart.value.purpose : undefined,
               assistantMessageId: null,
               state: "running",
               requestedAt: Option.isSome(pendingTurnStart)
@@ -1379,9 +1563,34 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             });
           }
 
-          yield* projectionTurnRepository.deletePendingTurnStartByThreadId({
-            threadId: event.payload.threadId,
+          const messageIdToBind = Option.match(pendingTurnStart, {
+            onSome: (pending) => pending.messageId,
+            onNone: () =>
+              Option.isSome(existingTurn) ? existingTurn.value.pendingMessageId : null,
           });
+          if (messageIdToBind !== null) {
+            const existingMessage =
+              yield* projectionThreadMessageRepository.getByThreadAndMessageId({
+                threadId: event.payload.threadId,
+                messageId: messageIdToBind,
+              });
+            if (Option.isSome(existingMessage) && existingMessage.value.turnId === null) {
+              yield* projectionThreadMessageRepository.upsert({
+                ...existingMessage.value,
+                turnId,
+              });
+            }
+          }
+
+          // Retire only the pending start that just bound to this concrete
+          // running turn; a later-queued replacement's pending marker survives
+          // an earlier turn's session updates.
+          if (Option.isSome(pendingTurnStart)) {
+            yield* projectionTurnRepository.deletePendingTurnStartByMessageId({
+              threadId: event.payload.threadId,
+              messageId: pendingTurnStart.value.messageId,
+            });
+          }
           return;
         }
 
@@ -1392,6 +1601,11 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           const existingTurn = yield* projectionTurnRepository.getByTurnId({
             threadId: event.payload.threadId,
             turnId: event.payload.turnId,
+          });
+          const assistantTurnPurpose = yield* resolveAssistantTurnPurpose({
+            threadId: event.payload.threadId,
+            turnId: event.payload.turnId,
+            eventPurpose: event.payload.purpose,
           });
           if (Option.isSome(existingTurn)) {
             const existingIsTerminal =
@@ -1409,6 +1623,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
                 event.payload.streaming && !existingIsTerminal
                   ? null
                   : existingTurn.value.completedAt,
+              purpose: assistantTurnPurpose ?? existingTurn.value.purpose,
               startedAt: existingTurn.value.startedAt ?? event.payload.createdAt,
               requestedAt: existingTurn.value.requestedAt ?? event.payload.createdAt,
             });
@@ -1420,6 +1635,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             pendingMessageId: null,
             sourceProposedPlanThreadId: null,
             sourceProposedPlanId: null,
+            purpose: assistantTurnPurpose,
             assistantMessageId: event.payload.messageId,
             state: "running",
             requestedAt: event.payload.createdAt,
@@ -1474,6 +1690,23 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
           });
 
           if (Option.isSome(existingTurn)) {
+            // A diff completion that settles a running loop-owned turn records
+            // its terminal outcome on the durable ledger, exactly like session
+            // settlement.
+            if (
+              existingTurn.value.state === "running" &&
+              (nextState === "completed" || nextState === "error") &&
+              existingTurn.value.purpose?.kind === "loop-iteration"
+            ) {
+              yield* recordDurableLoopSettlement({
+                threadId: event.payload.threadId,
+                purpose: existingTurn.value.purpose,
+                outcome: nextState,
+                turnId: event.payload.turnId,
+                messageId: existingTurn.value.pendingMessageId,
+                settledAt: event.payload.completedAt,
+              });
+            }
             yield* projectionTurnRepository.upsertByTurnId({
               ...existingTurn.value,
               // Preserve the persisted assistantMessageId when the event payload
@@ -1547,6 +1780,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
                     messageId: turn.pendingMessageId,
                     sourceProposedPlanThreadId: turn.sourceProposedPlanThreadId,
                     sourceProposedPlanId: turn.sourceProposedPlanId,
+                    purpose: turn.purpose ?? undefined,
                     requestedAt: turn.requestedAt,
                   })
               : projectionTurnRepository.upsertByTurnId({
@@ -1816,6 +2050,16 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
       shouldApply: (event) =>
         event.type === "thread.turn-start-requested" || event.type === "thread.session-set",
       apply: applyThreadSessionsProjection,
+    },
+    {
+      name: ORCHESTRATION_PROJECTOR_NAMES.threadLoop,
+      phase: "hot",
+      shouldApply: (event) =>
+        event.type === "thread.loop-set" ||
+        event.type === "thread.loop-off" ||
+        event.type === "thread.loop-continued" ||
+        event.type === "thread.loop-wait-noted",
+      apply: applyThreadLoopProjection,
     },
     {
       name: ORCHESTRATION_PROJECTOR_NAMES.threadTurns,
@@ -2233,6 +2477,7 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionThreadProposedPlanRepositoryLive),
   Layer.provideMerge(ProjectionThreadActivityRepositoryLive),
   Layer.provideMerge(ProjectionThreadSessionRepositoryLive),
+  Layer.provideMerge(ProjectionThreadLoopRepositoryLive),
   Layer.provideMerge(ProjectionTurnRepositoryLive),
   Layer.provideMerge(ProjectionPendingInteractionRepositoryLive),
   Layer.provideMerge(ProjectionStateRepositoryLive),

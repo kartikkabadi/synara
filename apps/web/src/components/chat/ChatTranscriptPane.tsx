@@ -34,6 +34,7 @@ import type { AgentActivityDetail } from "./agentActivity.logic";
 interface ChatTranscriptPaneProps {
   activeThreadId: string;
   activeTurnId?: TurnId | null;
+  activeTurnPurpose?: ComponentProps<typeof MessagesTimeline>["activeTurnPurpose"];
   activeTurnInProgress: boolean;
   activeTurnStartedAt: string | null;
   agentActivityDetail?: AgentActivityDetail | null;
@@ -45,6 +46,7 @@ interface ChatTranscriptPaneProps {
   hasMessages: boolean;
   isRevertingCheckpoint: boolean;
   isWorking: boolean;
+  loop?: ComponentProps<typeof MessagesTimeline>["loop"];
   followLiveOutput: boolean;
   listRef: RefObject<LegendListRef | null>;
   timelineControllerRef?: RefObject<MessagesTimelineController | null>;
@@ -91,6 +93,7 @@ interface ChatTranscriptPaneProps {
 export function ChatTranscriptPane({
   activeThreadId,
   activeTurnId,
+  activeTurnPurpose,
   activeTurnInProgress,
   activeTurnStartedAt,
   agentActivityDetail,
@@ -102,6 +105,7 @@ export function ChatTranscriptPane({
   hasMessages,
   isRevertingCheckpoint,
   isWorking,
+  loop,
   followLiveOutput,
   listRef,
   timelineControllerRef,
@@ -188,7 +192,9 @@ export function ChatTranscriptPane({
             hasMessages={hasMessages}
             isWorking={isWorking}
             worktreeSetup={worktreeSetup}
+            loop={loop ?? null}
             activeTurnId={activeTurnId ?? null}
+            activeTurnPurpose={activeTurnPurpose ?? null}
             activeTurnInProgress={activeTurnInProgress}
             activeTurnStartedAt={activeTurnStartedAt}
             listRef={listRef}

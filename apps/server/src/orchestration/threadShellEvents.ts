@@ -22,6 +22,7 @@ const THREAD_PROJECTION_EVENT_TYPES = new Set<OrchestrationEvent["type"]>([
   "thread.marker-label-set",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
+  "thread.turn-queued",
   "thread.turn-start-requested",
   "thread.deleted",
   "thread.archived",
@@ -36,6 +37,10 @@ const OTHER_THREAD_SHELL_EVENT_TYPES = new Set<OrchestrationEvent["type"]>([
   "thread.conversation-rolled-back",
   "thread.session-set",
   "thread.turn-diff-completed",
+  "thread.loop-set",
+  "thread.loop-off",
+  "thread.loop-continued",
+  "thread.loop-wait-noted",
 ]);
 
 export function shouldApplyThreadsProjection(event: OrchestrationEvent): boolean {

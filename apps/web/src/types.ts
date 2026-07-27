@@ -32,6 +32,8 @@ import type {
   RuntimeMode,
   ThreadCreationSource,
   ThreadEnvironmentMode,
+  ThreadLoop,
+  ThreadTurnPurpose,
 } from "@synara/contracts";
 
 export type SessionPhase = "disconnected" | "connecting" | "ready" | "running";
@@ -112,6 +114,7 @@ export interface ChatMessage {
   dispatchMode?: TurnDispatchMode;
   dispatchOrigin?: MessageDispatchOrigin;
   turnId?: TurnId | null;
+  purpose?: ThreadTurnPurpose | undefined;
   createdAt: string;
   completedAt?: string | undefined;
   streaming: boolean;
@@ -252,6 +255,7 @@ export interface Thread extends ThreadWorkspaceState {
   hasPendingUserInput?: boolean;
   hasActionableProposedPlan?: boolean;
   pendingInteractions?: OrchestrationPendingInteraction[];
+  loop?: ThreadLoop | null;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
 }
@@ -291,6 +295,7 @@ export interface ThreadShell extends ThreadWorkspaceState {
   hasPendingUserInput?: boolean;
   hasActionableProposedPlan?: boolean;
   pendingInteractions?: OrchestrationPendingInteraction[];
+  loop?: ThreadLoop | null;
   lastVisitedAt?: string | undefined;
 }
 

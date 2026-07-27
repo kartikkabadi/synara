@@ -3,6 +3,7 @@ import {
   CheckpointRef,
   CommandId,
   EventId,
+  LoopActivationId,
   MessageId,
   ProjectId,
   SpaceId,
@@ -396,6 +397,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           hasPendingApprovals: true,
           hasPendingUserInput: true,
           hasActionableProposedPlan: true,
+          hasPendingTurnStart: false,
+          pendingTurnStart: null,
           latestTurn: {
             turnId: asTurnId("turn-1"),
             state: "completed",
@@ -413,6 +416,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           archivedAt: null,
           deletedAt: null,
           handoff: null,
+          loop: null,
           messages: [
             {
               id: asMessageId("message-0"),
@@ -1553,10 +1557,13 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           hasPendingApprovals: true,
           hasPendingUserInput: true,
           hasActionableProposedPlan: true,
+          hasPendingTurnStart: false,
           createdAt: "2026-03-03T00:00:02.000Z",
           updatedAt: "2026-03-03T00:00:03.000Z",
           archivedAt: null,
+          deletedAt: null,
           handoff: null,
+          loop: null,
           session: {
             threadId: ThreadId.makeUnsafe("thread-shell"),
             status: "ready",
@@ -1963,6 +1970,86 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         completedModel.threads[0]?.activities.map((activity) => activity.kind),
         ["checkpoint.revert.succeeded"],
       );
+    }),
+  );
+
+  it.effect("hydrates full pending turn start identity into every read model", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_thread_activities`;
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id, title, workspace_root, default_model_selection_json,
+          scripts_json, created_at, updated_at, deleted_at
+        ) VALUES (
+          'project-pending', 'Pending project', '/tmp/pending',
+          '{"provider":"codex","model":"gpt-5-codex"}', '[]',
+          '2026-07-22T00:00:00.000Z', '2026-07-22T00:00:00.000Z', NULL
+        )
+      `;
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id, project_id, title, model_selection_json, branch, worktree_path,
+          latest_turn_id, created_at, updated_at, deleted_at
+        ) VALUES (
+          'thread-pending', 'project-pending', 'Pending thread',
+          '{"provider":"codex","model":"gpt-5-codex"}', NULL, NULL, NULL,
+          '2026-07-22T00:00:00.000Z', '2026-07-22T00:00:00.000Z', NULL
+        )
+      `;
+      yield* sql`
+        INSERT INTO projection_turns (
+          thread_id, turn_id, pending_message_id, source_proposed_plan_thread_id,
+          source_proposed_plan_id, assistant_message_id, state, requested_at,
+          started_at, completed_at, checkpoint_turn_count, checkpoint_ref,
+          checkpoint_status, checkpoint_files_json, purpose_json
+        ) VALUES (
+          'thread-pending', NULL, 'msg-pending-loop', NULL, NULL, NULL, 'pending',
+          '2026-07-22T00:00:01.000Z', NULL, NULL, NULL, NULL, NULL, '[]',
+          '{"kind":"loop-iteration","activationId":"activation-pending","iteration":2}'
+        )
+      `;
+
+      const expectedPendingTurnStart = {
+        messageId: asMessageId("msg-pending-loop"),
+        requestedAt: "2026-07-22T00:00:01.000Z",
+        purpose: {
+          kind: "loop-iteration" as const,
+          activationId: LoopActivationId.makeUnsafe("activation-pending"),
+          iteration: 2,
+        },
+      };
+
+      // The command read model rebuilt after a restart must expose the same
+      // pending-start identity (message, purpose, activation) as the hot
+      // projector so loop ownership decisions are restart-independent.
+      const commandModel = yield* snapshotQuery.getCommandReadModel();
+      assert.deepEqual(commandModel.threads[0]?.pendingTurnStart, expectedPendingTurnStart);
+      assert.equal(commandModel.threads[0]?.hasPendingTurnStart, true);
+
+      const snapshot = yield* snapshotQuery.getSnapshot();
+      assert.deepEqual(snapshot.threads[0]?.pendingTurnStart, expectedPendingTurnStart);
+
+      const detail = yield* snapshotQuery.getThreadDetailById(asThreadId("thread-pending"));
+      assert.equal(detail._tag, "Some");
+      if (detail._tag === "Some") {
+        assert.deepEqual(detail.value.pendingTurnStart, expectedPendingTurnStart);
+      }
+
+      const shell = yield* snapshotQuery.getThreadShellById(asThreadId("thread-pending"));
+      assert.equal(shell._tag, "Some");
+      if (shell._tag === "Some") {
+        assert.equal(shell.value.hasPendingTurnStart, true);
+      }
+
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_projects`;
     }),
   );
 

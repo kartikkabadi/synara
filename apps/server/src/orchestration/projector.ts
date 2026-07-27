@@ -1,6 +1,7 @@
 import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@synara/contracts";
 import {
   OrchestrationCheckpointSummary,
+  OrchestrationLatestTurn,
   OrchestrationMessage,
   OrchestrationSession,
   OrchestrationThread,
@@ -45,13 +46,19 @@ import {
   ThreadMarkerRemovedPayload,
   ThreadProposedPlanUpsertedPayload,
   ThreadConversationRolledBackPayload,
+  ThreadLoopContinuedPayload,
+  ThreadLoopOffPayload,
+  ThreadLoopSetPayload,
+  ThreadLoopWaitNotedPayload,
   ThreadRuntimeModeSetPayload,
   ThreadUnarchivedPayload,
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
+  ThreadTurnStartCancelledPayload,
   ThreadTurnStartRequestedPayload,
 } from "./Schemas.ts";
+import { recordLoopSettlement } from "./loop/settlement.ts";
 import { resolveStableMessageTurnId } from "./messageTurnId.ts";
 import { settleTurnStateFromSession } from "./turnLifecycle.ts";
 import { deriveTurnStartModelSelection, deriveTurnStartSession } from "./turnStartSession.ts";
@@ -84,13 +91,13 @@ function isTerminalLatestTurn(
 // no provider event will ever mark the turn complete on its own, so a running
 // latestTurn is settled here. Checkpoint diff events (thread.turn-diff-completed)
 // only enrich the terminal state afterwards — they are not the lifecycle authority.
-// A retained activeTurnId blocks settlement (except on error): stop-requested flows
-// deliberately emit "interrupted" while keeping the turn active until the provider's
-// terminal event decides the real outcome, and a premature settle here could never
-// be corrected because settlement only applies to running turns.
+// Error is settled immediately even if activeTurnId is still set, because the
+// provider has already abandoned the turn. Interrupted/stopped/ready are only
+// settled once activeTurnId has cleared, so a stop-requested or completed state
+// never overwrites a still-live turn before the provider confirms the outcome.
 function settleLatestTurnForSessionStatus(
   latestTurn: OrchestrationThread["latestTurn"],
-  session: Pick<OrchestrationSession, "status" | "activeTurnId" | "updatedAt">,
+  session: Pick<OrchestrationSession, "status" | "activeTurnId" | "updatedAt" | "lastError">,
 ): OrchestrationThread["latestTurn"] {
   if (latestTurn?.state !== "running") {
     return latestTurn;
@@ -854,6 +861,7 @@ export function projectEvent(
         })),
       );
 
+    case "thread.turn-queued":
     case "thread.turn-start-requested":
       return decodeForEvent(
         ThreadTurnStartRequestedPayload,
@@ -891,6 +899,55 @@ export function projectEvent(
               ...(turnStartSession !== null ? { session: turnStartSession } : {}),
               runtimeMode: payload.runtimeMode,
               interactionMode: payload.interactionMode,
+              hasPendingTurnStart: true,
+              pendingTurnStart: {
+                messageId: payload.messageId,
+                requestedAt: payload.createdAt,
+                ...(payload.purpose !== undefined ? { purpose: payload.purpose } : {}),
+                ...(payload.sourceProposedPlan !== undefined
+                  ? { sourceProposedPlan: payload.sourceProposedPlan }
+                  : {}),
+              },
+              updatedAt: payload.createdAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.turn-start-cancelled":
+      return decodeForEvent(
+        ThreadTurnStartCancelledPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          // Clear only the exact cancelled pending start; a newer pending
+          // start (e.g. a racing manual message) must survive.
+          if (!thread || thread.pendingTurnStart?.messageId !== payload.messageId) {
+            return nextBase;
+          }
+          // A cancelled loop-owned start settles its iteration as interrupted:
+          // the watermark can advance past it without treating the cancellation
+          // as a provider failure. Without this, a cancelled iteration would
+          // leave a permanent gap that blocks all later accounting.
+          const cancelledLoop =
+            payload.purpose?.kind === "loop-iteration" && thread.loop != null
+              ? recordLoopSettlement(thread.loop, {
+                  purpose: payload.purpose,
+                  outcome: "interrupted",
+                  turnId: null,
+                  messageId: payload.messageId,
+                  settledAt: payload.createdAt,
+                })
+              : null;
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              hasPendingTurnStart: false,
+              pendingTurnStart: null,
+              ...(cancelledLoop !== null ? { loop: cancelledLoop } : {}),
               updatedAt: payload.createdAt,
             }),
           };
@@ -922,6 +979,7 @@ export function projectEvent(
             turnId: payload.turnId,
             streaming: payload.streaming,
             source: payload.source,
+            ...(payload.purpose !== undefined ? { purpose: payload.purpose } : {}),
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
           },
@@ -954,6 +1012,7 @@ export function projectEvent(
             ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
             ...(message.skills !== undefined ? { skills: message.skills } : {}),
             ...(message.mentions !== undefined ? { mentions: message.mentions } : {}),
+            purpose: message.purpose,
           };
           cappedMessages = nextMessages;
         } else {
@@ -995,33 +1054,130 @@ export function projectEvent(
           "session",
         );
 
+        // A terminal session before the provider ever reached running cancels any
+        // pending turn start the same way ProjectionPipeline deletes the pending
+        // row. `error` is terminal immediately; `interrupted`/`stopped` only once the
+        // active turn has cleared, so an in-flight interrupt does not drop a queued
+        // replacement.
+        const isTerminalBeforeRunning =
+          session.status === "error" ||
+          ((session.status === "interrupted" || session.status === "stopped") &&
+            session.activeTurnId === null);
+        const isRunningWithActiveTurn =
+          session.status === "running" && session.activeTurnId !== null;
+
+        const isExistingActiveTurn = thread.latestTurn?.turnId === session.activeTurnId;
+
+        const terminalStateForPendingStart = ((): OrchestrationLatestTurn["state"] => {
+          if (session.status === "error") return "error";
+          if (session.status === "stopped" && session.lastError !== null) return "error";
+          return "interrupted";
+        })();
+
+        // A repeated terminal notification for an attempt that already
+        // settled must not fail a later queued replacement's pending start:
+        // only a genuine transition into the terminal state can represent
+        // the pending start itself failing before a concrete turn existed.
+        const isRepeatedTerminalSession =
+          thread.session?.status === session.status &&
+          thread.session.updatedAt === session.updatedAt;
+
+        const shouldCreateTerminalFromPendingStart =
+          isTerminalBeforeRunning &&
+          !isRepeatedTerminalSession &&
+          thread.latestTurn?.state !== "running" &&
+          thread.pendingTurnStart !== null &&
+          thread.pendingTurnStart !== undefined;
+
+        const nextLatestTurn = isRunningWithActiveTurn
+          ? isExistingActiveTurn && isTerminalLatestTurn(thread.latestTurn)
+            ? thread.latestTurn
+            : {
+                turnId: session.activeTurnId,
+                state: "running" as const,
+                requestedAt: isExistingActiveTurn
+                  ? thread.latestTurn.requestedAt
+                  : session.updatedAt,
+                startedAt: isExistingActiveTurn
+                  ? (thread.latestTurn.startedAt ?? session.updatedAt)
+                  : session.updatedAt,
+                completedAt: null,
+                assistantMessageId: isExistingActiveTurn
+                  ? thread.latestTurn.assistantMessageId
+                  : null,
+                purpose: isExistingActiveTurn
+                  ? thread.latestTurn.purpose
+                  : thread.pendingTurnStart?.purpose,
+                ...(isExistingActiveTurn
+                  ? thread.latestTurn.sourceProposedPlan !== undefined
+                    ? { sourceProposedPlan: thread.latestTurn.sourceProposedPlan }
+                    : {}
+                  : thread.pendingTurnStart?.sourceProposedPlan !== undefined
+                    ? { sourceProposedPlan: thread.pendingTurnStart.sourceProposedPlan }
+                    : {}),
+              }
+          : shouldCreateTerminalFromPendingStart
+            ? {
+                turnId: null,
+                state: terminalStateForPendingStart,
+                requestedAt: thread.pendingTurnStart.requestedAt,
+                startedAt: null,
+                completedAt: session.updatedAt,
+                assistantMessageId: null,
+                purpose: thread.pendingTurnStart.purpose,
+                ...(thread.pendingTurnStart.sourceProposedPlan !== undefined
+                  ? { sourceProposedPlan: thread.pendingTurnStart.sourceProposedPlan }
+                  : {}),
+              }
+            : settleLatestTurnForSessionStatus(thread.latestTurn, session);
+
+        // A pending start is retired only when the terminal state represents
+        // that exact start failing before a concrete TurnId existed, or when
+        // the start binds to a new concrete running turn. An earlier concrete
+        // turn settling must never delete a later queued replacement's pending
+        // marker — continuation policy reads it to persist a wait instead of
+        // creating an extra iteration.
+        const bindsPendingToNewRunningTurn = isRunningWithActiveTurn && !isExistingActiveTurn;
+        const retiresPendingStart =
+          bindsPendingToNewRunningTurn || shouldCreateTerminalFromPendingStart;
+
+        // Record the settled attempt's terminal outcome on the loop's durable
+        // settlement ledger exactly once, keyed by its own dispatched
+        // iteration — not on the mutable latestTurn, which a queued
+        // replacement may overwrite before accounting runs.
+        const settledPurpose = shouldCreateTerminalFromPendingStart
+          ? thread.pendingTurnStart?.purpose
+          : !isRunningWithActiveTurn &&
+              thread.latestTurn?.state === "running" &&
+              nextLatestTurn !== null &&
+              nextLatestTurn.state !== "running"
+            ? thread.latestTurn.purpose
+            : undefined;
+        const settledLoop =
+          settledPurpose !== undefined &&
+          settledPurpose.kind === "loop-iteration" &&
+          thread.loop != null &&
+          nextLatestTurn !== null &&
+          nextLatestTurn.state !== "running"
+            ? recordLoopSettlement(thread.loop, {
+                purpose: settledPurpose,
+                outcome: nextLatestTurn.state,
+                turnId: shouldCreateTerminalFromPendingStart ? null : nextLatestTurn.turnId,
+                messageId: shouldCreateTerminalFromPendingStart
+                  ? (thread.pendingTurnStart?.messageId ?? null)
+                  : null,
+                settledAt: session.updatedAt,
+              })
+            : null;
+
         return {
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             session,
-            latestTurn:
-              session.status === "running" && session.activeTurnId !== null
-                ? thread.latestTurn?.turnId === session.activeTurnId &&
-                  isTerminalLatestTurn(thread.latestTurn)
-                  ? thread.latestTurn
-                  : {
-                      turnId: session.activeTurnId,
-                      state: "running",
-                      requestedAt:
-                        thread.latestTurn?.turnId === session.activeTurnId
-                          ? thread.latestTurn.requestedAt
-                          : session.updatedAt,
-                      startedAt:
-                        thread.latestTurn?.turnId === session.activeTurnId
-                          ? (thread.latestTurn.startedAt ?? session.updatedAt)
-                          : session.updatedAt,
-                      completedAt: null,
-                      assistantMessageId:
-                        thread.latestTurn?.turnId === session.activeTurnId
-                          ? thread.latestTurn.assistantMessageId
-                          : null,
-                    }
-                : settleLatestTurnForSessionStatus(thread.latestTurn, session),
+            hasPendingTurnStart: retiresPendingStart ? false : thread.hasPendingTurnStart,
+            pendingTurnStart: retiresPendingStart ? null : thread.pendingTurnStart,
+            latestTurn: nextLatestTurn,
+            ...(settledLoop !== null ? { loop: settledLoop } : {}),
             updatedAt: event.occurredAt,
           }),
         };
@@ -1143,13 +1299,44 @@ export function projectEvent(
                     : payload.completedAt,
                 completedAt: payload.completedAt,
                 assistantMessageId: preservedAssistantMessageId,
+                purpose:
+                  thread.latestTurn?.turnId === payload.turnId
+                    ? thread.latestTurn.purpose
+                    : thread.pendingTurnStart?.purpose,
+                ...(thread.latestTurn?.turnId === payload.turnId
+                  ? thread.latestTurn.sourceProposedPlan !== undefined
+                    ? { sourceProposedPlan: thread.latestTurn.sourceProposedPlan }
+                    : {}
+                  : thread.pendingTurnStart?.sourceProposedPlan !== undefined
+                    ? { sourceProposedPlan: thread.pendingTurnStart.sourceProposedPlan }
+                    : {}),
               };
+
+        // A diff completion that settles a running loop-owned turn records the
+        // terminal outcome on the loop's durable settlement ledger, exactly
+        // like session settlement.
+        const diffSettledLoop =
+          thread.latestTurn?.state === "running" &&
+          thread.latestTurn.turnId === payload.turnId &&
+          latestTurn !== null &&
+          latestTurn.state !== "running" &&
+          thread.latestTurn.purpose?.kind === "loop-iteration" &&
+          thread.loop != null
+            ? recordLoopSettlement(thread.loop, {
+                purpose: thread.latestTurn.purpose,
+                outcome: latestTurn.state,
+                turnId: payload.turnId,
+                messageId: null,
+                settledAt: payload.completedAt,
+              })
+            : null;
 
         return {
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             checkpoints,
             latestTurn,
+            ...(diffSettledLoop !== null ? { loop: diffSettledLoop } : {}),
             updatedAt: event.occurredAt,
           }),
         };
@@ -1289,6 +1476,50 @@ export function projectEvent(
             }),
           };
         }),
+      );
+
+    case "thread.loop-set":
+      return decodeForEvent(ThreadLoopSetPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            loop: payload.loop,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.loop-off":
+      return decodeForEvent(ThreadLoopOffPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            loop: payload.loop,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.loop-continued":
+      return decodeForEvent(ThreadLoopContinuedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            loop: payload.loop,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.loop-wait-noted":
+      return decodeForEvent(ThreadLoopWaitNotedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            loop: payload.loop,
+            updatedAt: event.occurredAt,
+          }),
+        })),
       );
 
     default:

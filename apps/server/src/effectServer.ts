@@ -28,6 +28,7 @@ import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "./orchestration/Services/OrchestrationEngine";
+import { LoopReactor } from "./orchestration/Services/LoopReactor";
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor";
@@ -65,6 +66,7 @@ export interface ServerShape {
     | AutomationService
     | ServerLifecycleEvents
     | OrchestrationEngineService
+    | LoopReactor
     | OrchestrationReactor
     | ProjectionSnapshotQuery
     | ProviderSessionReaper
@@ -126,6 +128,7 @@ export const createEffectServer = Effect.fn(function* (
   const managedAttachmentCleanup = yield* ManagedAttachmentCleanup;
   const lifecycleEvents = yield* ServerLifecycleEvents;
   const orchestrationEngine = yield* OrchestrationEngineService;
+  const loopReactor = yield* LoopReactor;
   const orchestrationReactor = yield* OrchestrationReactor;
   const providerService = yield* ProviderService;
   const providerSessionReaper = yield* ProviderSessionReaper;
@@ -218,6 +221,9 @@ export const createEffectServer = Effect.fn(function* (
   // process start cannot replay state-dependent commands against the terminal
   // projection.
   yield* orchestrationReactor.reconcileSettledOpenTurns;
+  // Restore any active `/loop` modes only after stuck turns are reconciled so
+  // the loop continuation decision sees a clean thread state.
+  yield* loopReactor.restoreActiveLoops;
   yield* recoverGitHandoffOperations((command) => orchestrationEngine.dispatch(command)).pipe(
     Effect.mapError(
       (cause) => new ServerLifecycleError({ operation: "recoverGitHandoffOperations", cause }),

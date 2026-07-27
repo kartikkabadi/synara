@@ -1,0 +1,128 @@
+import { Schema } from "effect";
+
+import {
+  IsoDateTime,
+  NonNegativeInt,
+  PositiveInt,
+  TrimmedNonEmptyString,
+  TrimmedString,
+} from "./baseSchemas";
+
+export const LOOP_DEFAULT_HARD_CAP = 100;
+// Issue #49 final locked caps: explicit count budgets are 1..100 and are
+// also capped by the default hard cap (100) so the two limits never diverge.
+export const LOOP_MAX_COUNT_BUDGET = 100;
+export const LOOP_DEFAULT_CONSECUTIVE_ERROR_THRESHOLD = 3;
+export const LOOP_MAX_DURATION_SECONDS = 24 * 60 * 60;
+// Loop prompts are turn bodies; they share the canonical turn-input bound.
+export const LOOP_PROMPT_MAX_INPUT_CHARS = 120_000;
+
+export const LoopStopReason = Schema.Literals([
+  "toggled_off",
+  "user_stop",
+  "budget_iterations",
+  "budget_duration",
+  "hard_cap",
+  "consecutive_errors",
+  "prompt_invalid",
+  "thread_unrunnable",
+  "attachments_not_supported",
+  "replaced_by_manual_policy",
+  "thread_archived",
+  "thread_deleted",
+]);
+export type LoopStopReason = typeof LoopStopReason.Type;
+
+export const LoopPrompt = TrimmedString.check(Schema.isNonEmpty())
+  .check(Schema.isMaxLength(LOOP_PROMPT_MAX_INPUT_CHARS))
+  .check(Schema.isPattern(/^[^/]/));
+export type LoopPrompt = typeof LoopPrompt.Type;
+
+// Stable identity for one loop activation. Branded so it cannot be confused
+// with CommandId/TurnId even though it is derived from a command id.
+export const LoopActivationId = TrimmedNonEmptyString.pipe(Schema.brand("LoopActivationId"));
+export type LoopActivationId = typeof LoopActivationId.Type;
+
+// Server-assigned marker on loop-owned turns. Never client-supplied.
+export const ThreadTurnPurpose = Schema.Struct({
+  kind: Schema.Literal("loop-iteration"),
+  activationId: LoopActivationId,
+  iteration: PositiveInt,
+});
+export type ThreadTurnPurpose = typeof ThreadTurnPurpose.Type;
+
+// Terminal outcome kinds a loop-owned attempt can settle with. `interrupted`
+// covers user interrupts, crash reconciliation, and exact start cancellations:
+// it advances the settlement watermark without touching the error streak.
+export const LoopSettledOutcome = Schema.Literals(["completed", "error", "interrupted"]);
+export type LoopSettledOutcome = typeof LoopSettledOutcome.Type;
+
+// Durable per-attempt settlement identity for one loop-owned iteration whose
+// terminal outcome has been observed but not yet consumed by continuation
+// accounting. Persisted on the ThreadLoop row so restarts rebuild the same
+// unaccounted settlement set; accounting removes entries in contiguous
+// iteration order and only then advances `lastSettledIteration`.
+export const LoopUnsettledOutcome = Schema.Struct({
+  activationId: LoopActivationId,
+  iteration: PositiveInt,
+  outcome: LoopSettledOutcome,
+  // Null when the attempt failed before a concrete TurnId existed.
+  turnId: Schema.NullOr(TrimmedNonEmptyString),
+  messageId: Schema.NullOr(TrimmedNonEmptyString),
+  settledAt: IsoDateTime,
+});
+export type LoopUnsettledOutcome = typeof LoopUnsettledOutcome.Type;
+
+export const ThreadLoop = Schema.Struct({
+  active: Schema.Boolean,
+
+  // Empty string means "armed, waiting for first prompt".
+  prompt: Schema.String.check(Schema.isMaxLength(LOOP_PROMPT_MAX_INPUT_CHARS)),
+
+  // Number of loop-owned turns accepted/dispatched in this activation.
+  iteration: NonNegativeInt,
+
+  // Explicit user count budget; null means none.
+  maxIterations: Schema.NullOr(PositiveInt),
+
+  // Absolute expiry instant for duration budget; null means none. Re-anchored
+  // to server-now + durationSeconds on reconfigure.
+  endsAt: Schema.NullOr(IsoDateTime),
+
+  // Canonical configured duration budget in seconds; null means no duration
+  // budget. Budget copy derives from this, never from endsAt - createdAt.
+  durationSeconds: Schema.optional(Schema.NullOr(PositiveInt)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+
+  // Always present. Default 100.
+  hardCap: PositiveInt,
+
+  // Consecutive terminal errors on loop-owned turns since last success.
+  consecutiveErrors: NonNegativeInt,
+
+  // Highest loop-owned iteration of this activation whose terminal outcome has
+  // been counted. Monotone: each dispatched iteration settles exactly once,
+  // even when a replacement iteration is already queued or terminal events
+  // arrive duplicated/out of order.
+  lastSettledIteration: NonNegativeInt.pipe(Schema.withDecodingDefaultKey(() => 0)),
+
+  // Observed-but-unaccounted terminal outcomes of this activation, ordered by
+  // iteration. Written exactly once per attempt when the terminal state is
+  // projected, consumed in contiguous iteration order by continuation
+  // accounting, and independent of `latestTurn` so promoting a replacement
+  // never erases an earlier attempt's outcome.
+  unsettled: Schema.Array(LoopUnsettledOutcome).pipe(Schema.withDecodingDefaultKey(() => [])),
+
+  // Short redacted reason when auto-off happens; null otherwise.
+  lastStopReason: Schema.NullOr(LoopStopReason),
+
+  // Stable identity for this loop activation; used to scope settlement and
+  // continuation command IDs so a reconfigured loop does not inherit stale
+  // terminal events from a previous activation.
+  activationId: LoopActivationId,
+
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type ThreadLoop = typeof ThreadLoop.Type;

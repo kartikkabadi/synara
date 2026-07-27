@@ -285,4 +285,130 @@ describe("makeDispatchCommandNormalizer", () => {
       fs.rmSync(attachmentsDir, { recursive: true, force: true });
     }
   });
+
+  describe("server-authoritative loop lifecycle time", () => {
+    const normalizer = makeDispatchCommandNormalizer<Error>({
+      attachmentsDir: "/tmp/attachments",
+      fileSystem: {} as FileSystem.FileSystem,
+      path: {} as Path.Path,
+      canonicalizeProjectWorkspaceRoot: (workspaceRoot) => Effect.succeed(workspaceRoot),
+    });
+
+    it.each([
+      ["far in the past", "2000-01-01T00:00:00.000Z"],
+      ["far in the future", "2099-01-01T00:00:00.000Z"],
+    ])(
+      "re-stamps thread.loop.set createdAt with server now when the client clock is %s",
+      async (_name, clientCreatedAt) => {
+        const before = Date.now();
+        const result = await Effect.runPromise(
+          normalizer({
+            command: {
+              type: "thread.loop.set",
+              commandId: CommandId.makeUnsafe("cmd-loop-set-skew"),
+              threadId: ThreadId.makeUnsafe("thread-loop-skew"),
+              prompt: "keep going",
+              maxIterations: null,
+              durationSeconds: 30 * 60,
+              createdAt: clientCreatedAt,
+            } satisfies Extract<ClientOrchestrationCommand, { type: "thread.loop.set" }>,
+          }),
+        );
+        const after = Date.now();
+        expect(result.command.type).toBe("thread.loop.set");
+        if (result.command.type !== "thread.loop.set") {
+          return;
+        }
+        const stamped = Date.parse(result.command.createdAt);
+        expect(stamped).toBeGreaterThanOrEqual(before);
+        expect(stamped).toBeLessThanOrEqual(after);
+      },
+    );
+
+    it.each([
+      ["far in the past", "2000-01-01T00:00:00.000Z"],
+      ["far in the future", "2099-01-01T00:00:00.000Z"],
+    ])(
+      "re-stamps manual thread.turn.start createdAt with server now when the client clock is %s",
+      async (_name, clientCreatedAt) => {
+        const before = Date.now();
+        const result = await Effect.runPromise(
+          normalizer({
+            command: {
+              type: "thread.turn.start",
+              commandId: CommandId.makeUnsafe("cmd-turn-start-skew"),
+              threadId: ThreadId.makeUnsafe("thread-loop-skew"),
+              message: {
+                messageId: MessageId.makeUnsafe("msg-turn-start-skew"),
+                role: "user",
+                text: "keep going",
+                attachments: [],
+              },
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              createdAt: clientCreatedAt,
+            } satisfies Extract<ClientOrchestrationCommand, { type: "thread.turn.start" }>,
+          }),
+        );
+        const after = Date.now();
+        expect(result.command.type).toBe("thread.turn.start");
+        if (result.command.type !== "thread.turn.start") {
+          return;
+        }
+        const stamped = Date.parse(result.command.createdAt);
+        expect(stamped).toBeGreaterThanOrEqual(before);
+        expect(stamped).toBeLessThanOrEqual(after);
+      },
+    );
+
+    it("re-stamps thread.turn.interrupt with server now", async () => {
+      const before = Date.now();
+      const result = await Effect.runPromise(
+        normalizer({
+          command: {
+            type: "thread.turn.interrupt",
+            commandId: CommandId.makeUnsafe("cmd-turn-interrupt-skew"),
+            threadId: ThreadId.makeUnsafe("thread-loop-skew"),
+            createdAt: "2000-01-01T00:00:00.000Z",
+          } satisfies Extract<ClientOrchestrationCommand, { type: "thread.turn.interrupt" }>,
+        }),
+      );
+      expect(result.command.type).toBe("thread.turn.interrupt");
+      if (result.command.type !== "thread.turn.interrupt") {
+        return;
+      }
+      const stamped = Date.parse(result.command.createdAt);
+      expect(stamped).toBeGreaterThanOrEqual(before);
+      expect(stamped).toBeLessThanOrEqual(Date.now());
+    });
+
+    it("re-stamps thread.loop.toggle and thread.loop.off with server now", async () => {
+      const before = Date.now();
+      for (const command of [
+        {
+          type: "thread.loop.toggle" as const,
+          commandId: CommandId.makeUnsafe("cmd-loop-toggle-skew"),
+          threadId: ThreadId.makeUnsafe("thread-loop-skew"),
+          createdAt: "2000-01-01T00:00:00.000Z",
+        },
+        {
+          type: "thread.loop.off" as const,
+          commandId: CommandId.makeUnsafe("cmd-loop-off-skew"),
+          threadId: ThreadId.makeUnsafe("thread-loop-skew"),
+          createdAt: "2099-01-01T00:00:00.000Z",
+        },
+      ]) {
+        const result = await Effect.runPromise(normalizer({ command }));
+        if (
+          result.command.type !== "thread.loop.toggle" &&
+          result.command.type !== "thread.loop.off"
+        ) {
+          throw new Error(`unexpected command type: ${result.command.type}`);
+        }
+        const stamped = Date.parse(result.command.createdAt);
+        expect(stamped).toBeGreaterThanOrEqual(before);
+        expect(stamped).toBeLessThanOrEqual(Date.now());
+      }
+    });
+  });
 });

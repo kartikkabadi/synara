@@ -24,7 +24,7 @@ export const requestedExternalMcpRunId = (
 
 export const latestExternalMcpWaitState = (thread: {
   readonly latestTurn: {
-    readonly turnId: string;
+    readonly turnId: string | null;
     readonly state: ExternalMcpWaitState;
   } | null;
   readonly session: { readonly status: string } | null;
@@ -44,7 +44,7 @@ export const latestExternalMcpWaitState = (thread: {
 export const terminalExternalMcpSessionStateForRun = (
   thread: {
     readonly latestTurn: {
-      readonly turnId: string;
+      readonly turnId: string | null;
       readonly state: ExternalMcpWaitState;
     } | null;
     readonly session: { readonly status: string } | null;

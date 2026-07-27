@@ -4,6 +4,7 @@
 
 import {
   MessageId,
+  type OrchestrationLatestTurn,
   type OrchestrationReadModel,
   type OrchestrationSpaceShell,
   type OrchestrationSessionStatus,
@@ -69,6 +70,19 @@ function sourceProposedPlansEqual(
   return left.threadId === right.threadId && left.planId === right.planId;
 }
 
+function turnPurposesEqual(
+  left: OrchestrationLatestTurn["purpose"],
+  right: OrchestrationLatestTurn["purpose"],
+): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  return (
+    left.kind === right.kind &&
+    left.activationId === right.activationId &&
+    left.iteration === right.iteration
+  );
+}
+
 function latestTurnsEqual(left: Thread["latestTurn"], right: Thread["latestTurn"]): boolean {
   if (left === right) return true;
   if (left == null || right == null) return false;
@@ -79,7 +93,8 @@ function latestTurnsEqual(left: Thread["latestTurn"], right: Thread["latestTurn"
     left.startedAt === right.startedAt &&
     left.completedAt === right.completedAt &&
     left.assistantMessageId === right.assistantMessageId &&
-    sourceProposedPlansEqual(left.sourceProposedPlan, right.sourceProposedPlan)
+    sourceProposedPlansEqual(left.sourceProposedPlan, right.sourceProposedPlan) &&
+    turnPurposesEqual(left.purpose, right.purpose)
   );
 }
 
@@ -178,6 +193,7 @@ export function threadShellsEqual(left: ThreadShell | undefined, right: ThreadSh
     left.hasPendingUserInput === right.hasPendingUserInput &&
     left.hasActionableProposedPlan === right.hasActionableProposedPlan &&
     left.pendingInteractions === right.pendingInteractions &&
+    deepEqualJson(left.loop ?? null, right.loop ?? null) &&
     left.lastVisitedAt === right.lastVisitedAt
   );
 }
@@ -485,6 +501,7 @@ export function normalizeChatMessage(
     previous.dispatchMode === incoming.dispatchMode &&
     previous.dispatchOrigin === incoming.dispatchOrigin &&
     previous.turnId === incoming.turnId &&
+    previous.purpose === incoming.purpose &&
     previous.createdAt === incoming.createdAt &&
     previous.streaming === incoming.streaming &&
     previous.source === incoming.source &&
@@ -503,6 +520,7 @@ export function normalizeChatMessage(
     ...(incoming.dispatchMode ? { dispatchMode: incoming.dispatchMode } : {}),
     ...(incoming.dispatchOrigin ? { dispatchOrigin: incoming.dispatchOrigin } : {}),
     turnId: incoming.turnId,
+    purpose: incoming.purpose,
     createdAt: incoming.createdAt,
     streaming: incoming.streaming,
     source: incoming.source,
@@ -1328,7 +1346,8 @@ function normalizeLatestTurn(
     previous.startedAt === incoming.startedAt &&
     previous.completedAt === incoming.completedAt &&
     previous.assistantMessageId === incoming.assistantMessageId &&
-    previous.sourceProposedPlan === nextSourceProposedPlan
+    previous.sourceProposedPlan === nextSourceProposedPlan &&
+    turnPurposesEqual(previous.purpose, incoming.purpose)
   ) {
     return previous;
   }
@@ -1341,6 +1360,7 @@ function normalizeLatestTurn(
     completedAt: incoming.completedAt,
     assistantMessageId: incoming.assistantMessageId,
     ...(nextSourceProposedPlan ? { sourceProposedPlan: nextSourceProposedPlan } : {}),
+    ...(incoming.purpose !== undefined ? { purpose: incoming.purpose } : {}),
   };
 }
 
@@ -1389,6 +1409,10 @@ export function normalizeThreadFromReadModel(
         ? undefined
         : [...incomingPendingInteractions];
   const error = normalizeThreadErrorMessage(incoming.session?.lastError);
+  const resolvedLoop =
+    previous?.loop !== undefined && deepEqualJson(previous.loop, incoming.loop ?? null)
+      ? previous.loop
+      : (incoming.loop ?? null);
   const lastVisitedAt = previous?.lastVisitedAt ?? incoming.updatedAt;
   const resolvedLatestUserMessageAt =
     Object.hasOwn(incoming, "latestUserMessageAt") && incoming.latestUserMessageAt !== undefined
@@ -1465,6 +1489,7 @@ export function normalizeThreadFromReadModel(
     previous.hasPendingApprovals === resolvedHasPendingApprovals &&
     previous.hasPendingUserInput === resolvedHasPendingUserInput &&
     previous.hasActionableProposedPlan === resolvedHasActionableProposedPlan &&
+    previous.loop === resolvedLoop &&
     (previous.forkSourceThreadId ?? null) === (incoming.forkSourceThreadId ?? null) &&
     (previous.sidechatSourceThreadId ?? null) === (incoming.sidechatSourceThreadId ?? null) &&
     deepEqualJson(previous.lastKnownPr ?? null, lastKnownPr) &&
@@ -1531,6 +1556,7 @@ export function normalizeThreadFromReadModel(
     ...(resolvedHasActionableProposedPlan !== undefined
       ? { hasActionableProposedPlan: resolvedHasActionableProposedPlan }
       : {}),
+    loop: resolvedLoop,
     turnDiffSummaries,
     activities,
     ...(pendingInteractions !== undefined ? { pendingInteractions } : {}),
@@ -1559,6 +1585,10 @@ export function normalizeThreadShellSnapshot(
       ? previous.lastKnownPr
       : (incoming.lastKnownPr ?? null);
   const error = normalizeThreadErrorMessage(incoming.session?.lastError);
+  const resolvedLoop =
+    previous?.loop !== undefined && deepEqualJson(previous.loop, incoming.loop ?? null)
+      ? previous.loop
+      : (incoming.loop ?? null);
   const lastVisitedAt = previous?.lastVisitedAt ?? incoming.updatedAt;
   const nextWorktreePath = incoming.worktreePath;
   const nextWorkingDirectory = incoming.workingDirectory ?? null;
@@ -1634,6 +1664,7 @@ export function normalizeThreadShellSnapshot(
     ...(previous?.pendingInteractions !== undefined
       ? { pendingInteractions: previous.pendingInteractions }
       : {}),
+    loop: resolvedLoop,
     ...(lastVisitedAt !== undefined ? { lastVisitedAt } : {}),
   };
   return {

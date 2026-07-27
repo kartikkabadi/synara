@@ -20,6 +20,10 @@
       "types": "./src/githubRepository.ts",
       "import": "./src/githubRepository.ts"
     },
+    "./loopTestFixtures": {
+      "types": "./src/loopTestFixtures.ts",
+      "import": "./src/loopTestFixtures.ts"
+    },
     "./logging": {
       "types": "./src/logging.ts",
       "import": "./src/logging.ts"
@@ -259,6 +263,10 @@
     "./providerAccounts/grokAccountEnvironment": {
       "types": "./src/providerAccounts/grokAccountEnvironment.ts",
       "import": "./src/providerAccounts/grokAccountEnvironment.ts"
+    },
+    "./loop": {
+      "types": "./src/loop.ts",
+      "import": "./src/loop.ts"
     },
     "./migrationRecovery": {
       "types": "./src/migrationRecovery.ts",

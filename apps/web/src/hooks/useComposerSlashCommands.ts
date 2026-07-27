@@ -9,6 +9,11 @@ import {
   type ThreadId,
 } from "@synara/contracts";
 import { buildPromptThreadTitleFallback } from "@synara/shared/chatThreads";
+import {
+  resolveLoopMenuSelection,
+  useLoopSlashCommand,
+  type LoopSetupOptions,
+} from "../components/chat/loop/useLoopSlashCommand";
 import { deriveAssociatedWorktreeMetadata } from "@synara/shared/threadWorkspace";
 import { useCallback, useEffect, useState } from "react";
 import { newCommandId, newMessageId, newThreadId } from "../lib/utils";
@@ -64,6 +69,7 @@ export function useComposerSlashCommands(input: {
   fastModeEnabled: boolean;
   providerNativeCommands: readonly ProviderNativeCommandDescriptor[];
   providerCommandDiscoveryCwd: string | null;
+  hasUnsupportedLoopContext: boolean;
   selectedProvider: ProviderKind;
   currentProviderModelOptions: ProviderModelOptions[ProviderKind] | undefined;
   selectedModelSelection: ModelSelection;
@@ -71,6 +77,9 @@ export function useComposerSlashCommands(input: {
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
   threadId: ThreadId;
+  openLoopSetup: (options: LoopSetupOptions) => void;
+  openLoopEdit: () => void;
+  ensureLoopThreadReady: (titleSeed: string) => Promise<boolean>;
   syncServerShellSnapshot: (snapshot: OrchestrationShellSnapshot) => void;
   navigateToThread: (threadId: ThreadId, options?: { splitViewId?: SplitViewId }) => Promise<void>;
   handleClearConversation: () => Promise<void> | void;
@@ -116,6 +125,7 @@ export function useComposerSlashCommands(input: {
     fastModeEnabled,
     providerNativeCommands,
     providerCommandDiscoveryCwd,
+    hasUnsupportedLoopContext,
     selectedProvider,
     currentProviderModelOptions,
     selectedModelSelection,
@@ -123,6 +133,9 @@ export function useComposerSlashCommands(input: {
     runtimeMode,
     interactionMode,
     threadId,
+    openLoopSetup,
+    openLoopEdit,
+    ensureLoopThreadReady,
     syncServerShellSnapshot,
     navigateToThread,
     handleClearConversation,
@@ -625,6 +638,17 @@ export function useComposerSlashCommands(input: {
     });
   }, [canOfferExportCommand, threadId]);
 
+  const { runLoopSlashCommand } = useLoopSlashCommand({
+    threadId,
+    activeProject,
+    activeThread,
+    hasUnsupportedLoopContext,
+    openLoopSetup,
+    ensureLoopThreadReady,
+    syncServerShellSnapshot,
+    editorActions,
+  });
+
   const openFeedbackDialog = useCallback(() => {
     openGlobalFeedbackDialog({
       provider: selectedProvider,
@@ -787,6 +811,12 @@ export function useComposerSlashCommands(input: {
         }
         return true;
       }
+      if (slashInvocation.command === "loop") {
+        // Draft handling is owned by the loop helpers: guided setup replaces
+        // the slash text with the objective; toggle/direct paths clear it.
+        await runLoopSlashCommand(trimmed);
+        return true;
+      }
       return false;
     },
     [
@@ -806,6 +836,7 @@ export function useComposerSlashCommands(input: {
       runCodexReviewStart,
       runExportSlashCommand,
       runFastSlashCommand,
+      runLoopSlashCommand,
     ],
   );
 
@@ -899,6 +930,20 @@ export function useComposerSlashCommands(input: {
         );
         if (wasPromptReplacementApplied(applied)) {
           editorActions.setComposerHighlightedItemId(null);
+        }
+        return;
+      }
+
+      if (item.command === "loop") {
+        const applied = clearSlashCommandFromComposer();
+        if (wasPromptReplacementApplied(applied)) {
+          editorActions.setComposerHighlightedItemId(null);
+          const selection = resolveLoopMenuSelection(activeThread?.loop?.active === true);
+          if (selection.kind === "edit") {
+            openLoopEdit();
+          } else {
+            openLoopSetup(selection.options);
+          }
         }
         return;
       }
@@ -1024,6 +1069,9 @@ export function useComposerSlashCommands(input: {
       supportsTextNativeReviewCommand,
       runExportSlashCommand,
       runFastSlashCommand,
+      activeThread,
+      openLoopEdit,
+      openLoopSetup,
     ],
   );
 

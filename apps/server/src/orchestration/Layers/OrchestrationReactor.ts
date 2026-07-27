@@ -6,6 +6,7 @@ import {
 } from "../Services/OrchestrationReactor.ts";
 import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
 import { CompactionReactor } from "../Services/CompactionReactor.ts";
+import { LoopReactor } from "../Services/LoopReactor.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { StudioOutputReactor } from "../Services/StudioOutputReactor.ts";
@@ -15,16 +16,18 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const providerCommandReactor = yield* ProviderCommandReactor;
   const checkpointReactor = yield* CheckpointReactor;
   const compactionReactor = yield* CompactionReactor;
+  const loopReactor = yield* LoopReactor;
   const studioOutputReactor = yield* StudioOutputReactor;
 
   const start: OrchestrationReactorShape["start"] = Effect.gen(function* () {
     yield* studioOutputReactor.start;
     yield* checkpointReactor.start;
     yield* compactionReactor.start;
+    yield* loopReactor.start;
     yield* providerRuntimeIngestion.start;
     // Install every runtime observer before provider command dispatch can
     // begin. Reverse-order finalization then drains provider commands first,
-    // runtime ingestion second, checkpoints third, and Studio output last.
+    // runtime ingestion second, checkpoints third, loop, and Studio output last.
     yield* providerCommandReactor.start;
   });
 

@@ -184,10 +184,12 @@ export function ComposerModelEffortPicker(props: ComposerModelEffortPickerProps)
       {triggerStatusLabel ? (
         props.hideStatusLabel ? (
           <>
-            <SettingsIcon
-              aria-hidden="true"
-              className={cn("size-3.5 shrink-0", COMPOSER_MUTED_ACCENT_TEXT_CLASS_NAME)}
-            />
+            <span data-slot="composer-traits-status-icon" className="contents">
+              <SettingsIcon
+                aria-hidden="true"
+                className={cn("size-3.5 shrink-0", COMPOSER_MUTED_ACCENT_TEXT_CLASS_NAME)}
+              />
+            </span>
             <span className="sr-only">{triggerStatusLabel}</span>
           </>
         ) : (

@@ -17,6 +17,12 @@ export type OrchestrationCommandAdmissionDecision =
 export function usesReservedCommandAdmission(type: OrchestrationCommand["type"]): boolean {
   switch (type) {
     case "thread.turn.interrupt":
+    case "thread.turn.cancel-start":
+    // Loop set/off/toggle are user control-plane actions like interrupt:
+    // they must stay admissible when the queue is saturated with data traffic.
+    case "thread.loop.set":
+    case "thread.loop.off":
+    case "thread.loop.toggle":
     // Task stop/background are user control-plane actions like interrupt:
     // they must stay admissible when the queue is saturated with data traffic.
     case "thread.task.stop":

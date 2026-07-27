@@ -7,7 +7,7 @@ type TurnState = "pending" | "running" | "completed" | "interrupted" | "error";
  * the provider can still deliver the authoritative terminal event.
  */
 export function settleTurnStateFromSession(
-  session: Pick<OrchestrationSession, "status" | "activeTurnId">,
+  session: Pick<OrchestrationSession, "status" | "activeTurnId" | "lastError">,
   existingState: TurnState,
 ): Exclude<TurnState, "pending" | "running"> | null {
   if (session.activeTurnId !== null && session.status !== "error") {
@@ -18,8 +18,12 @@ export function settleTurnStateFromSession(
     case "error":
       return "error";
     case "interrupted":
-    case "stopped":
       return "interrupted";
+    case "stopped":
+      // A stopped session that is carrying a runtime error settles the open
+      // turn as an error so downstream consumers (e.g. `/loop` consecutive-error
+      // accounting) see a terminal error rather than an interruption.
+      return session.lastError !== null ? "error" : "interrupted";
     case "ready":
       return existingState === "error"
         ? "error"

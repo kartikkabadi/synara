@@ -1,9 +1,12 @@
 import type {
+  MessageId,
   OrchestrationCommand,
   OrchestrationEvent,
   OrchestrationReadModel,
   OrchestrationThread,
   ProjectKind,
+  ThreadId,
+  ThreadLoop,
   ThreadMarker,
 } from "@synara/contracts";
 import {
@@ -25,11 +28,19 @@ import {
   collectTailTurnIds,
   resolveTailUserMessageEditTarget,
 } from "@synara/shared/conversationEdit";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import { hasNativeHandoffMessages } from "./handoff.ts";
 import { resolveStableMessageTurnId } from "./messageTurnId.ts";
+import { decideLoopCommand } from "./loop/commandDecider.ts";
+import { decideInterruptLoopOff, resolveTurnStartLoopPolicy } from "./loop/manualTurnPolicy.ts";
+import { isLoopOwnedTurn } from "./loop/ownership.ts";
+import {
+  buildLoopIterationTurnDrafts,
+  buildPendingLoopStartCancellationDrafts,
+  type LoopEventDraft,
+} from "./loop/turnEvents.ts";
 import {
   findSpaceById,
   isLegacyHomeChatContainerRow,
@@ -45,6 +56,7 @@ import {
   requireProjectAbsent,
   requireProjectHasNoThreads,
   requireProjectWorkspaceRootAvailable,
+  findThreadById,
   requireSpace,
   requireSpaceAbsent,
   requireSpaceAssignableProject,
@@ -94,6 +106,29 @@ function withEventBase(
     correlationId: input.commandId,
     metadata: input.metadata ?? {},
   };
+}
+
+// Materializes loop event drafts from the loop deciders into full events, chaining
+// each event's causation to the previous one in the batch.
+function materializeLoopEvents(
+  command: Pick<OrchestrationCommand, "commandId"> & { threadId: ThreadId; createdAt: string },
+  drafts: ReadonlyArray<LoopEventDraft>,
+): Array<Omit<OrchestrationEvent, "sequence">> {
+  const out: Array<Omit<OrchestrationEvent, "sequence">> = [];
+  for (const draft of drafts) {
+    const previous = out.at(-1);
+    out.push({
+      ...withEventBase({
+        aggregateKind: "thread",
+        aggregateId: command.threadId,
+        occurredAt: command.createdAt,
+        commandId: command.commandId,
+      }),
+      ...(previous !== undefined ? { causationEventId: previous.eventId } : {}),
+      ...draft,
+    });
+  }
+  return out;
 }
 
 function checkpointRevertSucceededEvent(input: {
@@ -1524,7 +1559,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         sourceProposedPlan && sourceThread
           ? sourceThread.proposedPlans.find((entry) => entry.id === sourceProposedPlan.planId)
           : null;
-      const dispatchMode = command.dispatchMode ?? "queue";
       if (sourceProposedPlan && !sourcePlan) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -1537,6 +1571,36 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Proposed plan '${sourceProposedPlan?.planId}' belongs to thread '${sourceThread.id}' in a different project.`,
         });
       }
+
+      const loopResolution = resolveTurnStartLoopPolicy({
+        thread: targetThread,
+        message: {
+          text: command.message.text,
+          hasAttachments: command.message.attachments.length > 0,
+          hasStructuredReferences:
+            (command.message.skills?.length ?? 0) > 0 ||
+            (command.message.mentions?.length ?? 0) > 0,
+        },
+        createdAt: command.createdAt,
+      });
+      const purpose = loopResolution.purpose;
+      const dispatchMode = loopResolution.dispatchModeOverride ?? command.dispatchMode ?? "queue";
+      const loopEvents = materializeLoopEvents(command, loopResolution.loopEvents);
+      // Loop-claimed turns start from the shared loop iteration draft shape so a
+      // new turn-start payload field only has to be added in one place.
+      const loopDrafts =
+        purpose !== undefined
+          ? buildLoopIterationTurnDrafts({
+              threadId: command.threadId,
+              messageId: command.message.messageId,
+              prompt: command.message.text,
+              purpose,
+              runtimeMode: command.runtimeMode,
+              interactionMode: command.interactionMode,
+              createdAt: command.createdAt,
+            })
+          : null;
+
       const userMessageEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...withEventBase({
           aggregateKind: "thread",
@@ -1546,6 +1610,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         }),
         type: "thread.message-sent",
         payload: {
+          ...(loopDrafts !== null ? loopDrafts[0].payload : {}),
           threadId: command.threadId,
           messageId: command.message.messageId,
           role: "user",
@@ -1568,6 +1633,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
       const turnRequestPayload = {
+        ...(loopDrafts !== null ? loopDrafts[1].payload : {}),
         threadId: command.threadId,
         messageId: command.message.messageId,
         ...(command.modelSelection !== undefined ? { modelSelection: command.modelSelection } : {}),
@@ -1605,28 +1671,29 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: shouldQueue ? "thread.turn-queued" : "thread.turn-start-requested",
         payload: turnRequestPayload,
       };
+      const resultEvents: Array<Omit<OrchestrationEvent, "sequence">> = [
+        ...loopEvents,
+        userMessageEvent,
+        queuedEvent,
+      ];
       if (shouldQueue && dispatchMode === "steer") {
-        return [
-          userMessageEvent,
-          queuedEvent,
-          {
-            ...withEventBase({
-              aggregateKind: "thread",
-              aggregateId: command.threadId,
-              occurredAt: command.createdAt,
-              commandId: command.commandId,
-            }),
-            causationEventId: queuedEvent.eventId,
-            type: "thread.turn-interrupt-requested",
-            payload: {
-              threadId: command.threadId,
-              turnId: targetThread.session?.activeTurnId ?? undefined,
-              createdAt: command.createdAt,
-            },
+        resultEvents.push({
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          }),
+          causationEventId: queuedEvent.eventId,
+          type: "thread.turn-interrupt-requested",
+          payload: {
+            threadId: command.threadId,
+            turnId: targetThread.session?.activeTurnId ?? undefined,
+            createdAt: command.createdAt,
           },
-        ];
+        });
       }
-      return [userMessageEvent, queuedEvent];
+      return resultEvents;
     }
 
     case "thread.turn.dispatch-queued": {
@@ -1667,18 +1734,78 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.sourceProposedPlan !== undefined
             ? { sourceProposedPlan: command.sourceProposedPlan }
             : {}),
+          ...(command.purpose !== undefined ? { purpose: command.purpose } : {}),
           createdAt: command.createdAt,
         },
       };
     }
 
     case "thread.turn.interrupt": {
-      yield* requireThread({
+      const turnInterruptThread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
-      return {
+      const turnInterruptEvents: Array<Omit<OrchestrationEvent, "sequence">> = [];
+
+      // Determine which turn is being interrupted and whether it is loop-owned.
+      const interruptTurnId: TurnId | undefined =
+        command.turnId ??
+        (turnInterruptThread.session?.status === "running" &&
+        turnInterruptThread.session.activeTurnId !== null
+          ? turnInterruptThread.session.activeTurnId
+          : undefined);
+      const isLoopOwnedInterrupt =
+        interruptTurnId !== undefined && isLoopOwnedTurn(turnInterruptThread, interruptTurnId);
+
+      // Stop/Esc turns the loop off and interrupts a currently running loop-owned turn
+      // — including one from a stale activation after a reconfigure. Interrupting a
+      // manual turn while the loop is armed does not affect the loop.
+      const interruptLoopOff = decideInterruptLoopOff({
+        thread: turnInterruptThread,
+        interruptTurnId,
+        isLoopOwnedInterrupt,
+        createdAt: command.createdAt,
+      });
+      if (interruptLoopOff !== null) {
+        turnInterruptEvents.push(
+          ...materializeLoopEvents(command, [
+            // Stop now retires the activation's not-yet-running pending start
+            // durably so it cannot strand the thread after the loop is off.
+            ...buildPendingLoopStartCancellationDrafts({
+              thread: turnInterruptThread,
+              activationId: interruptLoopOff.loop.activationId,
+              createdAt: command.createdAt,
+            }),
+            { type: "thread.loop-off", payload: interruptLoopOff },
+          ]),
+        );
+      }
+
+      if (interruptTurnId !== undefined) {
+        turnInterruptEvents.push({
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          }),
+          type: "thread.turn-interrupt-requested",
+          payload: {
+            threadId: command.threadId,
+            turnId: interruptTurnId,
+            createdAt: command.createdAt,
+          },
+        });
+      }
+
+      if (turnInterruptEvents.length > 0) {
+        return turnInterruptEvents;
+      }
+
+      // No active loop and no turn: emit a bare interrupt for the thread so a
+      // user-triggered Esc still reaches the provider session layer.
+      turnInterruptEvents.push({
         ...withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -1691,7 +1818,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.turnId !== undefined ? { turnId: command.turnId } : {}),
           createdAt: command.createdAt,
         },
-      };
+      });
+
+      return turnInterruptEvents;
     }
 
     case "thread.task.stop": {
@@ -1982,24 +2111,49 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.session.stop": {
-      yield* requireThread({
+      const sessionStopThread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
-      return {
-        ...withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        }),
-        type: "thread.session-stop-requested",
-        payload: {
-          threadId: command.threadId,
-          createdAt: command.createdAt,
+      const sessionStopEvents: Array<Omit<OrchestrationEvent, "sequence">> = [
+        {
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          }),
+          type: "thread.session-stop-requested",
+          payload: {
+            threadId: command.threadId,
+            createdAt: command.createdAt,
+          },
         },
-      };
+      ];
+      if (sessionStopThread.loop?.active === true) {
+        const loopOff: ThreadLoop = {
+          ...sessionStopThread.loop,
+          active: false,
+          lastStopReason: "user_stop",
+          updatedAt: command.createdAt,
+        };
+        sessionStopEvents.unshift({
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          }),
+          type: "thread.loop-off",
+          payload: {
+            threadId: command.threadId,
+            stopReason: "user_stop",
+            loop: loopOff,
+          },
+        });
+      }
+      return sessionStopEvents;
     }
 
     case "thread.session.set": {
@@ -2263,6 +2417,59 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           activity: command.activity,
         },
       };
+    }
+
+    case "thread.turn.cancel-start": {
+      // Server-internal settlement of a durable pending start that will never
+      // reach the provider (stale loop authority). Emits only when the exact
+      // pending message is still current, so a newer pending start (manual or
+      // a fresh activation) is never cleared.
+      const thread = findThreadById(readModel, command.threadId);
+      if (thread === undefined || thread.pendingTurnStart?.messageId !== command.messageId) {
+        return [];
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.turn-start-cancelled",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.messageId,
+          ...(thread.pendingTurnStart.purpose !== undefined
+            ? { purpose: thread.pendingTurnStart.purpose }
+            : {}),
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.loop.set":
+    case "thread.loop.off":
+    case "thread.loop.toggle":
+    case "thread.loop.continue": {
+      // findThreadById, not requireThread: continuation/off must still be able
+      // to observe a deleted thread and settle the loop (thread_deleted).
+      const thread = findThreadById(readModel, command.threadId);
+      if (thread === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' does not exist for command '${command.type}'.`,
+        });
+      }
+      const decision = decideLoopCommand(command, thread);
+      if (decision.kind === "invalid") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: decision.detail,
+        });
+      }
+      const loopEvents = materializeLoopEvents(command, decision.events);
+      const [single] = loopEvents;
+      return loopEvents.length === 1 && single !== undefined ? single : loopEvents;
     }
 
     default: {
