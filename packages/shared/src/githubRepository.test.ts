@@ -33,6 +33,8 @@ describe("parseGitHubRepositoryNameWithOwnerFromRemoteUrl", () => {
     ["https://github.com/openai/codex", "openai/codex"],
     ["git://github.com/openai/codex/", "openai/codex"],
     [" HTTPS://GITHUB.COM/OpenAI/Codex.git ", "OpenAI/Codex"],
+    ["https://git-manager.devin.ai/proxy/github.com/openai/codex", "openai/codex"],
+    ["https://proxy.example.com/mirror/github.com/openai/codex.git/", "openai/codex"],
   ])("parses %s", (remote, expected) => {
     expect(parseGitHubRepositoryNameWithOwnerFromRemoteUrl(remote)).toBe(expected);
   });
@@ -43,6 +45,8 @@ describe("parseGitHubRepositoryNameWithOwnerFromRemoteUrl", () => {
     "https://gitlab.com/openai/codex",
     "https://github.com/owner",
     "https://github.com/-owner/repo",
+    "https://proxy.example.com/mirror/github.com/owner",
+    "https://proxy.example.com/mirror/gitlab.com/openai/codex",
   ])("rejects unsupported remote %s", (remote) => {
     expect(parseGitHubRepositoryNameWithOwnerFromRemoteUrl(remote)).toBeNull();
   });
