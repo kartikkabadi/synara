@@ -96,7 +96,7 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
           yield* writeTextFile(outside, "Downloads/report.txt", "local file\n");
           const absolutePath = path.join(outside, "Downloads/report.txt");
           const grant = yield* Effect.promise(() =>
-            createLocalPreviewGrant({ requestedPath: absolutePath }),
+            createLocalPreviewGrant({ requestedPath: absolutePath, allowedRoots: [outside] }),
           );
 
           const result = yield* workspaceFileSystem.readFile({

@@ -1001,7 +1001,21 @@ const makeWsRpcHandlersLayer = () =>
           rpcEffect(workspaceFileSystem.readFile(input), "Failed to read workspace file"),
         [WS_METHODS.projectsCreateLocalFilePreviewGrant]: (input) =>
           rpcEffect(
-            Effect.promise(() => createLocalPreviewGrant({ requestedPath: input.path })),
+            projectionReadModelQuery.getShellSnapshot().pipe(
+              Effect.flatMap((snapshot) =>
+                Effect.promise(() =>
+                  createLocalPreviewGrant({
+                    requestedPath: input.path,
+                    allowedRoots: [
+                      ...snapshot.projects.map((project) => project.workspaceRoot),
+                      config.worktreesDir,
+                      config.chatWorkspaceRoot,
+                      config.studioWorkspaceRoot,
+                    ],
+                  }),
+                ),
+              ),
+            ),
             "Failed to create local file preview grant",
           ),
         [WS_METHODS.projectsWriteFile]: (input) =>
