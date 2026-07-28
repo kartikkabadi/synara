@@ -54,7 +54,7 @@ describe("buildSshArgv", () => {
       "StrictHostKeyChecking=yes",
       "build.example.com",
       "--",
-      "echo $$ && cd '/srv/workspaces/repo' && exec 'codex' app-server",
+      "echo \"__SYNARA_REMOTE_PID__=$$\" && cd '/srv/workspaces/repo' && exec 'codex' app-server",
     ]);
   });
 
@@ -158,7 +158,9 @@ describe("buildSshArgv", () => {
 
 describe("buildRemoteCommand", () => {
   it("captures the remote PID before exec", () => {
-    assert.ok(buildRemoteCommand(runtime(), profile()).startsWith("echo $$ && "));
+    assert.ok(
+      buildRemoteCommand(runtime(), profile()).startsWith('echo "__SYNARA_REMOTE_PID__=$$" && '),
+    );
   });
 
   it("quotes workspace roots and binary paths with special characters", () => {
@@ -168,7 +170,7 @@ describe("buildRemoteCommand", () => {
     );
     assert.equal(
       command,
-      "echo $$ && cd '/srv/it'\\''s a dir' && exec '/opt/agent tools/codex' app-server",
+      "echo \"__SYNARA_REMOTE_PID__=$$\" && cd '/srv/it'\\''s a dir' && exec '/opt/agent tools/codex' app-server",
     );
   });
 
@@ -188,6 +190,6 @@ describe("buildSshCommandString", () => {
   it("prefixes ssh and separates the remote command with --", () => {
     const rendered = buildSshCommandString(transport(), runtime(), profile());
     assert.ok(rendered.startsWith("ssh -o BatchMode=yes"));
-    assert.ok(rendered.includes(" -- echo $$ && cd "));
+    assert.ok(rendered.includes(' -- echo "__SYNARA_REMOTE_PID__=$$" && cd '));
   });
 });

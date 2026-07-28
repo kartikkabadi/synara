@@ -12,6 +12,12 @@ import type {
 import { Schema } from "effect";
 
 export const DEFAULT_REMOTE_BINARY = "codex";
+/**
+ * Sentinel prefixing the remote PID line so the spawner can distinguish it
+ * from banners or other unexpected stdout. The full line is
+ * `__SYNARA_REMOTE_PID__=<digits>`.
+ */
+export const REMOTE_PID_SENTINEL_PREFIX = "__SYNARA_REMOTE_PID__=";
 export const REMOTE_APP_SERVER_ARG = "app-server";
 
 /**
@@ -59,8 +65,9 @@ function validatePort(port: number): number {
 }
 
 /**
- * Builds the remote shell command. Prints the remote shell PID (`$$`) as the
- * first line of stdout so the spawner can scope later teardown, then execs the
+ * Builds the remote shell command. Prints a sentinel PID line
+ * (`__SYNARA_REMOTE_PID__=$$`) as the first line of stdout so the spawner can
+ * scope later teardown and reject unexpected preamble output, then execs the
  * provider binary from the workspace root.
  */
 export function buildRemoteCommand(
@@ -72,7 +79,7 @@ export function buildRemoteCommand(
     "remoteWorkspaceRoot",
   );
   const binary = runtime.remoteBinaryPath?.trim() || DEFAULT_REMOTE_BINARY;
-  return `echo $$ && cd ${posixQuote(workspaceRoot)} && exec ${posixQuote(binary)} ${REMOTE_APP_SERVER_ARG}`;
+  return `echo "${REMOTE_PID_SENTINEL_PREFIX}$$" && cd ${posixQuote(workspaceRoot)} && exec ${posixQuote(binary)} ${REMOTE_APP_SERVER_ARG}`;
 }
 
 /**
