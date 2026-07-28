@@ -1,5 +1,9 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ExecutionEnvironmentConnection, ExecutionEnvironmentRuntime } from "@synara/contracts";
+import {
+  ExecutionEnvironmentConnection,
+  ExecutionEnvironmentRuntime,
+  ProviderKind,
+} from "@synara/contracts";
 import { Effect, FileSystem, Layer, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -34,6 +38,32 @@ describe("ServerEnvironmentLive", () => {
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped, Effect.runPromise);
   });
 
+  it("advertises the local capability set", async () => {
+    await Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "synara-server-environment-test-",
+      });
+
+      const descriptor = yield* Effect.gen(function* () {
+        const serverEnvironment = yield* ServerEnvironment;
+        return yield* serverEnvironment.getDescriptor;
+      }).pipe(Effect.provide(makeLayer(baseDir)));
+
+      expect(descriptor.capabilities).toEqual({
+        repositoryIdentity: true,
+        providerKinds: ProviderKind.literals,
+        shell: true,
+        checkpoint: true,
+        devServerForwarding: true,
+        reconnect: true,
+        browser: false,
+        computerUse: false,
+        sync: false,
+      });
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped, Effect.runPromise);
+  });
+
   it("returns local runtime and connection defaults that round-trip through the schemas", async () => {
     await Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -55,6 +85,9 @@ describe("ServerEnvironmentLive", () => {
       expect(descriptor.connection?.connectionStatus).toBe("connected");
       expect(descriptor.connection?.lastSeenAt).toBeDefined();
       expect(() => new Date(descriptor.connection!.lastSeenAt!).toISOString()).not.toThrow();
+      const lastSeenAgeMs = Date.now() - new Date(descriptor.connection!.lastSeenAt!).getTime();
+      expect(lastSeenAgeMs).toBeGreaterThanOrEqual(0);
+      expect(lastSeenAgeMs).toBeLessThan(5_000);
 
       const encodedRuntime = Schema.encodeUnknownSync(ExecutionEnvironmentRuntime)(
         descriptor.runtime,
