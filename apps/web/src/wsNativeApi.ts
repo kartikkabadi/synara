@@ -927,6 +927,11 @@ export async function resetWsNativeApiForTest(): Promise<void> {
   instance = null;
   clearWsNativeApiListeners();
   fallbackBrowserStates.clear();
+  // A leaked `window.nativeApi` override would keep serving this disposed
+  // transport through `readNativeApi()`; drop it so the next read rebuilds.
+  if (typeof window !== "undefined") {
+    Reflect.deleteProperty(window, "nativeApi");
+  }
   await transport?.dispose();
 }
 
