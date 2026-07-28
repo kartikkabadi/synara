@@ -108,6 +108,17 @@ export function buildSshArgv(
     argv.push("-J", requireNonEmpty(transport.jumpHost, "jumpHost"));
   }
 
+  // Never inherit port forwardings from the user's SSH config, and turn a
+  // half-open channel into a deterministic failure via protocol keepalives.
+  argv.push(
+    "-o",
+    "ClearAllForwardings=yes",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=3",
+  );
+
   // Host-key verification is always strict; the policy only selects the trust
   // source. "pinned-fingerprint" additionally requires a fingerprint check
   // before spawn (see sshHostKey.ts).
@@ -131,14 +142,19 @@ export function buildSshArgv(
     argv.push("-o", `SendEnv=${name}`);
   }
 
-  const user = transport.user !== undefined ? requireNonEmpty(transport.user, "user") : undefined;
-  argv.push(user !== undefined ? `${user}@${host}` : host);
-  argv.push("--", buildRemoteCommand(runtime, executionProfile));
+  const user =
+    transport.user !== undefined
+      ? requireSafeCliValue(requireNonEmpty(transport.user, "user"), "user")
+      : undefined;
+  // The option terminator must precede the destination: OpenSSH stops option
+  // parsing at the destination, so anything after it is the remote command.
+  argv.push("--", user !== undefined ? `${user}@${host}` : host);
+  argv.push(buildRemoteCommand(runtime, executionProfile));
   return argv;
 }
 
 /**
- * Convenience formatter for logging/auditing: `ssh <args> -- <remoteCommand>`.
+ * Convenience formatter for logging/auditing: `ssh <options> -- <destination> <remoteCommand>`.
  * Contains no secret material (paths and env-var names only).
  */
 export function buildSshCommandString(

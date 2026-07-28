@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
   ExecutionEnvironmentRuntime,
   ExecutionEnvironmentSshTransport,
@@ -45,17 +46,85 @@ describe("posixQuote", () => {
   });
 });
 
+// Parser-faithful fixture replicating OpenSSH argv handling: options taking
+// an argument consume the next token, `--` terminates option parsing, the
+// first non-option token is the destination, and every remaining token is
+// joined with spaces to form the remote command.
+const OPTIONS_WITH_ARG = new Set(["-p", "-i", "-F", "-J", "-o", "-l", "-b", "-c", "-e"]);
+
+function parseLikeOpenSsh(argv: readonly string[]): {
+  destination: string;
+  remoteCommand: string;
+} {
+  let index = 0;
+  while (index < argv.length) {
+    const token = argv[index];
+    assert.ok(token !== undefined);
+    if (token === "--") {
+      index += 1;
+      break;
+    }
+    if (token.startsWith("-")) {
+      index += OPTIONS_WITH_ARG.has(token) ? 2 : 1;
+      continue;
+    }
+    break;
+  }
+  const destination = argv[index];
+  assert.ok(destination !== undefined, "argv has no destination");
+  assert.ok(!destination.startsWith("-"), `destination parses as an option: ${destination}`);
+  return { destination, remoteCommand: argv.slice(index + 1).join(" ") };
+}
+
 describe("buildSshArgv", () => {
   it("builds a minimal argv with defaults", () => {
     assert.deepEqual(buildSshArgv(transport(), runtime(), profile()), [
       "-o",
       "BatchMode=yes",
       "-o",
+      "ClearAllForwardings=yes",
+      "-o",
+      "ServerAliveInterval=15",
+      "-o",
+      "ServerAliveCountMax=3",
+      "-o",
       "StrictHostKeyChecking=yes",
-      "build.example.com",
       "--",
+      "build.example.com",
       "echo $$ && cd '/srv/workspaces/repo' && exec 'codex' app-server",
     ]);
+  });
+
+  it("parses to the exact destination and remote command under OpenSSH rules", () => {
+    const argv = buildSshArgv(
+      transport({ port: 2222, user: "deploy", identityFile: "/keys/id_ed25519" }),
+      runtime({ forwardedEnvNames: ["HTTP_PROXY"] }),
+      profile(),
+    );
+    assert.deepEqual(parseLikeOpenSsh(argv), {
+      destination: "deploy@build.example.com",
+      remoteCommand: "echo $$ && cd '/srv/workspaces/repo' && exec 'codex' app-server",
+    });
+  });
+
+  it("resolves through a real OpenSSH client via ssh -G", () => {
+    const argv = buildSshArgv(transport({ port: 2222, user: "deploy" }), runtime(), profile());
+    const resolved = execFileSync("ssh", ["-G", ...argv], { encoding: "utf8" });
+    assert.match(resolved, /^user deploy$/m);
+    assert.match(resolved, /^port 2222$/m);
+    assert.match(resolved, /^hostname build\.example\.com$/m);
+    assert.match(resolved, /^batchmode yes$/m);
+    assert.match(resolved, /^clearallforwardings yes$/m);
+    assert.match(resolved, /^stricthostkeychecking (yes|true)$/m);
+    assert.match(resolved, /^serveraliveinterval 15$/m);
+    assert.match(resolved, /^serveralivecountmax 3$/m);
+  });
+
+  it("places the option terminator before the destination", () => {
+    const argv = buildSshArgv(transport(), runtime(), profile());
+    assert.equal(argv.indexOf("--"), argv.length - 3);
+    assert.equal(argv[argv.length - 2], "build.example.com");
+    assert.ok(argv[argv.length - 1]?.startsWith("echo $$ && "));
   });
 
   it("maps port, identity file, ssh config, jump host, and user", () => {
@@ -146,6 +215,13 @@ describe("buildSshArgv", () => {
     );
   });
 
+  it("rejects users that look like CLI options", () => {
+    assert.throws(
+      () => buildSshArgv({ ...transport(), user: "-oProxyCommand=evil" }, runtime(), profile()),
+      SshCommandError,
+    );
+  });
+
   it("rejects out-of-range ports", () => {
     for (const port of [0, 65_536, 1.5]) {
       assert.throws(
@@ -185,9 +261,9 @@ describe("buildRemoteCommand", () => {
 });
 
 describe("buildSshCommandString", () => {
-  it("prefixes ssh and separates the remote command with --", () => {
+  it("prefixes ssh and terminates options before the destination", () => {
     const rendered = buildSshCommandString(transport(), runtime(), profile());
     assert.ok(rendered.startsWith("ssh -o BatchMode=yes"));
-    assert.ok(rendered.includes(" -- echo $$ && cd "));
+    assert.ok(rendered.includes(" -- build.example.com echo $$ && cd "));
   });
 });
