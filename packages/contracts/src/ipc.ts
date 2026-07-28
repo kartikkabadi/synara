@@ -206,6 +206,14 @@ import type {
   StatsGetProfileTokenStatsInput,
   StatsGetProfileTokenStatsResult,
 } from "./stats";
+import type {
+  ControlPlaneGetJobInput,
+  ControlPlaneGetJobResult,
+  ControlPlaneListUncertainRevertJobsInput,
+  ControlPlaneListUncertainRevertJobsResult,
+  ControlPlaneResolveUncertainJobInput,
+  ControlPlaneResolveUncertainJobResult,
+} from "./controlPlane";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -695,6 +703,15 @@ export interface NativeApi {
     getProfileTokenStats: (
       input: StatsGetProfileTokenStatsInput,
     ) => Promise<StatsGetProfileTokenStatsResult>;
+  };
+  controlPlane: {
+    listUncertainRevertJobs: (
+      input: ControlPlaneListUncertainRevertJobsInput,
+    ) => Promise<ControlPlaneListUncertainRevertJobsResult>;
+    getJob: (input: ControlPlaneGetJobInput) => Promise<ControlPlaneGetJobResult>;
+    resolveUncertainJob: (
+      input: ControlPlaneResolveUncertainJobInput,
+    ) => Promise<ControlPlaneResolveUncertainJobResult>;
   };
   provider: {
     getComposerCapabilities: (

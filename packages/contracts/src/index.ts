@@ -15,6 +15,7 @@ export * from "./wsCompatibility";
 export * from "./keybindings";
 export * from "./server";
 export * from "./stats";
+export * from "./controlPlane";
 export * from "./settings";
 export * from "./git";
 export * from "./pullRequests";
