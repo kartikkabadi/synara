@@ -149,6 +149,8 @@ import {
   ServerGenerateAutomationIntentResult,
   ServerGenerateThreadRecapInput,
   ServerGenerateThreadRecapResult,
+  ServerCheckEnvironmentInput,
+  ServerCheckEnvironmentResult,
   ServerGetEnvironmentResult,
   ServerListEnvironmentsResult,
   ServerRemoveEnvironmentInput,
@@ -706,6 +708,12 @@ export const WsServerRemoveEnvironmentRpc = Rpc.make(WS_METHODS.serverRemoveEnvi
   error: WsRpcError,
 });
 
+export const WsServerCheckEnvironmentRpc = Rpc.make(WS_METHODS.serverCheckEnvironment, {
+  payload: ServerCheckEnvironmentInput,
+  success: ServerCheckEnvironmentResult,
+  error: WsRpcError,
+});
+
 export const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
   payload: Schema.Struct({}),
   success: ServerGetSettingsResult,
@@ -1076,6 +1084,7 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsServerListEnvironmentsRpc,
   WsServerUpsertEnvironmentRpc,
   WsServerRemoveEnvironmentRpc,
+  WsServerCheckEnvironmentRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
   WsServerRefreshProvidersRpc,
