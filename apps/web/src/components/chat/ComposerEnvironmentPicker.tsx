@@ -79,7 +79,9 @@ export function ComposerEnvironmentPicker(props: {
     });
   };
 
-  const triggerLabel = activeSelection ? activeSelection.environmentLabel : "Local";
+  // The branch tools trigger already reads "Local"; use "This machine" here so
+  // the two composer buttons keep distinct accessible names.
+  const triggerLabel = activeSelection ? activeSelection.environmentLabel : "This machine";
 
   return (
     <Popover>
