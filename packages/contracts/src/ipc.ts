@@ -121,6 +121,8 @@ import type {
 import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem";
 import type { StudioListThreadOutputsInput, StudioListThreadOutputsResult } from "./studio";
 import type {
+  ServerCheckEnvironmentInput,
+  ServerCheckEnvironmentResult,
   ServerConfig,
   ServerDiagnosticsResult,
   ServerGenerateAutomationIntentInput,
@@ -128,6 +130,10 @@ import type {
   ServerGenerateThreadRecapInput,
   ServerGenerateThreadRecapResult,
   ServerGetEnvironmentResult,
+  ServerListEnvironmentsResult,
+  ServerRemoveEnvironmentInput,
+  ServerRemoveEnvironmentResult,
+  ServerUpsertEnvironmentInput,
   ServerGetProviderUsageSnapshotInput,
   ServerGetProviderUsageSnapshotResult,
   ServerListProviderUsageInput,
@@ -704,6 +710,12 @@ export interface NativeApi {
   server: {
     getConfig: () => Promise<ServerConfig>;
     getEnvironment: () => Promise<ServerGetEnvironmentResult>;
+    listEnvironments: () => Promise<ServerListEnvironmentsResult>;
+    upsertEnvironment: (input: ServerUpsertEnvironmentInput) => Promise<void>;
+    removeEnvironment: (
+      input: ServerRemoveEnvironmentInput,
+    ) => Promise<ServerRemoveEnvironmentResult>;
+    checkEnvironment: (input: ServerCheckEnvironmentInput) => Promise<ServerCheckEnvironmentResult>;
     getSettings: () => Promise<ServerGetSettingsResult>;
     updateSettings: (input: ServerUpdateSettingsInput) => Promise<ServerUpdateSettingsResult>;
     getAuthSession: () => Promise<AuthSessionState>;
