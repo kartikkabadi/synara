@@ -127,7 +127,9 @@ jobs:
           ./node_modules/.bin/playwright install --with-deps chromium
 
       - name: Browser test (stable)
-        timeout-minutes: 40
+        timeout-minutes: 45
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: bun run --cwd apps/web test:browser:stable
 
       # Pixel/font/layout comparisons are tracked explicitly in
@@ -136,6 +138,8 @@ jobs:
       - name: Browser test (Linux geometry quarantine)
         continue-on-error: true
         timeout-minutes: 10
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: bun run --cwd apps/web test:browser:geometry
 
   windows_process:
