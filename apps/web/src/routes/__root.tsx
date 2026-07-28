@@ -1551,6 +1551,21 @@ function EventRouter() {
       }
     };
 
+    // Shell events share the global event sequence with the thread detail
+    // streams, so skipped numbers can be detail traffic on other streams
+    // rather than lost shell events. Once the authoritative snapshot has been
+    // consulted, apply the held upserts in order instead of waiting for a
+    // contiguity that may never come.
+    const flushBufferedShellEventsMonotonic = () => {
+      const nextPending = pendingShellEvents
+        .filter((event) => event.sequence > shellSnapshotSequence)
+        .toSorted((left, right) => left.sequence - right.sequence);
+      pendingShellEvents = [];
+      for (const event of nextPending) {
+        applyContiguousShellEvent(event);
+      }
+    };
+
     // There is no targeted replay RPC for the shell stream, so a sequence gap
     // resyncs from the authoritative shell snapshot instead.
     let shellGapResyncInFlight = false;
@@ -1562,15 +1577,16 @@ function EventRouter() {
       void api.orchestration
         .getShellSnapshot()
         .then((snapshot) => {
-          if (disposed || snapshot.snapshotSequence <= shellSnapshotSequence) {
-            drainPendingShellEvents();
+          if (disposed) {
             return;
           }
-          shellSnapshotSequence = snapshot.snapshotSequence;
-          syncServerShellSnapshot(snapshot);
-          reconcilePromotedDraftsFromShellThreads(snapshot.threads);
-          removeOrphanedTerminalsForCurrentState();
-          flushShellBuffer(snapshot.snapshotSequence);
+          if (snapshot.snapshotSequence > shellSnapshotSequence) {
+            shellSnapshotSequence = snapshot.snapshotSequence;
+            syncServerShellSnapshot(snapshot);
+            reconcilePromotedDraftsFromShellThreads(snapshot.threads);
+            removeOrphanedTerminalsForCurrentState();
+          }
+          flushBufferedShellEventsMonotonic();
         })
         .catch(() => undefined)
         .finally(() => {
