@@ -2,11 +2,9 @@
 // under Node's default old-space size, so append --max-old-space-size unless
 // the caller already set one via NODE_OPTIONS.
 import { spawnSync } from "node:child_process";
+import { withHeapLimit } from "./buildNodeOptions.mjs";
 
-const existing = process.env.NODE_OPTIONS ?? "";
-const nodeOptions = existing.includes("--max-old-space-size")
-  ? existing
-  : `${existing} --max-old-space-size=6144`.trim();
+const nodeOptions = withHeapLimit(process.env.NODE_OPTIONS ?? "", 6144);
 
 const result = spawnSync("vite", ["build"], {
   stdio: "inherit",
