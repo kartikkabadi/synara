@@ -1,7 +1,9 @@
 import {
   EnvironmentId,
   ExecutionEnvironmentCapabilities,
+  ExecutionEnvironmentConnection,
   type ExecutionEnvironmentDescriptor,
+  ExecutionEnvironmentRuntime,
 } from "@synara/contracts";
 import { Effect, FileSystem, Layer, Path, Random, Schema } from "effect";
 
@@ -80,6 +82,15 @@ export const makeServerEnvironment = Effect.fn(function* () {
     serverVersion: packageJson.version,
     capabilities: Schema.decodeUnknownSync(ExecutionEnvironmentCapabilities)({
       repositoryIdentity: true,
+    }),
+    runtime: Schema.decodeUnknownSync(ExecutionEnvironmentRuntime)({
+      runtimeType: "local",
+      serverVersion: packageJson.version,
+      supervisor: "none",
+    }),
+    connection: Schema.decodeUnknownSync(ExecutionEnvironmentConnection)({
+      connectionStatus: "connected",
+      lastSeenAt: new Date().toISOString(),
     }),
   };
 
