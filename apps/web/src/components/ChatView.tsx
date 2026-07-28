@@ -449,6 +449,11 @@ import {
   ProviderModelPicker,
   resolveProviderModelLabel,
 } from "./chat/ProviderModelPicker";
+import { ComposerEnvironmentPicker } from "./chat/ComposerEnvironmentPicker";
+import {
+  buildThreadExecutionProfile,
+  useThreadExecutionEnvironmentStore,
+} from "../threadExecutionEnvironmentStore";
 import { ComposerModelEffortPicker } from "./chat/ComposerModelEffortPicker";
 import { resolveTraitsTriggerSummary, TraitsPicker } from "./chat/TraitsPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
@@ -2097,6 +2102,9 @@ export default function ChatView({
     (activeThread.latestTurn !== null ||
       activeThread.messages.length > 0 ||
       activeThread.session !== null),
+  );
+  const activeThreadEnvironmentSelection = useThreadExecutionEnvironmentStore((state) =>
+    activeThread ? (state.selectionByThreadId[activeThread.id] ?? null) : null,
   );
   const lockedProvider: ProviderKind | null = hasThreadStarted
     ? (sessionProvider ?? threadProvider ?? selectedProviderByThreadId ?? null)
@@ -7171,6 +7179,10 @@ export default function ChatView({
       return true;
     }
     const threadIdForSend = activeThread.id;
+    const executionProfileForSend = buildThreadExecutionProfile(
+      threadIdForSend,
+      selectedModelSelectionForSend.provider,
+    );
     const isFirstMessage = !isServerThread || !hasNativeUserMessages;
     const firstSendCreatedAt = new Date();
     let firstComposerImageNameForTitle: string | null = null;
@@ -7682,6 +7694,7 @@ export default function ChatView({
           dispatchMode,
           runtimeMode: nextRuntimeModeForSend,
           interactionMode: interactionModeForSend,
+          ...(executionProfileForSend ? { executionProfile: executionProfileForSend } : {}),
           ...(sourceProposedPlanForSend ? { sourceProposedPlan: sourceProposedPlanForSend } : {}),
           createdAt: messageCreatedAt,
         }),
@@ -8137,6 +8150,10 @@ export default function ChatView({
       const providerOptionsForPlanDispatch =
         queuedTurn?.providerOptionsForDispatch ?? providerOptionsForDispatch;
       const modelSelectionForPlanDispatch = queuedTurn?.modelSelection ?? selectedModelSelection;
+      const executionProfileForPlanDispatch = buildThreadExecutionProfile(
+        threadIdForSend,
+        modelSelectionForPlanDispatch.provider,
+      );
       const sourceProposedPlan =
         nextInteractionMode === "default"
           ? buildSourceProposedPlanReference({
@@ -8169,6 +8186,9 @@ export default function ChatView({
         dispatchMode,
         runtimeMode: queuedTurn?.runtimeMode ?? runtimeMode,
         interactionMode: nextInteractionMode,
+        ...(executionProfileForPlanDispatch
+          ? { executionProfile: executionProfileForPlanDispatch }
+          : {}),
         ...(sourceProposedPlan ? { sourceProposedPlan } : {}),
         createdAt: messageCreatedAt,
       });
@@ -10651,7 +10671,19 @@ export default function ChatView({
                             : {})}
                         />
                       ) : null}
-                      {!isVoiceRecording && !isVoiceTranscribing ? composerPickerControls : null}
+                      {!isVoiceRecording && !isVoiceTranscribing ? (
+                        <>
+                          {composerPickerControls}
+                          {activeThreadId !== null ? (
+                            <ComposerEnvironmentPicker
+                              threadId={activeThreadId}
+                              providerKind={selectedProvider}
+                              locked={hasThreadStarted}
+                              compact={isComposerFooterCompact}
+                            />
+                          ) : null}
+                        </>
+                      ) : null}
                       {showVoiceNotesControl && (isVoiceRecording || isVoiceTranscribing) ? (
                         <ComposerVoiceRecorderBar
                           disabled={isComposerApprovalState || isConnecting || isSendBusy}
@@ -10876,6 +10908,7 @@ export default function ChatView({
       >
         <ChatHeader
           activeThreadId={activeThread.id}
+          executionEnvironmentLabel={activeThreadEnvironmentSelection?.environmentLabel ?? null}
           activeThreadTitle={activeThreadDisplayTitle}
           activeThreadEntryPoint={terminalState.entryPoint}
           activeProvider={activeThread.session?.provider ?? activeThread.modelSelection.provider}
