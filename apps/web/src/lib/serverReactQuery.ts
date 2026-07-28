@@ -17,6 +17,7 @@ export const serverQueryKeys = {
   config: () => ["server", "config"] as const,
   authSession: () => ["server", "auth", "session"] as const,
   environment: () => ["server", "environment"] as const,
+  environments: () => ["server", "environments"] as const,
   settings: () => ["server", "settings"] as const,
   worktrees: () => ["server", "worktrees"] as const,
   localServers: () => ["server", "localServers"] as const,
@@ -156,6 +157,19 @@ export function serverSettingsQueryOptions() {
       return api.server.getSettings();
     },
     staleTime: Infinity,
+  });
+}
+
+export function serverEnvironmentsQueryOptions() {
+  return queryOptions({
+    queryKey: serverQueryKeys.environments(),
+    queryFn: async () => {
+      const api = ensureNativeApi();
+      return api.server.listEnvironments();
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 }
 
