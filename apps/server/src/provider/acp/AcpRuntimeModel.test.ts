@@ -500,7 +500,7 @@ describe("AcpRuntimeModel", () => {
         size: 1_000_000,
         used: 42_000,
       },
-    } satisfies EffectAcpSchema.SessionNotification;
+    } satisfies Acp.SessionNotification;
 
     const withoutClaim = parseSessionUpdateEvent(notification);
     expect(withoutClaim.events[0]).toMatchObject({
@@ -535,7 +535,7 @@ describe("AcpRuntimeModel", () => {
         size: 1_000_000,
         used: 42_000,
       },
-    } satisfies EffectAcpSchema.SessionNotification;
+    } satisfies Acp.SessionNotification;
 
     const defaultConfidence = parseSessionUpdateEvent(notification);
     const defaultUsage =

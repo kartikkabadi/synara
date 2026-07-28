@@ -172,24 +172,23 @@ export function useComposerSlashCommands(input: {
         return false;
       }
 
+      const compactionInput = {
+        requestId: crypto.randomUUID(),
+        threadId: activeThread.id,
+        trigger: "manual" as const,
+        ...(trimmedInstructions ? { instructions: trimmedInstructions } : {}),
+      };
       try {
-        void api.provider
-          .compactThread({
-            requestId: crypto.randomUUID(),
-            threadId: activeThread.id,
-            trigger: "manual",
-            ...(trimmedInstructions ? { instructions: trimmedInstructions } : {}),
-          })
-          .catch((error) => {
-            toastManager.add({
-              type: "error",
-              title: "Could not compact thread",
-              description:
-                error instanceof Error
-                  ? error.message
-                  : "An error occurred while compacting context.",
-            });
+        void api.provider.compactThread(compactionInput).catch((error) => {
+          toastManager.add({
+            type: "error",
+            title: "Could not compact thread",
+            description:
+              error instanceof Error
+                ? error.message
+                : "An error occurred while compacting context.",
           });
+        });
         return true;
       } catch (error) {
         toastManager.add({
