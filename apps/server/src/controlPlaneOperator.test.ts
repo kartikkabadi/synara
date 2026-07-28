@@ -127,4 +127,113 @@ describe.skipIf(!addonAvailable)("controlPlaneOperator (native addon)", () => {
       }),
     ),
   );
+
+  it.effect("rejects resolving a job that does not exist", () =>
+    withTempKernel((kernel) =>
+      Effect.gen(function* () {
+        const exit = yield* Effect.exit(
+          resolveUncertainRevertJob(kernel, { jobId: "f".repeat(32), resolution: "retry" }),
+        );
+        assert.isTrue(Exit.isFailure(exit));
+        assert.include(String(exit), "InvalidResolutionTarget");
+        assert.include(String(exit), "does not exist");
+      }),
+    ),
+  );
+
+  it.effect("rejects resolving an uncertain job from another queue", () =>
+    withTempKernel((kernel) =>
+      Effect.gen(function* () {
+        const now = 1_000;
+        const jobId = yield* kernel.newId();
+        yield* kernel.commit({
+          committedAtMs: now,
+          enqueueJobs: [
+            {
+              jobId,
+              queue: "other-queue",
+              partitionKey: `thread:${jobId}`,
+              payload: new TextEncoder().encode("{}"),
+            },
+          ],
+        });
+        yield* kernel.claimJobs({
+          queue: "other-queue",
+          workerId: "worker-1",
+          nowMs: now,
+          leaseMs: 100,
+          limit: 1,
+        });
+        yield* kernel.claimJobs({
+          queue: "other-queue",
+          workerId: "worker-2",
+          nowMs: now + 1_000,
+          leaseMs: 100,
+          limit: 1,
+        });
+        assert.equal((yield* getControlPlaneJob(kernel, { jobId })).job?.state, "uncertain");
+
+        const exit = yield* Effect.exit(
+          resolveUncertainRevertJob(kernel, { jobId, resolution: "markDead" }, now + 2_000),
+        );
+        assert.isTrue(Exit.isFailure(exit));
+        assert.include(String(exit), "InvalidResolutionTarget");
+        assert.include(String(exit), "not a checkpoint-revert job");
+        assert.equal((yield* getControlPlaneJob(kernel, { jobId })).job?.state, "uncertain");
+      }),
+    ),
+  );
+
+  it.effect("rejects resolving a job that is not uncertain", () =>
+    withTempKernel((kernel) =>
+      Effect.gen(function* () {
+        const now = 1_000;
+        const jobId = yield* kernel.newId();
+        yield* kernel.commit({
+          committedAtMs: now,
+          enqueueJobs: [
+            {
+              jobId,
+              queue: CHECKPOINT_REVERT_QUEUE,
+              partitionKey: `thread:${jobId}`,
+              payload: new TextEncoder().encode("{}"),
+            },
+          ],
+        });
+
+        const exit = yield* Effect.exit(
+          resolveUncertainRevertJob(kernel, { jobId, resolution: "markSucceeded" }, now + 1),
+        );
+        assert.isTrue(Exit.isFailure(exit));
+        assert.include(String(exit), "InvalidResolutionTarget");
+        assert.include(String(exit), "not uncertain");
+      }),
+    ),
+  );
+
+  it.effect("fails in the kernel if the job leaves uncertain between read and resolution", () =>
+    withTempKernel((kernel) =>
+      Effect.gen(function* () {
+        const now = 1_000;
+        const jobId = yield* makeUncertainJob(kernel, now);
+        // Simulate a concurrent resolution between validation and commit.
+        const racingKernel: ControlPlaneKernelShape = {
+          ...kernel,
+          resolveUncertainJobs: (input) =>
+            kernel
+              .resolveUncertainJobs({
+                committedAtMs: input.committedAtMs,
+                resolutions: [{ jobId, resolution: "markSucceeded" }],
+              })
+              .pipe(Effect.andThen(kernel.resolveUncertainJobs(input))),
+        };
+
+        const exit = yield* Effect.exit(
+          resolveUncertainRevertJob(racingKernel, { jobId, resolution: "markDead" }, now + 2_000),
+        );
+        assert.isTrue(Exit.isFailure(exit));
+        assert.equal((yield* getControlPlaneJob(kernel, { jobId })).job?.state, "succeeded");
+      }),
+    ),
+  );
 });
