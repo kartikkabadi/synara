@@ -102,6 +102,7 @@ import { ProfileStatsQuery } from "./profileStats";
 import { redactSensitiveProcessArgs } from "./processArgumentRedaction";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment";
 import { RemoteEnvironmentRegistry } from "./environment/Services/RemoteEnvironmentRegistry";
+import { EnvironmentProbe } from "./environment/Services/EnvironmentProbe";
 import { ExternalMcpService } from "./externalMcp/Services/ExternalMcpService";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
@@ -351,6 +352,7 @@ const makeWsRpcHandlersLayer = () =>
       const runtimeStartup = yield* ServerRuntimeStartup;
       const serverEnvironment = yield* ServerEnvironment;
       const remoteEnvironmentRegistry = yield* RemoteEnvironmentRegistry;
+      const environmentProbe = yield* EnvironmentProbe;
       const serverSettings = yield* ServerSettingsService;
       const terminalManager = yield* TerminalManager;
       const textGeneration = yield* TextGeneration;
@@ -1405,6 +1407,13 @@ const makeWsRpcHandlersLayer = () =>
               .remove(input.environmentId)
               .pipe(Effect.map((removed) => ({ removed }))),
             "Failed to remove environment",
+          ),
+        [WS_METHODS.serverCheckEnvironment]: (input) =>
+          rpcEffect(
+            environmentProbe
+              .check(input.executionProfile)
+              .pipe(Effect.map((connection) => ({ connection }))),
+            "Failed to check environment",
           ),
         [WS_METHODS.serverGetSettings]: () =>
           rpcEffect(serverSettings.getSettingsView, "Failed to load server settings"),

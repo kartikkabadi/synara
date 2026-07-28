@@ -269,6 +269,7 @@ export interface CodexAppServerStartSessionInput {
   readonly serviceTier?: string;
   readonly resumeCursor?: unknown;
   readonly providerOptions?: ProviderSessionStartInput["providerOptions"];
+  readonly executionProfile?: ExecutionProfile;
   readonly runtimeMode: RuntimeMode;
   /** Server-private managed account launch context; never sent to clients. */
   readonly accountLaunch?: ProviderAccountLaunchContext;
@@ -959,11 +960,15 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       const codexOptions = readCodexProviderOptions(input);
       const codexBinaryPath = codexOptions.binaryPath ?? "codex";
       const codexHomePath = codexOptions.homePath;
-      await this.assertSupportedCodexCliVersion({
-        binaryPath: codexBinaryPath,
-        cwd: resolvedCwd,
-        ...(codexHomePath ? { homePath: codexHomePath } : {}),
-      });
+      if (input.executionProfile === undefined) {
+        // Remote sessions gate on the remote binary instead (EnvironmentProbe);
+        // probing the local install would validate the wrong executable.
+        await this.assertSupportedCodexCliVersion({
+          binaryPath: codexBinaryPath,
+          cwd: resolvedCwd,
+          ...(codexHomePath ? { homePath: codexHomePath } : {}),
+        });
+      }
       gatewaySessionLease = this.agentGatewayMcp?.acquireSessionLease(threadId);
       const child = await this.spawnCodexAppServer({
         binaryPath: codexBinaryPath,
@@ -973,6 +978,14 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           gatewaySessionLease?.connection.bearerToken,
           input.accountLaunch,
         ),
+        ...(input.executionProfile !== undefined
+          ? {
+              remote: {
+                executionProfile: input.executionProfile,
+                sessionStartInput: buildRemoteSessionStartInput(input, input.executionProfile),
+              },
+            }
+          : {}),
       });
 
       context = {
@@ -3678,6 +3691,22 @@ function readResumeCursorThreadId(resumeCursor: unknown): string | undefined {
 
 function readResumeThreadId(input: CodexAppServerStartSessionInput): string | undefined {
   return readResumeCursorThreadId(input.resumeCursor);
+}
+
+// The resolver only reads the executionProfile today; the session-start input
+// travels alongside it so future spawn plans can honor per-session options.
+function buildRemoteSessionStartInput(
+  input: CodexAppServerStartSessionInput,
+  executionProfile: ExecutionProfile,
+): ProviderSessionStartInput {
+  return {
+    threadId: input.threadId,
+    provider: "codex",
+    runtimeMode: input.runtimeMode,
+    executionProfile,
+    ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
+    ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
+  };
 }
 
 function toTurnId(value: string | undefined): TurnId | undefined {

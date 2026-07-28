@@ -10,9 +10,14 @@ import {
 } from "./baseSchemas";
 import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
 import { EditorId } from "./editor";
-import { ModelSelection, ProviderKind, ProviderStartOptions } from "./orchestration";
+import {
+  ExecutionProfile,
+  ModelSelection,
+  ProviderKind,
+  ProviderStartOptions,
+} from "./orchestration";
 import { ServerSettingsPatch, ServerSettingsView } from "./settings";
-import { ExecutionEnvironmentDescriptor } from "./environment";
+import { ExecutionEnvironmentConnection, ExecutionEnvironmentDescriptor } from "./environment";
 import { AutomationCompletionPolicy, AutomationMode, AutomationSchedule } from "./automation";
 
 export const SERVER_VOICE_TRANSCRIPTION_MAX_AUDIO_BYTES = 10 * 1024 * 1024;
@@ -461,6 +466,18 @@ export const ServerRemoveEnvironmentResult = Schema.Struct({
   removed: Schema.Boolean,
 });
 export type ServerRemoveEnvironmentResult = typeof ServerRemoveEnvironmentResult.Type;
+
+// Pre-flight probe: verifies an execution environment can run the profile's
+// provider (workspace exists, provider binary present, version supported).
+export const ServerCheckEnvironmentInput = Schema.Struct({
+  executionProfile: ExecutionProfile,
+});
+export type ServerCheckEnvironmentInput = typeof ServerCheckEnvironmentInput.Type;
+
+export const ServerCheckEnvironmentResult = Schema.Struct({
+  connection: ExecutionEnvironmentConnection,
+});
+export type ServerCheckEnvironmentResult = typeof ServerCheckEnvironmentResult.Type;
 
 export const ServerUpdateSettingsInput = ServerSettingsPatch;
 export type ServerUpdateSettingsInput = typeof ServerUpdateSettingsInput.Type;
