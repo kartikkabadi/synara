@@ -112,6 +112,9 @@ describe("CheckpointDiffQueryLive", () => {
           return "diff patch";
         }),
       deleteCheckpointRefs: () => Effect.void,
+      captureRescueCheckpoint: () => Effect.die("unused checkpoint store test method"),
+      restoreRescueCheckpoint: () => Effect.succeed(true),
+      deleteRescueRef: () => Effect.void,
     };
 
     const layer = CheckpointDiffQueryLive.pipe(
@@ -212,6 +215,9 @@ describe("CheckpointDiffQueryLive", () => {
           return "full diff patch";
         }),
       deleteCheckpointRefs: () => Effect.void,
+      captureRescueCheckpoint: () => Effect.die("unused checkpoint store test method"),
+      restoreRescueCheckpoint: () => Effect.succeed(true),
+      deleteRescueRef: () => Effect.void,
     };
 
     const layer = CheckpointDiffQueryLive.pipe(
@@ -281,6 +287,9 @@ describe("CheckpointDiffQueryLive", () => {
       reverseCheckpointDiff: () => Effect.succeed(true),
       diffCheckpoints: () => Effect.succeed(""),
       deleteCheckpointRefs: () => Effect.void,
+      captureRescueCheckpoint: () => Effect.die("unused checkpoint store test method"),
+      restoreRescueCheckpoint: () => Effect.succeed(true),
+      deleteRescueRef: () => Effect.void,
     };
 
     const layer = CheckpointDiffQueryLive.pipe(
@@ -348,6 +357,9 @@ describe("CheckpointDiffQueryLive", () => {
       reverseCheckpointDiff: () => Effect.succeed(true),
       diffCheckpoints: () => Effect.succeed("diff patch"),
       deleteCheckpointRefs: () => Effect.void,
+      captureRescueCheckpoint: () => Effect.die("unused checkpoint store test method"),
+      restoreRescueCheckpoint: () => Effect.succeed(true),
+      deleteRescueRef: () => Effect.void,
     };
 
     const layer = CheckpointDiffQueryLive.pipe(
@@ -416,6 +428,9 @@ describe("CheckpointDiffQueryLive", () => {
       reverseCheckpointDiff: () => Effect.succeed(true),
       diffCheckpoints: () => Effect.succeed("diff patch"),
       deleteCheckpointRefs: () => Effect.void,
+      captureRescueCheckpoint: () => Effect.die("unused checkpoint store test method"),
+      restoreRescueCheckpoint: () => Effect.succeed(true),
+      deleteRescueRef: () => Effect.void,
     };
 
     const layer = CheckpointDiffQueryLive.pipe(
@@ -489,6 +504,9 @@ describe("CheckpointDiffQueryLive", () => {
           return "diff patch";
         }),
       deleteCheckpointRefs: () => Effect.void,
+      captureRescueCheckpoint: () => Effect.die("unused checkpoint store test method"),
+      restoreRescueCheckpoint: () => Effect.succeed(true),
+      deleteRescueRef: () => Effect.void,
     };
 
     const layer = CheckpointDiffQueryLive.pipe(
@@ -558,6 +576,9 @@ describe("CheckpointDiffQueryLive", () => {
       reverseCheckpointDiff: () => Effect.succeed(true),
       diffCheckpoints: () => Effect.succeed("diff patch"),
       deleteCheckpointRefs: () => Effect.void,
+      captureRescueCheckpoint: () => Effect.die("unused checkpoint store test method"),
+      restoreRescueCheckpoint: () => Effect.succeed(true),
+      deleteRescueRef: () => Effect.void,
     };
 
     const layer = CheckpointDiffQueryLive.pipe(
