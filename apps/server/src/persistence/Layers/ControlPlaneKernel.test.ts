@@ -40,8 +40,8 @@ const withTempDir = (use: (dir: string) => void) => {
   }
 };
 
-const expectKernelFailure = <A, R extends Scope.Scope>(
-  effect: Effect.Effect<A, ControlPlaneKernelError, R>,
+const expectKernelFailure = <A>(
+  effect: Effect.Effect<A, ControlPlaneKernelError, Scope.Scope>,
   code: string,
   detailIncludes: string,
 ) => {
