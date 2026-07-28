@@ -31,7 +31,10 @@ const makeDescriptor = (environmentId: string, label = environmentId): Descripto
   });
 
 const withRegistry = <A, E>(
-  run: (registry: RemoteEnvironmentRegistry["Service"]) => Effect.Effect<A, E, ServerEnvironment>,
+  run: (
+    registry: RemoteEnvironmentRegistry["Service"],
+    environmentsDir: string,
+  ) => Effect.Effect<A, E, ServerEnvironment | FileSystem.FileSystem>,
 ) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -40,7 +43,7 @@ const withRegistry = <A, E>(
     });
     return yield* Effect.gen(function* () {
       const registry = yield* RemoteEnvironmentRegistry;
-      return yield* run(registry);
+      return yield* run(registry, `${baseDir}/environments`);
     }).pipe(Effect.provide(makeLayer(baseDir)));
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped, Effect.runPromise);
 
@@ -125,6 +128,51 @@ describe("RemoteEnvironmentRegistryLive", () => {
         expect(localUpsertError).toBeInstanceOf(RemoteEnvironmentError);
 
         expect((yield* registry.list()).map((d) => d.environmentId)).toEqual([localEnvironmentId]);
+      }),
+    );
+  });
+
+  it("a corrupt descriptor file is skipped while valid environments stay listed", async () => {
+    await withRegistry((registry, environmentsDir) =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const serverEnvironment = yield* ServerEnvironment;
+        const localEnvironmentId = yield* serverEnvironment.getEnvironmentId;
+
+        yield* registry.upsert(makeDescriptor("env-valid"));
+        yield* fileSystem.writeFileString(`${environmentsDir}/env-corrupt.json`, "{not json");
+        yield* fileSystem.writeFileString(
+          `${environmentsDir}/env-stale.json`,
+          JSON.stringify({ environmentId: "env-stale", unexpectedShape: true }),
+        );
+
+        const listed = yield* registry.list();
+        expect(listed.map((d) => d.environmentId)).toEqual([localEnvironmentId, "env-valid"]);
+      }),
+    );
+  });
+
+  it("a descriptor whose id does not match its file name is rejected", async () => {
+    await withRegistry((registry, environmentsDir) =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const serverEnvironment = yield* ServerEnvironment;
+        const localEnvironmentId = yield* serverEnvironment.getEnvironmentId;
+
+        yield* registry.upsert(makeDescriptor("env-original"));
+        yield* fileSystem.copy(
+          `${environmentsDir}/env-original.json`,
+          `${environmentsDir}/env-copied.json`,
+        );
+
+        const listed = yield* registry.list();
+        expect(listed.map((d) => d.environmentId)).toEqual([localEnvironmentId, "env-original"]);
+
+        const mismatchError = yield* registry
+          .getById(EnvironmentId.makeUnsafe("env-copied"))
+          .pipe(Effect.flip);
+        expect(mismatchError).toBeInstanceOf(RemoteEnvironmentError);
+        expect(mismatchError.reason).toContain("does not match file name");
       }),
     );
   });
