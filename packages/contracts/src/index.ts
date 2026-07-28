@@ -21,6 +21,7 @@ export * from "./pullRequests";
 export * from "./orchestration";
 export * from "./editor";
 export * from "./environment";
+export * from "./remoteAgent";
 export * from "./project";
 export * from "./studio";
 export * from "./filesystem";

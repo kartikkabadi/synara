@@ -27,7 +27,7 @@ describe("ExecutionEnvironmentCapabilities", () => {
     expect(parsed.devServerForwarding).toBe(false);
     expect(parsed.checkpoint).toBe(false);
     expect(parsed.sync).toBe(false);
-    expect(parsed.reconnect).toBe(false);
+    expect(parsed.reconnect).toBe("none");
   });
 
   it("accepts explicit provider kinds", () => {

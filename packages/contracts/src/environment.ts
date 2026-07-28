@@ -74,6 +74,11 @@ export type ExecutionEnvironmentRuntime = typeof ExecutionEnvironmentRuntime.Typ
 
 const CapabilityFlag = Schema.Boolean.pipe(Schema.withDecodingDefault(() => false));
 
+// "remote-agent": the environment runs a persistent agent that survives client
+// disconnects and supports attach/replay; "none": sessions die with the connection.
+export const ReconnectCapability = Schema.Literals(["none", "remote-agent"]);
+export type ReconnectCapability = typeof ReconnectCapability.Type;
+
 export const ExecutionEnvironmentCapabilities = Schema.Struct({
   repositoryIdentity: CapabilityFlag,
   providerKinds: Schema.Array(ProviderKind).pipe(Schema.withDecodingDefault(() => [])),
@@ -83,7 +88,7 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   devServerForwarding: CapabilityFlag,
   checkpoint: CapabilityFlag,
   sync: CapabilityFlag,
-  reconnect: CapabilityFlag,
+  reconnect: ReconnectCapability.pipe(Schema.withDecodingDefault(() => "none" as const)),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 
