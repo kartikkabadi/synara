@@ -1214,7 +1214,6 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Compaction failed");
   });
 
-
   it("folds work log summaries above the next assistant message footer", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(

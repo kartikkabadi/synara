@@ -1069,7 +1069,6 @@ export const WsControlPlaneResolveUncertainJobRpc = Rpc.make(
   },
 );
 
-
 export const WsAutomationListRpc = Rpc.make(WS_METHODS.automationList, {
   payload: AutomationListInput,
   success: AutomationListResult,
