@@ -212,13 +212,9 @@ import {
   sendAppSnapError,
   sendAppSnapState,
 } from "./appSnapIpc";
-import { resolveIslandEnabled } from "./island/islandGeometry";
-import { registerIslandIpcHandlers } from "./island/islandIpc";
-import {
-  IslandWindowManager,
-  readStoredIslandEnabled,
-  writeStoredIslandEnabled,
-} from "./island/islandWindow";
+import { DesktopIslandHelperManager } from "./islandHelperManager";
+import { registerIslandIpcHandlers, sendIslandAction, sendIslandState } from "./islandIpc";
+import { resolveDesktopIslandHelperPath } from "./islandHelperPath";
 
 // Capture the real archive identity before any explicit app.asar lookup. Static
 // snapshotting and the runtime watcher both use this same generation as their
@@ -251,7 +247,6 @@ const BASE_DIR =
   Path.join(OS.homedir(), desktopIdentity.defaultHomeDirectoryName);
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_WINDOW_STATE_PATH = Path.join(STATE_DIR, "desktop-window-state.json");
-const ISLAND_SETTINGS_PATH = Path.join(STATE_DIR, "island-settings.json");
 const DESKTOP_SCHEME = desktopIdentity.scheme;
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const APP_DISPLAY_NAME = desktopIdentity.displayName;
@@ -368,7 +363,8 @@ const browserManager = new DesktopBrowserManager({
 });
 let browserUsePipeServer: BrowserUsePipeServer | null = null;
 let appSnapManager: DesktopAppSnapManager | null = null;
-let islandManager: IslandWindowManager | null = null;
+let islandHelperManager: DesktopIslandHelperManager | null = null;
+let configuredGitHubUpdateSource: ReturnType<typeof resolveGitHubUpdateSource> = null;
 let configuredUpdaterCacheDirName: string | null = null;
 
 browserManager.subscribe((state) => {
@@ -607,12 +603,8 @@ async function waitForBackendWindowReady(baseUrl: string): Promise<"listening" |
   });
 }
 
-function isIslandBrowserWindow(window: BrowserWindow): boolean {
-  return islandManager?.window === window;
-}
-
 function firstAppWindow(): BrowserWindow | null {
-  return BrowserWindow.getAllWindows().find((window) => !isIslandBrowserWindow(window)) ?? null;
+  return BrowserWindow.getAllWindows()[0] ?? null;
 }
 
 function ensureInitialBackendWindowOpen(baseUrl: string): void {
@@ -1637,6 +1629,47 @@ function resolveAppSnapHelperPath(): string {
     return Path.resolve(process.resourcesPath, "..", "Helpers", "synara-appsnap-helper");
   }
   return Path.resolve(__dirname, "..", ".electron-runtime", "appsnap", "synara-appsnap-helper");
+}
+
+function getIslandEventTarget(): Electron.WebContents | null {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) {
+    return null;
+  }
+  return mainWindow.webContents;
+}
+
+function initializeDesktopIsland(): void {
+  if (islandHelperManager) return;
+
+  const helperPath = resolveDesktopIslandHelperPath({
+    isPackaged: app.isPackaged,
+    moduleDir: __dirname,
+    resourcesPath: process.resourcesPath,
+  });
+  const capability = process.platform === "darwin" && (app.isPackaged || FS.existsSync(helperPath));
+
+  islandHelperManager = new DesktopIslandHelperManager({
+    platform: process.platform,
+    capability,
+    helperPath,
+    onState: (state) => sendIslandState(getIslandEventTarget(), state),
+    onAction: (action) => sendIslandAction(getIslandEventTarget(), action),
+    onFallback: (failure) => {
+      writeDesktopLogHeader(
+        `island helper fallback code=${failure.code} message=${sanitizeLogValue(failure.message)}`,
+      );
+      if (process.platform === "darwin") {
+        console.warn(`[desktop-island] ${failure.message}`);
+      }
+    },
+    onError: (failure) => {
+      writeDesktopLogHeader(
+        `island helper error code=${failure.code} message=${sanitizeLogValue(failure.message)}`,
+      );
+      console.warn(`[desktop-island] ${failure.message}`);
+    },
+  });
+  islandHelperManager.start();
 }
 
 function ensureMainWindowForAppSnap(): BrowserWindow | null {
@@ -3448,10 +3481,10 @@ async function shutdownDesktopRuntime(reason: string): Promise<void> {
       clearUpdateCheckTimeoutTimer();
       clearUpdatePollTimer();
       cancelBackendReadinessWait();
+      islandHelperManager?.dispose();
+      islandHelperManager = null;
       appSnapManager?.dispose();
       appSnapManager = null;
-      islandManager?.destroy();
-      islandManager = null;
       await disposeBrowserUsePipeServerForShutdown(reason);
       browserManager.dispose();
       restoreStdIoCapture?.();
@@ -3799,26 +3832,9 @@ function registerIpcHandlers(): void {
   if (appSnapManager) {
     registerAppSnapIpcHandlers(ipcMain, appSnapManager);
   }
-  registerIslandIpcHandlers(ipcMain, {
-    getManager: () => islandManager,
-    // App renderers (main window, settings) are trusted: the sender must own a
-    // BrowserWindow and be loaded from the app's own entry URL, which excludes
-    // embedded browser-tab WebContentsViews and OAuth popup windows.
-    isTrustedAppSender: (sender) =>
-      BrowserWindow.fromWebContents(sender) !== null && isTrustedAppUrl(sender.getURL()),
-    getEnabled: isIslandEnabled,
-    setEnabled: setIslandEnabled,
-    focusThread: (threadId) => {
-      focusMainWindow({ stealAppFocus: true });
-      // dispatchMenuAction recreates the main window when none is open and
-      // defers the send until the renderer has finished loading.
-      dispatchMenuAction(`notification-open-thread:${threadId}`);
-    },
-    stopLoop: (_threadId) => {
-      // TODO(loop): route to the thread.loop.toggle dispatch path once the
-      // /loop contracts (devin/loop-phase-1) are available on this branch.
-    },
-  });
+  if (islandHelperManager) {
+    registerIslandIpcHandlers(ipcMain, islandHelperManager);
+  }
   registerDesktopVoiceTranscriptionHandler();
   startBrowserPerformanceLogging();
   registerBrowserIpcHandlers(ipcMain, browserManager);
@@ -3842,41 +3858,6 @@ function isTrustedAppUrl(rawUrl: string): boolean {
   }
   if (base.origin !== "null") return candidate.origin === base.origin;
   return candidate.protocol === base.protocol && candidate.pathname === base.pathname;
-}
-
-function islandEntryUrl(): string {
-  return `${appEntryBaseUrl()}#/island`;
-}
-
-function isIslandEnabled(): boolean {
-  return resolveIslandEnabled(readStoredIslandEnabled(ISLAND_SETTINGS_PATH), process.platform);
-}
-
-function setIslandEnabled(enabled: boolean): boolean {
-  try {
-    writeStoredIslandEnabled(ISLAND_SETTINGS_PATH, enabled);
-  } catch (error) {
-    console.warn(`[desktop] Failed to persist island setting: ${formatErrorMessage(error)}`);
-  }
-  if (enabled) {
-    ensureIslandWindow();
-  } else {
-    islandManager?.destroy();
-    islandManager = null;
-  }
-  return enabled;
-}
-
-function ensureIslandWindow(): void {
-  if (isQuitting) return;
-  if (!islandManager) {
-    islandManager = new IslandWindowManager({
-      preloadPath: Path.join(__dirname, "islandPreload.js"),
-      url: islandEntryUrl(),
-      platform: process.platform,
-    });
-  }
-  islandManager.create();
 }
 
 function getIconOption(): { icon: string } | Record<string, never> {
@@ -4019,6 +4000,9 @@ function createWindow(): BrowserWindow {
   window.webContents.on("did-finish-load", () => {
     window.setTitle(APP_DISPLAY_NAME);
     emitUpdateState();
+    if (islandHelperManager) {
+      sendIslandState(window.webContents, islandHelperManager.getState());
+    }
   });
   window.once("ready-to-show", () => {
     // Preserve the original first-launch behavior, then respect the state saved
@@ -4272,6 +4256,7 @@ async function bootstrap(): Promise<void> {
   backendAuthToken = Crypto.randomBytes(24).toString("hex");
   await reserveBackendEndpoint("bootstrap");
 
+  initializeDesktopIsland();
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");
   try {
@@ -4386,10 +4371,6 @@ if (hasSingleInstanceLock) {
       void bootstrap().catch((error) => {
         handleFatalStartupError("bootstrap", error);
       });
-      if (isIslandEnabled()) {
-        ensureIslandWindow();
-      }
-
       app.on("browser-window-blur", () => {
         markDesktopAppBackgrounded();
       });

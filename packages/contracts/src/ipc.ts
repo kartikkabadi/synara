@@ -480,39 +480,130 @@ export interface DesktopWindowState {
   isFullscreen: boolean;
 }
 
-export type IslandWindowState = "collapsed" | "hover" | "expanded";
-
-export interface IslandNotchInfo {
-  width: number;
-  height: number;
-}
-
-export interface IslandDisplayContext {
-  platform: "macos" | "windows" | "linux" | "other";
-  notch: IslandNotchInfo | null;
-}
-
-// Session-count metadata riding along setState so the main process can size
-// the window to the content (idle mini-pill, content-driven expanded height).
-export interface IslandStateMeta {
-  sessionCount: number;
-}
-
-// Bridge exposed to the dedicated island overlay window (islandPreload.ts).
-export interface IslandBridge {
-  // null when the manager is unavailable or the sender is rejected.
-  getContext: () => Promise<IslandDisplayContext | null>;
-  setIgnoreMouse: (ignore: boolean) => Promise<void>;
-  setState: (state: IslandWindowState, meta?: IslandStateMeta) => Promise<void>;
-  focusThread: (threadId: string) => Promise<void>;
-  stopLoop: (threadId: string) => Promise<void>;
-  onToggleExpanded: (listener: () => void) => () => void;
-}
-
 export interface SynaraStorageSnapshot {
   readonly version: 1;
   readonly exportedAt: string;
   readonly entries: Readonly<Record<string, string>>;
+}
+
+export type DesktopIslandMode = "activity" | "approval" | "idle";
+export const DESKTOP_ISLAND_MAX_SESSIONS = 5;
+export const DESKTOP_ISLAND_TEXT_LIMITS = {
+  title: 96,
+  provider: 32,
+  elapsed: 16,
+  activity: 80,
+  detail: 192,
+  changeSummary: 32,
+} as const;
+
+export type DesktopIslandSessionStatus =
+  | "working"
+  | "approval"
+  | "responding"
+  | "done"
+  | "error"
+  | "idle";
+
+export interface DesktopIslandSessionSnapshot {
+  id: string;
+  title: string;
+  provider: string;
+  elapsed: string;
+  activity: string;
+  detail: string;
+  status: DesktopIslandSessionStatus;
+  changeSummary: string;
+}
+
+export interface DesktopIslandApprovalSnapshot {
+  threadId: string;
+  requestId: string;
+  requestKind: "command" | "file-read" | "file-change";
+}
+
+interface DesktopIslandSnapshotBase {
+  version: 1;
+  mode: DesktopIslandMode;
+  primaryThreadId: string | null;
+  sessions: DesktopIslandSessionSnapshot[];
+}
+
+export type DesktopIslandSnapshot =
+  | (DesktopIslandSnapshotBase & {
+      mode: "approval";
+      primaryThreadId: string;
+      approval: DesktopIslandApprovalSnapshot;
+    })
+  | (DesktopIslandSnapshotBase & {
+      mode: "activity";
+      primaryThreadId: string;
+      approval?: never;
+    })
+  | {
+      version: 1;
+      mode: "idle";
+      primaryThreadId: null;
+      sessions: [];
+      approval?: never;
+    };
+
+export type DesktopIslandHelperStatus =
+  | "idle"
+  | "unsupported"
+  | "unavailable"
+  | "starting"
+  | "ready"
+  | "restarting"
+  | "fallback"
+  | "disposed";
+
+export type DesktopIslandFailureCode =
+  | "unsupported-platform"
+  | "capability-disabled"
+  | "helper-missing"
+  | "helper-spawn-failed"
+  | "helper-crashed"
+  | "ready-timeout"
+  | "protocol-error"
+  | "protocol-line-too-large"
+  | "snapshot-too-large"
+  | "write-failed"
+  | "invalid-action";
+
+export interface DesktopIslandFailure {
+  code: DesktopIslandFailureCode;
+  message: string;
+}
+
+export interface DesktopIslandState {
+  status: DesktopIslandHelperStatus;
+  nativeActive: boolean;
+  restartCount: number;
+  renderedRevision: number | null;
+  failure: DesktopIslandFailure | null;
+}
+
+export type DesktopIslandAction =
+  | {
+      actionId: string;
+      revision: number;
+      kind: "open-thread";
+      threadId: string;
+    }
+  | {
+      actionId: string;
+      revision: number;
+      kind: "deny" | "allow-once" | "always-allow";
+      threadId: string;
+      requestId: string;
+    };
+
+export interface DesktopIslandBridge {
+  getState: () => Promise<DesktopIslandState>;
+  updateSnapshot: (snapshot: DesktopIslandSnapshot) => Promise<number | null>;
+  onState: (listener: (state: DesktopIslandState) => void) => () => void;
+  onAction: (listener: (action: DesktopIslandAction) => void) => () => void;
 }
 
 export interface DesktopBridge {
@@ -576,13 +667,10 @@ export interface DesktopBridge {
     onError: (listener: (error: DesktopAppSnapErrorEvent) => void) => () => void;
     onState: (listener: (state: DesktopAppSnapState) => void) => () => void;
   };
+  island?: DesktopIslandBridge;
   storageMigration: {
     readSnapshot: () => SynaraStorageSnapshot | null;
     acknowledgeSnapshot: () => Promise<void>;
-  };
-  island?: {
-    getEnabled: () => Promise<boolean>;
-    setEnabled: (enabled: boolean) => Promise<boolean>;
   };
   server?: {
     transcribeVoice: (

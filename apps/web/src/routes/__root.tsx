@@ -35,6 +35,7 @@ import { WhatsNewPopoutCard } from "../whatsNew/WhatsNewPopoutCard";
 import { shouldRenderTerminalWorkspace } from "../components/ChatView.logic";
 import { Button, dialogActionButtonClassName } from "../components/ui/button";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
+import { DynamicIslandHost } from "../components/dynamicIsland/DynamicIslandHost";
 import { useGitProgressToastPreview } from "../components/useGitProgressToastPreview";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { useFeatureFlags } from "../featureFlags";
@@ -176,13 +177,6 @@ export const Route = createRootRouteWithContext<{
 });
 
 function RootRouteView() {
-  // The island overlay window renders bare: no app chrome, toasts, or coordinators.
-  const isIslandRoute = useRouterState({
-    select: (state) => state.location.pathname === "/island",
-  });
-  if (isIslandRoute) {
-    return <Outlet />;
-  }
   return <RootAppShellView />;
 }
 
@@ -263,6 +257,7 @@ function RootAppShellView() {
           <Outlet />
         </AnchoredToastProvider>
       </ToastProvider>
+      <DynamicIslandHost />
       {desktopWindowControls}
     </>
   );

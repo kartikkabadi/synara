@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { NativeApi, DesktopBridge, IslandBridge } from "@synara/contracts";
+import type { NativeApi, DesktopBridge } from "@synara/contracts";
 
 interface ImportMetaEnv {
   readonly APP_VERSION: string;
@@ -15,6 +15,5 @@ declare global {
   interface Window {
     nativeApi?: NativeApi;
     desktopBridge?: DesktopBridge;
-    islandBridge?: IslandBridge;
   }
 }

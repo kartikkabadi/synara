@@ -48,10 +48,6 @@
       "types": "./src/staticSnapshot.ts",
       "import": "./src/staticSnapshot.ts"
     },
-    "./islandGeometry": {
-      "types": "./src/islandGeometry.ts",
-      "import": "./src/islandGeometry.ts"
-    },
     "./windowsProcess": {
       "types": "./src/windowsProcess.ts",
       "import": "./src/windowsProcess.ts"

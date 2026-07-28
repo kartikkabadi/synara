@@ -23,10 +23,6 @@ function createAppHistory(): RouterHistory {
   if (typeof window === "undefined") {
     return createMemoryHistory({ initialEntries: ["/"] });
   }
-  // The island overlay window always renders the /island route, isolated from app navigation.
-  if (window.islandBridge !== undefined) {
-    return createMemoryHistory({ initialEntries: ["/island"] });
-  }
   // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
   return isElectron ? createHashHistory() : createBrowserHistory();
 }
