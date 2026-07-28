@@ -438,6 +438,26 @@ describe("normalizeOpenCodeTokenUsage", () => {
       lastCachedInputTokens: 15,
       lastOutputTokens: 50,
       lastReasoningOutputTokens: 25,
+      context: {
+        usedTokens: 190,
+        maxTokens: 200_000,
+        usedPercent: 0.095,
+        measurement: "synara-estimated",
+        confidence: "low",
+      },
+      cumulative: {
+        inputTokens: 100,
+        cachedInputTokens: 15,
+        outputTokens: 50,
+        reasoningOutputTokens: 25,
+        totalProcessedTokens: 190,
+      },
+      lastTurn: {
+        inputTokens: 100,
+        cachedInputTokens: 15,
+        outputTokens: 50,
+        reasoningOutputTokens: 25,
+      },
     });
   });
 
@@ -499,6 +519,16 @@ describe("normalizeOpenCodeTokenUsage", () => {
       totalProcessedTokens: 325,
       maxTokens: 200,
       lastUsedTokens: 200,
+      context: {
+        usedTokens: 200,
+        maxTokens: 200,
+        usedPercent: 100,
+        measurement: "synara-estimated",
+        confidence: "low",
+      },
+      cumulative: {
+        totalProcessedTokens: 325,
+      },
     });
   });
 });

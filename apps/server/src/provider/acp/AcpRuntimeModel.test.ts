@@ -440,18 +440,21 @@ describe("AcpRuntimeModel", () => {
   });
 
   it("projects ACP usage updates into context-window snapshots", () => {
-    const result = parseSessionUpdateEvent({
-      sessionId: "session-1",
-      update: {
-        sessionUpdate: "usage_update",
-        size: 1_000_000,
-        used: 42_000,
-        cost: {
-          amount: 0.2,
-          currency: "USD",
+    const result = parseSessionUpdateEvent(
+      {
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "usage_update",
+          size: 1_000_000,
+          used: 42_000,
+          cost: {
+            amount: 0.2,
+            currency: "USD",
+          },
         },
-      },
-    } satisfies Acp.SessionNotification);
+      } satisfies Acp.SessionNotification,
+      { usageCompactsAutomatically: true },
+    );
 
     expect(result.events).toEqual([
       {
@@ -461,6 +464,13 @@ describe("AcpRuntimeModel", () => {
           usedPercent: 4.2,
           maxTokens: 1_000_000,
           compactsAutomatically: true,
+          context: {
+            usedTokens: 42_000,
+            usedPercent: 4.2,
+            maxTokens: 1_000_000,
+            measurement: "provider-estimated",
+            confidence: "medium",
+          },
         },
         cost: {
           amount: 0.2,
@@ -480,6 +490,75 @@ describe("AcpRuntimeModel", () => {
         },
       },
     ]);
+  });
+
+  it("omits the automatic-compaction claim from usage snapshots unless the caller supplies it", () => {
+    const notification = {
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "usage_update",
+        size: 1_000_000,
+        used: 42_000,
+      },
+    } satisfies Acp.SessionNotification;
+
+    const withoutClaim = parseSessionUpdateEvent(notification);
+    expect(withoutClaim.events[0]).toMatchObject({
+      _tag: "UsageUpdated",
+      usage: {
+        usedTokens: 42_000,
+        usedPercent: 4.2,
+        maxTokens: 1_000_000,
+      },
+    });
+    expect(
+      withoutClaim.events[0]?._tag === "UsageUpdated"
+        ? withoutClaim.events[0].usage.compactsAutomatically
+        : undefined,
+    ).toBeUndefined();
+
+    const withFalseClaim = parseSessionUpdateEvent(notification, {
+      usageCompactsAutomatically: false,
+    });
+    expect(
+      withFalseClaim.events[0]?._tag === "UsageUpdated"
+        ? withFalseClaim.events[0].usage.compactsAutomatically
+        : undefined,
+    ).toBe(false);
+  });
+
+  it("maps ACP used/size to a provider-estimated context claim without a cumulative claim", () => {
+    const notification = {
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "usage_update",
+        size: 1_000_000,
+        used: 42_000,
+      },
+    } satisfies Acp.SessionNotification;
+
+    const defaultConfidence = parseSessionUpdateEvent(notification);
+    const defaultUsage =
+      defaultConfidence.events[0]?._tag === "UsageUpdated"
+        ? defaultConfidence.events[0].usage
+        : undefined;
+    expect(defaultUsage?.context).toEqual({
+      usedTokens: 42_000,
+      usedPercent: 4.2,
+      maxTokens: 1_000_000,
+      measurement: "provider-estimated",
+      confidence: "medium",
+    });
+    expect(defaultUsage?.cumulative).toBeUndefined();
+
+    const lowConfidence = parseSessionUpdateEvent(notification, {
+      usageContextConfidence: "low",
+    });
+    expect(
+      lowConfidence.events[0]?._tag === "UsageUpdated"
+        ? lowConfidence.events[0].usage.context?.confidence
+        : undefined,
+    ).toBe("low");
   });
 
   it("keeps permission request parsing compatible with loose extension payloads", () => {

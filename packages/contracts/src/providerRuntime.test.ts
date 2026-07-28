@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
 
-import { ProviderRuntimeEvent, type ProviderRuntimeEventType } from "./providerRuntime";
+import {
+  ProviderCompactionRequest,
+  ProviderCompactionResult,
+  ProviderRuntimeEvent,
+  ThreadCompactionRuntimeStatus,
+  type ProviderRuntimeEventType,
+} from "./providerRuntime";
 
 const decodeRuntimeEvent = Schema.decodeUnknownSync(ProviderRuntimeEvent);
 
@@ -170,5 +176,171 @@ describe("ProviderRuntimeEvent", () => {
     expect(parsed.payload.usage.maxTokens).toBe(200000);
     expect(parsed.payload.usage.usedTokens).toBe(31251);
     expect(parsed.payload.usage.usedPercent).toBe(15.6255);
+    expect(parsed.payload.usage.context).toBeUndefined();
+    expect(parsed.payload.usage.cumulative).toBeUndefined();
+    expect(parsed.payload.usage.lastTurn).toBeUndefined();
+  });
+
+  it("decodes thread token usage snapshots with nested V2 claims", () => {
+    const parsed = decodeRuntimeEvent({
+      type: "thread.token-usage.updated",
+      eventId: "event-token-usage-2",
+      provider: "claudeAgent",
+      createdAt: "2026-02-28T00:00:05.000Z",
+      threadId: "thread-1",
+      payload: {
+        usage: {
+          usedTokens: 31251,
+          maxTokens: 200000,
+          totalProcessedTokens: 748126,
+          context: {
+            usedTokens: 31251,
+            maxTokens: 200000,
+            usedPercent: 15.6255,
+            measurement: "provider-reported",
+            confidence: "exact",
+          },
+          cumulative: {
+            inputTokens: 700000,
+            outputTokens: 48126,
+            totalProcessedTokens: 748126,
+          },
+          lastTurn: {
+            inputTokens: 30000,
+            outputTokens: 1251,
+            durationMs: 43567,
+            toolUses: 25,
+          },
+        },
+      },
+    });
+
+    expect(parsed.type).toBe("thread.token-usage.updated");
+    if (parsed.type !== "thread.token-usage.updated") {
+      throw new Error("expected thread.token-usage.updated");
+    }
+    expect(parsed.payload.usage.context?.measurement).toBe("provider-reported");
+    expect(parsed.payload.usage.context?.confidence).toBe("exact");
+    expect(parsed.payload.usage.cumulative?.totalProcessedTokens).toBe(748126);
+    expect(parsed.payload.usage.lastTurn?.toolUses).toBe(25);
+  });
+
+  it("rejects nested context claims with unknown measurement labels", () => {
+    expect(() =>
+      decodeRuntimeEvent({
+        type: "thread.token-usage.updated",
+        eventId: "event-token-usage-3",
+        provider: "claudeAgent",
+        createdAt: "2026-02-28T00:00:06.000Z",
+        threadId: "thread-1",
+        payload: {
+          usage: {
+            usedTokens: 31251,
+            context: {
+              usedTokens: 31251,
+              measurement: "guessed",
+              confidence: "exact",
+            },
+          },
+        },
+      }),
+    ).toThrow();
+  });
+});
+
+describe("ProviderCompactionRequest", () => {
+  const decodeRequest = Schema.decodeUnknownSync(ProviderCompactionRequest);
+
+  it("decodes a manual request with instructions", () => {
+    const parsed = decodeRequest({
+      requestId: "compact-req-1",
+      threadId: "thread-1",
+      trigger: "manual",
+      instructions: "Keep the migration plan",
+      expectedLifecycleGeneration: "gen-1",
+    });
+    expect(parsed.trigger).toBe("manual");
+    expect(parsed.instructions).toBe("Keep the migration plan");
+  });
+
+  it("decodes a synara-auto request without optional fields", () => {
+    const parsed = decodeRequest({
+      requestId: "compact-req-2",
+      threadId: "thread-2",
+      trigger: "synara-auto",
+    });
+    expect(parsed.trigger).toBe("synara-auto");
+    expect(parsed.instructions).toBeUndefined();
+  });
+
+  it("rejects unknown triggers", () => {
+    expect(() =>
+      decodeRequest({ requestId: "r", threadId: "t", trigger: "provider-auto" }),
+    ).toThrow();
+  });
+});
+
+describe("ProviderCompactionResult", () => {
+  const decodeResult = Schema.decodeUnknownSync(ProviderCompactionResult);
+
+  it("decodes each result kind", () => {
+    expect(decodeResult({ kind: "same-session" }).kind).toBe("same-session");
+    const rollover = decodeResult({
+      kind: "session-rollover",
+      resumeCursor: "cursor-1",
+      providerThreadId: "provider-thread-1",
+    });
+    expect(rollover.kind).toBe("session-rollover");
+    expect(decodeResult({ kind: "runtime-restart-required", resumeCursor: "cursor-2" }).kind).toBe(
+      "runtime-restart-required",
+    );
+  });
+
+  it("requires a resume cursor for session rollover", () => {
+    expect(() => decodeResult({ kind: "session-rollover" })).toThrow();
+  });
+});
+
+describe("ThreadCompactionRuntimeStatus", () => {
+  const decodeStatus = Schema.decodeUnknownSync(ThreadCompactionRuntimeStatus);
+
+  it("decodes a provider-owned status with trigger and last compaction", () => {
+    const status = decodeStatus({
+      owner: "provider",
+      providerAutoEnabled: true,
+      manualAvailability: { available: true },
+      trigger: { kind: "percent", percent: 85 },
+      lastCompaction: {
+        requestId: "req-1",
+        owner: "provider",
+        trigger: "provider-auto",
+        result: "completed",
+        sessionEffect: "same-session",
+        completedAt: "2026-03-23T00:00:00.000Z",
+      },
+    });
+    expect(status.owner).toBe("provider");
+    expect(status.trigger).toEqual({ kind: "percent", percent: 85 });
+    expect(status.lastCompaction?.result).toBe("completed");
+  });
+
+  it("decodes an unavailable status with a null auto flag", () => {
+    const status = decodeStatus({
+      owner: "none",
+      providerAutoEnabled: null,
+      manualAvailability: { available: false, reason: "Unsupported" },
+    });
+    expect(status.providerAutoEnabled).toBeNull();
+    expect(status.manualAvailability.reason).toBe("Unsupported");
+  });
+
+  it("rejects an unknown owner", () => {
+    expect(() =>
+      decodeStatus({
+        owner: "someone",
+        providerAutoEnabled: null,
+        manualAvailability: { available: false },
+      }),
+    ).toThrow();
   });
 });

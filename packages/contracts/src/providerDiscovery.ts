@@ -7,7 +7,7 @@ import { Schema } from "effect";
 import { TrimmedNonEmptyString } from "./baseSchemas";
 import { ProviderOptionDescriptor } from "./model";
 
-const ProviderDiscoveryKind = Schema.Literals([
+export const ProviderDiscoveryKind = Schema.Literals([
   "codex",
   "claudeAgent",
   "cursor",
@@ -48,6 +48,41 @@ export const ProviderMentionReference = Schema.Struct({
 });
 export type ProviderMentionReference = typeof ProviderMentionReference.Type;
 
+// Structured, per-provider description of what compaction Synara can truthfully
+// offer: how manual compaction is invoked (if at all), whether the provider
+// compacts natively on its own, and how observable that lifecycle is.
+export const ProviderCompactionCapabilities = Schema.Struct({
+  manual: Schema.Struct({
+    mode: Schema.Literals(["same-session", "session-rollover", "unsupported"]),
+    mechanism: Schema.Literals(["native-rpc", "native-sdk", "control-command", "unsupported"]),
+    supportsInstructions: Schema.Boolean,
+  }),
+  automatic: Schema.Struct({
+    mode: Schema.Literals(["native", "none", "unknown"]),
+    enabledByDefault: Schema.optional(Schema.Boolean),
+    statusVisibility: Schema.Literals(["exact", "partial", "none"]),
+    triggerVisibility: Schema.Literals(["exact", "derived", "opaque"]),
+  }),
+  telemetry: Schema.Struct({
+    lifecycle: Schema.Literals(["native", "inferred", "none"]),
+    contextUsage: Schema.Literals([
+      "exact",
+      "provider-estimated",
+      "synara-estimated",
+      "processed-total-only",
+      "none",
+    ]),
+  }),
+});
+export type ProviderCompactionCapabilities = typeof ProviderCompactionCapabilities.Type;
+
+// Legacy boolean consumed by older clients; derived from `compaction.manual.mode`.
+export function supportsThreadCompactionFromCompaction(
+  compaction: ProviderCompactionCapabilities,
+): boolean {
+  return compaction.manual.mode === "same-session" || compaction.manual.mode === "session-rollover";
+}
+
 export const ProviderComposerCapabilities = Schema.Struct({
   provider: ProviderDiscoveryKind,
   supportsSkillMentions: Schema.Boolean,
@@ -56,6 +91,9 @@ export const ProviderComposerCapabilities = Schema.Struct({
   supportsPluginMentions: Schema.Boolean,
   supportsPluginDiscovery: Schema.Boolean,
   supportsRuntimeModelList: Schema.Boolean,
+  compaction: ProviderCompactionCapabilities,
+  // Legacy boolean; always derived from `compaction` via
+  // `supportsThreadCompactionFromCompaction` when a descriptor is built.
   supportsThreadCompaction: Schema.optional(Schema.Boolean),
   supportsThreadImport: Schema.optional(Schema.Boolean),
 });

@@ -147,6 +147,27 @@ export class ProviderSessionDirectoryPersistenceError extends Schema.TaggedError
   }
 }
 
+/**
+ * ProviderCompactionPersistenceError - Durable compaction operation write failure.
+ *
+ * `outcomeKnown` is false when the provider effect may already have executed
+ * (terminal persistence failure), and true when the operation was aborted
+ * before any provider call.
+ */
+export class ProviderCompactionPersistenceError extends Schema.TaggedErrorClass<ProviderCompactionPersistenceError>()(
+  "ProviderCompactionPersistenceError",
+  {
+    operation: Schema.String,
+    detail: Schema.String,
+    outcomeKnown: Schema.Boolean,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {
+  override get message(): string {
+    return `Compaction operation persistence error in ${this.operation}: ${this.detail}`;
+  }
+}
+
 export type ProviderAdapterError =
   | ProviderAdapterValidationError
   | ProviderAdapterSessionNotFoundError
@@ -159,5 +180,6 @@ export type ProviderServiceError =
   | ProviderUnsupportedError
   | ProviderSessionNotFoundError
   | ProviderSessionDirectoryPersistenceError
+  | ProviderCompactionPersistenceError
   | ProviderAdapterError
   | CheckpointServiceError;
