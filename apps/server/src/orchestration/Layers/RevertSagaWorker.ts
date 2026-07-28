@@ -27,7 +27,6 @@ import {
 
 const SHADOW_WORKER_ID = "checkpoint-reactor-shadow";
 const SHADOW_CLAIM_LEASE_MS = 30_000;
-const SHADOW_CLAIM_LIMIT = 8;
 
 const encodePayload = (payload: object): Uint8Array =>
   new TextEncoder().encode(JSON.stringify(payload));
@@ -61,10 +60,11 @@ function makeHandle(
       })
       .pipe(Effect.asVoid, Effect.catch(logKernelFailure(eventType)));
 
-  // Claim from the saga queue and acknowledge this saga's job in the same
-  // kernel transaction as the terminal event. Jobs claimed alongside that
-  // belong to other sagas are left to lease-expire; shadow mode never
-  // executes anything, so an expiring shadow lease is only log noise.
+  // Claim this saga's job deterministically — scoped to its thread
+  // partition with limit 1 — and acknowledge it in the same kernel
+  // transaction as the terminal event. The partition claim leases only the
+  // per-thread FIFO head (this saga's job under the thread revert lease),
+  // so settlement can never lease or mutate another saga's job.
   const settleJob = (eventType: string, payload: object) =>
     Effect.gen(function* () {
       const claim = yield* kernel.claimJobs({
@@ -72,7 +72,8 @@ function makeHandle(
         workerId: SHADOW_WORKER_ID,
         nowMs: Date.now(),
         leaseMs: SHADOW_CLAIM_LEASE_MS,
-        limit: SHADOW_CLAIM_LIMIT,
+        limit: 1,
+        partitionKey: `thread:${input.threadId}`,
       });
       const claimedJob = claim.jobs.find((job) => job.jobId === jobId);
       if (!claimedJob) {

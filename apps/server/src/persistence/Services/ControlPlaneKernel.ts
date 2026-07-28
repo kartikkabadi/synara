@@ -99,6 +99,8 @@ export interface KernelClaimRequest {
   readonly nowMs: number;
   readonly leaseMs: number;
   readonly limit: number;
+  /** When set, only this partition's ready head job is eligible for claiming. */
+  readonly partitionKey?: string;
 }
 
 export interface KernelClaimedJob {
