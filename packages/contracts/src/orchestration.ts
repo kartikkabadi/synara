@@ -593,6 +593,20 @@ export const OrchestrationLatestTurn = Schema.Struct({
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
+export const ThreadRevertSagaStatus = Schema.Literals(["reverting", "uncertain"]);
+export type ThreadRevertSagaStatus = typeof ThreadRevertSagaStatus.Type;
+
+/** Live compensated-saga state for a checkpoint revert on this thread. */
+export const OrchestrationThreadRevertSaga = Schema.Struct({
+  status: ThreadRevertSagaStatus,
+  turnCount: NonNegativeInt,
+  sagaId: TrimmedNonEmptyString,
+  uncertainStepId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+});
+export type OrchestrationThreadRevertSaga = typeof OrchestrationThreadRevertSaga.Type;
+
 export const OrchestrationThreadPullRequest = Schema.Struct({
   number: PositiveInt,
   title: TrimmedNonEmptyString,
@@ -758,6 +772,9 @@ export const OrchestrationThread = Schema.Struct({
     Schema.withDecodingDefault(() => null),
   ),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
+  revertSaga: Schema.optional(Schema.NullOr(OrchestrationThreadRevertSaga)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   latestUserMessageAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   hasPendingApprovals: Schema.optional(Schema.Boolean),
   hasPendingUserInput: Schema.optional(Schema.Boolean),
@@ -1557,6 +1574,27 @@ const ThreadRevertCompleteCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   turnCount: NonNegativeInt,
+  sagaId: Schema.optional(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
+const ThreadRevertStartedCommand = Schema.Struct({
+  type: Schema.Literal("thread.revert.started"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnCount: NonNegativeInt,
+  sagaId: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const ThreadRevertUncertainCommand = Schema.Struct({
+  type: Schema.Literal("thread.revert.uncertain"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnCount: NonNegativeInt,
+  sagaId: TrimmedNonEmptyString,
+  stepId: TrimmedNonEmptyString,
+  detail: Schema.String,
   createdAt: IsoDateTime,
 });
 
@@ -1580,6 +1618,8 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
+  ThreadRevertStartedCommand,
+  ThreadRevertUncertainCommand,
   ThreadConversationRollbackCommand,
   ThreadConversationRollbackCompleteCommand,
   ThreadDispatchQueuedTurnCommand,
@@ -1625,6 +1665,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.approval-response-requested",
   "thread.user-input-response-requested",
   "thread.checkpoint-revert-requested",
+  "thread.revert-started",
+  "thread.revert-uncertain",
   "thread.reverted",
   "thread.conversation-rollback-requested",
   "thread.conversation-rolled-back",
@@ -1945,9 +1987,24 @@ export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+export const ThreadRevertStartedPayload = Schema.Struct({
+  threadId: ThreadId,
+  turnCount: NonNegativeInt,
+  sagaId: TrimmedNonEmptyString,
+});
+
+export const ThreadRevertUncertainPayload = Schema.Struct({
+  threadId: ThreadId,
+  turnCount: NonNegativeInt,
+  sagaId: TrimmedNonEmptyString,
+  stepId: TrimmedNonEmptyString,
+  detail: Schema.String,
+});
+
 export const ThreadRevertedPayload = Schema.Struct({
   threadId: ThreadId,
   turnCount: NonNegativeInt,
+  sagaId: Schema.optional(TrimmedNonEmptyString),
 });
 
 export const ThreadConversationRollbackRequestedPayload = Schema.Struct({
@@ -2187,6 +2244,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.checkpoint-revert-requested"),
     payload: ThreadCheckpointRevertRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.revert-started"),
+    payload: ThreadRevertStartedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.revert-uncertain"),
+    payload: ThreadRevertUncertainPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

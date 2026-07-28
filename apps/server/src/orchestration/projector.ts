@@ -48,6 +48,8 @@ import {
   ThreadRuntimeModeSetPayload,
   ThreadUnarchivedPayload,
   ThreadRevertedPayload,
+  ThreadRevertStartedPayload,
+  ThreadRevertUncertainPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
   ThreadTurnStartRequestedPayload,
@@ -1155,6 +1157,43 @@ export function projectEvent(
         };
       });
 
+    case "thread.revert-started":
+      return decodeForEvent(ThreadRevertStartedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            revertSaga: {
+              status: "reverting",
+              turnCount: payload.turnCount,
+              sagaId: payload.sagaId,
+              uncertainStepId: null,
+            },
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.revert-uncertain":
+      return decodeForEvent(
+        ThreadRevertUncertainPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            revertSaga: {
+              status: "uncertain",
+              turnCount: payload.turnCount,
+              sagaId: payload.sagaId,
+              uncertainStepId: payload.stepId,
+            },
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
     case "thread.reverted":
       return decodeForEvent(ThreadRevertedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => {
@@ -1200,6 +1239,7 @@ export function projectEvent(
               proposedPlans,
               activities,
               latestTurn,
+              revertSaga: null,
               updatedAt: event.occurredAt,
             }),
           };

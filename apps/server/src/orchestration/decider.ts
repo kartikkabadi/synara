@@ -38,6 +38,12 @@ import {
   checkpointRevertActiveTurnDetail,
   checkpointRevertDeleteInProgressDetail,
   checkpointRevertInProgressDetail,
+  revertSagaAlreadyActiveDetail,
+  revertSagaInProgressDetail,
+  revertSagaMismatchDetail,
+  revertSagaNotActiveDetail,
+  revertSagaTurnCountMismatchDetail,
+  threadHasActiveRevertSaga,
   listActiveProjectsByWorkspaceRoot,
   listActiveSpaces,
   listThreadsByProjectId,
@@ -1512,6 +1518,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: checkpointRevertInProgressDetail(command.threadId),
         });
       }
+      if (threadHasActiveRevertSaga(targetThread)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: revertSagaInProgressDetail(command.threadId),
+        });
+      }
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan
         ? yield* requireThread({
@@ -1639,6 +1651,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: checkpointRevertInProgressDetail(command.threadId),
+        });
+      }
+      if (threadHasActiveRevertSaga(thread)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: revertSagaInProgressDetail(command.threadId),
         });
       }
       return {
@@ -1911,6 +1929,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: checkpointRevertInProgressDetail(command.threadId),
         });
       }
+      if (threadHasActiveRevertSaga(thread)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: revertSagaInProgressDetail(command.threadId),
+        });
+      }
       const editTarget = resolveTailUserMessageEditTarget({
         messages: thread.messages,
         messageId: command.messageId,
@@ -2176,12 +2200,97 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ];
     }
 
-    case "thread.revert.complete": {
-      yield* requireThread({
+    case "thread.revert.started": {
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      if (threadHasActiveRevertSaga(thread)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: revertSagaAlreadyActiveDetail(command.threadId),
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.revert-started",
+        payload: {
+          threadId: command.threadId,
+          turnCount: command.turnCount,
+          sagaId: command.sagaId,
+        },
+      };
+    }
+
+    case "thread.revert.uncertain": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const activeSaga = thread.revertSaga ?? null;
+      if (activeSaga === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: revertSagaNotActiveDetail(command.threadId),
+        });
+      }
+      if (activeSaga.sagaId !== command.sagaId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: revertSagaMismatchDetail(command.threadId, command.sagaId),
+        });
+      }
+      if (activeSaga.turnCount !== command.turnCount) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: revertSagaTurnCountMismatchDetail(command.threadId, command.turnCount),
+        });
+      }
+      if (activeSaga.status === "uncertain" && activeSaga.uncertainStepId === command.stepId) {
+        return [];
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.revert-uncertain",
+        payload: {
+          threadId: command.threadId,
+          turnCount: command.turnCount,
+          sagaId: command.sagaId,
+          stepId: command.stepId,
+          detail: command.detail,
+        },
+      };
+    }
+
+    case "thread.revert.complete": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const activeSaga = thread.revertSaga ?? null;
+      if (
+        command.sagaId !== undefined &&
+        activeSaga !== null &&
+        activeSaga.sagaId !== command.sagaId
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: revertSagaMismatchDetail(command.threadId, command.sagaId),
+        });
+      }
       const revertedEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...withEventBase({
           aggregateKind: "thread",
@@ -2193,6 +2302,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           turnCount: command.turnCount,
+          ...(command.sagaId !== undefined ? { sagaId: command.sagaId } : {}),
         },
       };
       return [

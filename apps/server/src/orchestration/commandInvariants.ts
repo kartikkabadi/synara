@@ -85,6 +85,33 @@ export function checkpointRevertInProgressDetail(threadId: ThreadId): string {
   return `Thread '${threadId}' has a checkpoint revert in progress. Wait for it to finish before starting a turn.`;
 }
 
+/** True while a durable revert saga owns the thread: after `thread.revert-started` and before `thread.reverted`. */
+export function threadHasActiveRevertSaga(thread: {
+  readonly revertSaga?: OrchestrationThread["revertSaga"];
+}): boolean {
+  return thread.revertSaga != null;
+}
+
+export function revertSagaInProgressDetail(threadId: ThreadId): string {
+  return `Thread '${threadId}' has a revert saga in progress. Wait for it to finish before starting a turn.`;
+}
+
+export function revertSagaAlreadyActiveDetail(threadId: ThreadId): string {
+  return `Thread '${threadId}' already has an active revert saga.`;
+}
+
+export function revertSagaNotActiveDetail(threadId: ThreadId): string {
+  return `Thread '${threadId}' has no active revert saga.`;
+}
+
+export function revertSagaMismatchDetail(threadId: ThreadId, sagaId: string): string {
+  return `Saga '${sagaId}' does not match the active revert saga on thread '${threadId}'.`;
+}
+
+export function revertSagaTurnCountMismatchDetail(threadId: ThreadId, turnCount: number): string {
+  return `Turn count ${turnCount} does not match the active revert saga on thread '${threadId}'.`;
+}
+
 export function checkpointRevertDeleteInProgressDetail(threadId: ThreadId): string {
   return `Thread '${threadId}' has a checkpoint revert in progress. Wait for it to finish before deleting the thread.`;
 }
