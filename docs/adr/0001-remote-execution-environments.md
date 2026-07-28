@@ -91,7 +91,7 @@ External evidence supporting this decision package:
 
 - Upstream Emanuele-web04/synara#467 (Claude over SSH) is a working proof of Architecture A's shape: a provider process spawned remotely with stdio streamed over the SSH channel, local server authoritative.
 - Upstream Emanuele-web04/synara#366 (remote-host RFC) is the reference design for Architecture B (remote Synara server behind an SSH broker), including its bootstrap, auth-token, and version-skew concerns.
-- Kartik's source-validation addendum on #99 validates the per-thread execution-profile shape against upstream #284 and surveys comparable systems (Better Agent's detached runners behind one authoritative backend; T3 Code's tailnet-scoped access; Crabbox's remote-lease and proof-bundle patterns) as architectural inspiration.
+- Kartik's source-validation addendum on #99 validates the per-thread execution-profile shape against upstream #284 and surveys comparable systems (Better Agent's detached runners behind one authoritative backend; pingdotgg's minimal multi-provider web GUI and its tailnet-scoped access model; Crabbox's remote-lease and proof-bundle patterns) as architectural inspiration.
 
 The architectural invariant across all of it: **backends may differ, but users see one Synara lifecycle, one approval model, one recovery model, and one durable evidence trail.**
 
