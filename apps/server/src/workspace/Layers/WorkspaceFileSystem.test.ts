@@ -135,6 +135,29 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
       }),
     );
 
+    it.effect("rejects absolute local file paths with a forged preview grant", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const outside = yield* makeTempDir;
+        yield* writeTextFile(outside, "Downloads/report.txt", "local file\n");
+        const absolutePath = path.join(outside, "Downloads/report.txt");
+
+        const error = yield* workspaceFileSystem
+          .readFile({
+            cwd,
+            relativePath: absolutePath,
+            previewGrant: crypto.randomUUID(),
+          })
+          .pipe(Effect.flip);
+
+        expect(error.message).toContain(
+          `Workspace file path must be relative to the project root: ${absolutePath}`,
+        );
+      }),
+    );
+
     it.effect("resolves a bare filename to its unique nested file", () =>
       Effect.gen(function* () {
         const workspaceFileSystem = yield* WorkspaceFileSystem;
