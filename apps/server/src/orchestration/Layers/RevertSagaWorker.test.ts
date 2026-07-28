@@ -97,6 +97,70 @@ describe.skipIf(!addonAvailable)("RevertSagaWorker (shadow mode)", () => {
     ),
   );
 
+  it.effect("settles only its own job under a backlog of concurrent sagas", () =>
+    withKernel((kernel) =>
+      Effect.gen(function* () {
+        const worker = makeRevertSagaWorker(kernel);
+        const sagaCount = 10;
+        const handles: Array<RevertSagaShadowHandle> = [];
+        for (let index = 0; index < sagaCount; index += 1) {
+          const handle = yield* worker
+            .armShadowSaga({
+              threadId: ThreadId.makeUnsafe(`thread-concurrent-${index}`),
+              turnCount: 2,
+              targetCheckpointRef,
+              cwd: "/tmp/workspace",
+            })
+            .pipe(Effect.map(Option.getOrThrow));
+          handles.push(handle);
+        }
+        assert.equal(
+          (yield* kernel.jobs({ queue: REVERT_SAGA_QUEUE, state: "pending", limit: 50 })).length,
+          sagaCount,
+        );
+
+        // Settle one saga from the middle of the backlog: every other job
+        // must stay pending, unleased, and with its attempt untouched.
+        yield* handles[6]!.recordStep("filesystem-restore");
+        yield* handles[6]!.complete();
+        const afterOne = yield* kernel.jobs({
+          queue: REVERT_SAGA_QUEUE,
+          state: "pending",
+          limit: 50,
+        });
+        assert.equal(afterOne.length, sagaCount - 1);
+        for (const job of afterOne) {
+          assert.equal(job.state, "pending");
+          assert.equal(job.attempt, 0);
+          assert.isUndefined(job.workerId);
+        }
+
+        // Complete the rest out of order; each settles exactly its own job.
+        for (const index of [9, 0, 3, 8, 1, 7, 2, 5, 4]) {
+          yield* handles[index]!.recordStep("filesystem-restore");
+          yield* handles[index]!.complete();
+        }
+        assert.equal(
+          (yield* kernel.jobs({ queue: REVERT_SAGA_QUEUE, state: "succeeded", limit: 50 })).length,
+          sagaCount,
+        );
+        assert.equal(
+          (yield* kernel.jobs({ queue: REVERT_SAGA_QUEUE, state: "pending", limit: 50 })).length,
+          0,
+        );
+        // No job ever needed more than its single settlement claim.
+        const succeeded = yield* kernel.jobs({
+          queue: REVERT_SAGA_QUEUE,
+          state: "succeeded",
+          limit: 50,
+        });
+        for (const job of succeeded) {
+          assert.equal(job.attempt, 1);
+        }
+      }),
+    ),
+  );
+
   it.effect("acks the job on abort before any mutation", () =>
     withKernel((kernel) =>
       Effect.gen(function* () {
