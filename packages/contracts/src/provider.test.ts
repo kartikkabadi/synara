@@ -40,6 +40,32 @@ describe("ProviderSessionStartInput", () => {
     expect(parsed.providerOptions?.codex?.homePath).toBe("/tmp/.codex");
   });
 
+  it("accepts an optional execution profile", () => {
+    const parsed = decodeProviderSessionStartInput({
+      threadId: "thread-1",
+      provider: "codex",
+      runtimeMode: "full-access",
+      executionProfile: {
+        environmentId: "env-1",
+        providerKind: "codex",
+        remoteWorkspaceRoot: "/srv/repos/synara",
+      },
+    });
+    expect(parsed.executionProfile?.environmentId).toBe("env-1");
+    expect(parsed.executionProfile?.remoteWorkspaceRoot).toBe("/srv/repos/synara");
+  });
+
+  it("rejects an execution profile without a workspace root", () => {
+    expect(() =>
+      decodeProviderSessionStartInput({
+        threadId: "thread-1",
+        provider: "codex",
+        runtimeMode: "full-access",
+        executionProfile: { environmentId: "env-1", providerKind: "codex" },
+      }),
+    ).toThrow();
+  });
+
   it("rejects payloads without runtime mode", () => {
     expect(() =>
       decodeProviderSessionStartInput({
