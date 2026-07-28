@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import {
+  EnvironmentId,
   IsoDateTime,
   NonNegativeInt,
   PositiveInt,
@@ -440,6 +441,26 @@ export type ServerGetSettingsResult = typeof ServerGetSettingsResult.Type;
 
 export const ServerGetEnvironmentResult = ExecutionEnvironmentDescriptor;
 export type ServerGetEnvironmentResult = typeof ServerGetEnvironmentResult.Type;
+
+export const ServerListEnvironmentsResult = Schema.Struct({
+  environments: Schema.Array(ExecutionEnvironmentDescriptor),
+});
+export type ServerListEnvironmentsResult = typeof ServerListEnvironmentsResult.Type;
+
+export const ServerUpsertEnvironmentInput = Schema.Struct({
+  descriptor: ExecutionEnvironmentDescriptor,
+});
+export type ServerUpsertEnvironmentInput = typeof ServerUpsertEnvironmentInput.Type;
+
+export const ServerRemoveEnvironmentInput = Schema.Struct({
+  environmentId: EnvironmentId,
+});
+export type ServerRemoveEnvironmentInput = typeof ServerRemoveEnvironmentInput.Type;
+
+export const ServerRemoveEnvironmentResult = Schema.Struct({
+  removed: Schema.Boolean,
+});
+export type ServerRemoveEnvironmentResult = typeof ServerRemoveEnvironmentResult.Type;
 
 export const ServerUpdateSettingsInput = ServerSettingsPatch;
 export type ServerUpdateSettingsInput = typeof ServerUpdateSettingsInput.Type;
