@@ -29,7 +29,6 @@ const SHADOW_WORKER_ID = "checkpoint-reactor-shadow";
 const EXECUTOR_WORKER_ID = "checkpoint-revert-executor";
 const SHADOW_CLAIM_LEASE_MS = 30_000;
 const EXECUTOR_LEASE_MS = 60_000;
-const SHADOW_CLAIM_LIMIT = 8;
 
 const encodePayload = (payload: object): Uint8Array =>
   new TextEncoder().encode(JSON.stringify(payload));
@@ -65,6 +64,10 @@ function makeHandle(
       })
       .pipe(Effect.asVoid, Effect.catch(logKernelFailure(eventType)));
 
+  // Claim this saga's job deterministically — scoped to its thread
+  // partition with limit 1, so the executor claim can never lease or
+  // mutate another saga's job. The partition claim leases only the
+  // per-thread FIFO head (this saga's job under the thread revert lease).
   const claim = () =>
     Effect.gen(function* () {
       const outcome = yield* kernel.claimJobs({
@@ -72,7 +75,8 @@ function makeHandle(
         workerId: EXECUTOR_WORKER_ID,
         nowMs: Date.now(),
         leaseMs: EXECUTOR_LEASE_MS,
-        limit: SHADOW_CLAIM_LIMIT,
+        limit: 1,
+        partitionKey: `thread:${input.threadId}`,
       });
       const claimedJob = outcome.jobs.find((job) => job.jobId === jobId);
       if (!claimedJob) {
@@ -90,10 +94,9 @@ function makeHandle(
 
   // Acknowledge this saga's job in the same kernel transaction as the
   // terminal event, using the held lease when the executor claimed the job
-  // up front, otherwise claiming by scan (shadow mode). Jobs claimed
-  // alongside that belong to other sagas are left to lease-expire; shadow
-  // mode never executes anything, so an expiring shadow lease is only log
-  // noise.
+  // up front, otherwise via a deterministic per-partition claim (shadow
+  // mode), which leases only this thread's FIFO head job and never touches
+  // another saga's job.
   const settleJob = (eventType: string, payload: object) =>
     Effect.gen(function* () {
       let leaseToken = heldLeaseToken;
@@ -103,7 +106,8 @@ function makeHandle(
           workerId: SHADOW_WORKER_ID,
           nowMs: Date.now(),
           leaseMs: SHADOW_CLAIM_LEASE_MS,
-          limit: SHADOW_CLAIM_LIMIT,
+          limit: 1,
+          partitionKey: `thread:${input.threadId}`,
         });
         const claimedJob = outcome.jobs.find((job) => job.jobId === jobId);
         if (!claimedJob) {
