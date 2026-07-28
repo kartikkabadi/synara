@@ -1,10 +1,17 @@
 // FILE: store.test.ts
 // Purpose: Exercises the public store facade, persistence, and simple UI actions.
 
-import { ProjectId, ThreadId, TurnId, type OrchestrationReadModel } from "@synara/contracts";
+import {
+  ProjectId,
+  SpaceId,
+  ThreadId,
+  TurnId,
+  type OrchestrationReadModel,
+} from "@synara/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  applySpaceOrder,
   collapseProjectsExcept,
   markThreadUnread,
   renameProjectLocally,
@@ -12,6 +19,7 @@ import {
   setThreadWorkspace,
   setAllProjectsExpanded,
   syncServerReadModel,
+  useStore,
 } from "./store";
 import type { AppState } from "./storeState";
 import {
@@ -25,6 +33,64 @@ import {
 } from "./storeTestFixtures";
 
 describe("store facade", () => {
+  it("frees a batch of thread details in a single store write", () => {
+    // Dropping several leases at once must not cost one update per thread: every
+    // update re-runs the retention reconcile that decides what to evict next.
+    const first = ThreadId.makeUnsafe("thread-batch-1");
+    const second = ThreadId.makeUnsafe("thread-batch-2");
+    const kept = ThreadId.makeUnsafe("thread-batch-kept");
+    const initialState = useStore.getState();
+    useStore.setState({
+      messageIdsByThreadId: { [first]: [], [second]: [], [kept]: [] },
+      messageByThreadId: { [first]: {}, [second]: {}, [kept]: {} },
+    });
+
+    const updates = vi.fn();
+    const unsubscribe = useStore.subscribe(updates);
+    try {
+      useStore.getState().evictThreadDetails([first, second]);
+    } finally {
+      unsubscribe();
+    }
+
+    const state = useStore.getState();
+    expect(updates).toHaveBeenCalledTimes(1);
+    expect(state.messageByThreadId?.[first]).toBeUndefined();
+    expect(state.messageByThreadId?.[second]).toBeUndefined();
+    expect(state.messageByThreadId?.[kept]).toBeDefined();
+
+    useStore.setState(initialState);
+  });
+
+  it("applies a Space order immediately for optimistic drag feedback", () => {
+    const workSpaceId = SpaceId.makeUnsafe("space-work");
+    const sideSpaceId = SpaceId.makeUnsafe("space-side");
+    const state = makeState(makeThread());
+    state.spaces = [
+      {
+        id: workSpaceId,
+        name: "Work",
+        icon: "bag",
+        sortOrder: 0,
+        createdAt: "2026-07-15T10:00:00.000Z",
+        updatedAt: "2026-07-15T10:00:00.000Z",
+      },
+      {
+        id: sideSpaceId,
+        name: "Side",
+        icon: "rocket",
+        sortOrder: 1,
+        createdAt: "2026-07-15T10:00:00.000Z",
+        updatedAt: "2026-07-15T10:00:00.000Z",
+      },
+    ];
+
+    const reordered = applySpaceOrder(state, [sideSpaceId, workSpaceId]);
+
+    expect(reordered.spaces.map((space) => space.id)).toEqual([sideSpaceId, workSpaceId]);
+    expect(reordered.spaces.map((space) => space.sortOrder)).toEqual([0, 1]);
+  });
+
   it("markThreadUnread moves lastVisitedAt before completion for a completed thread", () => {
     const latestTurnCompletedAt = "2026-02-25T12:30:00.000Z";
     const initialState = makeState(
@@ -122,6 +188,7 @@ describe("store facade", () => {
     const project2 = ProjectId.makeUnsafe("project-2");
     const project3 = ProjectId.makeUnsafe("project-3");
     const state: AppState = {
+      spaces: [],
       projects: [
         makeProject({
           id: project1,
@@ -158,6 +225,7 @@ describe("store facade", () => {
     const project1 = ProjectId.makeUnsafe("project-1");
     const project2 = ProjectId.makeUnsafe("project-2");
     const state: AppState = {
+      spaces: [],
       projects: [
         makeProject({
           id: project1,
@@ -189,6 +257,7 @@ describe("store facade", () => {
 
   it("collapses all projects when toggled off", () => {
     const state: AppState = {
+      spaces: [],
       projects: [
         makeProject({
           id: ProjectId.makeUnsafe("project-1"),
@@ -218,6 +287,7 @@ describe("store facade", () => {
     const project1 = ProjectId.makeUnsafe("project-1");
     const project2 = ProjectId.makeUnsafe("project-2");
     const state: AppState = {
+      spaces: [],
       projects: [
         makeProject({
           id: project1,
@@ -264,6 +334,7 @@ describe("store facade", () => {
     const project2 = ProjectId.makeUnsafe("project-2");
     const project3 = ProjectId.makeUnsafe("project-3");
     const initialState: AppState = {
+      spaces: [],
       projects: [
         makeProject({
           id: project2,
@@ -286,6 +357,7 @@ describe("store facade", () => {
     const readModel: OrchestrationReadModel = {
       snapshotSequence: 2,
       updatedAt: "2026-02-27T00:00:00.000Z",
+      spaces: [],
       projects: [
         makeReadModelProject({
           id: project1,
@@ -315,6 +387,7 @@ describe("store facade", () => {
     const project1 = ProjectId.makeUnsafe("project-1");
     const project2 = ProjectId.makeUnsafe("project-2");
     const initialState: AppState = {
+      spaces: [],
       projects: [
         makeProject({
           id: project1,
@@ -338,6 +411,7 @@ describe("store facade", () => {
     const snapshotWithoutProject2: OrchestrationReadModel = {
       snapshotSequence: 2,
       updatedAt: "2026-02-27T00:00:00.000Z",
+      spaces: [],
       projects: [
         makeReadModelProject({
           id: project1,
@@ -350,6 +424,7 @@ describe("store facade", () => {
     const snapshotWithProject2Restored: OrchestrationReadModel = {
       snapshotSequence: 3,
       updatedAt: "2026-02-27T00:01:00.000Z",
+      spaces: [],
       projects: [
         makeReadModelProject({
           id: project1,

@@ -30,8 +30,19 @@ import {
   AntigravityAdapter,
   type AntigravityAdapterShape,
 } from "../Services/AntigravityAdapter.ts";
-import type { ProviderThreadSnapshot } from "../Services/ProviderAdapter.ts";
+import {
+  PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
+  type ProviderThreadSnapshot,
+} from "../Services/ProviderAdapter.ts";
 import { appendFileAttachmentsPromptBlock } from "../attachmentProjection.ts";
+import { makeBoundedCallbackIngress } from "../boundedCallbackIngress.ts";
+import {
+  compactProviderRuntimeEventForIngress,
+  isTerminalProviderRuntimeEvent,
+  PROVIDER_RUNTIME_CALLBACK_BUFFER_MAX_BYTES,
+  PROVIDER_RUNTIME_CALLBACK_TERMINAL_RESERVE,
+  providerRuntimeEventBytes,
+} from "../providerRuntimeEventIngress.ts";
 import { teardownChildProcessTree } from "../supervisedProcessTeardown.ts";
 
 const PROVIDER = "antigravity" as const;
@@ -143,9 +154,22 @@ function transcriptPathForConversation(conversationId: string): string {
   );
 }
 
-function shellQuote(value: string): string {
-  if (process.platform === "win32") return `"${value.replaceAll('"', '\\"')}"`;
+function shellQuote(value: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform === "win32") return `"${value.replaceAll('"', '\\"')}"`;
   return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+export function buildAntigravityCaptureCommand(
+  executablePath: string,
+  scriptPath: string,
+  event: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const invocation = `${shellQuote(executablePath, platform)} ${shellQuote(scriptPath, platform)} ${shellQuote(event, platform)}`;
+  if (platform === "win32") {
+    return `if not defined SYNARA_ANTIGRAVITY_EVENTS (more >nul 2>nul & echo {}) else (set "ELECTRON_RUN_AS_NODE=1" && ${invocation})`;
+  }
+  return `if [ -z "\${SYNARA_ANTIGRAVITY_EVENTS:-}" ]; then cat >/dev/null 2>&1 || :; printf '%s\\n' '{}'; else ELECTRON_RUN_AS_NODE=1 ${invocation}; fi`;
 }
 
 export function hookScriptSource(): string {
@@ -289,7 +313,7 @@ async function ensureCapturePlugin(binaryPath: string): Promise<void> {
   );
   await fs.writeFile(scriptPath, hookScriptSource(), { mode: 0o700 });
   const command = (event: string) =>
-    `${shellQuote(process.execPath)} ${shellQuote(scriptPath)} ${shellQuote(event)}`;
+    buildAntigravityCaptureCommand(process.execPath, scriptPath, event);
   await fs.writeFile(
     path.join(pluginDir, "hooks.json"),
     `${JSON.stringify(buildAntigravityHookConfig(command), null, 2)}\n`,
@@ -449,12 +473,25 @@ export function makeAntigravityRuntimeEventBase(input: {
 
 const makeAntigravityAdapter = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig;
-  const events = yield* Queue.unbounded<ProviderRuntimeEvent>();
+  const eventQueue = yield* Queue.bounded<ProviderRuntimeEvent>(
+    PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
+  );
   const sessions = new Map<ThreadId, AntigravitySessionContext>();
   const defaultEffortByModel = new Map(Object.entries(DEFAULT_EFFORT_BY_MODEL));
 
+  const eventIngress = yield* makeBoundedCallbackIngress<ProviderRuntimeEvent, never, never>(
+    (event) => Queue.offer(eventQueue, event).pipe(Effect.asVoid),
+    {
+      capacity: PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
+      maxBufferedBytes: PROVIDER_RUNTIME_CALLBACK_BUFFER_MAX_BYTES,
+      terminalReserve: PROVIDER_RUNTIME_CALLBACK_TERMINAL_RESERVE,
+      isTerminal: isTerminalProviderRuntimeEvent,
+      sizeOf: providerRuntimeEventBytes,
+    },
+  );
+
   const offer = (event: ProviderRuntimeEvent) => {
-    Effect.runPromise(Queue.offer(events, event)).catch(() => undefined);
+    eventIngress.offer(compactProviderRuntimeEventForIngress(event));
   };
 
   const base = (
@@ -1020,21 +1057,19 @@ const makeAntigravityAdapter = Effect.gen(function* () {
     );
 
   const stopSession: AntigravityAdapterShape["stopSession"] = (threadId) =>
-    requireSession(threadId).pipe(
-      Effect.flatMap((context) =>
-        Effect.gen(function* () {
-          context.stopped = true;
-          context.interrupted = true;
-          yield* teardownActiveProcess(context, "session/stop");
-          sessions.delete(threadId);
-          offer({
-            ...base(context, { includeTurn: false }),
-            type: "session.exited",
-            payload: { reason: "stopped", exitKind: "graceful" },
-          } satisfies ProviderRuntimeEvent);
-        }),
-      ),
-    );
+    Effect.gen(function* () {
+      const context = sessions.get(threadId);
+      if (!context) return;
+      context.stopped = true;
+      context.interrupted = true;
+      yield* teardownActiveProcess(context, "session/stop");
+      sessions.delete(threadId);
+      offer({
+        ...base(context, { includeTurn: false }),
+        type: "session.exited",
+        payload: { reason: "stopped", exitKind: "graceful" },
+      } satisfies ProviderRuntimeEvent);
+    });
 
   const snapshot = (context: AntigravitySessionContext): ProviderThreadSnapshot => ({
     threadId: context.session.threadId,
@@ -1098,7 +1133,11 @@ const makeAntigravityAdapter = Effect.gen(function* () {
     }).pipe(Effect.asVoid);
 
   yield* Effect.addFinalizer(() =>
-    stopAll().pipe(Effect.ignore, Effect.andThen(Queue.shutdown(events))),
+    stopAll().pipe(
+      Effect.ignore,
+      Effect.andThen(eventIngress.stop),
+      Effect.andThen(Queue.shutdown(eventQueue)),
+    ),
   );
 
   return {
@@ -1136,7 +1175,7 @@ const makeAntigravityAdapter = Effect.gen(function* () {
         supportsThreadImport: false,
       } satisfies ProviderComposerCapabilities),
     get streamEvents() {
-      return Stream.fromQueue(events);
+      return Stream.fromQueue(eventQueue);
     },
   } satisfies AntigravityAdapterShape;
 });

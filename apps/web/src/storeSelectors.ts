@@ -5,19 +5,28 @@
 import type { ProjectId, ThreadEnvironmentMode, ThreadId } from "@synara/contracts";
 
 import type { AppState } from "./storeState";
+import { resolveThreadDisplayProvider } from "./lib/threadDisplayProvider";
 import { collectByIds, getThreadFromState, getThreadsFromState } from "./threadDerivation";
-import type { Project, SidebarThreadSummary, Thread, ThreadShell } from "./types";
+import type {
+  ComposerThreadMentionSource,
+  Project,
+  SidebarThreadSummary,
+  Thread,
+  ThreadShell,
+} from "./types";
 
 const EMPTY_THREAD_SHELLS: ThreadShell[] = [];
 
 export interface ThreadWorkspaceMetadata {
   envMode: ThreadEnvironmentMode | undefined;
   worktreePath: string | null;
+  workingDirectory: string | null;
 }
 
 const EMPTY_THREAD_WORKSPACE_METADATA: ThreadWorkspaceMetadata = Object.freeze({
   envMode: undefined,
   worktreePath: null,
+  workingDirectory: null,
 });
 
 function createStableEntitySelector<T extends { id: string }>(
@@ -105,10 +114,19 @@ export function createAllThreadsSelector(): (state: AppState) => readonly Thread
   };
 }
 
-/** Shell-only projection of all threads, in `threadIds` order. Unlike
- *  `createAllThreadsSelector`, this stays reference-stable across message/activity
- *  streaming updates, so subscribers only re-render on thread-level changes
- *  (create/delete/archive/title/workspace). Use it when message content is not needed. */
+/** Shell-only projection of all threads, in `threadIds` order.
+ *
+ *  It reads only `threadIds` + `threadShellById`, so it never rebuilds for message/activity
+ *  *content* changes — but it is NOT fully stable while a turn streams: `ThreadShell.updatedAt`
+ *  is part of the shell, and `threadShellsEqual` compares it, so every delta that advances
+ *  `updatedAt` writes a new shell and yields a new array here. That comparison has to stay:
+ *  the shell is where `updatedAt` lives, and the sidebar both sorts by it
+ *  (`components/Sidebar.logic.ts`) and renders it (`components/SidebarSearchPalette.tsx`).
+ *
+ *  So: cheaper and far less churny than `createAllThreadsSelector` (one new array per delta
+ *  instead of rebuilding every thread's message/activity lists), but subscribers that must not
+ *  re-render during streaming should select a narrower slice (e.g.
+ *  `createThreadWorkspaceMetadataSelector`) rather than relying on this being stable. */
 export function createThreadShellsSelector(): (state: AppState) => readonly ThreadShell[] {
   return (state) => collectByIds(state.threadIds, state.threadShellById, EMPTY_THREAD_SHELLS);
 }
@@ -153,6 +171,7 @@ export function createThreadWorkspaceMetadataSelector(
 ): (state: AppState) => ThreadWorkspaceMetadata {
   let previousEnvMode: ThreadEnvironmentMode | undefined = undefined;
   let previousWorktreePath: string | null = null;
+  let previousWorkingDirectory: string | null = null;
   let previousResult = EMPTY_THREAD_WORKSPACE_METADATA;
 
   return (state) => {
@@ -164,16 +183,22 @@ export function createThreadWorkspaceMetadataSelector(
     const source = state.threadShellById?.[threadId];
     const envMode = source?.envMode;
     const worktreePath = source?.worktreePath ?? null;
-    if (previousEnvMode === envMode && previousWorktreePath === worktreePath) {
+    const workingDirectory = source?.workingDirectory ?? null;
+    if (
+      previousEnvMode === envMode &&
+      previousWorktreePath === worktreePath &&
+      previousWorkingDirectory === workingDirectory
+    ) {
       return previousResult;
     }
 
     previousEnvMode = envMode;
     previousWorktreePath = worktreePath;
+    previousWorkingDirectory = workingDirectory;
     previousResult =
-      envMode === undefined && worktreePath === null
+      envMode === undefined && worktreePath === null && workingDirectory === null
         ? EMPTY_THREAD_WORKSPACE_METADATA
-        : { envMode, worktreePath };
+        : { envMode, worktreePath, workingDirectory };
     return previousResult;
   };
 }
@@ -204,6 +229,64 @@ export function createSidebarThreadSummariesSelector(): (
       return summary ? [summary] : [];
     });
     return previousSummaries;
+  };
+}
+
+export function createComposerThreadMentionSourcesSelector(): (
+  state: AppState,
+) => readonly ComposerThreadMentionSource[] {
+  let previousThreadIds: AppState["threadIds"] | undefined;
+  let previousSummaryById: AppState["sidebarThreadSummaryById"] | undefined;
+  let previousSources: readonly ComposerThreadMentionSource[] = [];
+
+  return (state) => {
+    const threadIds = state.threadIds;
+    const summaryById = state.sidebarThreadSummaryById;
+    if (threadIds === previousThreadIds && summaryById === previousSummaryById) {
+      return previousSources;
+    }
+    previousThreadIds = threadIds;
+    previousSummaryById = summaryById;
+
+    const nextSources = (threadIds ?? []).flatMap((threadId) => {
+      const thread = summaryById[threadId];
+      return thread
+        ? [
+            {
+              id: thread.id,
+              projectId: thread.projectId,
+              title: thread.title,
+              provider: resolveThreadDisplayProvider(thread),
+              createdAt: thread.createdAt,
+              latestUserMessageAt: thread.latestUserMessageAt,
+              ...(thread.archivedAt !== undefined ? { archivedAt: thread.archivedAt } : {}),
+              ...(thread.lastVisitedAt !== undefined
+                ? { lastVisitedAt: thread.lastVisitedAt }
+                : {}),
+            } satisfies ComposerThreadMentionSource,
+          ]
+        : [];
+    });
+    if (
+      nextSources.length === previousSources.length &&
+      nextSources.every((source, index) => {
+        const previous = previousSources[index];
+        return (
+          source.id === previous?.id &&
+          source.projectId === previous.projectId &&
+          source.title === previous.title &&
+          source.provider === previous.provider &&
+          source.createdAt === previous.createdAt &&
+          source.archivedAt === previous.archivedAt &&
+          source.lastVisitedAt === previous.lastVisitedAt &&
+          source.latestUserMessageAt === previous.latestUserMessageAt
+        );
+      })
+    ) {
+      return previousSources;
+    }
+    previousSources = nextSources;
+    return previousSources;
   };
 }
 

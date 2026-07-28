@@ -10,6 +10,7 @@ import type {
   OrchestrationCheckpointSummary,
   OrchestrationProject,
   OrchestrationProjectShell,
+  OrchestrationSpaceShell,
   OrchestrationReadModel,
   OrchestrationShellSnapshot,
   OrchestrationThreadDetailSnapshot,
@@ -18,6 +19,7 @@ import type {
   CheckpointRef,
   ProjectId,
   ProjectKind,
+  SpaceId,
   ThreadId,
   ThreadEnvironmentMode,
   TurnId,
@@ -43,6 +45,7 @@ export interface ProjectionThreadCheckpointContext {
   readonly workspaceRoot: string;
   readonly envMode: ThreadEnvironmentMode;
   readonly worktreePath: string | null;
+  readonly workingDirectory: string | null;
   readonly checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>;
   /** Completed file-change payloads, newest first, when explicitly requested by the caller. */
   readonly fileChangeActivityPayloads?: ReadonlyArray<unknown>;
@@ -65,9 +68,24 @@ export interface ProjectionFullThreadDiffContext {
   readonly workspaceRoot: string;
   readonly envMode: ThreadEnvironmentMode;
   readonly worktreePath: string | null;
+  readonly workingDirectory: string | null;
   readonly latestCheckpointTurnCount: number;
   readonly baselineCheckpointRef: CheckpointRef | null;
   readonly toCheckpointRef: CheckpointRef | null;
+}
+
+/**
+ * Narrow projection row backing managed-worktree retention.
+ *
+ * Soft-deleted threads are intentionally included: thread retention soft-deletes
+ * and never purges, yet the worktree those threads own still sits on disk and must
+ * stay eligible for snapshot + reclaim.
+ */
+export interface ProjectionManagedWorktreeThread {
+  readonly id: ThreadId;
+  readonly archivedAt: string | null;
+  readonly worktreePath: string | null;
+  readonly associatedWorktreePath: string | null;
 }
 
 /**
@@ -105,6 +123,26 @@ export interface ProjectionSnapshotQueryShape {
   >;
 
   /**
+   * Find only stale threads whose projected session/turn still appears in
+   * flight. Used by the runtime reconciler to avoid hydrating the full shell
+   * snapshot on every polling interval.
+   */
+  readonly listStaleInFlightThreadIds: (input: {
+    readonly updatedBefore: string;
+    readonly limit: number;
+  }) => Effect.Effect<ReadonlyArray<ThreadId>, ProjectionRepositoryError>;
+
+  /**
+   * Read only the columns managed-worktree retention needs, for every thread that
+   * records a worktree path. Avoids hydrating the full read model on a background
+   * prune, while still exposing soft-deleted threads so their worktrees are reclaimed.
+   */
+  readonly listManagedWorktreeThreads: () => Effect.Effect<
+    ReadonlyArray<ProjectionManagedWorktreeThread>,
+    ProjectionRepositoryError
+  >;
+
+  /**
    * Read the latest orchestration shell snapshot.
    *
    * Returns only project rows plus thread shell summaries so clients can
@@ -128,6 +166,11 @@ export interface ProjectionSnapshotQueryShape {
   readonly getProjectShellById: (
     projectId: ProjectId,
   ) => Effect.Effect<Option.Option<OrchestrationProjectShell>, ProjectionRepositoryError>;
+
+  /** Read a single active custom space shell row by id. */
+  readonly getSpaceShellById: (
+    spaceId: SpaceId,
+  ) => Effect.Effect<Option.Option<OrchestrationSpaceShell>, ProjectionRepositoryError>;
 
   /**
    * Read the earliest active thread for a project.

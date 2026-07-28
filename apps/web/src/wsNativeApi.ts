@@ -16,6 +16,11 @@ import {
   type AuthRevokePairingLinkInput,
   type AuthSessionState,
   type AuthWebSocketTokenResult,
+  type ExternalMcpCreateIntegrationInput,
+  type ExternalMcpCreateIntegrationResult,
+  type ExternalMcpIntegration,
+  type ExternalMcpRefreshPairingInput,
+  type ExternalMcpRevokeIntegrationInput,
   type ThreadId,
   type ThreadBrowserState,
   type GitActionProgressEvent,
@@ -43,9 +48,11 @@ import { VOICE_TRANSCRIPTION_UPLOAD_ROUTE_PATH } from "@synara/shared/binaryTran
 import { showConfirmDialogFallback } from "./confirmDialogFallback";
 import { showContextMenuFallback } from "./contextMenuFallback";
 import { requireHttpExternalUrl } from "./lib/externalUrl";
-import { WsTransport } from "./wsTransport";
+import { WsTransport, type WsThreadStreamFailure } from "./wsTransport";
 import { emitWsCompatibilityIssue, emitWsTransportState } from "./wsTransportEvents";
 import { resolveWsHttpUrl } from "./lib/wsHttpUrl";
+
+export type { WsThreadStreamFailure } from "./wsTransport";
 
 let instance: { api: NativeApi; transport: WsTransport } | null = null;
 
@@ -75,7 +82,9 @@ function createListenerRegistry<T>() {
 }
 
 function subscribeWithReplay<T>(input: {
-  readonly registry: { subscribe: (listener: (payload: T) => void) => () => unknown };
+  readonly registry: {
+    subscribe: (listener: (payload: T) => void) => () => unknown;
+  };
   readonly listener: (payload: T) => void;
   readonly latest: T | null;
 }): () => void {
@@ -120,6 +129,7 @@ const automationEventListeners = createListenerRegistry<AutomationStreamEvent>()
 const orchestrationDomainEventListeners = createListenerRegistry<OrchestrationEvent>();
 const orchestrationShellEventListeners = createListenerRegistry<OrchestrationShellStreamItem>();
 const orchestrationThreadEventListeners = createListenerRegistry<OrchestrationThreadStreamItem>();
+const threadStreamFailureListeners = createListenerRegistry<WsThreadStreamFailure>();
 const fallbackBrowserStateListeners = createListenerRegistry<ThreadBrowserState>();
 const fallbackBrowserStates = new Map<ThreadId, ThreadBrowserState>();
 
@@ -136,6 +146,7 @@ function clearWsNativeApiListeners(): void {
   orchestrationDomainEventListeners.clear();
   orchestrationShellEventListeners.clear();
   orchestrationThreadEventListeners.clear();
+  threadStreamFailureListeners.clear();
   fallbackBrowserStateListeners.clear();
 }
 
@@ -360,6 +371,18 @@ export function onServerSettingsUpdated(
   });
 }
 
+/**
+ * Subscribe to unrecoverable per-thread stream failures (retries and reconnect
+ * exhausted). Lets thread-detail consumers surface a failed hydration state
+ * instead of rendering an empty conversation.
+ */
+export function onThreadStreamFailure(
+  listener: (failure: WsThreadStreamFailure) => void,
+): () => void {
+  const unsubscribe = threadStreamFailureListeners.subscribe(listener);
+  return () => void unsubscribe();
+}
+
 export function createWsNativeApi(): NativeApi {
   if (instance) {
     if (instance.transport.getState() !== "disposed") {
@@ -407,6 +430,9 @@ export function createWsNativeApi(): NativeApi {
   });
   transport.subscribe(ORCHESTRATION_WS_CHANNELS.threadEvent, (message) => {
     orchestrationThreadEventListeners.emit(message.data);
+  });
+  transport.onThreadStreamFailure((failure) => {
+    threadStreamFailureListeners.emit(failure);
   });
   const api: NativeApi = {
     dialogs: {
@@ -494,6 +520,7 @@ export function createWsNativeApi(): NativeApi {
       pull: (input) => transport.request(WS_METHODS.gitPull, input),
       status: (input) => transport.request(WS_METHODS.gitStatus, input),
       readWorkingTreeDiff: (input) => transport.request(WS_METHODS.gitReadWorkingTreeDiff, input),
+      workingTreeDiffStats: (input) => transport.request(WS_METHODS.gitWorkingTreeDiffStats, input),
       summarizeDiff: (input) =>
         transport.request(WS_METHODS.gitSummarizeDiff, input, {
           timeoutMs: null,
@@ -592,6 +619,14 @@ export function createWsNativeApi(): NativeApi {
         await transport.dispose();
         return result;
       },
+      listExternalMcpIntegrations: () =>
+        transport.request(WS_METHODS.serverListExternalMcpIntegrations),
+      createExternalMcpIntegration: (input: ExternalMcpCreateIntegrationInput) =>
+        transport.request(WS_METHODS.serverCreateExternalMcpIntegration, input),
+      revokeExternalMcpIntegration: (input: ExternalMcpRevokeIntegrationInput) =>
+        transport.request(WS_METHODS.serverRevokeExternalMcpIntegration, input),
+      refreshExternalMcpPairing: (input: ExternalMcpRefreshPairingInput) =>
+        transport.request(WS_METHODS.serverRefreshExternalMcpPairing, input),
       refreshProviders: () => transport.request(WS_METHODS.serverRefreshProviders),
       // Provider updates run up to 2 minutes server-side; callers wrap this in
       // withProviderUpdateTimeout, which owns the client-side watchdog.
@@ -645,6 +680,8 @@ export function createWsNativeApi(): NativeApi {
     orchestration: {
       getSnapshot: () => transport.request(ORCHESTRATION_WS_METHODS.getSnapshot),
       getShellSnapshot: () => transport.request(ORCHESTRATION_WS_METHODS.getShellSnapshot),
+      getThreadDetailSnapshot: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.getThreadDetailSnapshot, input),
       dispatchCommand: (command) => {
         return transport.request(ORCHESTRATION_WS_METHODS.dispatchCommand, {
           command: omitNullUserInputAnswers(command),
@@ -692,6 +729,7 @@ export function createWsNativeApi(): NativeApi {
     },
     automation: {
       list: (input) => transport.request(WS_METHODS.automationList, input),
+      getMemory: (input) => transport.request(WS_METHODS.automationGetMemory, input),
       create: (input) => transport.request(WS_METHODS.automationCreate, input),
       update: (input) => transport.request(WS_METHODS.automationUpdate, input),
       delete: (input) => transport.request(WS_METHODS.automationDelete, input),
@@ -699,6 +737,7 @@ export function createWsNativeApi(): NativeApi {
       cancelRun: (input) => transport.request(WS_METHODS.automationCancelRun, input),
       markRunRead: (input) => transport.request(WS_METHODS.automationMarkRunRead, input),
       archiveRun: (input) => transport.request(WS_METHODS.automationArchiveRun, input),
+      resolveProposal: (input) => transport.request(WS_METHODS.automationResolveProposal, input),
       onEvent: automationEventListeners.subscribe,
     },
     browser: {

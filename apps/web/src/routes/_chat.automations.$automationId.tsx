@@ -7,14 +7,20 @@ import {
   type ProviderOptionDescriptor,
 } from "@synara/contracts";
 import {
+  automationContinuationThreadId,
+  automationRequiresTargetThread,
+} from "@synara/shared/automationMode";
+import {
   getModelCapabilities,
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
 } from "@synara/shared/model";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { getProviderStartOptions, useAppSettings } from "~/appSettings";
+import { AutomationProposalActions } from "~/components/automation/AutomationProposalActions";
 import {
   CHAT_SURFACE_HEADER_DIVIDER_CLASS_NAME,
   CHAT_SURFACE_HEADER_HEIGHT_CLASS,
@@ -35,7 +41,7 @@ import {
 import {
   completionPolicyFromStopWhen,
   stopWhenFromCompletionPolicy,
-} from "~/lib/automationCompletionPolicy";
+} from "@synara/shared/automationCompletionPolicy";
 import { automationLifecycleState, canPauseAutomation } from "~/lib/automationStatus";
 import {
   useDesktopTopBarTrafficLightGutterClassName,
@@ -71,6 +77,7 @@ import {
   providerOptionsForAutomationEdit,
   providerOptionsForAutomationModelSelection,
   runResultSummary,
+  runResultTitle,
   runStatusLabel,
   RunStatusIndicator,
   SCHEDULE_KIND_OPTIONS,
@@ -143,11 +150,21 @@ function automationStatusDisplay(definition: AutomationDefinition): {
 
 type SelectOption = { readonly value: string; readonly label: string };
 
+const MODE_LABELS: Record<AutomationDefinition["mode"], string> = {
+  standalone: "Standalone",
+  heartbeat: "Heartbeat",
+  dedicated: "Dedicated thread",
+};
+
 const WORKTREE_OPTIONS: readonly SelectOption[] = [
   { value: "auto", label: "Auto" },
   { value: "local", label: "Local" },
   { value: "worktree", label: "Worktree" },
 ];
+
+function worktreeModeLabel(mode: AutomationWorktreeMode): string {
+  return WORKTREE_OPTIONS.find((option) => option.value === mode)?.label ?? mode;
+}
 
 const INTERVAL_PRESETS: readonly SelectOption[] = [
   { value: "900", label: "Every 15 min" },
@@ -199,6 +216,17 @@ function AutomationDetailView() {
 
   const definition = data.definitions.find((candidate) => candidate.id === automationId) ?? null;
   const runs = runsByAutomationId.get(automationId) ?? [];
+  const memoryQuery = useQuery({
+    queryKey: ["automation-memory", automationId],
+    queryFn: () =>
+      definition
+        ? ensureNativeApi().automation.getMemory({ automationId: definition.id })
+        : Promise.resolve(null),
+    enabled: definition !== null,
+  });
+  const streamedMemory =
+    (data.memories ?? []).find((candidate) => candidate.automationId === automationId) ?? null;
+  const memory = streamedMemory ?? memoryQuery.data ?? null;
   const providerOptionsForDispatch = getProviderStartOptions(settings);
 
   if (!definition) {
@@ -243,7 +271,13 @@ function AutomationDetailView() {
   }
 
   const project = projects.find((candidate) => candidate.id === definition.projectId);
-  const targetThread = threads.find((candidate) => candidate.id === definition.targetThreadId);
+  const continuationThreadId = automationContinuationThreadId(definition);
+  const continuedThread = threads.find((candidate) => candidate.id === continuationThreadId);
+  // Heartbeat inherits its thread's environment, so it never picks one. A dedicated
+  // automation still picks freely until its first run claims a thread: after that every
+  // run reuses that thread, so its project and checkout are fixed.
+  const ownsItsEnvironment = !automationRequiresTargetThread(definition.mode);
+  const canChooseEnvironment = ownsItsEnvironment && continuationThreadId === null;
   const sourceThread = definition.sourceThreadId
     ? threads.find((candidate) => candidate.id === definition.sourceThreadId)
     : null;
@@ -251,6 +285,7 @@ function AutomationDetailView() {
   const schedule = definition.schedule;
   const status = automationStatusDisplay(definition);
   const stopWhen = stopWhenFromCompletionPolicy(definition.completionPolicy ?? { type: "none" });
+  const pendingProposal = definition.proposalState === "pending";
 
   const patch = (input: Omit<AutomationUpdateInput, "id">) =>
     updateMutation.mutate({ id: definition.id, ...input });
@@ -402,6 +437,24 @@ function AutomationDetailView() {
               <p className="whitespace-pre-wrap text-[0.9375rem] leading-relaxed text-muted-foreground">
                 {definition.prompt}
               </p>
+              {pendingProposal ? (
+                <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-[var(--color-background-elevated-primary)] p-4">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground">Suggested automation</p>
+                    <p className="text-xs text-muted-foreground">
+                      Accept it before it can run, or dismiss it to archive the suggestion.
+                    </p>
+                  </div>
+                  <AutomationProposalActions
+                    automationId={definition.id}
+                    onResolved={(resolution) => {
+                      if (resolution === "dismissed") {
+                        void navigate({ to: "/automations" });
+                      }
+                    }}
+                  />
+                </div>
+              ) : null}
             </div>
           </main>
         </div>
@@ -426,7 +479,7 @@ function AutomationDetailView() {
               )}
             >
               <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
-                {canPauseAutomation(definition) ? (
+                {!pendingProposal && canPauseAutomation(definition) ? (
                   <Button
                     type="button"
                     size="icon-sm"
@@ -454,6 +507,7 @@ function AutomationDetailView() {
                   className="ml-1.5"
                   disabled={
                     runNowMutation.isPending ||
+                    pendingProposal ||
                     // Stay disabled while an approval update is in flight: the cache merges
                     // acknowledgedRisks optimistically, so warnings clears before the server
                     // persists and a run dispatched in that window hits the old definition.
@@ -461,9 +515,11 @@ function AutomationDetailView() {
                     approvalGaps.runBlockingWarnings.length > 0
                   }
                   title={
-                    approvalGaps.runBlockingWarnings.length > 0
-                      ? "Approve the automation first"
-                      : undefined
+                    pendingProposal
+                      ? "Accept the automation proposal first"
+                      : approvalGaps.runBlockingWarnings.length > 0
+                        ? "Approve the automation first"
+                        : undefined
                   }
                   onClick={() => runNowMutation.mutate(definition)}
                 >
@@ -512,8 +568,12 @@ function AutomationDetailView() {
               </DetailGroup>
 
               <DetailGroup title="Details">
-                {definition.mode === "heartbeat" ? (
+                {!ownsItsEnvironment ? (
                   <DetailRow label="Runs in">Thread</DetailRow>
+                ) : !canChooseEnvironment ? (
+                  <DetailRow label="Runs in">
+                    {worktreeModeLabel(definition.worktreeMode)}
+                  </DetailRow>
                 ) : (
                   <EditRow
                     label={
@@ -543,7 +603,7 @@ function AutomationDetailView() {
                     />
                   </EditRow>
                 )}
-                {definition.mode === "heartbeat" ? (
+                {!canChooseEnvironment ? (
                   <DetailRow label="Project">{project?.name ?? "Unknown project"}</DetailRow>
                 ) : (
                   <EditRow label="Project">
@@ -702,22 +762,33 @@ function AutomationDetailView() {
                   modelSelection={definition.modelSelection}
                   onChange={applyModelSelection}
                 />
-                <DetailRow label="Mode">
-                  {definition.mode === "heartbeat" ? "Heartbeat" : "Standalone"}
-                </DetailRow>
-                {definition.mode === "heartbeat" ? (
-                  <EditRow label="Stop when">
-                    <InlineCommitTextInput
-                      value={stopWhen}
-                      placeholder="Never"
-                      onCommit={(value) =>
-                        patch({
-                          completionPolicy: completionPolicyFromStopWhen(value),
-                        })
-                      }
-                    />
-                  </EditRow>
-                ) : null}
+                <DetailRow label="Mode">{MODE_LABELS[definition.mode]}</DetailRow>
+                <EditRow label="Notify">
+                  <InlineSelect
+                    value={definition.notificationPolicy ?? "all"}
+                    options={[
+                      { value: "all", label: "All runs" },
+                      { value: "failed-runs-only", label: "Failed runs only" },
+                    ]}
+                    onChange={(value) =>
+                      patch({
+                        notificationPolicy:
+                          value === "failed-runs-only" ? "failed-runs-only" : "all",
+                      })
+                    }
+                  />
+                </EditRow>
+                <EditRow label="Stop when">
+                  <InlineCommitTextInput
+                    value={stopWhen}
+                    placeholder="Never"
+                    onCommit={(value) =>
+                      patch({
+                        completionPolicy: completionPolicyFromStopWhen(value),
+                      })
+                    }
+                  />
+                </EditRow>
                 <EditRow label="Max iterations">
                   <InlineSelect
                     value={definition.maxIterations == null ? "" : String(definition.maxIterations)}
@@ -727,13 +798,32 @@ function AutomationDetailView() {
                     }
                   />
                 </EditRow>
-                {definition.mode === "heartbeat" ? (
+                {continuationThreadId !== null ? (
                   <DetailRow label="Thread">
-                    {targetThread
-                      ? resolveThreadPickerTitle(targetThread.title)
-                      : "Thread unavailable"}
+                    {continuedThread ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void navigate({
+                            to: "/$threadId",
+                            params: { threadId: continuedThread.id },
+                          })
+                        }
+                        className="min-w-0 truncate text-right text-foreground transition-colors hover:text-primary"
+                      >
+                        {resolveThreadPickerTitle(continuedThread.title)}
+                      </button>
+                    ) : (
+                      "Thread unavailable"
+                    )}
                   </DetailRow>
                 ) : null}
+              </DetailGroup>
+
+              <DetailGroup title="Memory">
+                <div className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-foreground/[0.035] px-2.5 py-2 font-mono text-[0.6875rem] leading-relaxed text-muted-foreground">
+                  {memory?.content || "No persistent memory yet."}
+                </div>
               </DetailGroup>
 
               <DetailGroup title="Previous runs">
@@ -815,12 +905,13 @@ function DetailRow({
 // plain right-aligned text — the status as foreground, timestamps muted — with no chip behind
 // them, so the value column stays quiet and flush to the right.
 function StatusValue({
-  tone = "default",
+  tone: toneProp,
   children,
 }: {
   readonly tone?: "default" | "muted";
   readonly children: React.ReactNode;
 }) {
+  const tone = toneProp ?? "default";
   return (
     <span
       className={cn(
@@ -1048,6 +1139,7 @@ function RunRow({
       onOpen(run.threadId as NonNullable<AutomationRun["threadId"]>);
     }
   };
+  const resultTitle = runResultTitle(run);
   return (
     // The whole row opens its thread (the run's chat history); inline actions stop
     // propagation so they don't also navigate.
@@ -1076,6 +1168,7 @@ function RunRow({
       <RunStatusIndicator status={run.status} />
       <div className="min-w-0 flex-1 truncate">
         <span className="text-foreground/90">{runStatusLabel(run.status)}</span>
+        {resultTitle ? <span className="text-foreground/90"> · {resultTitle}</span> : null}
         <span className="text-muted-foreground"> · {runResultSummary(run)}</span>
       </div>
       {triageActionable ? (

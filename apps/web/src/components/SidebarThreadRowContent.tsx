@@ -170,7 +170,7 @@ export function SidebarThreadRowContent({
   terminalCount,
   isActive,
   variant,
-  subagentIndentPx = 0,
+  subagentIndentPx: subagentIndentPxProp,
   pendingStatusColorClass,
   suffix,
 }: {
@@ -184,6 +184,7 @@ export function SidebarThreadRowContent({
   pendingStatusColorClass?: string | null | undefined;
   suffix?: ReactNode;
 }) {
+  const subagentIndentPx = subagentIndentPxProp ?? 0;
   const isSubagentThread = Boolean(thread.parentThreadId);
   const subagentPresentation =
     variant === "standard" && isSubagentThread
@@ -232,7 +233,7 @@ export function SidebarThreadRowContent({
       >
         <span
           className={cn(
-            "min-w-0 flex-1 truncate text-[length:var(--app-font-size-ui,12px)]",
+            "min-w-0 flex-1 truncate-fade text-[length:var(--app-font-size-ui,12px)]",
             isActive ? "text-foreground" : SIDEBAR_ROW_LABEL_TEXT_CLASS_NAME,
             variant === "standard" && isSubagentThread
               ? "leading-[18px] text-foreground/80"

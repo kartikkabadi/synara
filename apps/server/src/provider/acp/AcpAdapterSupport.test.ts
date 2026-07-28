@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import * as EffectAcpErrors from "effect-acp/errors";
+import * as AcpErrors from "./AcpErrors.ts";
 
 import {
   acpPermissionOutcome,
@@ -7,6 +7,8 @@ import {
   classifyAcpPromptTurnCompletion,
   mapAcpToAdapterError,
   readAcpFailedToolDetail,
+  resolveAcpFullAccessPermissionOutcome,
+  resolveAcpPermissionPolicy,
   selectAcpFullAccessPermissionOptionId,
   selectAcpPermissionOptionId,
 } from "./AcpAdapterSupport.ts";
@@ -49,16 +51,74 @@ describe("AcpAdapterSupport", () => {
     expect(selectAcpPermissionOptionId("cancel", options)).toBeUndefined();
   });
 
-  it("selects the session-wide approval option for full-access ACP sessions", () => {
+  it("prefers request-scoped Full Access approvals and falls back to persistent grants", () => {
     expect(
       selectAcpFullAccessPermissionOptionId([
         { kind: "allow_once", optionId: "allow-once" },
         { kind: "allow_always", optionId: "allow-session" },
       ]),
-    ).toBe("allow-session");
-    expect(
-      selectAcpFullAccessPermissionOptionId([{ kind: "allow_once", optionId: "allow-once" }]),
     ).toBe("allow-once");
+    expect(
+      selectAcpFullAccessPermissionOptionId([{ kind: "allow_always", optionId: "allow-session" }]),
+    ).toBe("allow-session");
+  });
+
+  it("keeps Full Access operational with the allow options offered by the provider", () => {
+    expect(
+      resolveAcpFullAccessPermissionOutcome([{ kind: "allow_always", optionId: "allow-session" }]),
+    ).toEqual({ outcome: "selected", optionId: "allow-session" });
+    expect(
+      resolveAcpFullAccessPermissionOutcome([{ kind: "reject_once", optionId: "deny-now" }]),
+    ).toEqual({ outcome: "cancelled" });
+  });
+
+  it("keeps Plan above Full Access and releases the gate for the next default turn", () => {
+    const options = [
+      { kind: "allow_once", optionId: "implement-once" },
+      { kind: "allow_always", optionId: "implement-always" },
+      { kind: "reject_once", optionId: "stay-in-plan" },
+    ] as const;
+
+    expect(
+      resolveAcpPermissionPolicy({
+        runtimeMode: "full-access",
+        interactionMode: "plan",
+        options,
+      }),
+    ).toEqual({ outcome: "selected", optionId: "stay-in-plan" });
+    expect(
+      resolveAcpPermissionPolicy({
+        runtimeMode: "full-access",
+        interactionMode: "plan",
+        options: [{ kind: "allow_always", optionId: "implement" }],
+      }),
+    ).toEqual({ outcome: "cancelled" });
+    expect(
+      resolveAcpPermissionPolicy({
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        options,
+      }),
+    ).toEqual({ outcome: "selected", optionId: "implement-once" });
+  });
+
+  it("surfaces Default prompts only for active approval-required turns", () => {
+    const options = [{ kind: "allow_once", optionId: "allow" }] as const;
+
+    expect(
+      resolveAcpPermissionPolicy({
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        options,
+      }),
+    ).toBeUndefined();
+    expect(
+      resolveAcpPermissionPolicy({
+        runtimeMode: "full-access",
+        interactionMode: undefined,
+        options,
+      }),
+    ).toEqual({ outcome: "cancelled" });
   });
 
   it("reads failed ACP tool details without treating successful tools as failures", () => {
@@ -102,7 +162,7 @@ describe("AcpAdapterSupport", () => {
       "cursor",
       "thread-1" as never,
       "session/prompt",
-      new EffectAcpErrors.AcpRequestError({
+      new AcpErrors.AcpRequestError({
         code: -32602,
         errorMessage: "Invalid params",
       }),
@@ -117,7 +177,7 @@ describe("AcpAdapterSupport", () => {
       "droid",
       "thread-1" as never,
       "session/prompt",
-      new EffectAcpErrors.AcpRequestError({
+      new AcpErrors.AcpRequestError({
         code: -32603,
         errorMessage: "Internal error: Agent error",
         data: '402 {"title":"Payment Required"}',

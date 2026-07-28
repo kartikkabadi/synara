@@ -47,6 +47,7 @@ import {
 } from "../../agentGateway/sessionLease.ts";
 import { KiloAdapter, type KiloAdapterShape } from "../Services/KiloAdapter.ts";
 import { OpenCodeAdapter, type OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
+import { PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY } from "../Services/ProviderAdapter.ts";
 import {
   buildOpenCodePermissionRules,
   KILO_CLI_SPEC,
@@ -132,6 +133,8 @@ const KILO_ADAPTER_CONFIG: OpenCodeCompatibleAdapterConfig = {
 const OPENCODE_PROMPT_ACCEPTED_ACTIVITY_TIMEOUT_MS = 60_000;
 const OPENCODE_PROMPT_ACCEPTED_RECOVERY_DELAYS_MS = [2_000, 5_000, 10_000, 20_000] as const;
 const OPENCODE_PROMPT_SUBMISSION_INLINE_WAIT_MS = 500;
+const OPENCODE_EVENT_RECONNECT_DELAYS_MS = [250, 1_000, 2_500, 5_000] as const;
+const OPENCODE_MAX_RELATED_SESSIONS = 256;
 
 type OpenCodeSubscribedEvent =
   Awaited<ReturnType<OpencodeClient["event"]["subscribe"]>> extends {
@@ -156,8 +159,8 @@ interface OpenCodeSessionContext {
   readonly directory: string;
   readonly openCodeSessionId: string;
   readonly pendingPermissions: Map<string, PermissionRequest>;
-  /** Permission request ids auto-approved server-side in full-access mode (never surfaced to the UI). */
-  readonly autoApprovedPermissionIds: Set<string>;
+  /** Permission request ids resolved by Synara policy and never surfaced to the UI. */
+  readonly policyResolvedPermissionIds: Set<string>;
   readonly pendingQuestions: Map<string, QuestionRequest>;
   readonly pendingTextDeltasByPartId: Map<string, string>;
   readonly messageRoleById: Map<string, "user" | "assistant">;
@@ -178,8 +181,10 @@ interface OpenCodeSessionContext {
   activeTurnCompletionActivitySerial: number;
   activeTurnSawToolCallFinish: boolean;
   activeTurnSawFinalAssistant: boolean;
+  activeTurnFinalAssistantMessageId: string | undefined;
   activeTurnToolCallIdleWatchdogStarted: boolean;
   activeInteractionMode: "default" | "plan" | undefined;
+  appliedPermissionInteractionMode: "default" | "plan";
   activeAgent: string | undefined;
   activeVariant: string | undefined;
   readonly stopped: Ref.Ref<boolean>;
@@ -211,6 +216,7 @@ export interface OpenCodeAdapterLiveOptions {
   readonly promptAcceptedActivityTimeoutMs?: number;
   readonly promptAcceptedRecoveryDelaysMs?: ReadonlyArray<number>;
   readonly promptSubmissionInlineWaitMs?: number;
+  readonly prematureIdleCompletionGraceMs?: number;
   readonly beforeSessionInstall?: Effect.Effect<void>;
   readonly resolveServerPassword?: (
     provider: OpenCodeCompatibleProvider,
@@ -695,13 +701,14 @@ function clearActiveTurnState(context: OpenCodeSessionContext): void {
   context.activeTurnCompletionActivitySerial = 0;
   context.activeTurnSawToolCallFinish = false;
   context.activeTurnSawFinalAssistant = false;
+  context.activeTurnFinalAssistantMessageId = undefined;
   context.activeTurnToolCallIdleWatchdogStarted = false;
   context.activeInteractionMode = undefined;
   context.activeAgent = undefined;
   context.activeVariant = undefined;
   context.latestTurnCostUsd = undefined;
   context.relatedSessionIds.clear();
-  // Deliberately NOT cleared here: a permission auto-approved at the tail of a turn can
+  // Deliberately NOT cleared here: a permission policy-resolved at the tail of a turn can
   // have its permission.replied echo arrive after turn teardown, and dropping the id first
   // would misclassify that echo as a real resolution (orphaned "Approval resolved" in the
   // UI). Ids are unique per request so stale entries are inert; the set is freed with the
@@ -774,9 +781,7 @@ function isOpenCodeToolCallFinish(value: unknown): boolean {
   return finish === "tool-call" || finish === "tool-calls" || finish === "function-call";
 }
 
-function isOpenCodeCompletedAssistantMessage(
-  entry: OpenCodeMessageSnapshot & { readonly info: Record<string, unknown> },
-): boolean {
+function isOpenCodeCompletedAssistantMessage(entry: OpenCodeMessageSnapshot): boolean {
   if (entry.info.role !== "assistant") {
     return false;
   }
@@ -799,7 +804,7 @@ function isOpenCodeCompletedAssistantMessage(
 function trackActiveTurnAssistantFinish(
   context: OpenCodeSessionContext,
   turnId: TurnId | undefined,
-  entry: OpenCodeMessageSnapshot & { readonly info: Record<string, unknown> },
+  entry: OpenCodeMessageSnapshot,
 ): void {
   if (!turnId || context.activeTurnId !== turnId || entry.info.role !== "assistant") {
     return;
@@ -809,8 +814,45 @@ function trackActiveTurnAssistantFinish(
   }
   if (isOpenCodeCompletedAssistantMessage(entry)) {
     context.activeTurnSawFinalAssistant = true;
+    context.activeTurnFinalAssistantMessageId = entry.info.id;
     markOpenCodeTurnCompletionActivity(context, turnId);
   }
+}
+
+function areOpenCodeAssistantTextPartsSettled(parts: ReadonlyArray<Part>): boolean {
+  let sawTextPart = false;
+  for (const part of parts) {
+    if (part.type !== "text") {
+      continue;
+    }
+    sawTextPart = true;
+    if (!isCompletedOpenCodeAssistantTextPart(part)) {
+      return false;
+    }
+  }
+  return sawTextPart;
+}
+
+function isOpenCodeAssistantMessageTextSettled(
+  context: OpenCodeSessionContext,
+  messageId: string,
+): boolean {
+  const messageParts: Array<Part> = [];
+  for (const part of context.partById.values()) {
+    if (part.messageID === messageId) {
+      messageParts.push(part);
+    }
+  }
+  return (
+    areOpenCodeAssistantTextPartsSettled(messageParts) &&
+    messageParts.every(
+      (part) => part.type !== "text" || context.completedAssistantPartIds.has(part.id),
+    )
+  );
+}
+
+function isCompletedOpenCodeAssistantTextPart(part: Part): boolean {
+  return part.type === "text" && part.time?.end !== undefined;
 }
 
 function extractResumeSessionId(resumeCursor: unknown): string | undefined {
@@ -1142,6 +1184,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         ) ?? OPENCODE_PROMPT_ACCEPTED_RECOVERY_DELAYS_MS;
       const promptSubmissionInlineWaitMs =
         options?.promptSubmissionInlineWaitMs ?? OPENCODE_PROMPT_SUBMISSION_INLINE_WAIT_MS;
+      const prematureIdleCompletionGraceMs = options?.prematureIdleCompletionGraceMs ?? 10_000;
       const nativeEventLogger =
         options?.nativeEventLogger ??
         (options?.nativeEventLogPath !== undefined
@@ -1151,7 +1194,9 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           : undefined);
       const managedNativeEventLogger =
         options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
-      const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
+      const runtimeEvents = yield* Queue.bounded<ProviderRuntimeEvent>(
+        PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
+      );
       const sessions = new Map<ThreadId, OpenCodeSessionContext>();
 
       yield* Effect.addFinalizer(() =>
@@ -1469,8 +1514,17 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           readonly errorMessage?: string | undefined;
         },
       ) {
+        if (context.activeTurnId !== input.turnId) {
+          return false;
+        }
         clearActiveTurnState(context);
-        updateProviderSession(context, { status: "ready" }, { clearActiveTurnId: true });
+        updateProviderSession(
+          context,
+          input.errorMessage
+            ? { status: "error", lastError: input.errorMessage }
+            : { status: "ready" },
+          { clearActiveTurnId: true },
+        );
         yield* emit(context, {
           ...buildEventBase({
             threadId: context.session.threadId,
@@ -1488,7 +1542,25 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                 ...(input.totalCostUsd !== undefined ? { totalCostUsd: input.totalCostUsd } : {}),
               },
         });
+        return true;
       });
+
+      const waitForOpenCodeTurnCompletionQuiet = Effect.fn("waitForOpenCodeTurnCompletionQuiet")(
+        function* (context: OpenCodeSessionContext, turnId: TurnId, quietMs: number) {
+          let observedActivitySerial = context.activeTurnCompletionActivitySerial;
+          while (true) {
+            yield* Effect.sleep(quietMs);
+            if ((yield* Ref.get(context.stopped)) || context.activeTurnId !== turnId) {
+              return false;
+            }
+            const currentActivitySerial = context.activeTurnCompletionActivitySerial;
+            if (currentActivitySerial === observedActivitySerial) {
+              return true;
+            }
+            observedActivitySerial = currentActivitySerial;
+          }
+        },
+      );
 
       const deferPrematureIdleCompletion = Effect.fn("deferPrematureIdleCompletion")(function* (
         context: OpenCodeSessionContext,
@@ -1498,25 +1570,115 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         const idleBeforeAssistantActivity = context.activeTurnCompletionActivitySerial === 0;
         const idleAfterToolCalls =
           context.activeTurnSawToolCallFinish && !context.activeTurnSawFinalAssistant;
-        if (!idleBeforeAssistantActivity && !idleAfterToolCalls) {
+        const finalAssistantMessageId = context.activeTurnFinalAssistantMessageId;
+        const idleBeforeFinalAssistantParts =
+          context.activeTurnSawFinalAssistant &&
+          finalAssistantMessageId !== undefined &&
+          !isOpenCodeAssistantMessageTextSettled(context, finalAssistantMessageId);
+        const idleAfterFinalAssistant =
+          context.activeTurnSawFinalAssistant && finalAssistantMessageId !== undefined;
+        if (!idleBeforeAssistantActivity && !idleAfterToolCalls && !idleAfterFinalAssistant) {
           return false;
         }
         if (!context.activeTurnToolCallIdleWatchdogStarted) {
           context.activeTurnToolCallIdleWatchdogStarted = true;
           yield* Effect.gen(function* () {
-            yield* Effect.sleep(10_000);
-            if (
-              (yield* Ref.get(context.stopped)) ||
-              context.activeTurnId !== turnId ||
-              context.activeTurnSawFinalAssistant
-            ) {
+            // A normal final response only needs a short event-stream quiet
+            // window. Early idle with no completed part keeps the longer grace
+            // period used for delayed provider recovery.
+            const needsRecoveryGrace =
+              idleBeforeAssistantActivity || idleAfterToolCalls || idleBeforeFinalAssistantParts;
+            const initialQuietMs = needsRecoveryGrace
+              ? prematureIdleCompletionGraceMs
+              : Math.min(prematureIdleCompletionGraceMs, 250);
+            if (!(yield* waitForOpenCodeTurnCompletionQuiet(context, turnId, initialQuietMs))) {
               return;
+            }
+
+            // Some OpenCode versions emit idle before the final assistant event
+            // and never emit idle again. A completed assistant message is enough
+            // to settle that deferred idle instead of leaving the turn running.
+            if (context.activeTurnSawFinalAssistant) {
+              // Re-read the id after the grace period: the final metadata may have
+              // arrived after the idle event that scheduled this watchdog.
+              const deferredFinalAssistantMessageId = context.activeTurnFinalAssistantMessageId;
+              if (
+                deferredFinalAssistantMessageId !== undefined &&
+                (yield* recoverOpenCodeTurnFromMessageId(context, {
+                  turnId,
+                  messageId: deferredFinalAssistantMessageId,
+                  raw: {
+                    source: "synara.opencode.deferred-idle-completion",
+                    event: raw,
+                  },
+                }))
+              ) {
+                return;
+              }
+              if (
+                deferredFinalAssistantMessageId !== undefined &&
+                isOpenCodeAssistantMessageTextSettled(context, deferredFinalAssistantMessageId)
+              ) {
+                // The event stream can be ahead of session.messages. Completion
+                // activity has now stayed quiet for a full grace window, so all
+                // locally delivered parts belong to this final response.
+                yield* completeOpenCodeTurn(context, {
+                  turnId,
+                  raw: {
+                    source: "synara.opencode.deferred-idle-local-part",
+                    event: raw,
+                  },
+                  totalCostUsd: context.latestTurnCostUsd,
+                });
+                return;
+              }
+
+              // A final message snapshot may be visible before its parts. Keep
+              // one additional bounded window for the SSE part or a fresher
+              // snapshot instead of failing a response that is still arriving.
+              if (
+                !(yield* waitForOpenCodeTurnCompletionQuiet(
+                  context,
+                  turnId,
+                  prematureIdleCompletionGraceMs,
+                ))
+              ) {
+                return;
+              }
+              const retriedFinalAssistantMessageId = context.activeTurnFinalAssistantMessageId;
+              if (
+                retriedFinalAssistantMessageId !== undefined &&
+                (yield* recoverOpenCodeTurnFromMessageId(context, {
+                  turnId,
+                  messageId: retriedFinalAssistantMessageId,
+                  raw: {
+                    source: "synara.opencode.deferred-idle-completion-retry",
+                    event: raw,
+                  },
+                }))
+              ) {
+                return;
+              }
+              if (
+                retriedFinalAssistantMessageId !== undefined &&
+                isOpenCodeAssistantMessageTextSettled(context, retriedFinalAssistantMessageId)
+              ) {
+                yield* completeOpenCodeTurn(context, {
+                  turnId,
+                  raw: {
+                    source: "synara.opencode.deferred-idle-local-part-retry",
+                    event: raw,
+                  },
+                  totalCostUsd: context.latestTurnCostUsd,
+                });
+                return;
+              }
             }
 
             const message = idleAfterToolCalls
               ? `${adapterConfig.displayName} became idle after tool calls without producing a final assistant response.`
               : `${adapterConfig.displayName} became idle before producing an assistant response.`;
-            yield* completeOpenCodeTurn(context, {
+            const completed = yield* completeOpenCodeTurn(context, {
               turnId,
               raw: {
                 source: "synara.opencode.idle-after-tool-calls",
@@ -1524,14 +1686,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
               },
               errorMessage: message,
             });
-            updateProviderSession(
-              context,
-              {
-                status: "error",
-                lastError: message,
-              },
-              { clearActiveTurnId: true },
-            );
+            if (!completed) return;
             yield* emit(context, {
               ...buildEventBase({
                 threadId: context.session.threadId,
@@ -1558,17 +1713,28 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         context: OpenCodeSessionContext,
         input: {
           readonly turnId: TurnId;
-          readonly assistantEntry: OpenCodeMessageSnapshot & {
-            readonly info: Record<string, unknown>;
-          };
+          readonly assistantEntry: OpenCodeMessageSnapshot;
           readonly raw: unknown;
         },
       ) {
+        if (context.activeTurnId !== input.turnId) {
+          return false;
+        }
+        if (!areOpenCodeAssistantTextPartsSettled(input.assistantEntry.parts)) {
+          return false;
+        }
         context.messageRoleById.set(input.assistantEntry.info.id, "assistant");
         trackActiveTurnAssistantFinish(context, input.turnId, input.assistantEntry);
         for (const part of input.assistantEntry.parts) {
+          if (context.activeTurnId !== input.turnId) {
+            return false;
+          }
           context.partById.set(part.id, part);
           yield* emitRecoveredAssistantTextDelta(context, part, input.turnId, input.raw);
+        }
+
+        if (context.activeTurnId !== input.turnId) {
+          return false;
         }
 
         const selectedModel = context.session.model;
@@ -1594,6 +1760,9 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
             },
           });
         }
+        if (context.activeTurnId !== input.turnId) {
+          return false;
+        }
         const cost = nonNegativeFiniteNumber(
           (input.assistantEntry.info as Partial<AssistantMessage>).cost,
         );
@@ -1605,6 +1774,48 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         });
         return true;
       });
+
+      const recoverOpenCodeTurnFromMessageId = Effect.fn("recoverOpenCodeTurnFromMessageId")(
+        function* (
+          context: OpenCodeSessionContext,
+          input: {
+            readonly turnId: TurnId;
+            readonly messageId: string;
+            readonly raw: unknown;
+          },
+        ) {
+          const messagesResponse = yield* runOpenCodeSdk("session.messages", () =>
+            context.client.session.messages({
+              sessionID: context.openCodeSessionId,
+            }),
+          ).pipe(
+            Effect.catchCause(() =>
+              Effect.succeed(
+                null as Awaited<ReturnType<OpencodeClient["session"]["messages"]>> | null,
+              ),
+            ),
+          );
+          if (context.activeTurnId !== input.turnId) {
+            return false;
+          }
+          const assistantEntry = (messagesResponse?.data ?? []).find((entry) => {
+            if (entry.info.id !== input.messageId || entry.info.role !== "assistant") {
+              return false;
+            }
+            // The generated SDK response keeps `info` typed as the broad Message union
+            // even after its role discriminator is checked.
+            return isOpenCodeCompletedAssistantMessage(entry as unknown as OpenCodeMessageSnapshot);
+          });
+          if (!assistantEntry || assistantEntry.info.role !== "assistant") {
+            return false;
+          }
+          return yield* recoverOpenCodeTurnFromAssistantMessage(context, {
+            turnId: input.turnId,
+            assistantEntry: assistantEntry as unknown as OpenCodeMessageSnapshot,
+            raw: input.raw,
+          });
+        },
+      );
 
       const recoverOpenCodeTurnFromMessages = Effect.fn("recoverOpenCodeTurnFromMessages")(
         function* (
@@ -1625,6 +1836,9 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
               ),
             ),
           );
+          if (context.activeTurnId !== input.turnId) {
+            return false;
+          }
           if (!messagesResponse) {
             return false;
           }
@@ -1636,9 +1850,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                     {
                       info: entry.info,
                       parts: entry.parts,
-                    } satisfies OpenCodeMessageSnapshot & {
-                      readonly info: Record<string, unknown>;
-                    },
+                    } satisfies OpenCodeMessageSnapshot,
                   ]
                 : [],
             )
@@ -1722,19 +1934,12 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
 
               const message =
                 "OpenCode did not produce any activity for this prompt. The session may be stuck; try sending again or restart OpenCode.";
-              yield* completeOpenCodeTurn(context, {
+              const completed = yield* completeOpenCodeTurn(context, {
                 turnId: input.turnId,
                 raw: { source: "synara.opencode.prompt.watchdog" },
                 errorMessage: message,
               });
-              updateProviderSession(
-                context,
-                {
-                  status: "error",
-                  lastError: message,
-                },
-                { clearActiveTurnId: true },
-              );
+              if (!completed) return;
               yield* emit(context, {
                 ...buildEventBase({
                   threadId: context.session.threadId,
@@ -1782,9 +1987,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                   ? ({
                       info: response.data.info,
                       parts: response.data.parts,
-                    } satisfies OpenCodeMessageSnapshot & {
-                      readonly info: Record<string, unknown>;
-                    })
+                    } satisfies OpenCodeMessageSnapshot)
                   : null;
               if (assistantEntry && isOpenCodeCompletedAssistantMessage(assistantEntry)) {
                 yield* recoverOpenCodeTurnFromAssistantMessage(context, {
@@ -1895,12 +2098,58 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         }
       });
 
+      const refreshRelatedOpenCodeSessions = Effect.fn("refreshRelatedOpenCodeSessions")(function* (
+        context: OpenCodeSessionContext,
+      ) {
+        const discovered = new Set<string>();
+        const pending = [context.openCodeSessionId];
+        while (pending.length > 0 && discovered.size < OPENCODE_MAX_RELATED_SESSIONS) {
+          const parentSessionId = pending.shift();
+          if (!parentSessionId) {
+            break;
+          }
+          const response = yield* runOpenCodeSdk("session.children", () =>
+            context.client.session.children({ sessionID: parentSessionId }),
+          );
+          for (const child of response.data ?? []) {
+            if (
+              child.id === context.openCodeSessionId ||
+              discovered.has(child.id) ||
+              discovered.size >= OPENCODE_MAX_RELATED_SESSIONS
+            ) {
+              continue;
+            }
+            discovered.add(child.id);
+            pending.push(child.id);
+          }
+        }
+        for (const sessionId of discovered) {
+          context.relatedSessionIds.add(sessionId);
+        }
+      });
+
       const handleSubscribedEvent = Effect.fn("handleSubscribedEvent")(function* (
         context: OpenCodeSessionContext,
         event: OpenCodeSubscribedEvent,
       ) {
         if (!shouldHandleSubscribedEvent(context, event)) {
-          return;
+          const sessionId = subscribedEventSessionId(event);
+          const canBelongToUndiscoveredChild =
+            sessionId !== undefined &&
+            (event.type === "permission.asked" || event.type === "question.asked");
+          if (!canBelongToUndiscoveredChild) {
+            return;
+          }
+          const refreshExit = yield* Effect.exit(refreshRelatedOpenCodeSessions(context));
+          if (Exit.isFailure(refreshExit)) {
+            yield* Effect.logWarning(
+              `${adapterConfig.displayName} failed to reconcile child sessions`,
+              Cause.squash(refreshExit.cause),
+            );
+          }
+          if (!shouldHandleSubscribedEvent(context, event)) {
+            return;
+          }
         }
 
         const turnId = context.activeTurnId;
@@ -2068,6 +2317,16 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
             const messageRole = messageRoleForPart(context, part);
 
             if (messageRole === "assistant") {
+              if (
+                turnId !== undefined &&
+                context.activeTurnId === turnId &&
+                context.activeTurnFinalAssistantMessageId === part.messageID
+              ) {
+                // Any final-message part restarts the deferred-idle quiet window.
+                // OpenCode may publish several completed text parts for one
+                // assistant message, especially around tool calls.
+                markOpenCodeTurnCompletionActivity(context, turnId);
+              }
               yield* emitAssistantTextDelta(context, part, turnId, event);
             }
 
@@ -2133,28 +2392,63 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           }
 
           case "permission.asked": {
-            // Full access: auto-approve instead of surfacing an approval, mirroring the
-            // Claude/Cursor/Grok adapters. Covers asks the declarative session ruleset cannot
-            // (resumed/forked sessions on older servers, subagent child sessions, user config).
-            if (context.session.runtimeMode === "full-access") {
-              context.autoApprovedPermissionIds.add(event.properties.id);
+            if (
+              context.pendingPermissions.has(event.properties.id) ||
+              context.policyResolvedPermissionIds.has(event.properties.id)
+            ) {
+              break;
+            }
+            // A permission recovered without an active turn has no trustworthy interaction
+            // mode. Fail closed so a request left by an interrupted Plan turn can never be
+            // reinterpreted as Full Access after a process restart or reconnect.
+            const policyReply =
+              context.activeInteractionMode === undefined ||
+              context.activeInteractionMode === "plan"
+                ? "reject"
+                : context.session.runtimeMode === "full-access"
+                  ? "once"
+                  : undefined;
+            if (policyReply !== undefined) {
+              context.policyResolvedPermissionIds.add(event.properties.id);
               const replyExit = yield* Effect.exit(
                 runOpenCodeSdk("permission.reply", () =>
                   context.client.permission.reply({
                     requestID: event.properties.id,
-                    reply: "always",
+                    reply: policyReply,
                   }),
                 ),
               );
               if (Exit.isSuccess(replyExit)) {
                 break;
               }
-              // Fall back to a visible approval so the turn cannot hang on a failed reply.
-              context.autoApprovedPermissionIds.delete(event.properties.id);
+              context.policyResolvedPermissionIds.delete(event.properties.id);
+              const detail = openCodeRuntimeErrorDetail(Cause.squash(replyExit.cause));
               yield* Effect.logWarning(
-                `${adapterConfig.displayName} full-access auto-approve failed; surfacing approval`,
+                `${adapterConfig.displayName} permission policy reply failed`,
                 Cause.squash(replyExit.cause),
               );
+              // A Full-access or Plan turn must never degrade into a human approval. Abort the
+              // provider turn and surface an actionable failure instead.
+              yield* runOpenCodeSdk("session.abort", () =>
+                context.client.session.abort({ sessionID: context.openCodeSessionId }),
+              ).pipe(Effect.ignore({ log: true }));
+              if (turnId !== undefined && context.activeTurnId === turnId) {
+                yield* completeOpenCodeTurn(context, {
+                  turnId,
+                  raw: event,
+                  errorMessage: `${adapterConfig.displayName} could not apply ${policyReply === "reject" ? "Plan-mode" : "Full-access"} permission policy: ${detail}`,
+                });
+              } else {
+                yield* emit(context, {
+                  ...buildEventBase({ threadId: context.session.threadId, raw: event }),
+                  type: "runtime.warning",
+                  payload: {
+                    message: `${adapterConfig.displayName} could not apply its permission policy.`,
+                    detail,
+                  },
+                });
+              }
+              break;
             }
             context.pendingPermissions.set(event.properties.id, event.properties);
             yield* emit(context, {
@@ -2178,10 +2472,11 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           }
 
           case "permission.replied": {
-            if (context.autoApprovedPermissionIds.delete(event.properties.requestID)) {
-              // Auto-approved in full access; nothing was surfaced to the UI.
+            if (context.policyResolvedPermissionIds.delete(event.properties.requestID)) {
+              // Synara policy resolved this request; nothing was surfaced to the UI.
               break;
             }
+            const request = context.pendingPermissions.get(event.properties.requestID);
             context.pendingPermissions.delete(event.properties.requestID);
             yield* emit(context, {
               ...buildEventBase({
@@ -2192,7 +2487,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
               }),
               type: "request.resolved",
               payload: {
-                requestType: "unknown",
+                requestType: request ? mapPermissionToRequestType(request.permission) : "unknown",
                 decision: mapPermissionDecision(event.properties.reply),
               },
             });
@@ -2200,6 +2495,9 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           }
 
           case "question.asked": {
+            if (context.pendingQuestions.has(event.properties.id)) {
+              break;
+            }
             context.pendingQuestions.set(event.properties.id, event.properties);
             yield* emit(context, {
               ...buildEventBase({
@@ -2647,15 +2945,16 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                 raw: event,
                 errorMessage: message,
               });
+            } else {
+              updateProviderSession(
+                context,
+                {
+                  status: "error",
+                  lastError: message,
+                },
+                { clearActiveTurnId: true },
+              );
             }
-            updateProviderSession(
-              context,
-              {
-                status: "error",
-                lastError: message,
-              },
-              { clearActiveTurnId: true },
-            );
             yield* emit(context, {
               ...buildEventBase({
                 threadId: context.session.threadId,
@@ -2754,6 +3053,60 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
 
           default:
             break;
+        }
+      });
+
+      const reconcilePendingOpenCodeInteractions = Effect.fn(
+        "reconcilePendingOpenCodeInteractions",
+      )(function* (context: OpenCodeSessionContext) {
+        yield* refreshRelatedOpenCodeSessions(context).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning(
+              `${adapterConfig.displayName} pending child-session reconciliation failed`,
+              Cause.squash(cause),
+            ),
+          ),
+        );
+        const [permissions, questions] = yield* Effect.all([
+          runOpenCodeSdk("permission.list", () => context.client.permission.list()).pipe(
+            Effect.map((response) => response.data ?? []),
+            Effect.catchCause((cause) =>
+              Effect.logWarning(
+                `${adapterConfig.displayName} pending permission reconciliation failed`,
+                Cause.squash(cause),
+              ).pipe(Effect.as([] as ReadonlyArray<PermissionRequest>)),
+            ),
+          ),
+          runOpenCodeSdk("question.list", () => context.client.question.list()).pipe(
+            Effect.map((response) => response.data ?? []),
+            Effect.catchCause((cause) =>
+              Effect.logWarning(
+                `${adapterConfig.displayName} pending question reconciliation failed`,
+                Cause.squash(cause),
+              ).pipe(Effect.as([] as ReadonlyArray<QuestionRequest>)),
+            ),
+          ),
+        ]);
+        const belongsToSessionTree = (sessionId: string) =>
+          sessionId === context.openCodeSessionId || context.relatedSessionIds.has(sessionId);
+
+        for (const request of permissions) {
+          if (!belongsToSessionTree(request.sessionID)) {
+            continue;
+          }
+          yield* handleSubscribedEvent(context, {
+            type: "permission.asked",
+            properties: request,
+          } as OpenCodeSubscribedEvent);
+        }
+        for (const request of questions) {
+          if (!belongsToSessionTree(request.sessionID)) {
+            continue;
+          }
+          yield* handleSubscribedEvent(context, {
+            type: "question.asked",
+            properties: request,
+          } as OpenCodeSubscribedEvent);
         }
       });
 
@@ -2958,39 +3311,61 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           Effect.sync(() => eventsAbortController.abort()),
         );
 
-        yield* Effect.flatMap(
-          runOpenCodeSdk("event.subscribe", () =>
-            context.client.event.subscribe(undefined, {
-              signal: eventsAbortController.signal,
-            }),
-          ),
-          (subscription) =>
-            Stream.fromAsyncIterable(
-              subscription.stream,
-              (cause) =>
-                new OpenCodeRuntimeError({
-                  operation: "event.subscribe",
-                  detail: openCodeRuntimeErrorDetail(cause),
-                  cause,
-                }),
-            ).pipe(Stream.runForEach((event) => handleSubscribedEvent(context, event))),
-        ).pipe(
-          Effect.exit,
-          Effect.flatMap((exit) =>
-            Effect.gen(function* () {
-              if (eventsAbortController.signal.aborted || (yield* Ref.get(context.stopped))) {
-                return;
-              }
-              if (Exit.isFailure(exit)) {
-                yield* emitUnexpectedExit(
-                  context,
-                  openCodeRuntimeErrorDetail(Cause.squash(exit.cause)),
+        yield* Effect.gen(function* () {
+          let reconnectAttempt = 0;
+          while (!eventsAbortController.signal.aborted && !(yield* Ref.get(context.stopped))) {
+            const subscriptionExit = yield* Effect.exit(
+              Effect.gen(function* () {
+                const subscription = yield* runOpenCodeSdk("event.subscribe", () =>
+                  context.client.event.subscribe(undefined, {
+                    signal: eventsAbortController.signal,
+                  }),
                 );
-              }
-            }),
-          ),
-          Effect.forkIn(context.sessionScope),
-        );
+                yield* reconcilePendingOpenCodeInteractions(context).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning(
+                      `${adapterConfig.displayName} pending interaction reconciliation failed`,
+                      Cause.squash(cause),
+                    ),
+                  ),
+                );
+                yield* Stream.fromAsyncIterable(
+                  subscription.stream,
+                  (cause) =>
+                    new OpenCodeRuntimeError({
+                      operation: "event.subscribe",
+                      detail: openCodeRuntimeErrorDetail(cause),
+                      cause,
+                    }),
+                ).pipe(Stream.runForEach((event) => handleSubscribedEvent(context, event)));
+              }),
+            );
+            if (eventsAbortController.signal.aborted || (yield* Ref.get(context.stopped))) {
+              return;
+            }
+
+            const delayMs =
+              OPENCODE_EVENT_RECONNECT_DELAYS_MS[
+                Math.min(reconnectAttempt, OPENCODE_EVENT_RECONNECT_DELAYS_MS.length - 1)
+              ] ?? OPENCODE_EVENT_RECONNECT_DELAYS_MS[0];
+            reconnectAttempt += 1;
+            yield* Effect.sleep(delayMs);
+            if (eventsAbortController.signal.aborted || (yield* Ref.get(context.stopped))) {
+              return;
+            }
+            const detail = Exit.isFailure(subscriptionExit)
+              ? openCodeRuntimeErrorDetail(Cause.squash(subscriptionExit.cause))
+              : `${adapterConfig.displayName} event stream ended.`;
+            yield* emit(context, {
+              ...buildEventBase({ threadId: context.session.threadId }),
+              type: "runtime.warning",
+              payload: {
+                message: `${adapterConfig.displayName} event stream disconnected; reconnecting.`,
+                detail,
+              },
+            });
+          }
+        }).pipe(Effect.forkIn(context.sessionScope));
 
         if (!context.server.external && context.server.exitCode !== null) {
           yield* context.server.exitCode.pipe(
@@ -3008,6 +3383,22 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
             Effect.forkIn(context.sessionScope),
           );
         }
+      });
+
+      const applyPermissionInteractionMode = Effect.fn("applyPermissionInteractionMode")(function* (
+        context: OpenCodeSessionContext,
+        interactionMode: "default" | "plan",
+      ) {
+        if (context.appliedPermissionInteractionMode === interactionMode) {
+          return;
+        }
+        yield* runOpenCodeSdk("session.update", () =>
+          context.client.session.update({
+            sessionID: context.openCodeSessionId,
+            permission: buildOpenCodePermissionRules(context.session.runtimeMode, interactionMode),
+          }),
+        ).pipe(Effect.mapError(toAdapterRequestError));
+        context.appliedPermissionInteractionMode = interactionMode;
       });
 
       const startSession: OpenCodeAdapterShape["startSession"] = Effect.fn("startSession")(
@@ -3112,20 +3503,21 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                         )
                       : false;
                     const createSessionId = resumedSessionId
-                      ? // Resumed sessions skip session.create, so re-apply the runtime-mode
-                        // permission ruleset explicitly. Non-fatal: older servers may reject the
-                        // field, and full-access asks are still auto-approved in the event pump.
+                      ? // A resumed provider may still be executing an interrupted Plan turn.
+                        // Install the read-only ruleset until Synara dispatches a new turn with a
+                        // known interaction mode. This must succeed before the event pump starts:
+                        // otherwise an already-running Full Access session could mutate state
+                        // without ever emitting a permission request for Synara to reject.
                         runOpenCodeSdk("session.update", () =>
                           client.session.update({
                             sessionID: resumedSessionId,
-                            permission: buildOpenCodePermissionRules(input.runtimeMode),
+                            permission: buildOpenCodePermissionRules(input.runtimeMode, "plan"),
                           }),
                         ).pipe(
-                          Effect.catchCause((cause) =>
-                            Effect.logWarning(
-                              `${adapterConfig.displayName} failed to apply permission ruleset on resume`,
-                              Cause.squash(cause),
-                            ),
+                          Effect.tapError(() =>
+                            runOpenCodeSdk("session.abort", () =>
+                              client.session.abort({ sessionID: resumedSessionId }),
+                            ).pipe(Effect.ignore({ log: true })),
                           ),
                           Effect.as(resumedSessionId),
                         )
@@ -3237,7 +3629,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                   directory,
                   openCodeSessionId: started.openCodeSessionId,
                   pendingPermissions: new Map(),
-                  autoApprovedPermissionIds: new Set(),
+                  policyResolvedPermissionIds: new Set(),
                   pendingQuestions: new Map(),
                   pendingTextDeltasByPartId: new Map(),
                   partById: new Map(),
@@ -3258,8 +3650,10 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                   activeTurnCompletionActivitySerial: 0,
                   activeTurnSawToolCallFinish: false,
                   activeTurnSawFinalAssistant: false,
+                  activeTurnFinalAssistantMessageId: undefined,
                   activeTurnToolCallIdleWatchdogStarted: false,
                   activeInteractionMode: undefined,
+                  appliedPermissionInteractionMode: resumedSessionId ? "plan" : "default",
                   activeAgent: undefined,
                   activeVariant: undefined,
                   stopped: yield* Ref.make(false),
@@ -3358,7 +3752,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         });
         const providerText = [harnessPolicy, text].filter(Boolean).join("\n\n");
 
-        const agent =
+        const requestedAgent =
           input.modelSelection?.provider === provider
             ? input.modelSelection.options?.agent
             : undefined;
@@ -3367,19 +3761,27 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
             ? input.modelSelection.options?.variant
             : undefined;
 
+        const interactionMode = input.interactionMode === "plan" ? "plan" : "default";
+        yield* applyPermissionInteractionMode(context, interactionMode);
+
         context.activeTurnId = turnId;
         context.activeTurnEventSerial = 0;
         context.activeTurnProviderActivitySerial = 0;
         context.activeTurnCompletionActivitySerial = 0;
         context.activeTurnSawToolCallFinish = false;
         context.activeTurnSawFinalAssistant = false;
+        context.activeTurnFinalAssistantMessageId = undefined;
         context.activeTurnToolCallIdleWatchdogStarted = false;
-        context.activeInteractionMode = input.interactionMode === "plan" ? "plan" : "default";
+        context.activeInteractionMode = interactionMode;
         // Always pin Synara's interaction mode to OpenCode's primary agent.
-        // Otherwise a user config with default agent=plan can trap default turns in plan mode.
+        // Otherwise a user config with default agent=plan (or a stale options.agent=plan
+        // after leaving Synara plan mode) can trap default turns in plan mode.
+        const modePinnedAgent =
+          interactionMode === "plan" ? adapterConfig.planAgent : adapterConfig.defaultAgent;
         context.activeAgent =
-          agent ??
-          (input.interactionMode === "plan" ? adapterConfig.planAgent : adapterConfig.defaultAgent);
+          interactionMode !== "plan" && requestedAgent === adapterConfig.planAgent
+            ? adapterConfig.defaultAgent
+            : (requestedAgent ?? modePinnedAgent);
         context.activeVariant = variant;
         updateProviderSession(
           context,
@@ -3529,18 +3931,22 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
 
       const stopSession: OpenCodeAdapterShape["stopSession"] = Effect.fn("stopSession")(
         function* (threadId) {
-          const context = ensureAdapterSessionContext(threadId);
+          const context = sessions.get(threadId);
+          if (!context) return;
+          const wasStopped = yield* Ref.get(context.stopped);
           yield* stopOpenCodeContext(context);
           sessions.delete(threadId);
-          yield* emit(context, {
-            ...buildEventBase({ threadId }),
-            type: "session.exited",
-            payload: {
-              reason: "Session stopped.",
-              recoverable: false,
-              exitKind: "graceful",
-            },
-          });
+          if (!wasStopped) {
+            yield* emit(context, {
+              ...buildEventBase({ threadId }),
+              type: "session.exited",
+              payload: {
+                reason: "Session stopped.",
+                recoverable: false,
+                exitKind: "graceful",
+              },
+            });
+          }
         },
       );
 

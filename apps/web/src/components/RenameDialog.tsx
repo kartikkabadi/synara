@@ -39,15 +39,17 @@ export function RenameDialog({
   title,
   description,
   initialValue,
-  allowEmpty = false,
+  allowEmpty: allowEmptyProp,
   placeholder,
-  saveLabel = "Save",
+  saveLabel: saveLabelProp,
   onOpenChange,
   onSave,
 }: RenameDialogProps) {
+  const allowEmpty = allowEmptyProp ?? false;
+  const saveLabel = saveLabelProp ?? "Save";
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogPopup surface="solid" className="max-w-md">
+      <DialogPopup className="max-w-md">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description ? <DialogDescription>{description}</DialogDescription> : null}

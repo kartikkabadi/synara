@@ -3,7 +3,9 @@ import {
   type AutomationDefinition,
   type AutomationId,
   type AutomationListResult,
+  type AutomationMemory,
   type AutomationMode,
+  type AutomationNotificationPolicy,
   type AutomationRun,
   type AutomationRunResult,
   type AutomationStreamEvent,
@@ -14,6 +16,7 @@ import {
   type RuntimeMode,
   type ThreadId,
 } from "@synara/contracts";
+import { automationRequiresTargetThread } from "@synara/shared/automationMode";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
@@ -56,12 +59,14 @@ import {
   datetimeLocalFromIso,
   defaultModelSelection,
   formatCadence,
+  formatCadenceLong,
   formatClockTime,
   formatDateTime,
+  formatNextRun,
   formatSchedule,
   formFromDefinition,
-  groupHeartbeatAutomationsByTargetThread,
-  heartbeatAutomationsForThread,
+  groupAutomationsByContinuedThread,
+  automationsForThread,
   isFormSubmittable,
   isoFromDatetimeLocal,
   modelSelectionForProjectChange,
@@ -94,7 +99,11 @@ import { useStore } from "~/store";
 import { resolveThreadPickerTitle } from "./-chatThreadRoute.logic";
 
 export const automationQueryKey = ["automations"] as const;
-export const EMPTY_AUTOMATION_LIST: AutomationListResult = { definitions: [], runs: [] };
+export const EMPTY_AUTOMATION_LIST: AutomationListResult = {
+  definitions: [],
+  runs: [],
+  memories: [],
+};
 
 export {
   acknowledgedRiskIdsForFormWarnings,
@@ -105,12 +114,14 @@ export {
   datetimeLocalFromIso,
   defaultModelSelection,
   formatCadence,
+  formatCadenceLong,
   formatClockTime,
   formatDateTime,
+  formatNextRun,
   formatSchedule,
   formFromDefinition,
-  groupHeartbeatAutomationsByTargetThread,
-  heartbeatAutomationsForThread,
+  groupAutomationsByContinuedThread,
+  automationsForThread,
   isFormSubmittable,
   isoFromDatetimeLocal,
   modelSelectionForProjectChange,
@@ -258,15 +269,13 @@ export function RunStatusIndicator({
 }
 
 export function isTriageRun(run: AutomationRun): boolean {
-  if (run.result) {
-    return isUnresolvedTriageResult(run.result);
+  if (run.status === "waiting-for-approval") {
+    return true;
   }
-  return (
-    run.status === "failed" ||
-    run.status === "cancelled" ||
-    run.status === "interrupted" ||
-    run.status === "waiting-for-approval"
-  );
+  if (run.result) {
+    return run.finishedAt !== null && isUnresolvedTriageResult(run.result);
+  }
+  return run.status === "failed" || run.status === "cancelled" || run.status === "interrupted";
 }
 
 export function isUnresolvedTriageResult(result: AutomationRunResult | null): boolean {
@@ -280,7 +289,7 @@ export function unresolvedTriageRuns(runs: readonly AutomationRun[]): Automation
 export function allVisibleTriageRuns(runs: readonly AutomationRun[]): AutomationRun[] {
   return runs.filter((run) => {
     if (run.result) {
-      return run.result.archivedAt === null;
+      return run.finishedAt !== null && run.result.archivedAt === null;
     }
     return isTriageRun(run);
   });
@@ -332,6 +341,11 @@ export function runResultSummary(run: AutomationRun): string {
   }
 }
 
+export function runResultTitle(run: AutomationRun): string | null {
+  const title = run.result?.title?.trim();
+  return title ? title : null;
+}
+
 export function canCancelAutomationRun(run: AutomationRun): boolean {
   return (
     run.status === "pending" ||
@@ -341,6 +355,78 @@ export function canCancelAutomationRun(run: AutomationRun): boolean {
   );
 }
 
+/**
+ * Plain-language warning for a latest run that needs the user's attention, or null when
+ * the run ended normally (or is still progressing). Drives the amber glyph and the
+ * subtitle warning segment on automation list rows.
+ */
+export function automationAttentionLabel(run: AutomationRun): string | null {
+  switch (run.status) {
+    case "waiting-for-approval":
+      return "Waiting for approval";
+    case "failed":
+      return "Last run failed";
+    case "cancelled":
+      return "Last run cancelled";
+    case "interrupted":
+      return "Last run interrupted";
+    default:
+      return null;
+  }
+}
+
+type LiveAutomationRun = AutomationRun & {
+  readonly status: "pending" | "claimed" | "running" | "waiting-for-approval";
+};
+
+export function isLiveRun(run: AutomationRun | null): run is LiveAutomationRun {
+  return (
+    run?.status === "pending" ||
+    run?.status === "claimed" ||
+    run?.status === "running" ||
+    run?.status === "waiting-for-approval"
+  );
+}
+
+/**
+ * Icon + tint for an automation list row's leading status glyph.
+ * - Live runs spin with a circular loading glyph.
+ * - Completed successful runs show a checkmark circle.
+ * - Failed/cancelled/interrupted runs keep the warning exclamation.
+ * - Scheduled (enabled with a future next run) shows a clock.
+ * - Paused automations show a pause glyph.
+ */
+export function automationListRowIcon(
+  definition: AutomationDefinition,
+  latestRun: AutomationRun | null,
+): { readonly name: string; readonly className: string } {
+  // Pausing prevents future dispatches but does not cancel an in-flight run, so the
+  // active run state must take precedence over the definition's enabled flag.
+  if (isLiveRun(latestRun)) {
+    return {
+      name: "loading-circle",
+      className: "size-4 animate-spin text-blue-500 motion-reduce:animate-none",
+    };
+  }
+  if (!definition.enabled) {
+    return { name: "pause", className: "size-4 text-muted-foreground/40" };
+  }
+  if (latestRun?.status === "succeeded") {
+    return { name: "circle-check", className: "size-4 text-green-500" };
+  }
+  if (latestRun && automationAttentionLabel(latestRun) !== null) {
+    return { name: "exclamation-circle", className: "size-4 text-amber-500" };
+  }
+  if (definition.nextRunAt) {
+    return { name: "clock", className: "size-4 text-foreground/70" };
+  }
+  return { name: "circle-placeholder-on", className: "size-4 text-foreground/70" };
+}
+
+/**
+ * Tint for the list row's leading status glyph: dimmed when paused, blue while a run is
+ * live, amber when the latest run needs attention, otherwise neutral.
+ */
 export function automationStatusDotClass(
   definition: AutomationDefinition,
   latestRun: AutomationRun | null,
@@ -353,8 +439,8 @@ export function automationStatusDotClass(
   ) {
     return "text-blue-500";
   }
-  if (latestRun && isTriageRun(latestRun)) return "text-destructive";
-  return "text-emerald-500";
+  if (latestRun && automationAttentionLabel(latestRun) !== null) return "text-amber-500";
+  return "text-foreground/70";
 }
 
 const deletedAutomationIdsInCache = new Set<string>();
@@ -443,6 +529,52 @@ function upsertRunByUpdatedAt(
     : [incoming, ...runs];
 }
 
+function mergeMemoriesByUpdatedAt(
+  snapshotMemories: readonly AutomationMemory[],
+  previousMemories: readonly AutomationMemory[],
+  visibleAutomationIds: ReadonlySet<AutomationId>,
+): AutomationMemory[] {
+  const previousByAutomationId = new Map(
+    previousMemories.map((memory) => [memory.automationId, memory]),
+  );
+  const seen = new Set<AutomationId>();
+  const memories: AutomationMemory[] = [];
+  for (const snapshotMemory of snapshotMemories) {
+    if (!visibleAutomationIds.has(snapshotMemory.automationId)) {
+      continue;
+    }
+    seen.add(snapshotMemory.automationId);
+    const previousMemory = previousByAutomationId.get(snapshotMemory.automationId);
+    memories.push(
+      previousMemory && isSameOrNewerTimestamp(previousMemory.updatedAt, snapshotMemory.updatedAt)
+        ? previousMemory
+        : snapshotMemory,
+    );
+  }
+  for (const previousMemory of previousMemories) {
+    if (
+      !seen.has(previousMemory.automationId) &&
+      visibleAutomationIds.has(previousMemory.automationId)
+    ) {
+      memories.push(previousMemory);
+    }
+  }
+  return memories;
+}
+
+function upsertMemoryByUpdatedAt(
+  memories: readonly AutomationMemory[],
+  incoming: AutomationMemory,
+): AutomationMemory[] {
+  const existing = memories.find((memory) => memory.automationId === incoming.automationId);
+  if (existing && isNewerTimestamp(existing.updatedAt, incoming.updatedAt)) {
+    return [...memories];
+  }
+  return existing
+    ? memories.map((memory) => (memory.automationId === incoming.automationId ? incoming : memory))
+    : [incoming, ...memories];
+}
+
 export function applyAutomationEvent(
   prev: AutomationListResult | undefined,
   event: AutomationStreamEvent,
@@ -455,6 +587,11 @@ export function applyAutomationEvent(
       return {
         definitions,
         runs: mergeRunsByUpdatedAt(event.runs, base.runs, visibleAutomationIds),
+        memories: mergeMemoriesByUpdatedAt(
+          event.memories ?? [],
+          base.memories ?? [],
+          visibleAutomationIds,
+        ),
       };
     }
     case "definition-upserted": {
@@ -463,20 +600,28 @@ export function applyAutomationEvent(
       }
       deletedAutomationIdsInCache.delete(event.definition.id);
       const definitions = upsertDefinitionByUpdatedAt(base.definitions, event.definition);
-      return { definitions, runs: base.runs };
+      return { definitions, runs: base.runs, memories: base.memories ?? [] };
     }
     case "definition-deleted":
       deletedAutomationIdsInCache.add(event.automationId);
       return {
         definitions: base.definitions.filter((definition) => definition.id !== event.automationId),
         runs: base.runs.filter((run) => run.automationId !== event.automationId),
+        memories: (base.memories ?? []).filter(
+          (memory) => memory.automationId !== event.automationId,
+        ),
       };
     case "run-upserted": {
       if (deletedAutomationIdsInCache.has(event.run.automationId)) {
         return base;
       }
       const runs = upsertRunByUpdatedAt(base.runs, event.run);
-      return { definitions: base.definitions, runs };
+      return { definitions: base.definitions, runs, memories: base.memories ?? [] };
+    }
+    case "memory-upserted": {
+      const currentMemories = base.memories ?? [];
+      const memories = upsertMemoryByUpdatedAt(currentMemories, event.memory);
+      return { definitions: base.definitions, runs: base.runs, memories };
     }
   }
 }
@@ -510,6 +655,7 @@ export function useAutomations(onRunStarted?: (threadId: ThreadId) => void) {
               : definition,
           ),
           runs: base.runs,
+          memories: base.memories ?? [],
         };
       });
       return { previous };
@@ -731,8 +877,8 @@ export function AutomationDialog({
   form,
   projects,
   threads,
-  warnings = [],
-  acknowledgedWarningIds = new Set(),
+  warnings: warningsProp,
+  acknowledgedWarningIds: acknowledgedWarningIdsProp,
   onOpenChange,
   onFormChange,
   onToggleWarning,
@@ -752,6 +898,9 @@ export function AutomationDialog({
   readonly onSubmit: () => void;
   readonly busy: boolean;
 }) {
+  const warnings: readonly AutomationDraftWarning[] = warningsProp ?? [];
+  const acknowledgedWarningIds: ReadonlySet<AutomationDraftWarningId> =
+    acknowledgedWarningIdsProp ?? new Set<AutomationDraftWarningId>();
   const setField = <K extends keyof AutomationFormState>(key: K, value: AutomationFormState[K]) =>
     onFormChange({ ...form, [key]: value });
   const projectThreads = threads.filter((thread) => thread.projectId === form.projectId);
@@ -813,7 +962,7 @@ export function AutomationDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogPopup surface="solid" showCloseButton={false} className="max-w-3xl">
+      <DialogPopup showCloseButton={false} className="max-w-3xl">
         <DialogTitle className="sr-only">
           {editing ? "Edit automation" : "New automation"}
         </DialogTitle>
@@ -911,7 +1060,9 @@ export function AutomationDialog({
 
         <div className="flex flex-wrap items-center gap-2 px-4 pb-4 pt-1">
           <div className="flex flex-1 flex-wrap items-center gap-0.5">
-            {form.mode === "standalone" ? (
+            {/* Heartbeat runs inherit the target thread's environment; every other mode
+                opens its own thread and therefore picks one. */}
+            {automationRequiresTargetThread(form.mode) ? null : (
               <Menu>
                 <MenuTrigger render={<Button variant="ghost" size="sm" className={CHIP_CLASS} />}>
                   <WorktreeIcon className="size-4" />
@@ -933,7 +1084,7 @@ export function AutomationDialog({
                   </MenuRadioGroup>
                 </ComposerPickerMenuPopup>
               </Menu>
-            ) : null}
+            )}
 
             <Menu>
               <MenuTrigger render={<Button variant="ghost" size="sm" className={CHIP_CLASS} />}>
@@ -1129,10 +1280,13 @@ export function AutomationDialog({
                     onValueChange={(value) => setField("mode", value as AutomationMode)}
                   >
                     <MenuRadioItem value="standalone">Standalone</MenuRadioItem>
+                    <MenuRadioItem value="dedicated">Dedicated thread</MenuRadioItem>
                     <MenuRadioItem value="heartbeat">Heartbeat</MenuRadioItem>
                   </MenuRadioGroup>
                 </MenuGroup>
-                {form.mode === "heartbeat" ? (
+                {/* Only heartbeat continues a thread the user picks; a dedicated automation
+                    creates and keeps its own. */}
+                {automationRequiresTargetThread(form.mode) ? (
                   <>
                     <MenuSeparator />
                     <MenuGroup>
@@ -1154,27 +1308,27 @@ export function AutomationDialog({
                         </MenuRadioGroup>
                       )}
                     </MenuGroup>
-                    <MenuSeparator />
-                    <MenuGroup>
-                      <MenuGroupLabel>Stop when</MenuGroupLabel>
-                      <div className="px-2 py-1">
-                        <input
-                          value={form.stopWhen}
-                          onChange={(event) => setField("stopWhen", event.target.value)}
-                          placeholder="PR is ready to merge"
-                          className="w-full rounded-md border border-border bg-transparent px-2 py-1.5 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        />
-                      </div>
-                    </MenuGroup>
-                    <MenuSeparator />
-                    <MenuCheckboxItem
-                      checked={form.stopOnError}
-                      onCheckedChange={(checked) => setField("stopOnError", checked)}
-                    >
-                      Stop on error
-                    </MenuCheckboxItem>
                   </>
                 ) : null}
+                <MenuSeparator />
+                <MenuGroup>
+                  <MenuGroupLabel>Stop when</MenuGroupLabel>
+                  <div className="px-2 py-1">
+                    <input
+                      value={form.stopWhen}
+                      onChange={(event) => setField("stopWhen", event.target.value)}
+                      placeholder="PR is ready to merge"
+                      className="w-full rounded-md border border-border bg-transparent px-2 py-1.5 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    />
+                  </div>
+                </MenuGroup>
+                <MenuSeparator />
+                <MenuCheckboxItem
+                  checked={form.stopOnError}
+                  onCheckedChange={(checked) => setField("stopOnError", checked)}
+                >
+                  Stop on error
+                </MenuCheckboxItem>
                 <MenuSeparator />
                 <MenuGroup>
                   <MenuGroupLabel>Max iterations</MenuGroupLabel>
@@ -1187,6 +1341,19 @@ export function AutomationDialog({
                         {preset.label}
                       </MenuRadioItem>
                     ))}
+                  </MenuRadioGroup>
+                </MenuGroup>
+                <MenuSeparator />
+                <MenuGroup>
+                  <MenuGroupLabel>Notify</MenuGroupLabel>
+                  <MenuRadioGroup
+                    value={form.notificationPolicy}
+                    onValueChange={(value) =>
+                      setField("notificationPolicy", value as AutomationNotificationPolicy)
+                    }
+                  >
+                    <MenuRadioItem value="all">All runs</MenuRadioItem>
+                    <MenuRadioItem value="failed-runs-only">Failed runs only</MenuRadioItem>
                   </MenuRadioGroup>
                 </MenuGroup>
               </ComposerPickerMenuPopup>

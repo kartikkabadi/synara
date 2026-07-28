@@ -13,15 +13,26 @@ import type {
   AuthWebSocketTokenResult,
 } from "./auth";
 import type {
+  ExternalMcpCreateIntegrationInput,
+  ExternalMcpCreateIntegrationResult,
+  ExternalMcpIntegration,
+  ExternalMcpRefreshPairingInput,
+  ExternalMcpRevokeIntegrationInput,
+} from "./externalMcp";
+import type {
   AutomationCancelRunInput,
   AutomationCancelRunResult,
   AutomationArchiveRunInput,
   AutomationCreateInput,
   AutomationDefinition,
   AutomationDeleteInput,
+  AutomationGetMemoryInput,
   AutomationListInput,
   AutomationListResult,
   AutomationMarkRunReadInput,
+  AutomationMemory,
+  AutomationResolveProposalInput,
+  AutomationResolveProposalResult,
   AutomationRunActionResult,
   AutomationRunNowInput,
   AutomationRunNowResult,
@@ -52,6 +63,7 @@ import type {
   GitPullResult,
   GitReadWorkingTreeDiffInput,
   GitReadWorkingTreeDiffResult,
+  GitWorkingTreeDiffStatsResult,
   GitRemoveIndexLockInput,
   GitRemoveWorktreeInput,
   GitResolvePullRequestResult,
@@ -150,6 +162,8 @@ import type {
   ClientOrchestrationCommand,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationGetThreadDetailSnapshotInput,
+  OrchestrationGetThreadDetailSnapshotResult,
   OrchestrationImportThreadInput,
   OrchestrationImportThreadResult,
   OrchestrationListProviderDeliveryBlockersInput,
@@ -343,12 +357,33 @@ export type DesktopAppSnapStatus =
   | "ready"
   | "error";
 
+export type DesktopAppSnapShortcutModifier = "command" | "control" | "option" | "shift";
+
+export interface DesktopAppSnapKeyChord {
+  kind: "key-chord";
+  modifier: DesktopAppSnapShortcutModifier;
+  /** A physical DOM KeyboardEvent.code, such as `KeyS` or `Space`. */
+  key: string;
+}
+
+export type DesktopAppSnapShortcut = { kind: "both-option-keys" } | DesktopAppSnapKeyChord;
+
+export interface DesktopAppSnapShortcutAvailability {
+  available: boolean;
+  reason: string | null;
+}
+
+export interface DesktopAppSnapShortcutUpdateResult {
+  state: DesktopAppSnapState;
+  availability: DesktopAppSnapShortcutAvailability;
+}
+
 export interface DesktopAppSnapState {
   platform: DesktopAppSnapPlatform;
   supported: boolean;
   enabled: boolean;
   status: DesktopAppSnapStatus;
-  shortcut: "both-option-keys" | null;
+  shortcut: DesktopAppSnapShortcut | null;
   inputMonitoringPermission: DesktopAppSnapPermission;
   screenRecordingPermission: DesktopAppSnapPermission;
   message: string | null;
@@ -476,6 +511,10 @@ export interface DesktopBridge {
   appSnap: {
     getState: () => Promise<DesktopAppSnapState>;
     setEnabled: (enabled: boolean) => Promise<DesktopAppSnapState>;
+    checkShortcut: (
+      shortcut: DesktopAppSnapShortcut,
+    ) => Promise<DesktopAppSnapShortcutAvailability>;
+    setShortcut: (shortcut: DesktopAppSnapShortcut) => Promise<DesktopAppSnapShortcutUpdateResult>;
     requestPermissions: () => Promise<DesktopAppSnapState>;
     listPendingCaptures: () => Promise<DesktopAppSnapCapture[]>;
     acknowledgeCapture: (captureId: string) => Promise<void>;
@@ -580,6 +619,9 @@ export interface NativeApi {
     readWorkingTreeDiff: (
       input: GitReadWorkingTreeDiffInput,
     ) => Promise<GitReadWorkingTreeDiffResult>;
+    workingTreeDiffStats: (
+      input: GitReadWorkingTreeDiffInput,
+    ) => Promise<GitWorkingTreeDiffStatsResult>;
     summarizeDiff: (input: GitSummarizeDiffInput) => Promise<GitSummarizeDiffResult>;
     runStackedAction: (input: GitRunStackedActionInput) => Promise<GitRunStackedActionResult>;
     onActionProgress: (callback: (event: GitActionProgressEvent) => void) => () => void;
@@ -619,6 +661,16 @@ export interface NativeApi {
     revokeAuthClient: (input: AuthRevokeClientSessionInput) => Promise<{ revoked: boolean }>;
     revokeOtherAuthClients: () => Promise<{ revokedCount: number }>;
     logoutAuthSession: () => Promise<AuthLogoutResult>;
+    listExternalMcpIntegrations: () => Promise<ReadonlyArray<ExternalMcpIntegration>>;
+    createExternalMcpIntegration: (
+      input: ExternalMcpCreateIntegrationInput,
+    ) => Promise<ExternalMcpCreateIntegrationResult>;
+    revokeExternalMcpIntegration: (
+      input: ExternalMcpRevokeIntegrationInput,
+    ) => Promise<{ revoked: boolean }>;
+    refreshExternalMcpPairing: (
+      input: ExternalMcpRefreshPairingInput,
+    ) => Promise<ExternalMcpCreateIntegrationResult>;
     refreshProviders: () => Promise<ServerRefreshProvidersResult>;
     updateProvider: (input: ServerProviderUpdateInput) => Promise<ServerProviderUpdateResult>;
     listWorktrees: () => Promise<ServerListWorktreesResult>;
@@ -665,6 +717,9 @@ export interface NativeApi {
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;
     getShellSnapshot: () => Promise<OrchestrationShellSnapshot>;
+    getThreadDetailSnapshot: (
+      input: OrchestrationGetThreadDetailSnapshotInput,
+    ) => Promise<OrchestrationGetThreadDetailSnapshotResult>;
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
     importThread: (
       input: OrchestrationImportThreadInput,
@@ -691,6 +746,7 @@ export interface NativeApi {
   };
   automation: {
     list: (input?: AutomationListInput) => Promise<AutomationListResult>;
+    getMemory: (input: AutomationGetMemoryInput) => Promise<AutomationMemory | null>;
     create: (input: AutomationCreateInput) => Promise<AutomationDefinition>;
     update: (input: AutomationUpdateInput) => Promise<AutomationDefinition>;
     delete: (input: AutomationDeleteInput) => Promise<void>;
@@ -698,6 +754,9 @@ export interface NativeApi {
     cancelRun: (input: AutomationCancelRunInput) => Promise<AutomationCancelRunResult>;
     markRunRead: (input: AutomationMarkRunReadInput) => Promise<AutomationRunActionResult>;
     archiveRun: (input: AutomationArchiveRunInput) => Promise<AutomationRunActionResult>;
+    resolveProposal: (
+      input: AutomationResolveProposalInput,
+    ) => Promise<AutomationResolveProposalResult>;
     onEvent: (callback: (event: AutomationStreamEvent) => void) => () => void;
   };
   browser: BrowserControlMethods & {

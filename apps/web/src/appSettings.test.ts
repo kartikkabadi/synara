@@ -10,6 +10,7 @@ import {
   AppSettingsSchema,
   CUSTOM_MODEL_EDITOR_PROVIDER_SETTINGS,
   DEFAULT_CHAT_FONT_SIZE_PX,
+  DEFAULT_FOLLOW_UP_BEHAVIOR,
   DEFAULT_SIDEBAR_PROJECT_SORT_ORDER,
   DEFAULT_TERMINAL_FONT_SIZE_PX,
   DEFAULT_SIDEBAR_THREAD_SORT_ORDER,
@@ -32,6 +33,7 @@ import {
   normalizeTerminalFontSizePx,
   patchCustomModels,
   resolveAppModelSelection,
+  resolveFollowUpDispatchMode,
   resolveTerminalFontFamilyStack,
 } from "./appSettings";
 
@@ -57,9 +59,47 @@ describe("normalizeCustomModelSlugs", () => {
   });
 });
 
+describe("resolveFollowUpDispatchMode", () => {
+  it("uses the selected behavior only while a turn is live", () => {
+    expect(
+      resolveFollowUpDispatchMode({
+        behavior: "steer",
+        hasLiveTurn: false,
+      }),
+    ).toBe("queue");
+    expect(
+      resolveFollowUpDispatchMode({
+        behavior: "steer",
+        hasLiveTurn: true,
+      }),
+    ).toBe("steer");
+  });
+
+  it("uses Ctrl/Cmd+Enter as a one-message inversion", () => {
+    expect(
+      resolveFollowUpDispatchMode({
+        behavior: "queue",
+        hasLiveTurn: true,
+        useOppositeBehavior: true,
+      }),
+    ).toBe("steer");
+    expect(
+      resolveFollowUpDispatchMode({
+        behavior: "steer",
+        hasLiveTurn: true,
+        useOppositeBehavior: true,
+      }),
+    ).toBe("queue");
+  });
+});
+
 describe("getAppModelOptions", () => {
   it("does not expose a hardcoded Antigravity model catalog", () => {
     expect(getAppModelOptions("antigravity", [])).toEqual([]);
+  });
+
+  it("does not expose Anthropic models in Pi before authenticated discovery", () => {
+    expect(getAppModelOptions("pi", [])).toEqual([]);
   });
 
   it("appends saved custom models after the built-in options", () => {
@@ -819,8 +859,10 @@ describe("AppSettingsSchema", () => {
       confirmThreadDelete: false,
       confirmTerminalTabClose: true,
       enableAppSnap: false,
+      appSnapShortcut: { kind: "both-option-keys" },
       appSnapPlaySound: true,
       enableAssistantStreaming: true,
+      followUpBehavior: DEFAULT_FOLLOW_UP_BEHAVIOR,
       sidebarProjectSortOrder: DEFAULT_SIDEBAR_PROJECT_SORT_ORDER,
       sidebarThreadSortOrder: DEFAULT_SIDEBAR_THREAD_SORT_ORDER,
       showStudioSection: true,

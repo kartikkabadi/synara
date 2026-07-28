@@ -7,27 +7,26 @@
  * @module ClaudeAdapterLive
  */
 import { spawn as spawnChildProcess } from "node:child_process";
-import {
-  type AgentInfo,
-  type CanUseTool,
-  type AgentDefinition,
-  query,
-  type HookInput,
-  type HookJSONOutput,
-  type Options as ClaudeQueryOptions,
-  type ModelInfo,
-  type PermissionMode,
-  type PermissionResult,
-  type PermissionUpdate,
-  type SDKMessage,
-  type SDKResultMessage,
-  type SDKControlGetContextUsageResponse,
-  type Settings,
-  type SettingSource,
-  type SDKUserMessage,
-  type SlashCommand,
-  type SpawnOptions as ClaudeSpawnOptions,
-  type SpawnedProcess as ClaudeSpawnedProcess,
+import type {
+  AgentInfo,
+  CanUseTool,
+  AgentDefinition,
+  HookInput,
+  HookJSONOutput,
+  Options as ClaudeQueryOptions,
+  ModelInfo,
+  PermissionMode,
+  PermissionResult,
+  PermissionUpdate,
+  SDKMessage,
+  SDKResultMessage,
+  SDKControlGetContextUsageResponse,
+  Settings,
+  SettingSource,
+  SDKUserMessage,
+  SlashCommand,
+  SpawnOptions as ClaudeSpawnOptions,
+  SpawnedProcess as ClaudeSpawnedProcess,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   ApprovalRequestId,
@@ -94,6 +93,7 @@ import {
 import { buildClaudeMcpServers } from "../../agentGateway/mcpInjection.ts";
 import { renderSynaraHarnessPolicy } from "../../agentGateway/harnessPolicy.ts";
 import { AgentGatewayCredentials } from "../../agentGateway/Services/AgentGatewayCredentials.ts";
+import { PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY } from "../Services/ProviderAdapter.ts";
 import {
   acquireAgentGatewaySessionLease,
   type AgentGatewaySessionLease,
@@ -101,6 +101,7 @@ import {
 import { resolveProviderAttachmentPath } from "../providerAttachmentPaths.ts";
 import { ServerConfig } from "../../config.ts";
 import { buildFileAttachmentsPromptBlock } from "../attachmentProjection.ts";
+import { loadClaudeAgentSdk } from "../claudeAgentSdk.ts";
 import { buildClaudeProcessEnv } from "../claudeProcessEnv.ts";
 import {
   CLAUDE_CONTEXT_WINDOW_MAX_TOKENS,
@@ -158,6 +159,7 @@ import {
 } from "../supervisedProcessTeardown.ts";
 
 const PROVIDER = "claudeAgent" as const;
+const CLAUDE_COMMAND_DISCOVERY_THREAD_ID = ThreadId.makeUnsafe("claude:command-discovery");
 type ClaudeTextStreamKind = Extract<RuntimeContentStreamKind, "assistant_text" | "reasoning_text">;
 type ClaudeToolResultStreamKind = Extract<
   RuntimeContentStreamKind,
@@ -191,6 +193,11 @@ interface ClaudeTurnState {
   readonly capturedProposedPlanKeys: Set<string>;
   readonly sawFileChange: boolean;
   nextSyntheticAssistantBlockIndex: number;
+  // Offset into assistantTextBlockOrder where the current assistant API
+  // message's blocks begin. A turn spans many API messages (tool-use round
+  // trips; a subagent's whole conversation shares one synthetic turn), while
+  // snapshot backfill aligns by position within a single message.
+  assistantMessageBlockBase: number;
 }
 
 interface AssistantTextBlockState {
@@ -409,10 +416,12 @@ function spawnOwnedClaudeCodeProcess(options: ClaudeSpawnOptions): ClaudeOwnedPr
 }
 
 export interface ClaudeAdapterLiveOptions {
+  // Async because the default implementation lazily imports the Claude Agent
+  // SDK; test doubles may still return a runtime synchronously.
   readonly createQuery?: (input: {
     readonly prompt: AsyncIterable<SDKUserMessage>;
     readonly options: ClaudeQueryOptions;
-  }) => ClaudeQueryRuntime;
+  }) => ClaudeQueryRuntime | Promise<ClaudeQueryRuntime>;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
   // Interval for polling a live workflow's transcript directory. Tests shrink it.
@@ -1405,7 +1414,7 @@ function sdkNativeItemId(message: SDKMessage): string | undefined {
   return undefined;
 }
 
-function subagentParentToolUseId(message: SDKMessage): string | undefined {
+function parentToolUseId(message: SDKMessage): string | undefined {
   if (
     message.type !== "assistant" &&
     message.type !== "user" &&
@@ -1417,6 +1426,26 @@ function subagentParentToolUseId(message: SDKMessage): string | undefined {
   return typeof message.parent_tool_use_id === "string" && message.parent_tool_use_id.length > 0
     ? message.parent_tool_use_id
     : undefined;
+}
+
+function isRecognizedSubagentToolUseId(context: ClaudeSessionContext, toolUseId: string): boolean {
+  if (context.subagentRuns.has(toolUseId) || context.settledSubagentToolUseIds.has(toolUseId)) {
+    return true;
+  }
+  for (const tool of context.inFlightTools.values()) {
+    if (tool.itemId === toolUseId && tool.itemType === "collab_agent_tool_call") {
+      return true;
+    }
+  }
+  return false;
+}
+
+function recognizedSubagentParentToolUseId(
+  context: ClaudeSessionContext,
+  message: SDKMessage,
+): string | undefined {
+  const toolUseId = parentToolUseId(message);
+  return toolUseId && isRecognizedSubagentToolUseId(context, toolUseId) ? toolUseId : undefined;
 }
 
 function claudeTaskTurnStatus(
@@ -1488,20 +1517,31 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           })
         : undefined);
 
-    const createQuery =
-      options?.createQuery ??
-      ((input: {
-        readonly prompt: AsyncIterable<SDKUserMessage>;
-        readonly options: ClaudeQueryOptions;
-      }) => query({ prompt: input.prompt, options: input.options }) as ClaudeQueryRuntime);
+    // The Claude Agent SDK is imported on first query construction rather than at
+    // module scope, so boots that never open a Claude session never pay for it.
+    const createQuery = async (input: {
+      readonly prompt: AsyncIterable<SDKUserMessage>;
+      readonly options: ClaudeQueryOptions;
+    }): Promise<ClaudeQueryRuntime> => {
+      const override = options?.createQuery;
+      if (override) {
+        return override(input);
+      }
+      const { query } = await loadClaudeAgentSdk();
+      return query({ prompt: input.prompt, options: input.options }) as ClaudeQueryRuntime;
+    };
     const spawnClaudeProcess = options?.spawnClaudeCodeProcess ?? spawnOwnedClaudeCodeProcess;
     const teardownProcessTree = options?.teardownProcessTree ?? teardownProviderProcessTree;
 
     const sessions = new Map<ThreadId, ClaudeSessionContext>();
+    const failedStartupProcessOwners = new Map<ThreadId, ClaudeProcessOwner>();
+    const failedCommandDiscoveryProcessOwners = new Set<ClaudeProcessOwner>();
     const sessionLifecycleLocks = new Map<ThreadId, Semaphore.Semaphore>();
     let cachedModels: ProviderListModelsResult | null = null;
     let cachedAgents: ProviderListAgentsResult | null = null;
-    const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const runtimeEventQueue = yield* Queue.bounded<ProviderRuntimeEvent>(
+      PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
+    );
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
     const nextEventId = Effect.map(Random.nextUUIDv4, (id) => EventId.makeUnsafe(id));
@@ -1557,6 +1597,38 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         Effect.asVoid,
       );
     };
+    const teardownFailedStartupProcess = Effect.fnUntraced(function* (
+      threadId: ThreadId,
+      owner: ClaudeProcessOwner,
+    ) {
+      yield* teardownClaudeProcess(threadId, owner);
+      if (failedStartupProcessOwners.get(threadId) === owner) {
+        failedStartupProcessOwners.delete(threadId);
+      }
+    });
+    const teardownFailedCommandDiscoveryProcesses = () =>
+      Effect.forEach(
+        failedCommandDiscoveryProcessOwners,
+        (owner) =>
+          teardownClaudeProcess(CLAUDE_COMMAND_DISCOVERY_THREAD_ID, owner).pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                failedCommandDiscoveryProcessOwners.delete(owner);
+              }),
+            ),
+          ),
+        { discard: true },
+      );
+    const teardownCommandDiscoveryProcess = (owner: ClaudeProcessOwner) =>
+      teardownClaudeProcess(CLAUDE_COMMAND_DISCOVERY_THREAD_ID, owner).pipe(
+        Effect.tapError(() =>
+          Effect.sync(() => {
+            if (owner.process) {
+              failedCommandDiscoveryProcessOwners.add(owner);
+            }
+          }),
+        ),
+      );
 
     const offerRuntimeEvent = (
       context: ClaudeSessionContext,
@@ -1819,10 +1891,16 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           return;
         }
 
-        const orderedBlocks = turnState.assistantTextBlockOrder.map((block) => ({
-          blockIndex: block.blockIndex,
-          block,
-        }));
+        // Align against only the current API message's blocks: aligning from
+        // position 0 would collide with completed blocks from earlier messages
+        // in the same turn and silently drop this snapshot's text (subagent
+        // conversations arrive as complete messages under one synthetic turn).
+        const orderedBlocks = turnState.assistantTextBlockOrder
+          .slice(turnState.assistantMessageBlockBase)
+          .map((block) => ({
+            blockIndex: block.blockIndex,
+            block,
+          }));
 
         for (const [position, text] of snapshotTextBlocks.entries()) {
           const existingEntry = orderedBlocks[position];
@@ -1852,6 +1930,10 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             });
           }
         }
+
+        // Without stream events there is no message_start to advance the base,
+        // so move it past this snapshot's blocks once they are settled.
+        turnState.assistantMessageBlockBase = turnState.assistantTextBlockOrder.length;
       });
 
     const ensureThreadId = (
@@ -2438,6 +2520,74 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       return run;
     };
 
+    // Opens a tool item and emits item.started. Streaming turns key the entry
+    // by stream block index; complete-message turns (subagent conversations
+    // arrive without stream events) use synthetic negative keys that stream
+    // deltas can never reference.
+    const openInFlightTool = (
+      context: ClaudeSessionContext,
+      input: {
+        readonly blockIndex: number;
+        readonly toolName: string;
+        readonly itemId: string;
+        readonly toolInput: Record<string, unknown>;
+        readonly rawMethod: string;
+        readonly rawPayload: unknown;
+      },
+    ): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        const itemType = classifyToolItemType(input.toolName);
+        const detail = summarizeToolRequest(input.toolName, input.toolInput);
+        const inputFingerprint =
+          Object.keys(input.toolInput).length > 0
+            ? toolInputFingerprint(input.toolInput)
+            : undefined;
+
+        const tool: ToolInFlight = {
+          itemId: input.itemId,
+          itemType,
+          toolName: input.toolName,
+          title: titleForTool(itemType),
+          detail,
+          input: input.toolInput,
+          partialInputJson: "",
+          ...(inputFingerprint ? { lastEmittedInputFingerprint: inputFingerprint } : {}),
+        };
+        context.inFlightTools.set(input.blockIndex, tool);
+
+        const stamp = yield* makeEventStamp();
+        yield* offerRuntimeEvent(context, {
+          type: "item.started",
+          eventId: stamp.eventId,
+          provider: PROVIDER,
+          createdAt: stamp.createdAt,
+          threadId: context.session.threadId,
+          ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+          itemId: asRuntimeItemId(tool.itemId),
+          payload: {
+            itemType: tool.itemType,
+            status: "inProgress",
+            title: tool.title,
+            ...(tool.detail ? { detail: tool.detail } : {}),
+            data: toolLifecycleEventData(tool),
+          },
+          providerRefs: nativeProviderRefs(context, { providerItemId: tool.itemId }),
+          raw: {
+            source: "claude.sdk.message",
+            method: input.rawMethod,
+            payload: input.rawPayload,
+          },
+        });
+        if (tool.toolName === "TodoWrite") {
+          yield* emitTodoTasksUpdated(context, {
+            toolInput: input.toolInput,
+            toolUseId: tool.itemId,
+            rawMethod: input.rawMethod,
+            rawPayload: input.rawPayload,
+          });
+        }
+      });
+
     const handleStreamEvent = (
       context: ClaudeSessionContext,
       message: SDKMessage,
@@ -2597,59 +2747,17 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           if (isClientSurfacedClaudeTool(toolName)) {
             return;
           }
-          const itemType = classifyToolItemType(toolName);
-          const toolInput =
-            typeof block.input === "object" && block.input !== null
-              ? (block.input as Record<string, unknown>)
-              : {};
-          const itemId = block.id;
-          const detail = summarizeToolRequest(toolName, toolInput);
-          const inputFingerprint =
-            Object.keys(toolInput).length > 0 ? toolInputFingerprint(toolInput) : undefined;
-
-          const tool: ToolInFlight = {
-            itemId,
-            itemType,
+          yield* openInFlightTool(context, {
+            blockIndex: index,
             toolName,
-            title: titleForTool(itemType),
-            detail,
-            input: toolInput,
-            partialInputJson: "",
-            ...(inputFingerprint ? { lastEmittedInputFingerprint: inputFingerprint } : {}),
-          };
-          context.inFlightTools.set(index, tool);
-
-          const stamp = yield* makeEventStamp();
-          yield* offerRuntimeEvent(context, {
-            type: "item.started",
-            eventId: stamp.eventId,
-            provider: PROVIDER,
-            createdAt: stamp.createdAt,
-            threadId: context.session.threadId,
-            ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
-            itemId: asRuntimeItemId(tool.itemId),
-            payload: {
-              itemType: tool.itemType,
-              status: "inProgress",
-              title: tool.title,
-              ...(tool.detail ? { detail: tool.detail } : {}),
-              data: toolLifecycleEventData(tool),
-            },
-            providerRefs: nativeProviderRefs(context, { providerItemId: tool.itemId }),
-            raw: {
-              source: "claude.sdk.message",
-              method: "claude/stream_event/content_block_start",
-              payload: message,
-            },
+            itemId: block.id,
+            toolInput:
+              typeof block.input === "object" && block.input !== null
+                ? (block.input as Record<string, unknown>)
+                : {},
+            rawMethod: "claude/stream_event/content_block_start",
+            rawPayload: message,
           });
-          if (toolName === "TodoWrite") {
-            yield* emitTodoTasksUpdated(context, {
-              toolInput,
-              toolUseId: tool.itemId,
-              rawMethod: "claude/stream_event/content_block_start",
-              rawPayload: message,
-            });
-          }
           return;
         }
 
@@ -2872,6 +2980,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           capturedProposedPlanKeys: new Set(),
           sawFileChange: false,
           nextSyntheticAssistantBlockIndex: -1,
+          assistantMessageBlockBase: 0,
         };
         context.session = {
           ...context.session,
@@ -2955,6 +3064,47 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               name?: unknown;
               input?: unknown;
             };
+            const isToolUseBlock =
+              toolUse.type === "tool_use" ||
+              toolUse.type === "server_tool_use" ||
+              toolUse.type === "mcp_tool_use";
+            if (
+              isToolUseBlock &&
+              context.subagentRefs !== undefined &&
+              typeof toolUse.id === "string" &&
+              typeof toolUse.name === "string" &&
+              !isClientSurfacedClaudeTool(toolUse.name)
+            ) {
+              // Subagent conversations are forwarded as complete messages only
+              // (no stream events), so this snapshot is the sole chance to open
+              // their tool items. The parent thread always streams and opens
+              // tools from content_block_start — which can arrive after this
+              // snapshot, so registering here for the parent would duplicate
+              // the item. Dedupe by tool-use id in case a subagent ever streams.
+              const toolUseId = toolUse.id;
+              const alreadyOpen = Array.from(context.inFlightTools.values()).some(
+                (tool) => tool.itemId === toolUseId,
+              );
+              if (!alreadyOpen) {
+                let syntheticIndex = -1;
+                for (const key of context.inFlightTools.keys()) {
+                  if (key <= syntheticIndex) {
+                    syntheticIndex = key - 1;
+                  }
+                }
+                yield* openInFlightTool(context, {
+                  blockIndex: syntheticIndex,
+                  toolName: toolUse.name,
+                  itemId: toolUseId,
+                  toolInput:
+                    typeof toolUse.input === "object" && toolUse.input !== null
+                      ? (toolUse.input as Record<string, unknown>)
+                      : {},
+                  rawMethod: "claude/assistant",
+                  rawPayload: message,
+                });
+              }
+            }
             if (toolUse.type !== "tool_use" || toolUse.name !== "ExitPlanMode") {
               continue;
             }
@@ -3722,11 +3872,9 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       Effect.gen(function* () {
         yield* logNativeSdkMessage(context, message);
 
-        // Subagent traffic (Task tool spawns) is tagged with parent_tool_use_id.
-        // Route it through the run's scoped context so it projects onto the child
-        // thread instead of folding into the parent turn, and keep it away from
-        // the parent's resume cursor.
-        const subagentToolUseId = subagentParentToolUseId(message);
+        // Claude also sets parent_tool_use_id on async Bash progress, so route only
+        // ids already recognized as Task/Agent tools onto child threads.
+        const subagentToolUseId = recognizedSubagentParentToolUseId(context, message);
         if (subagentToolUseId !== undefined) {
           // A settled task's zombie tail (messages already in flight when the
           // stop landed) is dropped, not projected onto the settled child.
@@ -3903,6 +4051,9 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         } catch (cause) {
           yield* emitRuntimeError(context, "Failed to close Claude runtime query.", cause);
         }
+        // Do not release session ownership until teardown proves the old
+        // process tree exited. The stopped context remains non-routable and
+        // prevents a replacement process from being spawned concurrently.
         yield* teardownClaudeProcess(context.session.threadId, context.processOwner);
 
         const updatedAt = yield* nowIso;
@@ -4396,6 +4547,12 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         };
         const claudeSubagents = buildClaudeSdkSubagents();
         const claudeSdkEnv = yield* resolveClaudeSdkEnv;
+        const failedStartupProcessOwner = failedStartupProcessOwners.get(threadId);
+        if (failedStartupProcessOwner) {
+          // A prior createQuery failure may have happened after spawning. Do
+          // not create another runtime until that orphan's exit is proven.
+          yield* teardownFailedStartupProcess(threadId, failedStartupProcessOwner);
+        }
         const existing = sessions.get(threadId);
         if (existing) {
           // Retire and prove the old process tree before spawning its replacement.
@@ -4458,7 +4615,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             : {}),
         };
 
-        const queryRuntime = yield* Effect.try({
+        const queryRuntime = yield* Effect.tryPromise({
           try: () =>
             createQuery({
               prompt,
@@ -4474,7 +4631,22 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         }).pipe(
           Effect.tapError(() =>
             Effect.all([
-              teardownClaudeProcess(threadId, processOwner),
+              teardownClaudeProcess(threadId, processOwner).pipe(
+                Effect.catch((error) =>
+                  Effect.sync(() => {
+                    if (processOwner.process) {
+                      failedStartupProcessOwners.set(threadId, processOwner);
+                    }
+                  }).pipe(
+                    Effect.andThen(
+                      Effect.logWarning("claude.session.failed_start_teardown_unproven", {
+                        threadId,
+                        detail: error.message,
+                      }),
+                    ),
+                  ),
+                ),
+              ),
               gatewaySessionLease ? Effect.sync(gatewaySessionLease.release) : Effect.void,
             ]).pipe(Effect.asVoid),
           ),
@@ -4624,9 +4796,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                 config: {
                   ...(modelSelection?.model ? { model: modelSelection.model } : {}),
                   ...(apiModelId ? { apiModelId } : {}),
-                  ...(requestedAutoCompactWindow
-                    ? { autoCompactWindow: requestedAutoCompactWindow }
-                    : {}),
+                  autoCompactWindow: requestedAutoCompactWindowTokens ?? null,
                   ...(input.cwd ? { cwd: input.cwd } : {}),
                   ...(effectiveEffort ? { effort: effectiveEffort } : {}),
                   ...(permissionMode ? { permissionMode } : {}),
@@ -4757,6 +4927,23 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           context.lastKnownAutoCompactThreshold = requestedAutoCompactWindow;
           context.emittedContextUsageWarnings.delete("near-window");
           context.emittedContextUsageWarnings.delete("large-prompt");
+
+          const configuredWindow =
+            requestedAutoCompactWindow !== undefined
+              ? { autoCompactWindow: requestedAutoCompactWindow }
+              : context.lastKnownContextWindow !== undefined
+                ? { contextWindow: context.lastKnownContextWindow }
+                : { autoCompactWindow: null };
+          const configuredStamp = yield* makeEventStamp();
+          yield* offerRuntimeEvent(context, {
+            type: "session.configured",
+            eventId: configuredStamp.eventId,
+            provider: PROVIDER,
+            createdAt: configuredStamp.createdAt,
+            threadId: input.threadId,
+            payload: { config: configuredWindow },
+            providerRefs: nativeProviderRefs(context),
+          });
         }
 
         // The thinking toggle mirrors the spawn-time `alwaysThinkingEnabled`
@@ -4857,6 +5044,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           capturedProposedPlanKeys: new Set(),
           sawFileChange: false,
           nextSyntheticAssistantBlockIndex: -1,
+          assistantMessageBlockBase: 0,
         };
 
         const updatedAt = yield* nowIso;
@@ -5074,10 +5262,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         Effect.gen(function* () {
           const context = sessions.get(threadId);
           if (!context) {
-            return yield* new ProviderAdapterSessionNotFoundError({
-              provider: PROVIDER,
-              threadId,
-            });
+            return;
           }
           yield* stopSessionInternal(context, {
             emitExitEvent: true,
@@ -5102,41 +5287,51 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       cwd: string,
       env: NodeJS.ProcessEnv,
     ): Promise<ProviderListCommandsResult> {
+      // Never spawn another discovery process until every previously unproven
+      // process tree has been reaped successfully.
+      await Effect.runPromise(teardownFailedCommandDiscoveryProcesses());
+
       // Spawn a lightweight Claude Code process for native command discovery.
       // The SDK's supportedCommands() awaits an internal initialization promise
       // that only resolves when the async generator is iterated (driving the
       // subprocess handshake). We iterate in the background to unblock it.
       const processOwner: ClaudeProcessOwner = {};
-      const tempQuery = createQuery({
-        prompt: neverResolvingUserMessageStream(),
-        options: {
-          cwd,
-          pathToClaudeCodeExecutable: "claude",
-          settingSources: [...CLAUDE_SETTING_SOURCES],
-          permissionMode: "plan" as PermissionMode,
-          persistSession: false,
-          env,
-          spawnClaudeCodeProcess: bindClaudeProcessOwner(processOwner),
-        },
-      });
+      let tempQuery: ClaudeQueryRuntime | undefined;
 
       try {
+        // Query construction itself may invoke the spawn callback before
+        // throwing, so it belongs inside the same ownership boundary.
+        tempQuery = await createQuery({
+          prompt: neverResolvingUserMessageStream(),
+          options: {
+            cwd,
+            pathToClaudeCodeExecutable: "claude",
+            settingSources: [...CLAUDE_SETTING_SOURCES],
+            permissionMode: "plan" as PermissionMode,
+            persistSession: false,
+            env,
+            spawnClaudeCodeProcess: bindClaudeProcessOwner(processOwner),
+          },
+        });
+        const queryRuntime = tempQuery;
+
         // Drive the iterator so the subprocess completes its init handshake.
         // This runs in the background; close() in the finally block stops it.
         void (async () => {
-          for await (const message of tempQuery) {
+          for await (const message of queryRuntime) {
             void message;
             /* consume until closed */
           }
         })().catch(() => undefined);
 
-        const commands = await tempQuery.supportedCommands();
+        const commands = await queryRuntime.supportedCommands();
         return mapSupportedCommands(commands);
       } finally {
-        tempQuery.close();
-        await Effect.runPromise(
-          teardownClaudeProcess(ThreadId.makeUnsafe("claude:command-discovery"), processOwner),
-        );
+        try {
+          tempQuery?.close();
+        } finally {
+          await Effect.runPromise(teardownCommandDiscoveryProcess(processOwner));
+        }
       }
     }
 
@@ -5206,24 +5401,40 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       } satisfies ProviderListSkillsResult);
 
     const stopAll: ClaudeAdapterShape["stopAll"] = () =>
-      Effect.forEach(
-        sessions,
-        ([, context]) =>
-          stopSessionInternal(context, {
-            emitExitEvent: true,
-          }),
-        { discard: true },
-      );
+      Effect.gen(function* () {
+        yield* Effect.forEach(
+          sessions,
+          ([, context]) =>
+            stopSessionInternal(context, {
+              emitExitEvent: true,
+            }),
+          { discard: true },
+        );
+        yield* Effect.forEach(
+          failedStartupProcessOwners,
+          ([threadId, owner]) => teardownFailedStartupProcess(threadId, owner),
+          { discard: true },
+        );
+        yield* teardownFailedCommandDiscoveryProcesses();
+      });
 
     yield* Effect.addFinalizer(() =>
-      Effect.forEach(
-        sessions,
-        ([, context]) =>
-          stopSessionInternal(context, {
-            emitExitEvent: false,
-          }),
-        { discard: true },
-      ).pipe(Effect.ignore, Effect.andThen(Queue.shutdown(runtimeEventQueue))),
+      Effect.gen(function* () {
+        yield* Effect.forEach(
+          sessions,
+          ([, context]) =>
+            stopSessionInternal(context, {
+              emitExitEvent: false,
+            }),
+          { discard: true },
+        );
+        yield* Effect.forEach(
+          failedStartupProcessOwners,
+          ([threadId, owner]) => teardownFailedStartupProcess(threadId, owner),
+          { discard: true },
+        );
+        yield* teardownFailedCommandDiscoveryProcesses();
+      }).pipe(Effect.ignore, Effect.andThen(Queue.shutdown(runtimeEventQueue))),
     );
 
     // No manual compaction through the current Claude SDK path; automatic

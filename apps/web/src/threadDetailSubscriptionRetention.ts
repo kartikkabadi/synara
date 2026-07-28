@@ -9,7 +9,9 @@ import { useStore } from "./store";
 import { getThreadFromState } from "./threadDerivation";
 
 const THREAD_DETAIL_RETENTION_EVICTION_MS = 15 * 60 * 1000;
-const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = WS_STREAM_LIMITS.threadPerClient;
+// Keep one slot of headroom under the server's per-client thread-stream budget so
+// a newly visible thread can be admitted without waiting for a cache eviction.
+const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = WS_STREAM_LIMITS.threadPerClient - 1;
 
 type RetainedThreadEntry = {
   refCount: number;
@@ -19,12 +21,23 @@ type RetainedThreadEntry = {
 
 const retainedThreadEntries = new Map<ThreadId, RetainedThreadEntry>();
 const listeners = new Set<() => void>();
+const evictionListeners = new Set<(threadId: ThreadId) => void>();
 let cachedSnapshot: readonly ThreadId[] = [];
 
 function emitChange(): void {
   cachedSnapshot = [...retainedThreadEntries.keys()];
   for (const listener of listeners) {
     listener();
+  }
+}
+
+function emitEviction(threadId: ThreadId): void {
+  for (const listener of evictionListeners) {
+    try {
+      listener(threadId);
+    } catch {
+      // Eviction listeners must not break retention bookkeeping.
+    }
   }
 }
 
@@ -93,6 +106,7 @@ function evictEntry(
     return;
   }
   useStore.getState().evictThreadDetail(threadId);
+  emitEviction(threadId);
   if (options?.notify !== false) {
     emitChange();
   }
@@ -160,6 +174,12 @@ function reconcileRetentionEntries(): void {
   evictIdleEntriesToCapacity();
 }
 
+// This reconcile is re-entrant by design: it can evict, and eviction writes to the
+// store, which synchronously runs this subscriber again. It stays correct because
+// `evictEntry` deletes its entry before touching the store, and every step re-reads
+// the live map, so a nested pass can only evict entries the outer pass has not
+// claimed. The eviction notice is the one part that must not run inline — lease
+// owners answer it by queueing a stream refresh rather than writing state here.
 useStore.subscribe(() => {
   reconcileRetentionEntries();
 });
@@ -213,8 +233,30 @@ export function subscribeRetainedThreadDetailIds(listener: () => void): () => vo
   };
 }
 
+/**
+ * Fires after a thread's detail slices were evicted from the store. Subscription
+ * owners use this to refresh threads whose stream lease is still active, since an
+ * eviction wipes messages without triggering a new snapshot on its own.
+ */
+export function subscribeThreadDetailEvictions(listener: (threadId: ThreadId) => void): () => void {
+  evictionListeners.add(listener);
+  return () => {
+    evictionListeners.delete(listener);
+  };
+}
+
 export function getRetainedThreadDetailIdsSnapshot(): readonly ThreadId[] {
   return cachedSnapshot;
+}
+
+/**
+ * Whether retention still owns this thread's warm detail. Subscription owners
+ * check this when a stream lease drops: detail that no retention entry owns and
+ * no lease references would otherwise stay in the store for the session's
+ * lifetime, because eviction only ever runs from a retention entry.
+ */
+export function isThreadDetailRetained(threadId: ThreadId): boolean {
+  return retainedThreadEntries.has(threadId);
 }
 
 export function resolveThreadDetailSubscriptionLeaseIds(input: {

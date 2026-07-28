@@ -3,7 +3,13 @@
 // Layer: Settings UI components
 // Exports: NotificationsSettingsPanel, AppSnapSettingsPanel
 
-import { type DesktopAppSnapPermission, type DesktopAppSnapState } from "@synara/contracts";
+import {
+  type DesktopAppSnapPermission,
+  type DesktopAppSnapState,
+  type ResolvedKeybindingsConfig,
+} from "@synara/contracts";
+import { appSnapShortcutLabels } from "@synara/shared/appSnapShortcut";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import type { AppSettingsBinding } from "~/appSettings";
@@ -18,25 +24,31 @@ import {
   requestBrowserNotificationPermission,
 } from "~/notifications/taskCompletion";
 import {
-  SETTINGS_CARD_CLASS_NAME,
   SETTINGS_CARD_ROW_DESCRIPTION_CLASS_NAME,
   SETTINGS_CARD_ROW_TITLE_CLASS_NAME,
 } from "~/settingsPanelStyles";
 import { Button } from "~/components/ui/button";
-import { Kbd, KbdGroup } from "~/components/ui/kbd";
 import { Switch } from "~/components/ui/switch";
 import { toastManager } from "~/components/ui/toast";
+import { serverConfigQueryOptions } from "~/lib/serverReactQuery";
+import { AppSnapShortcutControl } from "./AppSnapShortcutControl";
 import { SettingResetButton } from "./SettingControls";
-import { SettingsRow, SettingsSection } from "./SettingsPanelPrimitives";
+import { SettingsCard, SettingsRow, SettingsSection } from "./SettingsPanelPrimitives";
 
 function appSnapStatusText(state: DesktopAppSnapState | null): string {
   if (!state) return "Available in the Synara desktop app";
   if (!state.supported) return state.message ?? "Available on macOS only";
-  if (state.status === "ready") return "Listening — press both Option keys to snap";
+  if (state.status === "ready") {
+    const shortcut = state.shortcut;
+    const label = shortcut ? appSnapShortcutLabels(shortcut).join(" + ") : "the shortcut";
+    return `Listening — press ${label} to snap`;
+  }
   if (state.status === "disabled") return "Off";
   if (state.status === "starting") return "Starting the capture listener…";
   return state.message ?? "Permission setup required";
 }
+
+const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 
 const APPSNAP_PERMISSION_LABELS: Record<DesktopAppSnapPermission, string> = {
   granted: "Granted",
@@ -224,6 +236,8 @@ export function AppSnapSettingsPanel({
 }: AppSettingsBinding & { readonly active: boolean }) {
   const [appSnapState, setAppSnapState] = useState<DesktopAppSnapState | null>(null);
   const appSnapRequestGuardRef = useRef(createLatestAppSnapRequestGuard());
+  const serverConfigQuery = useQuery({ ...serverConfigQueryOptions(), enabled: active });
+  const keybindings = serverConfigQuery.data?.keybindings ?? EMPTY_KEYBINDINGS;
 
   useEffect(() => {
     const bridge = window.desktopBridge?.appSnap;
@@ -313,7 +327,7 @@ export function AppSnapSettingsPanel({
 
   return (
     <div className="space-y-6">
-      <div className={cn(SETTINGS_CARD_CLASS_NAME, "flex items-start gap-3 px-4 py-3.5")}>
+      <SettingsCard divided={false} className="flex items-start gap-3 px-4 py-3.5">
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border border-[color:var(--color-border)] text-muted-foreground">
           <CentralIcon name="screen-capture" className="size-4" />
         </span>
@@ -322,10 +336,9 @@ export function AppSnapSettingsPanel({
             Take an AppSnap to show your agent another app's window
           </p>
           <p className={SETTINGS_CARD_ROW_DESCRIPTION_CLASS_NAME}>
-            Press both <Kbd className="mx-px">⌥ Option</Kbd> keys at once while any app is
-            frontmost. Synara captures that window as an image, brings itself forward, and attaches
-            the snap to a task composer — the capture stays on this device until you send the
-            message.
+            Press your two-key shortcut while any app is frontmost. Synara captures that window as
+            an image, brings itself forward, and attaches the snap to a task composer — the capture
+            stays on this device until you send the message.
           </p>
           {!supported ? (
             <p className={cn(SETTINGS_CARD_ROW_DESCRIPTION_CLASS_NAME, "pt-0.5")}>
@@ -335,7 +348,7 @@ export function AppSnapSettingsPanel({
             </p>
           ) : null}
         </div>
-      </div>
+      </SettingsCard>
 
       <SettingsSection title="Capture">
         <SettingsRow
@@ -362,13 +375,23 @@ export function AppSnapSettingsPanel({
 
         <SettingsRow
           title="Shortcut"
-          description="Press the left and right Option keys at the same time. The chord works while any app is focused, and can't be remapped yet."
+          description="Choose exactly two keys: one modifier and one other key. Synara checks its own bindings and asks macOS whether another app already owns the shortcut before saving it."
           control={
-            <KbdGroup>
-              <Kbd>⌥ left</Kbd>
-              <span className="text-xs text-muted-foreground">+</span>
-              <Kbd>⌥ right</Kbd>
-            </KbdGroup>
+            <AppSnapShortcutControl
+              key={
+                settings.appSnapShortcut.kind === "both-option-keys"
+                  ? settings.appSnapShortcut.kind
+                  : `${settings.appSnapShortcut.modifier}:${settings.appSnapShortcut.key}`
+              }
+              shortcut={settings.appSnapShortcut}
+              enabled={enabled}
+              reserved={enabled && appSnapState?.status === "ready"}
+              keybindings={keybindings}
+              onSaved={(shortcut, state) => {
+                updateSettings({ appSnapShortcut: shortcut });
+                setAppSnapState(state);
+              }}
+            />
           }
         />
 

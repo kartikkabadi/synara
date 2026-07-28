@@ -9,6 +9,7 @@ import {
   MessageId,
   OrchestrationProposedPlanId,
   ProjectId,
+  SpaceId,
   ThreadId,
   ThreadMarkerId,
   TurnId,
@@ -36,6 +37,39 @@ import {
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE } from "./types";
 
 describe("store event reducer", () => {
+  it("hydrates and removes Spaces while clearing matching project assignments", () => {
+    const spaceId = SpaceId.makeUnsafe("space-work");
+    let state = applyOrchestrationEvents(makeState(makeThread()), [
+      makeDomainEvent("space.created", {
+        spaceId,
+        name: "Work",
+        icon: "bag",
+        sortOrder: 0,
+        createdAt: "2026-07-15T10:00:00.000Z",
+        updatedAt: "2026-07-15T10:00:00.000Z",
+      }),
+      makeDomainEvent("project.meta-updated", {
+        projectId: ProjectId.makeUnsafe("project-1"),
+        spaceId,
+        updatedAt: "2026-07-15T10:00:01.000Z",
+      }),
+    ]);
+
+    expect(state.spaces.map((space) => space.id)).toEqual([spaceId]);
+    expect(state.projects[0]?.spaceId).toBe(spaceId);
+
+    state = applyOrchestrationEvents(state, [
+      makeDomainEvent("space.deleted", {
+        spaceId,
+        deletedAt: "2026-07-15T10:00:02.000Z",
+      }),
+    ]);
+
+    expect(state.spaces).toEqual([]);
+    expect(state.projects[0]?.spaceId).toBeNull();
+    expect(state.projects[0]?.updatedAt).toBe("2026-07-15T10:00:02.000Z");
+  });
+
   it("preserves plugin mention references from live thread.message-sent events", () => {
     const messageId = MessageId.makeUnsafe("message-with-plugin-mention");
     const next = applyOrchestrationEvents(makeState(makeThread()), [
@@ -178,6 +212,7 @@ describe("store event reducer", () => {
   it("adds projects immediately from live project.created events", () => {
     const next = applyOrchestrationEvents(
       {
+        spaces: [],
         projects: [],
         sidebarThreadSummaryById: {},
         threadsHydrated: false,
@@ -216,6 +251,7 @@ describe("store event reducer", () => {
 
   it("updates existing projects immediately from live project.meta-updated events", () => {
     const initialState: AppState = {
+      spaces: [],
       projects: [
         makeProject({
           id: ProjectId.makeUnsafe("project-live"),
@@ -279,6 +315,7 @@ describe("store event reducer", () => {
   it("removes projects immediately from live project.deleted events", () => {
     const next = applyOrchestrationEvents(
       {
+        spaces: [],
         projects: [makeProject({ id: ProjectId.makeUnsafe("project-live") })],
         sidebarThreadSummaryById: {},
         threadsHydrated: true,
@@ -296,7 +333,9 @@ describe("store event reducer", () => {
     );
 
     expect(next.projects).toEqual([]);
-    expect(next.deletedProjectIdsById?.[ProjectId.makeUnsafe("project-live")]).toBe(true);
+    expect(next.deletedProjectIdsById?.[ProjectId.makeUnsafe("project-live")]).toEqual(
+      expect.any(Number),
+    );
   });
 
   it("settles a running latest turn immediately when session stop is requested", () => {
@@ -407,6 +446,42 @@ describe("store event reducer", () => {
 
     expect(threadsOf(next)[0]?.pendingSourceProposedPlan).toEqual(sourceProposedPlan);
     expect(threadsOf(next)[0]?.latestTurn?.sourceProposedPlan).toEqual(sourceProposedPlan);
+  });
+
+  it("does not adopt runtime/interaction modes from automation-dispatched turns", () => {
+    const initialState = makeState(makeThread({ runtimeMode: "approval-required" }));
+
+    const next = applyOrchestrationEvents(initialState, [
+      makeDomainEvent("thread.turn-start-requested", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        messageId: MessageId.makeUnsafe("automation-message"),
+        runtimeMode: "full-access",
+        interactionMode: DEFAULT_INTERACTION_MODE,
+        dispatchMode: "queue",
+        dispatchOrigin: "automation",
+        createdAt: "2026-02-27T00:01:00.000Z",
+      }),
+    ]);
+
+    expect(threadsOf(next)[0]?.runtimeMode).toBe("approval-required");
+  });
+
+  it("adopts runtime mode from user-dispatched turns", () => {
+    const initialState = makeState(makeThread({ runtimeMode: "approval-required" }));
+
+    const next = applyOrchestrationEvents(initialState, [
+      makeDomainEvent("thread.turn-start-requested", {
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        messageId: MessageId.makeUnsafe("user-message"),
+        runtimeMode: "full-access",
+        interactionMode: DEFAULT_INTERACTION_MODE,
+        dispatchMode: "queue",
+        dispatchOrigin: "user",
+        createdAt: "2026-02-27T00:01:00.000Z",
+      }),
+    ]);
+
+    expect(threadsOf(next)[0]?.runtimeMode).toBe("full-access");
   });
 
   it("does not truncate streamed assistant text when completion only carries the trailing chunk", () => {
@@ -1751,7 +1826,7 @@ describe("store event reducer", () => {
     expect(next.threadIds).not.toContain(threadId);
     expect(next.threadShellById?.[threadId]).toBeUndefined();
     expect(next.sidebarThreadSummaryById[threadId]).toBeUndefined();
-    expect(next.deletedThreadIdsById?.[threadId]).toBe(true);
+    expect(next.deletedThreadIdsById?.[threadId]).toEqual(expect.any(Number));
 
     const afterStaleSnapshot = syncServerShellSnapshot(
       next,
@@ -1907,5 +1982,68 @@ describe("store event reducer", () => {
     expect(next.messageByThreadId).toBe(state.messageByThreadId);
     expect(next.activityByThreadId).toBe(state.activityByThreadId);
     expect(next.sidebarThreadSummaryById).toBe(state.sidebarThreadSummaryById);
+  });
+
+  it("touches only the streamed message slot and its id list stays reference-stable", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const olderIds = Array.from({ length: 5 }, (_, index) =>
+      MessageId.makeUnsafe(`message-${index}`),
+    );
+    const streamingId = MessageId.makeUnsafe("message-streaming");
+    const initialState = makeState(
+      makeThread({
+        messages: [
+          ...olderIds.map((id, index) => ({
+            id,
+            role: "user" as const,
+            text: `prompt ${index}`,
+            turnId: null,
+            createdAt: "2026-02-27T00:01:00.000Z",
+            streaming: false,
+            source: "native" as const,
+          })),
+          {
+            id: streamingId,
+            role: "assistant" as const,
+            text: "Hello",
+            turnId: null,
+            createdAt: "2026-02-27T00:01:00.000Z",
+            streaming: true,
+            source: "native" as const,
+          },
+        ],
+      }),
+    );
+
+    const next = applyOrchestrationEvents(initialState, [
+      makeDomainEvent("thread.message-sent", {
+        threadId,
+        messageId: streamingId,
+        role: "assistant",
+        text: " world",
+        turnId: null,
+        streaming: true,
+        createdAt: "2026-02-27T00:01:00.000Z",
+        updatedAt: "2026-02-27T00:01:01.000Z",
+        attachments: [],
+        source: "native",
+      }),
+    ]);
+
+    expect(threadsOf(next)[0]?.messages.at(-1)?.text).toBe("Hello world");
+    // Only the streamed message is rewritten; every untouched message keeps its identity so
+    // memoized message rows do not re-render on each delta.
+    for (const id of olderIds) {
+      expect(next.messageByThreadId?.[threadId]?.[id]).toBe(
+        initialState.messageByThreadId?.[threadId]?.[id],
+      );
+    }
+    expect(next.messageByThreadId?.[threadId]?.[streamingId]).not.toBe(
+      initialState.messageByThreadId?.[threadId]?.[streamingId],
+    );
+    // The id order is unchanged by an in-place update, so the id list must not be rebuilt.
+    expect(next.messageIdsByThreadId?.[threadId]).toBe(
+      initialState.messageIdsByThreadId?.[threadId],
+    );
   });
 });

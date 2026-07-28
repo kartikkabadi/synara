@@ -107,6 +107,10 @@ interface GitActionsControlProps {
   // `header` renders the split quick-action button; `panel` collapses every git
   // action into a single "Commit and Push" Environment panel row + dropdown.
   variant?: "header" | "panel";
+  // Lets a parent capture "run commit & push for this instance's repo" so a global
+  // keyboard shortcut can trigger it without duplicating the action logic. Called with
+  // `null` on unmount/dependency change so a stale trigger never lingers.
+  onRegisterCommitAndPushTrigger?: ((trigger: (() => void) | null) => void) | undefined;
 }
 
 interface PendingDefaultBranchAction {
@@ -297,6 +301,17 @@ function GitQuickActionIcon({ quickAction }: { quickAction: GitQuickAction }) {
   return <InfoIcon className={GIT_ACTION_ICON_CLASS} />;
 }
 
+// The commit-and-push behavior moves between menu items with git state: on a feature
+// branch with pending changes it is the `commit_push` item, while on the default branch
+// (or with ahead-only commits) it lives under the `push` item. Both the panel row's
+// enabled state and the global shortcut resolve their target through this one rule.
+function findRunnableCommitPushMenuItem(items: GitActionMenuItem[]): GitActionMenuItem | null {
+  return (
+    items.find((item) => (item.id === "commit_push" || item.id === "push") && !item.disabled) ??
+    null
+  );
+}
+
 function GitPickerMenuRow({ item }: { item: GitPickerMenuItem }) {
   return (
     <MenuItem disabled={item.disabled} onClick={item.onSelect}>
@@ -311,9 +326,12 @@ function GitPickerMenuRow({ item }: { item: GitPickerMenuItem }) {
 export default function GitActionsControl({
   gitCwd,
   activeThreadId,
-  hideQuickActionLabel = false,
-  variant = "header",
+  hideQuickActionLabel: hideQuickActionLabelProp,
+  variant: variantProp,
+  onRegisterCommitAndPushTrigger,
 }: GitActionsControlProps) {
+  const hideQuickActionLabel = hideQuickActionLabelProp ?? false;
+  const variant = variantProp ?? "header";
   const isPanel = variant === "panel";
   const { settings } = useAppSettings();
   // Manual memoization kept: this file does not compile under React Compiler (see compile-report).
@@ -358,13 +376,20 @@ export default function GitActionsControl({
     });
   }, [threadToastData]);
 
-  const { data: gitStatus = null, error: gitStatusError } = useQuery(gitStatusQueryOptions(gitCwd));
-
-  const { data: branchList = null } = useQuery(gitBranchesQueryOptions(gitCwd));
+  const { data: branchListData, isSuccess: branchListReady } = useQuery(
+    gitBranchesQueryOptions(gitCwd),
+  );
+  const branchList = branchListData ?? null;
   // Default to true while loading so we don't flash init controls.
   const isRepo = branchList?.isRepo ?? true;
   const hasOriginRemote = branchList?.hasOriginRemote ?? false;
   const currentBranch = branchList?.branches.find((branch) => branch.current)?.name ?? null;
+  // Only poll status after branch discovery confirms a repo — avoids non-repo
+  // cwds feeding a permanent "Refreshing git status..." invalidation loop.
+  const { data: gitStatusData, error: gitStatusError } = useQuery(
+    gitStatusQueryOptions(gitCwd, branchListReady && branchList?.isRepo === true),
+  );
+  const gitStatus = gitStatusData ?? null;
   const liveThreadBranchUpdate = useMemo(
     () =>
       resolveLiveThreadBranchUpdate({
@@ -651,15 +676,18 @@ export default function GitActionsControl({
     async function runGitActionWithToast({
       action,
       commitMessage,
-      forcePushOnlyProgress = false,
+      forcePushOnlyProgress: forcePushOnlyProgressProp,
       onConfirmed,
-      skipDefaultBranchPrompt = false,
+      skipDefaultBranchPrompt: skipDefaultBranchPromptProp,
       statusOverride,
-      featureBranch = false,
+      featureBranch: featureBranchProp,
       isDefaultBranchOverride,
       progressToastId,
       filePaths,
     }: RunGitActionWithToastInput) {
+      const forcePushOnlyProgress = forcePushOnlyProgressProp ?? false;
+      const skipDefaultBranchPrompt = skipDefaultBranchPromptProp ?? false;
+      const featureBranch = featureBranchProp ?? false;
       const actionStatus = statusOverride ?? gitStatusForActions;
       const actionBranch = actionStatus?.branch ?? null;
       const actionIsDefaultBranch =
@@ -1119,6 +1147,17 @@ export default function GitActionsControl({
     [openCommitDialog, openExistingPr, runGitActionWithToast],
   );
 
+  useEffect(() => {
+    if (!onRegisterCommitAndPushTrigger) return;
+    const target = findRunnableCommitPushMenuItem(gitActionMenuItems);
+    if (!target) {
+      onRegisterCommitAndPushTrigger(null);
+      return;
+    }
+    onRegisterCommitAndPushTrigger(() => openDialogForMenuItem(target));
+    return () => onRegisterCommitAndPushTrigger(null);
+  }, [gitActionMenuItems, onRegisterCommitAndPushTrigger, openDialogForMenuItem]);
+
   const gitPickerMenuItems = useMemo<GitPickerMenuItem[]>(() => {
     const items: GitPickerMenuItem[] = [];
     const commitMenuItem = gitActionMenuItems.find((item) => item.id === "commit");
@@ -1276,9 +1315,7 @@ export default function GitActionsControl({
 
   if (!gitCwd) return null;
 
-  const hasRunnableCommitPushAction = gitActionMenuItems.some(
-    (item) => (item.id === "commit_push" || item.id === "push") && !item.disabled,
-  );
+  const hasRunnableCommitPushAction = findRunnableCommitPushMenuItem(gitActionMenuItems) !== null;
   const shouldDimPanelCommitPushRow = isGitActionRunning || !hasRunnableCommitPushAction;
 
   // Shared dropdown body — the picker rows plus the contextual git-status warnings.
@@ -1524,10 +1561,20 @@ export default function GitActionsControl({
             <DialogDescription>{pendingDefaultBranchActionCopy?.description}</DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setPendingDefaultBranchAction(null)}>
+            <Button
+              variant="outline"
+              size="sm"
+              shape="capsule"
+              onClick={() => setPendingDefaultBranchAction(null)}
+            >
               Abort
             </Button>
-            <Button variant="outline" size="sm" onClick={continuePendingDefaultBranchAction}>
+            <Button
+              variant="outline"
+              size="sm"
+              shape="capsule"
+              onClick={continuePendingDefaultBranchAction}
+            >
               {pendingDefaultBranchAction &&
               requiresFeatureBranchForDefaultBranchAction(pendingDefaultBranchAction.action)
                 ? "Create feature branch & continue"
@@ -1535,7 +1582,11 @@ export default function GitActionsControl({
             </Button>
             {pendingDefaultBranchAction &&
             !requiresFeatureBranchForDefaultBranchAction(pendingDefaultBranchAction.action) ? (
-              <Button size="sm" onClick={checkoutFeatureBranchAndContinuePendingAction}>
+              <Button
+                size="sm"
+                shape="capsule"
+                onClick={checkoutFeatureBranchAndContinuePendingAction}
+              >
                 Checkout feature branch & continue
               </Button>
             ) : null}

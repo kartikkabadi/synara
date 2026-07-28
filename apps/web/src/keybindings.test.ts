@@ -12,6 +12,7 @@ import {
   isChatNewShortcut,
   isChatNewChatShortcut,
   isDiffToggleShortcut,
+  isKeyboardShortcutsHelpShortcut,
   isOpenFavoriteEditorShortcut,
   isSidebarToggleShortcut,
   isTerminalClearShortcut,
@@ -22,6 +23,7 @@ import {
   resolveShortcutCommand,
   shouldShowThreadJumpHints,
   shortcutLabelForCommand,
+  spaceJumpIndexFromCommand,
   terminalNavigationShortcutData,
   threadJumpCommandForIndex,
   threadJumpIndexFromCommand,
@@ -38,6 +40,111 @@ function event(overrides: Partial<ShortcutEventLike> = {}): ShortcutEventLike {
     ...overrides,
   };
 }
+
+describe("isKeyboardShortcutsHelpShortcut", () => {
+  it("does not mistake the physical minus keys for shortcuts help on Windows", () => {
+    assert.isFalse(
+      isKeyboardShortcutsHelpShortcut(event({ ctrlKey: true, key: "/", code: "Minus" }), "Win32"),
+    );
+    assert.isFalse(
+      isKeyboardShortcutsHelpShortcut(
+        event({ ctrlKey: true, key: "/", code: "NumpadSubtract" }),
+        "Win32",
+      ),
+    );
+    assert.isFalse(
+      isKeyboardShortcutsHelpShortcut(event({ ctrlKey: true, key: "-", code: "Slash" }), "Win32"),
+    );
+  });
+
+  it("recognizes the physical slash keys on Windows", () => {
+    assert.isTrue(
+      isKeyboardShortcutsHelpShortcut(event({ ctrlKey: true, key: "/", code: "Slash" }), "Win32"),
+    );
+    assert.isTrue(
+      isKeyboardShortcutsHelpShortcut(
+        event({ ctrlKey: true, key: "/", code: "NumpadDivide" }),
+        "Win32",
+      ),
+    );
+  });
+
+  it("uses Cmd+/ on macOS without accepting Ctrl+/", () => {
+    assert.isTrue(
+      isKeyboardShortcutsHelpShortcut(
+        event({ metaKey: true, key: "/", code: "Slash" }),
+        "MacIntel",
+      ),
+    );
+    assert.isTrue(
+      isKeyboardShortcutsHelpShortcut(
+        event({ metaKey: true, key: "/", code: "Minus" }),
+        "MacIntel",
+      ),
+    );
+    assert.isFalse(
+      isKeyboardShortcutsHelpShortcut(
+        event({ ctrlKey: true, key: "/", code: "Slash" }),
+        "MacIntel",
+      ),
+    );
+  });
+
+  it("uses Ctrl+/ on Linux without accepting Meta+/", () => {
+    assert.isTrue(
+      isKeyboardShortcutsHelpShortcut(
+        event({ ctrlKey: true, key: "/", code: "Slash" }),
+        "Linux x86_64",
+      ),
+    );
+    assert.isTrue(
+      isKeyboardShortcutsHelpShortcut(
+        event({ ctrlKey: true, key: "/", code: "Minus" }),
+        "Linux x86_64",
+      ),
+    );
+    assert.isTrue(
+      isKeyboardShortcutsHelpShortcut(
+        event({ ctrlKey: true, key: "/", code: "NumpadSubtract" }),
+        "Linux x86_64",
+      ),
+    );
+    assert.isFalse(
+      isKeyboardShortcutsHelpShortcut(
+        event({ metaKey: true, key: "/", code: "Slash" }),
+        "Linux x86_64",
+      ),
+    );
+  });
+
+  it("ignores key-up, auto-repeat, and modified slash events", () => {
+    const platform = "Win32";
+    assert.isFalse(
+      isKeyboardShortcutsHelpShortcut(
+        event({ type: "keyup", ctrlKey: true, key: "/", code: "Slash" }),
+        platform,
+      ),
+    );
+    assert.isFalse(
+      isKeyboardShortcutsHelpShortcut(
+        event({ repeat: true, ctrlKey: true, key: "/", code: "Slash" }),
+        platform,
+      ),
+    );
+    assert.isFalse(
+      isKeyboardShortcutsHelpShortcut(
+        event({ ctrlKey: true, shiftKey: true, key: "/", code: "Slash" }),
+        platform,
+      ),
+    );
+    assert.isFalse(
+      isKeyboardShortcutsHelpShortcut(
+        event({ ctrlKey: true, altKey: true, key: "/", code: "Slash" }),
+        platform,
+      ),
+    );
+  });
+});
 
 function modShortcut(
   key: string,
@@ -114,7 +221,13 @@ const DEFAULT_BINDINGS = compile([
     command: "sidebar.toggle",
     whenAst: whenNot(whenIdentifier("terminalFocus")),
   },
-  { shortcut: modShortcut("k"), command: "sidebar.search" },
+  // Mirror server defaults: Cmd+K everywhere; Ctrl+K only off macOS.
+  { shortcut: modShortcut("k", { metaKey: true, modKey: false }), command: "sidebar.search" },
+  {
+    shortcut: ctrlShortcut("k"),
+    command: "sidebar.search",
+    whenAst: whenNot(whenIdentifier("isMac")),
+  },
   { shortcut: modShortcut("j"), command: "terminal.toggle" },
   {
     shortcut: modShortcut("d"),
@@ -243,6 +356,11 @@ const DEFAULT_BINDINGS = compile([
     shortcut: ctrlShortcut("tab", { shiftKey: true }),
     command: "view.recent.previous",
   },
+  ...Array.from({ length: 9 }, (_, index) => ({
+    shortcut: modShortcut(String(index + 1), { altKey: true }),
+    command: `space.jump.${index + 1}` as KeybindingCommand,
+    whenAst: whenCreationAllowed,
+  })),
   {
     shortcut: modShortcut("1"),
     command: "thread.jump.1",
@@ -621,6 +739,66 @@ describe("thread jump shortcuts", () => {
         platform: "MacIntel",
         context: { terminalWorkspaceOpen: true },
       }),
+    );
+  });
+});
+
+describe("space jump shortcuts", () => {
+  it("maps space jump commands to strip indices", () => {
+    assert.strictEqual(spaceJumpIndexFromCommand("space.jump.1"), 0);
+    assert.strictEqual(spaceJumpIndexFromCommand("space.jump.9"), 8);
+    assert.isNull(spaceJumpIndexFromCommand("thread.jump.1"));
+  });
+
+  it("resolves Cmd+Alt+digit even when Option shifts event.key on macOS", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ code: "Digit2", key: "™", metaKey: true, altKey: true }),
+        DEFAULT_BINDINGS,
+        {
+          platform: "MacIntel",
+          context: { terminalFocus: false, terminalWorkspaceOpen: false },
+        },
+      ),
+      "space.jump.2",
+    );
+  });
+
+  it("resolves space jumps from the built-in fallbacks when no config is present", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ code: "Digit1", key: "1", metaKey: true, altKey: true }), [], {
+        platform: "MacIntel",
+        context: { terminalFocus: false },
+      }),
+      "space.jump.1",
+    );
+  });
+
+  it("does not shadow plain numbered thread jumps", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "2", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false, terminalWorkspaceOpen: false },
+      }),
+      "thread.jump.2",
+    );
+  });
+
+  it("fires from a focused terminal on macOS but yields to it elsewhere", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(
+        event({ code: "Digit3", key: "3", metaKey: true, altKey: true }),
+        DEFAULT_BINDINGS,
+        { platform: "MacIntel", context: { terminalFocus: true } },
+      ),
+      "space.jump.3",
+    );
+    assert.isNull(
+      resolveShortcutCommand(
+        event({ code: "Digit3", key: "3", ctrlKey: true, altKey: true }),
+        DEFAULT_BINDINGS,
+        { platform: "Linux", context: { terminalFocus: true } },
+      ),
     );
   });
 });
@@ -1128,6 +1306,44 @@ describe("chat/editor shortcuts", () => {
         context: { terminalFocus: true },
       }),
       "sidebar.search",
+    );
+  });
+
+  it("keeps Cmd+K for sidebar.search on macOS and releases Ctrl+K", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "k", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+      }),
+      "sidebar.search",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "k", ctrlKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+      }),
+      null,
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_BINDINGS, "sidebar.search", "MacIntel"),
+      "⌘K",
+    );
+  });
+
+  it("keeps Ctrl+K for sidebar.search on Windows and Linux", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "k", ctrlKey: true }), DEFAULT_BINDINGS, {
+        platform: "Win32",
+      }),
+      "sidebar.search",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "k", ctrlKey: true }), DEFAULT_BINDINGS, {
+        platform: "Linux x86_64",
+      }),
+      "sidebar.search",
+    );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_BINDINGS, "sidebar.search", "Win32"),
+      "Ctrl+K",
     );
   });
 

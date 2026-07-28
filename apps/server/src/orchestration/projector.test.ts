@@ -2,6 +2,7 @@ import {
   CommandId,
   EventId,
   ProjectId,
+  SpaceId,
   ThreadId,
   type OrchestrationEvent,
 } from "@synara/contracts";
@@ -25,9 +26,11 @@ function makeEvent(input: {
     type: input.type,
     aggregateKind: input.aggregateKind,
     aggregateId:
-      input.aggregateKind === "project"
-        ? ProjectId.makeUnsafe(input.aggregateId)
-        : ThreadId.makeUnsafe(input.aggregateId),
+      input.aggregateKind === "space"
+        ? SpaceId.makeUnsafe(input.aggregateId)
+        : input.aggregateKind === "project"
+          ? ProjectId.makeUnsafe(input.aggregateId)
+          : ThreadId.makeUnsafe(input.aggregateId),
     occurredAt: input.occurredAt,
     commandId: input.commandId === null ? null : CommandId.makeUnsafe(input.commandId),
     causationEventId: null,
@@ -164,6 +167,7 @@ describe("orchestration projector", () => {
         envMode: "local",
         branch: null,
         worktreePath: null,
+        workingDirectory: null,
         associatedWorktreePath: null,
         associatedWorktreeBranch: null,
         associatedWorktreeRef: null,
@@ -261,6 +265,15 @@ describe("orchestration projector", () => {
     expect(next.threads[0]?.runtimeMode).toBe("approval-required");
     expect(next.threads[0]?.interactionMode).toBe("default");
     expect(next.threads[0]?.updatedAt).toBe(turnRequestedAt);
+    expect(next.threads[0]?.session).toEqual({
+      threadId: "thread-1",
+      status: "starting",
+      providerName: "pi",
+      runtimeMode: "approval-required",
+      activeTurnId: null,
+      lastError: null,
+      updatedAt: turnRequestedAt,
+    });
   });
 
   it("lets empty threads adopt the requested first-turn provider", async () => {
@@ -324,6 +337,10 @@ describe("orchestration projector", () => {
     expect(next.threads[0]?.modelSelection).toEqual({
       provider: "opencode",
       model: "openai/gpt-5",
+    });
+    expect(next.threads[0]?.session).toMatchObject({
+      status: "starting",
+      providerName: "opencode",
     });
   });
 
@@ -702,6 +719,34 @@ describe("orchestration projector", () => {
       turnId: "turn-1",
       state: "completed",
       completedAt: settledAt,
+    });
+  });
+
+  it("settles an errored turn even when the session still retains the active turn", async () => {
+    const createdAt = "2026-02-23T08:00:00.000Z";
+    const startedAt = "2026-02-23T08:00:05.000Z";
+    const erroredAt = "2026-02-23T08:00:10.000Z";
+
+    const afterRunning = await projectThreadWithRunningTurn({ createdAt, startedAt });
+    const afterError = await Effect.runPromise(
+      projectEvent(
+        afterRunning,
+        makeSessionSetEvent({
+          sequence: 3,
+          commandId: "cmd-error",
+          occurredAt: erroredAt,
+          status: "error",
+          activeTurnId: "turn-1",
+          lastError: "provider crashed",
+          updatedAt: erroredAt,
+        }),
+      ),
+    );
+
+    expect(afterError.threads[0]?.latestTurn).toMatchObject({
+      turnId: "turn-1",
+      state: "error",
+      completedAt: erroredAt,
     });
   });
 
@@ -1675,5 +1720,142 @@ describe("orchestration projector", () => {
       "accepted-first-user",
       "accepted-first-assistant",
     ]);
+  });
+
+  it("accumulates streaming deltas in place without reordering the transcript", async () => {
+    const createdAt = "2026-07-20T09:00:00.000Z";
+    const afterCreate = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(createdAt),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-stream",
+          occurredAt: createdAt,
+          commandId: "cmd-create-stream",
+          payload: {
+            threadId: "thread-stream",
+            projectId: "project-1",
+            title: "Streaming",
+            modelSelection: { provider: "codex", model: "gpt-5-codex" },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        }),
+      ),
+    );
+
+    const messageEvent = (input: {
+      readonly sequence: number;
+      readonly messageId: string;
+      readonly role: "user" | "assistant";
+      readonly text: string;
+      readonly streaming: boolean;
+      readonly turnId: string | null;
+    }) =>
+      makeEvent({
+        sequence: input.sequence,
+        type: "thread.message-sent",
+        aggregateKind: "thread",
+        aggregateId: "thread-stream",
+        occurredAt: createdAt,
+        commandId: `cmd-${input.sequence}`,
+        payload: {
+          threadId: "thread-stream",
+          messageId: input.messageId,
+          role: input.role,
+          text: input.text,
+          turnId: input.turnId,
+          streaming: input.streaming,
+          source: "native",
+          createdAt,
+          updatedAt: `2026-07-20T09:00:${String(input.sequence).padStart(2, "0")}.000Z`,
+        },
+      });
+
+    const deltas = ["Hel", "lo, ", "wor", "ld"];
+    const events = [
+      messageEvent({
+        sequence: 2,
+        messageId: "user-1",
+        role: "user",
+        text: "hi",
+        streaming: false,
+        turnId: "turn-1",
+      }),
+      ...deltas.map((delta, index) =>
+        messageEvent({
+          sequence: 3 + index,
+          messageId: "assistant-1",
+          role: "assistant",
+          text: delta,
+          streaming: true,
+          // First delta arrives without a turn binding; later deltas must not
+          // rebind an already-bound message.
+          turnId: index === 0 ? null : index === 3 ? "turn-other" : "turn-1",
+        }),
+      ),
+      messageEvent({
+        sequence: 7,
+        messageId: "user-2",
+        role: "user",
+        text: "next",
+        streaming: false,
+        turnId: "turn-2",
+      }),
+      // A late delta for an earlier message must update it in place.
+      messageEvent({
+        sequence: 8,
+        messageId: "assistant-1",
+        role: "assistant",
+        text: "!",
+        streaming: true,
+        turnId: "turn-1",
+      }),
+    ];
+
+    const state = await events.reduce<Promise<ReturnType<typeof createEmptyReadModel>>>(
+      (statePromise, event) =>
+        statePromise.then((current) => Effect.runPromise(projectEvent(current, event))),
+      Promise.resolve(afterCreate),
+    );
+
+    const thread = state.threads[0];
+    expect(thread?.messages.map((message) => message.id)).toEqual([
+      "user-1",
+      "assistant-1",
+      "user-2",
+    ]);
+    const assistant = thread?.messages[1];
+    expect(assistant?.text).toBe(`${deltas.join("")}!`);
+    expect(assistant?.streaming).toBe(true);
+    expect(assistant?.turnId).toBe("turn-1");
+    expect(thread?.messages[2]?.text).toBe("next");
+
+    // The non-streaming finalization replaces the accumulated text.
+    const finalized = await Effect.runPromise(
+      projectEvent(
+        state,
+        messageEvent({
+          sequence: 9,
+          messageId: "assistant-1",
+          role: "assistant",
+          text: "Hello, world!",
+          streaming: false,
+          turnId: "turn-1",
+        }),
+      ),
+    );
+    expect(finalized.threads[0]?.messages.map((message) => message.id)).toEqual([
+      "user-1",
+      "assistant-1",
+      "user-2",
+    ]);
+    expect(finalized.threads[0]?.messages[1]?.text).toBe("Hello, world!");
+    expect(finalized.threads[0]?.messages[1]?.streaming).toBe(false);
   });
 });

@@ -30,7 +30,6 @@ import { newCommandId, randomUUID } from "../lib/utils";
 import { readNativeApi } from "../nativeApi";
 import { usePinnedThreadsStore } from "../pinnedThreadsStore";
 import { reconcileOptimisticPinState } from "../pinning.logic";
-import { isThreadRunningTurn } from "../session-logic";
 import {
   resolveSplitViewFocusedThreadId,
   resolveSplitViewPaneIdForThread,
@@ -44,6 +43,24 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import type { Project, SidebarThreadSummary } from "../types";
 
 const ARCHIVE_UNDO_TOAST_DURATION_MS = 8000;
+
+/**
+ * Unarchives a thread, treating "it was already unarchived" as success.
+ *
+ * The undo toast can fire after the thread came back some other way (a second client, a replayed
+ * command), and that race is not an error worth showing. Kept at module scope because React Compiler
+ * cannot lower a `throw` inside a `try`/`catch`, and inlining this would cost the whole sidebar
+ * actions hook its compilation.
+ */
+async function unarchiveThreadIgnoringAlreadyRestored(threadId: ThreadId): Promise<void> {
+  try {
+    const api = readNativeApi();
+    if (!api) throw new Error("Unable to connect to the app server.");
+    await unarchiveThreadFromClient(api.orchestration, threadId);
+  } catch (error) {
+    if (!isThreadAlreadyUnarchivedError(error, threadId)) throw error;
+  }
+}
 
 interface DeleteProjectThreadsOptions {
   readonly confirmMessage?: string | null;
@@ -376,14 +393,6 @@ export function useSidebarThreadActions(input: {
       if (!api) return false;
       const thread = getThreadFromState(useStore.getState(), threadId);
       if (!thread) return false;
-      if (isThreadRunningTurn(thread)) {
-        toastManager.add({
-          type: "error",
-          title: "Cannot archive",
-          description: "Stop the running session before archiving this thread.",
-        });
-        return false;
-      }
       const pendingThreadIds = archivePendingThreadIdsRef.current;
       if (pendingThreadIds.has(threadId)) return false;
 
@@ -435,13 +444,7 @@ export function useSidebarThreadActions(input: {
             });
             return false;
           }
-          try {
-            const api = readNativeApi();
-            if (!api) throw new Error("Unable to connect to the app server.");
-            await unarchiveThreadFromClient(api.orchestration, restoreInput.threadId);
-          } catch (error) {
-            if (!isThreadAlreadyUnarchivedError(error, restoreInput.threadId)) throw error;
-          }
+          await unarchiveThreadIgnoringAlreadyRestored(restoreInput.threadId);
           if (restoreInput.returnToThreadOnUndo) {
             void navigate({
               to: "/$threadId",
@@ -543,29 +546,10 @@ export function useSidebarThreadActions(input: {
         });
         return;
       }
-      const archivableThreads = projectThreads.filter((thread) => !isThreadRunningTurn(thread));
-      const runningCount = projectThreads.length - archivableThreads.length;
-      if (archivableThreads.length === 0) {
-        toastManager.add({
-          type: "error",
-          title: "Cannot archive threads",
-          description:
-            runningCount === 1
-              ? "The only thread in this project is running. Stop it before archiving."
-              : `All ${runningCount} threads in this project are running. Stop them before archiving.`,
-        });
-        return;
-      }
       const archiveLines = [
-        `Archive ${archivableThreads.length} ${pluralize(archivableThreads.length, "thread")} in "${project.name}"?`,
+        `Archive ${projectThreads.length} ${pluralize(projectThreads.length, "thread")} in "${project.name}"?`,
         "Archived threads are hidden from the sidebar but can be restored later.",
       ];
-      if (runningCount > 0) {
-        archiveLines.push(
-          "",
-          `${runningCount} running ${pluralize(runningCount, "thread is", "threads are")} currently active and will be skipped.`,
-        );
-      }
       const confirmed = api
         ? await api.dialogs.confirm(archiveLines.join("\n"))
         : await showConfirmDialogFallback(archiveLines.join("\n"));
@@ -573,7 +557,7 @@ export function useSidebarThreadActions(input: {
 
       let archivedCount = 0;
       let failureCount = 0;
-      for (const thread of archivableThreads) {
+      for (const thread of projectThreads) {
         try {
           if (await archiveThread(thread.id)) archivedCount += 1;
           else failureCount += 1;
@@ -586,21 +570,15 @@ export function useSidebarThreadActions(input: {
           });
         }
       }
-      removeFromSelection(archivableThreads.map((thread) => thread.id));
+      removeFromSelection(projectThreads.map((thread) => thread.id));
       if (archivedCount > 0) {
-        const skippedDescription =
-          runningCount > 0
-            ? ` Skipped ${runningCount} running ${pluralize(runningCount, "thread")}.`
-            : "";
         toastManager.add({
           type: failureCount > 0 ? "warning" : "success",
           title: archivedCount === 1 ? "Thread archived" : `Archived ${archivedCount} threads`,
           description:
             failureCount > 0
-              ? `Failed to archive ${failureCount} ${pluralize(failureCount, "thread")}.${skippedDescription}`
-              : runningCount > 0
-                ? skippedDescription.trim()
-                : `"${project.name}" cleared.`,
+              ? `Failed to archive ${failureCount} ${pluralize(failureCount, "thread")}.`
+              : `"${project.name}" cleared.`,
         });
       } else if (failureCount > 0) {
         toastManager.add({
@@ -647,6 +625,11 @@ export function useSidebarThreadActions(input: {
       }
 
       const deletedIds = new Set<ThreadId>(projectThreads.map((thread) => thread.id));
+      // Built once, outside the loop's `try`: React Compiler cannot lower a conditional spread
+      // inside a try block and would skip this hook entirely.
+      const worktreeCleanupOverride = options?.worktreeCleanupMode
+        ? { worktreeCleanupMode: options.worktreeCleanupMode }
+        : {};
       const successfullyDeletedIds: ThreadId[] = [];
       let deletedCount = 0;
       let failureCount = 0;
@@ -655,9 +638,7 @@ export function useSidebarThreadActions(input: {
           await deleteThread(thread.id, {
             deletedThreadIds: deletedIds,
             reconcileDeletedThread: false,
-            ...(options?.worktreeCleanupMode
-              ? { worktreeCleanupMode: options.worktreeCleanupMode }
-              : {}),
+            ...worktreeCleanupOverride,
           });
           successfullyDeletedIds.push(thread.id);
           deletedCount += 1;

@@ -5,6 +5,7 @@
 import {
   MessageId,
   type OrchestrationReadModel,
+  type OrchestrationSpaceShell,
   type OrchestrationSessionStatus,
   type OrchestrationShellSnapshot,
   type OrchestrationThreadActivity,
@@ -23,6 +24,7 @@ import type {
   ChatAttachment,
   ChatMessage,
   Project,
+  Space,
   SidebarThreadSummary,
   Thread,
   ThreadSession,
@@ -31,6 +33,7 @@ import type {
 } from "./types";
 
 type ReadModelProject = OrchestrationReadModel["projects"][number];
+type ReadModelSpace = OrchestrationReadModel["spaces"][number];
 type ReadModelThread = OrchestrationReadModel["threads"][number];
 type ReadModelMessage = ReadModelThread["messages"][number];
 type ShellSnapshotThread = OrchestrationShellSnapshot["threads"][number];
@@ -43,6 +46,7 @@ export type ProjectNormalizationInput = Pick<
   | "defaultModelSelection"
   | "scripts"
   | "isPinned"
+  | "spaceId"
   | "createdAt"
   | "updatedAt"
 >;
@@ -151,6 +155,7 @@ export function threadShellsEqual(left: ThreadShell | undefined, right: ThreadSh
     left.envMode === right.envMode &&
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
+    (left.workingDirectory ?? null) === (right.workingDirectory ?? null) &&
     (left.associatedWorktreePath ?? null) === (right.associatedWorktreePath ?? null) &&
     (left.associatedWorktreeBranch ?? null) === (right.associatedWorktreeBranch ?? null) &&
     (left.associatedWorktreeRef ?? null) === (right.associatedWorktreeRef ?? null) &&
@@ -333,6 +338,7 @@ export function normalizeProject(
     previous.defaultModelSelection === defaultModelSelection &&
     previous.expanded === expanded &&
     (previous.isPinned ?? false) === (incoming.isPinned ?? false) &&
+    (previous.spaceId ?? null) === (incoming.spaceId ?? null) &&
     previous.createdAt === incoming.createdAt &&
     previous.updatedAt === incoming.updatedAt &&
     previous.scripts === scripts
@@ -351,10 +357,47 @@ export function normalizeProject(
     defaultModelSelection,
     expanded,
     isPinned: incoming.isPinned ?? false,
+    spaceId: incoming.spaceId ?? null,
     createdAt: incoming.createdAt,
     updatedAt: incoming.updatedAt,
     scripts,
   } satisfies Project;
+}
+
+export function normalizeSpace(
+  incoming: ReadModelSpace | OrchestrationSpaceShell,
+  previous: Space | undefined,
+): Space {
+  if (
+    previous &&
+    previous.id === incoming.id &&
+    previous.name === incoming.name &&
+    previous.icon === incoming.icon &&
+    previous.sortOrder === incoming.sortOrder &&
+    previous.createdAt === incoming.createdAt &&
+    previous.updatedAt === incoming.updatedAt
+  ) {
+    return previous;
+  }
+  return {
+    id: incoming.id,
+    name: incoming.name,
+    icon: incoming.icon,
+    sortOrder: incoming.sortOrder,
+    createdAt: incoming.createdAt,
+    updatedAt: incoming.updatedAt,
+  };
+}
+
+export function mapSpaces(
+  incoming: ReadonlyArray<ReadModelSpace | OrchestrationSpaceShell>,
+  previous: Space[],
+): Space[] {
+  const previousById = new Map(previous.map((space) => [space.id, space] as const));
+  const next = incoming
+    .map((space) => normalizeSpace(space, previousById.get(space.id)))
+    .toSorted((left, right) => left.sortOrder - right.sortOrder || left.id.localeCompare(right.id));
+  return arraysShallowEqual(previous, next) ? previous : next;
 }
 
 function normalizeChatAttachments(
@@ -816,6 +859,19 @@ export function mergeReadModelThreadDetailWithLiveHotPath(
     return incoming;
   }
 
+  const incomingSettlesLocalTurn =
+    previousThread.latestTurn?.state === "running" &&
+    incoming.latestTurn !== null &&
+    incoming.latestTurn.turnId === previousThread.latestTurn.turnId &&
+    incoming.latestTurn.state !== "running" &&
+    incoming.latestTurn.completedAt !== null;
+  if (incomingSettlesLocalTurn) {
+    // A scoped projection refresh is authoritative for a terminal transition.
+    // Do not preserve stale local streaming flags or client-only message rows
+    // after the server has settled the exact turn they belonged to.
+    return incoming;
+  }
+
   const preserveRunningTurn = shouldPreserveRunningTurn(previousThread, incoming);
   const messages = mergeReadModelMessagesWithLiveHotPath(incoming.messages, previousThread);
   const session = mergeReadModelSessionWithLiveHotPath(incoming.session, previousThread, {
@@ -966,6 +1022,98 @@ export function normalizeActivities(
   });
   const cappedActivities = capThreadActivities(nextActivities);
   return arraysShallowEqual(previous, cappedActivities) ? previous : cappedActivities;
+}
+
+type ThreadActivity = Thread["activities"][number];
+
+/**
+ * Incremental equivalent of repeatedly calling
+ * `normalizeActivities([...previous, activity], previous)` while folding a batch of
+ * `thread.activity-appended` events into one thread write.
+ *
+ * `normalizeActivities` re-dedupes, re-maps and re-caps the whole list for every activity, which
+ * is O(events x activities) inside a batch. The accumulator keeps an id index instead, so each
+ * append is O(1) amortised while staying observationally identical:
+ * - unseen ids append at the end, known ids merge in place via `preferRicherActivity`,
+ * - the cap is applied after every append (not just once at the end), so retention of pending
+ *   approval/user-input requests is decided at exactly the same points,
+ * - `result()` returns `previous` by reference when the batch changed nothing, and `append()`
+ *   reports per-activity change so callers can reproduce the old `updatedAt` bumping rule.
+ */
+export interface ThreadActivityAccumulator {
+  /** Appends one already-sequenced activity. Returns true when the accumulated list changed. */
+  readonly append: (activity: ThreadActivity) => boolean;
+  /** Accumulated activities, reference-identical to `previous` when nothing changed. */
+  readonly result: () => Thread["activities"];
+}
+
+export function createThreadActivityAccumulator(
+  previous: Thread["activities"],
+): ThreadActivityAccumulator {
+  const deduped = dedupeActivitiesById(previous);
+  // `dedupeActivitiesById` only returns a new array when it actually removed a duplicate, so a
+  // different reference here means the first `append()` must report a change even if that append
+  // is itself a no-op (matching `normalizeActivities`, which dedupes `previous` on every call).
+  let pendingDedupeChange = deduped !== previous;
+  let working: ThreadActivity[] = deduped;
+  let owned = pendingDedupeChange;
+  let indexById: Map<string, number> | undefined;
+
+  const ensureIndexById = (): Map<string, number> => {
+    if (!indexById) {
+      const nextIndexById = new Map<string, number>();
+      for (let index = 0; index < working.length; index += 1) {
+        nextIndexById.set(working[index]!.id, index);
+      }
+      indexById = nextIndexById;
+    }
+    return indexById;
+  };
+
+  const ensureOwned = (): void => {
+    if (!owned) {
+      working = [...working];
+      owned = true;
+    }
+  };
+
+  return {
+    append: (activity) => {
+      const activityIndexById = ensureIndexById();
+      const existingIndex = activityIndexById.get(activity.id);
+      let changed = false;
+      if (existingIndex === undefined) {
+        ensureOwned();
+        working.push(activity);
+        activityIndexById.set(activity.id, working.length - 1);
+        changed = true;
+      } else {
+        const existing = working[existingIndex]!;
+        const preferred = preferRicherActivity(existing, activity);
+        if (preferred !== existing) {
+          ensureOwned();
+          working[existingIndex] = preferred;
+          changed = true;
+        }
+      }
+      if (working.length > MAX_THREAD_ACTIVITIES) {
+        const capped = capThreadActivities(working);
+        // `capThreadActivities` only filters, so an unchanged length means unchanged contents.
+        if (capped.length !== working.length) {
+          working = capped;
+          owned = true;
+          indexById = undefined;
+          changed = true;
+        }
+      }
+      if (pendingDedupeChange) {
+        pendingDedupeChange = false;
+        return true;
+      }
+      return changed;
+    },
+    result: () => (arraysShallowEqual(previous, working) ? previous : working),
+  };
 }
 
 export function withOrchestrationEventSequence(
@@ -1255,6 +1403,7 @@ export function normalizeThreadFromReadModel(
       ? incoming.hasActionableProposedPlan
       : undefined;
   const nextWorktreePath = incoming.worktreePath;
+  const nextWorkingDirectory = incoming.workingDirectory ?? null;
   const nextAssociatedWorktreePath = incoming.associatedWorktreePath ?? null;
   const nextAssociatedWorktreeBranch = incoming.associatedWorktreeBranch ?? null;
   const nextAssociatedWorktreeRef = incoming.associatedWorktreeRef ?? null;
@@ -1307,6 +1456,7 @@ export function normalizeThreadFromReadModel(
     previous.envMode === (incoming.envMode ?? "local") &&
     previous.branch === resolvedBranch &&
     previous.worktreePath === nextWorktreePath &&
+    (previous.workingDirectory ?? null) === nextWorkingDirectory &&
     (previous.associatedWorktreePath ?? null) === nextAssociatedWorktreePath &&
     (previous.associatedWorktreeBranch ?? null) === nextAssociatedWorktreeBranch &&
     (previous.associatedWorktreeRef ?? null) === nextAssociatedWorktreeRef &&
@@ -1357,6 +1507,7 @@ export function normalizeThreadFromReadModel(
     envMode: incoming.envMode ?? "local",
     branch: resolvedBranch,
     worktreePath: nextWorktreePath,
+    workingDirectory: nextWorkingDirectory,
     associatedWorktreePath: nextAssociatedWorktreePath,
     associatedWorktreeBranch: nextAssociatedWorktreeBranch,
     associatedWorktreeRef: nextAssociatedWorktreeRef,
@@ -1410,6 +1561,7 @@ export function normalizeThreadShellSnapshot(
   const error = normalizeThreadErrorMessage(incoming.session?.lastError);
   const lastVisitedAt = previous?.lastVisitedAt ?? incoming.updatedAt;
   const nextWorktreePath = incoming.worktreePath;
+  const nextWorkingDirectory = incoming.workingDirectory ?? null;
   const nextAssociatedWorktreePath = incoming.associatedWorktreePath ?? null;
   const nextAssociatedWorktreeBranch = incoming.associatedWorktreeBranch ?? null;
   const nextAssociatedWorktreeRef = incoming.associatedWorktreeRef ?? null;
@@ -1447,6 +1599,7 @@ export function normalizeThreadShellSnapshot(
     envMode: incoming.envMode ?? "local",
     branch: resolvedBranch,
     worktreePath: nextWorktreePath,
+    workingDirectory: nextWorkingDirectory,
     associatedWorktreePath: nextAssociatedWorktreePath,
     associatedWorktreeBranch: nextAssociatedWorktreeBranch,
     associatedWorktreeRef: nextAssociatedWorktreeRef,

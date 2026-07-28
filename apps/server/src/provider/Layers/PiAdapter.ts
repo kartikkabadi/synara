@@ -7,9 +7,9 @@ import {
 } from "node:child_process";
 
 import type {
-  AuthStorage,
   BashOperations,
   ModelRegistry,
+  ModelRuntime,
   SessionManager,
   AgentSession as PiAgentSession,
   AgentSessionEvent,
@@ -59,6 +59,7 @@ import {
 } from "../../agentGateway/sessionLease.ts";
 import { resolveProviderAttachmentPath } from "../providerAttachmentPaths.ts";
 import { ServerConfig } from "../../config.ts";
+import { lazyModule } from "../../lazyModule.ts";
 import { buildProviderChildEnvironment } from "../../providerChildEnvironment.ts";
 import {
   ProviderAdapterRequestError,
@@ -67,9 +68,20 @@ import {
   ProviderAdapterValidationError,
 } from "../Errors.ts";
 import { PiAdapter, type PiAdapterShape } from "../Services/PiAdapter.ts";
-import type { ProviderThreadSnapshot } from "../Services/ProviderAdapter.ts";
+import {
+  PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
+  type ProviderThreadSnapshot,
+} from "../Services/ProviderAdapter.ts";
 import { appendFileAttachmentsPromptBlock } from "../attachmentProjection.ts";
+import { makeBoundedCallbackIngress } from "../boundedCallbackIngress.ts";
 import { classifyPiTurnFailure } from "../piTurnFailure.ts";
+import {
+  compactProviderRuntimeEventForIngress,
+  isTerminalProviderRuntimeEvent,
+  PROVIDER_RUNTIME_CALLBACK_BUFFER_MAX_BYTES,
+  PROVIDER_RUNTIME_CALLBACK_TERMINAL_RESERVE,
+  providerRuntimeEventBytes,
+} from "../providerRuntimeEventIngress.ts";
 import { clampUsagePercent, nonNegativeFiniteNumber, positiveFiniteNumber } from "../tokenUsage.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import {
@@ -99,6 +111,50 @@ const PI_DEFAULT_SUPPORTED_THINKING_LEVELS = new Set<ThinkingLevel>([
   "medium",
   "high",
 ]);
+const PI_ANTHROPIC_ENSURED_MODEL_IDS = ["claude-fable-5", "claude-opus-4-8"] as const;
+type PiAnthropicEnsuredModelId = (typeof PI_ANTHROPIC_ENSURED_MODEL_IDS)[number];
+
+/**
+ * Metadata used when an OAuth/extension Anthropic catalog replaced Pi's built-ins
+ * and omitted Fable / Opus 4.8. Values mirror `@earendil-works/pi-ai` Anthropic models.
+ */
+const PI_ANTHROPIC_ENSURED_MODEL_TEMPLATES: Record<
+  PiAnthropicEnsuredModelId,
+  {
+    readonly id: PiAnthropicEnsuredModelId;
+    readonly name: string;
+    readonly reasoning: true;
+    readonly thinkingLevelMap: NonNullable<Model<Api>["thinkingLevelMap"]>;
+    readonly compat: NonNullable<Model<Api>["compat"]>;
+    readonly input: Array<"text" | "image">;
+    readonly cost: Model<Api>["cost"];
+    readonly contextWindow: number;
+    readonly maxTokens: number;
+  }
+> = {
+  "claude-fable-5": {
+    id: "claude-fable-5",
+    name: "Claude Fable 5",
+    reasoning: true,
+    thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" },
+    compat: { forceAdaptiveThinking: true },
+    input: ["text", "image"],
+    cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
+  },
+  "claude-opus-4-8": {
+    id: "claude-opus-4-8",
+    name: "Claude Opus 4.8",
+    reasoning: true,
+    thinkingLevelMap: { xhigh: "xhigh", max: "max" },
+    compat: { forceAdaptiveThinking: true, supportsTemperature: false },
+    input: ["text", "image"],
+    cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
+  },
+};
 
 type PiModelRegistry = Pick<ModelRegistry, "find" | "getAll" | "getAvailable">;
 type PiCodingAgentModule = typeof import("@earendil-works/pi-coding-agent");
@@ -260,7 +316,12 @@ export function makePiBashProcessSupervisor(
   };
 }
 
-let piCodingAgentModulePromise: Promise<PiCodingAgentModule> | undefined;
+// Loads the Pi SDK only when the Pi provider is actually used. The SDK brings in
+// a native clipboard module, so importing it during Synara startup can bloat the
+// desktop backend before any Pi session exists.
+const loadPiCodingAgentModule: () => Promise<PiCodingAgentModule> = lazyModule(
+  () => import("@earendil-works/pi-coding-agent"),
+);
 
 interface PiSessionContext {
   harnessPolicyDelivered?: boolean;
@@ -442,14 +503,6 @@ function normalizePiThinkingLevel(value: string | null | undefined): ThinkingLev
   return isPiThinkingLevel(value) ? value : undefined;
 }
 
-// Loads the Pi SDK only when the Pi provider is actually used. The SDK brings in
-// a native clipboard module, so importing it during Synara startup can bloat the
-// desktop backend before any Pi session exists.
-async function loadPiCodingAgentModule(): Promise<PiCodingAgentModule> {
-  piCodingAgentModulePromise ??= import("@earendil-works/pi-coding-agent");
-  return piCodingAgentModulePromise;
-}
-
 function getLocalSupportedThinkingLevels(
   model: Pick<Model<Api>, "reasoning" | "thinkingLevelMap">,
 ): Set<ThinkingLevel> {
@@ -484,10 +537,57 @@ export function getPiSupportedThinkingOptions(
   return PI_THINKING_OPTIONS.filter((option) => supportedLevels.has(option.value));
 }
 
+/**
+ * When Anthropic is already authenticated, ensure Fable 5 and Opus 4.8 appear even
+ * if an older pi-anthropic-oauth extension replaced the built-in Anthropic catalog.
+ */
+export function ensurePiAnthropicCatalogModels(
+  available: ReadonlyArray<Model<Api>>,
+  all: ReadonlyArray<Model<Api>> = available,
+): Model<Api>[] {
+  const hasAnthropic = available.some((model) => model.provider === "anthropic");
+  if (!hasAnthropic) {
+    return [...available];
+  }
+
+  const result = [...available];
+  const peer = result.find((model) => model.provider === "anthropic");
+  if (!peer) {
+    return result;
+  }
+
+  for (const modelId of PI_ANTHROPIC_ENSURED_MODEL_IDS) {
+    if (result.some((model) => model.provider === "anthropic" && model.id === modelId)) {
+      continue;
+    }
+    const fromAll = all.find((model) => model.provider === "anthropic" && model.id === modelId);
+    if (fromAll) {
+      result.push(fromAll);
+      continue;
+    }
+    const template = PI_ANTHROPIC_ENSURED_MODEL_TEMPLATES[modelId];
+    result.push({
+      ...peer,
+      ...template,
+      id: template.id,
+      name: template.name,
+      provider: "anthropic",
+      api: peer.api,
+      baseUrl: peer.baseUrl,
+    });
+  }
+
+  return result;
+}
+
 export function getPiDiscoverableModels(
-  registry: Pick<ModelRegistry, "getAvailable">,
+  registry: Pick<ModelRegistry, "getAvailable" | "getAll">,
 ): ReadonlyArray<Model<Api>> {
-  return registry.getAvailable();
+  return ensurePiAnthropicCatalogModels(registry.getAvailable(), registry.getAll());
+}
+
+function isPiAnthropicEnsuredModelId(modelId: string): modelId is PiAnthropicEnsuredModelId {
+  return (PI_ANTHROPIC_ENSURED_MODEL_IDS as ReadonlyArray<string>).includes(modelId);
 }
 
 function parseModelReference(
@@ -521,6 +621,18 @@ function createProviderModelFallback(
   const providerDefault = registry.getAll().find((model) => model.provider === parsed.provider);
   if (!providerDefault) {
     return undefined;
+  }
+  if (parsed.provider === "anthropic" && isPiAnthropicEnsuredModelId(parsed.id)) {
+    const template = PI_ANTHROPIC_ENSURED_MODEL_TEMPLATES[parsed.id];
+    return {
+      ...providerDefault,
+      ...template,
+      id: template.id,
+      name: template.name,
+      provider: "anthropic",
+      api: providerDefault.api,
+      baseUrl: providerDefault.baseUrl,
+    };
   }
   return {
     id: parsed.id,
@@ -1077,20 +1189,23 @@ function makeAgentDir(
   return trimToUndefined(agentDir) ?? piSdk.getAgentDir();
 }
 
-// Keep discovery registries isolated so extension provider registrations reflect
-// the current agent dir + project cwd instead of stale state from prior listings.
-function createPiModelRegistry(
+// Keep session runtimes isolated so project extension provider registrations
+// cannot leak between threads that share an agent directory.
+export async function createPiModelRuntime(
   agentDir: string,
-  piSdk: Pick<PiCodingAgentModule, "AuthStorage" | "ModelRegistry">,
-): {
-  readonly authStorage: AuthStorage;
-  readonly registry: ModelRegistry;
-} {
-  const authStorage = piSdk.AuthStorage.create(path.join(agentDir, "auth.json"));
-  return {
-    authStorage,
-    registry: piSdk.ModelRegistry.create(authStorage, path.join(agentDir, "models.json")),
-  };
+  piSdk: Pick<PiCodingAgentModule, "ModelRuntime">,
+): Promise<ModelRuntime> {
+  return piSdk.ModelRuntime.create({
+    authPath: path.join(agentDir, "auth.json"),
+    modelsPath: path.join(agentDir, "models.json"),
+  });
+}
+
+function modelRegistryFacade(
+  modelRuntime: ModelRuntime,
+  piSdk: Pick<PiCodingAgentModule, "ModelRegistry">,
+): ModelRegistry {
+  return new piSdk.ModelRegistry(modelRuntime);
 }
 
 function extensionDisplayName(extension: {
@@ -1184,15 +1299,34 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     const agentGatewayCredentials = Option.getOrUndefined(
       yield* Effect.serviceOption(AgentGatewayCredentials),
     );
-    const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const runtimeEventQueue = yield* Queue.bounded<ProviderRuntimeEvent>(
+      PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
+    );
     const sessions = new Map<ThreadId, PiSessionContext>();
-    const modelRegistries = new Map<string, ModelRegistry>();
     const ownsNativeEventLogger = options?.nativeEventLogger === undefined;
     const nativeEventLogger =
       options?.nativeEventLogger ??
       (options?.nativeEventLogPath !== undefined
         ? yield* makeEventNdjsonLogger(options.nativeEventLogPath, { stream: "native" })
         : undefined);
+    const runtimeEventIngress = yield* makeBoundedCallbackIngress<
+      ProviderRuntimeEvent,
+      never,
+      never
+    >(
+      (event) =>
+        (nativeEventLogger && event.raw
+          ? nativeEventLogger.write(event.raw, event.threadId).pipe(Effect.ignore)
+          : Effect.void
+        ).pipe(Effect.andThen(Queue.offer(runtimeEventQueue, event)), Effect.asVoid),
+      {
+        capacity: PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
+        maxBufferedBytes: PROVIDER_RUNTIME_CALLBACK_BUFFER_MAX_BYTES,
+        terminalReserve: PROVIDER_RUNTIME_CALLBACK_TERMINAL_RESERVE,
+        isTerminal: isTerminalProviderRuntimeEvent,
+        sizeOf: providerRuntimeEventBytes,
+      },
+    );
 
     const loadPiSdk = (method: string) =>
       Effect.tryPromise({
@@ -1206,26 +1340,10 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           }),
       });
 
-    const getModelRegistry = async (
-      agentDir: string,
-      piSdk: Pick<PiCodingAgentModule, "AuthStorage" | "ModelRegistry">,
-    ): Promise<ModelRegistry> => {
-      const existing = modelRegistries.get(agentDir);
-      if (existing) return existing;
-      const { registry } = createPiModelRegistry(agentDir, piSdk);
-      modelRegistries.set(agentDir, registry);
-      return registry;
-    };
-
     const makeEventBase = makePiRuntimeEventBase;
 
     const offerRuntimeEvent = (event: ProviderRuntimeEvent) => {
-      Effect.runPromise(Queue.offer(runtimeEventQueue, event)).catch(() => undefined);
-      if (nativeEventLogger && event.raw) {
-        Effect.runPromise(nativeEventLogger.write(event.raw, event.threadId)).catch(
-          () => undefined,
-        );
-      }
+      runtimeEventIngress.offer(compactProviderRuntimeEventForIngress(event));
     };
 
     const offerRuntimeError = (
@@ -1916,7 +2034,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       processSupervisor: PiBashProcessSupervisor;
       gatewayTools?: ReadonlyArray<ToolDefinition>;
     }) => {
-      const registry = await getModelRegistry(input.agentDir, input.sdk);
+      const modelRuntime = await createPiModelRuntime(input.agentDir, input.sdk);
       const createRuntime: CreateAgentSessionRuntimeFactory = async ({
         cwd,
         agentDir,
@@ -1926,9 +2044,10 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         const services = await input.sdk.createAgentSessionServices({
           cwd,
           agentDir,
-          modelRegistry: registry,
+          modelRuntime,
         });
-        const model = findModelInRegistry(services.modelRegistry, input.modelId);
+        const registry = modelRegistryFacade(services.modelRuntime, input.sdk);
+        const model = findModelInRegistry(registry, input.modelId);
         if (input.modelId && !model) {
           throw new Error(
             `Pi model '${input.modelId}' is not available. Use a discovered model or a provider-qualified custom model slug like 'openai/gpt-5.5'.`,
@@ -1964,7 +2083,10 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         agentDir: input.agentDir,
         sessionManager: input.sessionManager,
       });
-      return { runtime, modelRegistry: runtime.services.modelRegistry };
+      return {
+        runtime,
+        modelRegistry: modelRegistryFacade(runtime.services.modelRuntime, input.sdk),
+      };
     };
 
     const startSession: PiAdapterShape["startSession"] = (input) =>
@@ -2446,9 +2568,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     const stopSession: PiAdapterShape["stopSession"] = (threadId) =>
       Effect.gen(function* () {
         const context = sessions.get(threadId);
-        if (!context) {
-          return yield* new ProviderAdapterSessionNotFoundError({ provider: PROVIDER, threadId });
-        }
+        if (!context) return;
         yield* Effect.tryPromise({
           try: () => disposeSessionContext(context),
           catch: (cause) =>
@@ -2558,21 +2678,21 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           const piSdk = await loadPiCodingAgentModule();
           const agentDir = makeAgentDir(input.agentDir, piSdk);
           const cwd = trimToUndefined(input.cwd) ?? serverConfig.cwd;
-          const { authStorage, registry } = createPiModelRegistry(agentDir, piSdk);
+          const modelRuntime = await createPiModelRuntime(agentDir, piSdk);
           const services = await piSdk.createAgentSessionServices({
             cwd,
             agentDir,
-            authStorage,
-            modelRegistry: registry,
+            modelRuntime,
           });
+          const registry = modelRegistryFacade(services.modelRuntime, piSdk);
           const extensionCount = services.resourceLoader.getExtensions().extensions.length;
-          const models = getPiDiscoverableModels(services.modelRegistry).map((model) => {
+          const models = getPiDiscoverableModels(registry).map((model) => {
             const supportedThinkingOptions = getPiSupportedThinkingOptions(model);
             return {
               slug: `${model.provider}/${model.id}`,
               name: model.name,
               upstreamProviderId: model.provider,
-              upstreamProviderName: services.modelRegistry.getProviderDisplayName(model.provider),
+              upstreamProviderName: registry.getProviderDisplayName(model.provider),
               ...(supportedThinkingOptions.length > 0
                 ? {
                     supportedReasoningEfforts: supportedThinkingOptions.map((option) => ({
@@ -2761,6 +2881,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
     yield* Effect.addFinalizer(() =>
       stopAll().pipe(
         Effect.orDie,
+        Effect.andThen(runtimeEventIngress.stop),
         Effect.ensuring(
           ownsNativeEventLogger && nativeEventLogger
             ? nativeEventLogger.close().pipe(Effect.ignore)

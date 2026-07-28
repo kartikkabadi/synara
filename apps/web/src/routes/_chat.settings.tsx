@@ -5,11 +5,13 @@
 
 import { PROVIDER_DISPLAY_NAMES, type ProviderKind } from "@synara/contracts";
 import { PROVIDER_DESCRIPTORS } from "@synara/shared/providerMetadata";
+import { sameAppSnapShortcut } from "@synara/shared/appSnapShortcut";
 import { createFileRoute, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 
 import {
   type AppSettings,
+  type FollowUpBehavior,
   DEFAULT_UI_DENSITY,
   type UiDensity,
   MAX_CHAT_FONT_SIZE_PX,
@@ -43,6 +45,7 @@ import ReleaseHistoryDialog from "../components/ReleaseHistoryDialog";
 import { KeyboardShortcutsSettingsPanel } from "../components/settings/KeyboardShortcutsSettingsPanel";
 import { ProfileSettingsPanel } from "../components/settings/ProfileSettingsPanel";
 import { ProviderUsageSettingsPanel } from "../components/settings/ProviderUsageSettingsPanel";
+import { ExternalMcpSettingsPanel } from "../components/settings/ExternalMcpSettingsPanel";
 import {
   SettingResetButton,
   SettingsSegmentedControl,
@@ -52,6 +55,7 @@ import {
   SettingsCard,
   SettingsRow,
   SettingsSection,
+  SettingsSectionShell,
 } from "../components/settings/SettingsPanelPrimitives";
 import { SkillsSettingsPanel } from "../components/settings/SkillsSettingsPanel";
 import { ThemePackEditor } from "../components/ThemePackEditor";
@@ -89,11 +93,7 @@ import {
   SETTINGS_NAV_ITEMS,
   SETTINGS_TARGETS,
 } from "../settingsNavigation";
-import {
-  SETTINGS_PAGE_BACKGROUND_CLASS_NAME,
-  SETTINGS_PANEL_SECTION_CLASS_NAME,
-  SETTINGS_SECTION_LABEL_CLASS_NAME,
-} from "../settingsPanelStyles";
+import { SETTINGS_PAGE_BACKGROUND_CLASS_NAME } from "../settingsPanelStyles";
 
 // ── Settings taxonomy ──────────────────────────────────────────────────────
 
@@ -158,6 +158,11 @@ const SIDEBAR_THREAD_SORT_ORDER_LABELS = {
   updated_at: "Recently active",
   created_at: "Newest first",
 } as const;
+
+const FOLLOW_UP_BEHAVIOR_OPTIONS = [
+  { value: "queue", label: "Queue" },
+  { value: "steer", label: "Steer" },
+] as const satisfies ReadonlyArray<{ value: FollowUpBehavior; label: string }>;
 
 // ── Settings UI primitives ────────────────────────────────────────────────
 
@@ -234,9 +239,6 @@ function SettingsRouteView() {
       : []),
     ...(settings.showChatsSection !== defaults.showChatsSection ? ["Chats section"] : []),
     ...(settings.showStudioSection !== defaults.showStudioSection ? ["Studio section"] : []),
-    ...(settings.showWorkspaceSection !== defaults.showWorkspaceSection
-      ? ["Workspace section"]
-      : []),
     ...(settings.uiDensity !== defaults.uiDensity ? ["UI density"] : []),
     ...(settings.chatFontSizePx !== defaults.chatFontSizePx ? ["Base font size"] : []),
     ...(settings.terminalFontSizePx !== defaults.terminalFontSizePx ? ["Terminal font size"] : []),
@@ -256,7 +258,11 @@ function SettingsRouteView() {
     ...(settings.enableAssistantStreaming !== defaults.enableAssistantStreaming
       ? ["Assistant output"]
       : []),
+    ...(settings.followUpBehavior !== defaults.followUpBehavior ? ["Follow-up behavior"] : []),
     ...(settings.enableAppSnap !== defaults.enableAppSnap ? ["AppSnap"] : []),
+    ...(!sameAppSnapShortcut(settings.appSnapShortcut, defaults.appSnapShortcut)
+      ? ["AppSnap shortcut"]
+      : []),
     ...(settings.appSnapPlaySound !== defaults.appSnapPlaySound ? ["AppSnap capture sound"] : []),
     ...(settings.enableProviderUpdateChecks !== defaults.enableProviderUpdateChecks
       ? ["Provider update checks"]
@@ -520,18 +526,9 @@ function SettingsRouteView() {
           resetLabel: "studio section",
           ariaLabel: "Show the Studio section in the sidebar",
         })}
-
-        {renderBooleanSettingRow({
-          settingKey: "showWorkspaceSection",
-          title: "Workspace",
-          description:
-            "Show the Workspace tab in the sidebar switcher. The Threads tab always stays visible.",
-          resetLabel: "workspace section",
-          ariaLabel: "Show the Workspace section in the sidebar",
-        })}
       </SettingsSection>
 
-      <div id={SETTINGS_TARGETS.environmentPanel}>
+      <div id={SETTINGS_TARGETS.environmentPanel} className="space-y-6">
         <SettingsSection title="Environment panel">
           {renderBooleanSettingRow({
             settingKey: "environmentPanelDefaultOpen",
@@ -541,7 +538,9 @@ function SettingsRouteView() {
             resetLabel: "environment panel default open",
             ariaLabel: "Open the Environment panel by default on normal threads",
           })}
+        </SettingsSection>
 
+        <SettingsSection title="Code and status">
           {renderBooleanSettingRow({
             settingKey: "showEnvironmentUsage",
             title: "Usage",
@@ -576,7 +575,9 @@ function SettingsRouteView() {
             resetLabel: "editor section",
             ariaLabel: "Show the Editor section in the Environment panel",
           })}
+        </SettingsSection>
 
+        <SettingsSection title="Context and notes">
           {renderBooleanSettingRow({
             settingKey: "showEnvironmentRecap",
             title: "Recap",
@@ -624,8 +625,7 @@ function SettingsRouteView() {
 
   const renderAppearancePanel = () => (
     <div className="space-y-6">
-      <section className={SETTINGS_PANEL_SECTION_CLASS_NAME}>
-        <h2 className={SETTINGS_SECTION_LABEL_CLASS_NAME}>Theme and typography</h2>
+      <SettingsSectionShell title="Theme">
         <SettingsCard>
           <SettingsRow
             title="Theme"
@@ -647,22 +647,6 @@ function SettingsRouteView() {
               />
             }
           />
-          <SettingsRow
-            title="Use system UI font"
-            description="Ignore the theme's custom UI font and render the interface with the native system font (SF Pro on macOS)."
-            resetAction={
-              !systemUiFont ? (
-                <SettingResetButton label="system UI font" onClick={() => setSystemUiFont(true)} />
-              ) : null
-            }
-            control={
-              <Switch
-                checked={systemUiFont}
-                onCheckedChange={(checked) => setSystemUiFont(Boolean(checked))}
-                aria-label="Use system UI font"
-              />
-            }
-          />
         </SettingsCard>
 
         <div className="space-y-3">
@@ -678,195 +662,212 @@ function SettingsRouteView() {
             />
           ))}
         </div>
+      </SettingsSectionShell>
 
-        <SettingsCard>
-          <SettingsRow
-            title="UI density"
-            description="Control spacing in the sidebar, composer, chat gutters, and settings rows without changing font size."
-            resetAction={
-              settings.uiDensity !== defaults.uiDensity ? (
-                <SettingResetButton
-                  label="UI density"
-                  onClick={() =>
-                    updateSettings({
-                      uiDensity: DEFAULT_UI_DENSITY,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <SettingsSegmentedControl
-                value={settings.uiDensity}
-                onValueChange={(value) => {
-                  if (!isUiDensity(value)) {
-                    return;
-                  }
-                  updateSettings({ uiDensity: value });
-                }}
-                ariaLabel="UI density"
-                options={UI_DENSITY_OPTIONS}
+      <SettingsSection title="Typography and spacing">
+        <SettingsRow
+          title="Use system UI font"
+          description="Ignore the theme's custom UI font and render the interface with the native system font (SF Pro on macOS)."
+          resetAction={
+            !systemUiFont ? (
+              <SettingResetButton label="system UI font" onClick={() => setSystemUiFont(true)} />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={systemUiFont}
+              onCheckedChange={(checked) => setSystemUiFont(Boolean(checked))}
+              aria-label="Use system UI font"
+            />
+          }
+        />
+
+        <SettingsRow
+          title="UI density"
+          description="Control spacing in the sidebar, composer, chat gutters, and settings rows without changing font size."
+          resetAction={
+            settings.uiDensity !== defaults.uiDensity ? (
+              <SettingResetButton
+                label="UI density"
+                onClick={() =>
+                  updateSettings({
+                    uiDensity: DEFAULT_UI_DENSITY,
+                  })
+                }
               />
-            }
-          />
+            ) : null
+          }
+          control={
+            <SettingsSegmentedControl
+              value={settings.uiDensity}
+              onValueChange={(value) => {
+                if (!isUiDensity(value)) {
+                  return;
+                }
+                updateSettings({ uiDensity: value });
+              }}
+              ariaLabel="UI density"
+              options={UI_DENSITY_OPTIONS}
+            />
+          }
+        />
 
-          <SettingsRow
-            title="Base font size"
-            description="Adjust the app text base in pixels. Chat and UI typography scale proportionally from this value."
-            resetAction={
-              settings.chatFontSizePx !== defaults.chatFontSizePx ? (
-                <SettingResetButton
-                  label="base font size"
-                  onClick={() =>
-                    updateSettings({
-                      chatFontSizePx: defaults.chatFontSizePx,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
-                <Input
-                  type="number"
+        <SettingsRow
+          title="Base font size"
+          description="Adjust the app text base in pixels. Chat and UI typography scale proportionally from this value."
+          resetAction={
+            settings.chatFontSizePx !== defaults.chatFontSizePx ? (
+              <SettingResetButton
+                label="base font size"
+                onClick={() =>
+                  updateSettings({
+                    chatFontSizePx: defaults.chatFontSizePx,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
+              <Input
+                type="number"
+                size="sm"
+                min={MIN_CHAT_FONT_SIZE_PX}
+                max={MAX_CHAT_FONT_SIZE_PX}
+                step={1}
+                inputMode="numeric"
+                variant="soft"
+                className="w-full text-right sm:w-20"
+                value={String(settings.chatFontSizePx)}
+                onChange={(event) => {
+                  const nextValue = event.target.value.trim();
+                  if (nextValue.length === 0) return;
+                  updateSettings({
+                    chatFontSizePx: normalizeChatFontSizePx(Number(nextValue)),
+                  });
+                }}
+                aria-label="Base font size in pixels"
+              />
+              <span className="text-xs text-muted-foreground">px</span>
+            </div>
+          }
+        />
+
+        <SettingsRow
+          title="Terminal font size"
+          description="Adjust terminal text independently from the app and chat font size."
+          resetAction={
+            settings.terminalFontSizePx !== defaults.terminalFontSizePx ? (
+              <SettingResetButton
+                label="terminal font size"
+                onClick={() =>
+                  updateSettings({
+                    terminalFontSizePx: defaults.terminalFontSizePx,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
+              <Input
+                type="number"
+                size="sm"
+                min={MIN_TERMINAL_FONT_SIZE_PX}
+                max={MAX_TERMINAL_FONT_SIZE_PX}
+                step={1}
+                inputMode="numeric"
+                variant="soft"
+                className="w-full text-right sm:w-20"
+                value={String(settings.terminalFontSizePx)}
+                onChange={(event) => {
+                  const nextValue = event.target.value.trim();
+                  if (nextValue.length === 0) return;
+                  updateSettings({
+                    terminalFontSizePx: normalizeTerminalFontSizePx(Number(nextValue)),
+                  });
+                }}
+                aria-label="Terminal font size in pixels"
+              />
+              <span className="text-xs text-muted-foreground">px</span>
+            </div>
+          }
+        />
+
+        <SettingsRow
+          title="Terminal font"
+          description="Type any monospace font installed on this device (e.g. Fira Code). Leave empty for the default. Fonts that aren't installed fall back to the system monospace."
+          resetAction={
+            settings.terminalFontFamily !== defaults.terminalFontFamily ? (
+              <SettingResetButton
+                label="terminal font"
+                onClick={() =>
+                  updateSettings({
+                    terminalFontFamily: defaults.terminalFontFamily,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <div className="flex w-full items-center justify-end sm:w-auto">
+              <Autocomplete
+                items={visibleTerminalFontFamilySuggestions}
+                mode="none"
+                openOnInputClick
+                value={settings.terminalFontFamily}
+                onValueChange={(value) => {
+                  updateSettings({
+                    terminalFontFamily: normalizeTerminalFontFamily(value),
+                  });
+                }}
+              >
+                <AutocompleteInput
                   size="sm"
-                  min={MIN_CHAT_FONT_SIZE_PX}
-                  max={MAX_CHAT_FONT_SIZE_PX}
-                  step={1}
-                  inputMode="numeric"
                   variant="soft"
-                  className="w-full text-right sm:w-20"
-                  value={String(settings.chatFontSizePx)}
-                  onChange={(event) => {
-                    const nextValue = event.target.value.trim();
-                    if (nextValue.length === 0) return;
-                    updateSettings({
-                      chatFontSizePx: normalizeChatFontSizePx(Number(nextValue)),
-                    });
-                  }}
-                  aria-label="Base font size in pixels"
+                  showTrigger
+                  showClear={settings.terminalFontFamily.length > 0}
+                  spellCheck={false}
+                  autoComplete="off"
+                  placeholder="Default (JetBrains Mono)"
+                  className="w-full sm:w-56"
+                  aria-label="Terminal font family"
                 />
-                <span className="text-xs text-muted-foreground">px</span>
-              </div>
-            }
-          />
+                <AutocompletePopup className="w-56 min-w-56 font-system-ui">
+                  <AutocompleteList>
+                    {visibleTerminalFontFamilySuggestions.map((suggestion, index) => (
+                      <AutocompleteItem
+                        key={suggestion}
+                        index={index}
+                        value={suggestion}
+                        className="font-normal text-[var(--color-text-foreground)]"
+                        onClick={() => {
+                          updateSettings({
+                            terminalFontFamily: normalizeTerminalFontFamily(suggestion),
+                          });
+                        }}
+                      >
+                        {suggestion}
+                      </AutocompleteItem>
+                    ))}
+                    <AutocompleteEmpty>No matching suggested fonts.</AutocompleteEmpty>
+                  </AutocompleteList>
+                </AutocompletePopup>
+              </Autocomplete>
+            </div>
+          }
+        />
 
-          <SettingsRow
-            title="Terminal font size"
-            description="Adjust terminal text independently from the app and chat font size."
-            resetAction={
-              settings.terminalFontSizePx !== defaults.terminalFontSizePx ? (
-                <SettingResetButton
-                  label="terminal font size"
-                  onClick={() =>
-                    updateSettings({
-                      terminalFontSizePx: defaults.terminalFontSizePx,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
-                <Input
-                  type="number"
-                  size="sm"
-                  min={MIN_TERMINAL_FONT_SIZE_PX}
-                  max={MAX_TERMINAL_FONT_SIZE_PX}
-                  step={1}
-                  inputMode="numeric"
-                  variant="soft"
-                  className="w-full text-right sm:w-20"
-                  value={String(settings.terminalFontSizePx)}
-                  onChange={(event) => {
-                    const nextValue = event.target.value.trim();
-                    if (nextValue.length === 0) return;
-                    updateSettings({
-                      terminalFontSizePx: normalizeTerminalFontSizePx(Number(nextValue)),
-                    });
-                  }}
-                  aria-label="Terminal font size in pixels"
-                />
-                <span className="text-xs text-muted-foreground">px</span>
-              </div>
-            }
-          />
-
-          <SettingsRow
-            title="Terminal font"
-            description="Type any monospace font installed on this device (e.g. Fira Code). Leave empty for the default. Fonts that aren't installed fall back to the system monospace."
-            resetAction={
-              settings.terminalFontFamily !== defaults.terminalFontFamily ? (
-                <SettingResetButton
-                  label="terminal font"
-                  onClick={() =>
-                    updateSettings({
-                      terminalFontFamily: defaults.terminalFontFamily,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <div className="flex w-full items-center justify-end sm:w-auto">
-                <Autocomplete
-                  items={visibleTerminalFontFamilySuggestions}
-                  mode="none"
-                  openOnInputClick
-                  value={settings.terminalFontFamily}
-                  onValueChange={(value) => {
-                    updateSettings({
-                      terminalFontFamily: normalizeTerminalFontFamily(value),
-                    });
-                  }}
-                >
-                  <AutocompleteInput
-                    size="sm"
-                    variant="soft"
-                    showTrigger
-                    showClear={settings.terminalFontFamily.length > 0}
-                    spellCheck={false}
-                    autoComplete="off"
-                    placeholder="Default (JetBrains Mono)"
-                    className="w-full sm:w-56"
-                    aria-label="Terminal font family"
-                  />
-                  <AutocompletePopup className="w-56 min-w-56 font-system-ui">
-                    <AutocompleteList>
-                      {visibleTerminalFontFamilySuggestions.map((suggestion, index) => (
-                        <AutocompleteItem
-                          key={suggestion}
-                          index={index}
-                          value={suggestion}
-                          className="font-normal text-[var(--color-text-foreground)]"
-                          onClick={() => {
-                            updateSettings({
-                              terminalFontFamily: normalizeTerminalFontFamily(suggestion),
-                            });
-                          }}
-                        >
-                          {suggestion}
-                        </AutocompleteItem>
-                      ))}
-                      <AutocompleteEmpty>No matching suggested fonts.</AutocompleteEmpty>
-                    </AutocompleteList>
-                  </AutocompletePopup>
-                </Autocomplete>
-              </div>
-            }
-          />
-
-          {shouldShowFontSmoothing
-            ? renderBooleanSettingRow({
-                settingKey: "enableNativeFontSmoothing",
-                title: "Font smoothing",
-                description: "Use macOS-style antialiasing for lighter, crisper text rendering.",
-                resetLabel: "font smoothing",
-                ariaLabel: "Enable font smoothing",
-              })
-            : null}
-        </SettingsCard>
-      </section>
+        {shouldShowFontSmoothing
+          ? renderBooleanSettingRow({
+              settingKey: "enableNativeFontSmoothing",
+              title: "Font smoothing",
+              description: "Use macOS-style antialiasing for lighter, crisper text rendering.",
+              resetLabel: "font smoothing",
+              ariaLabel: "Enable font smoothing",
+            })
+          : null}
+      </SettingsSection>
 
       <SettingsSection title="Time and reading">
         <SettingsRow
@@ -917,7 +918,32 @@ function SettingsRouteView() {
 
   const renderBehaviorPanel = () => (
     <div className="space-y-6">
-      <SettingsSection title="Runtime behavior">
+      <SettingsSection title="Conversation">
+        <SettingsRow
+          title="Follow-up behavior"
+          description="Choose whether messages sent during an active turn wait in the queue or steer the current run. Ctrl/Cmd+Enter uses the opposite behavior for one message."
+          resetAction={
+            settings.followUpBehavior !== defaults.followUpBehavior ? (
+              <SettingResetButton
+                label="follow-up behavior"
+                onClick={() =>
+                  updateSettings({
+                    followUpBehavior: defaults.followUpBehavior,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <SettingsSegmentedControl
+              value={settings.followUpBehavior}
+              onValueChange={(value) => updateSettings({ followUpBehavior: value })}
+              ariaLabel="Follow-up behavior"
+              options={FOLLOW_UP_BEHAVIOR_OPTIONS}
+            />
+          }
+        />
+
         {renderBooleanSettingRow({
           settingKey: "enableAssistantStreaming",
           title: "Assistant output",
@@ -925,7 +951,9 @@ function SettingsRouteView() {
           resetLabel: "assistant output",
           ariaLabel: "Stream assistant messages",
         })}
+      </SettingsSection>
 
+      <SettingsSection title="Review">
         {renderBooleanSettingRow({
           settingKey: "diffWordWrap",
           title: "Diff line wrapping",
@@ -997,7 +1025,7 @@ function SettingsRouteView() {
         {/* Companion sidebar trigger so settings is reachable-and-exitable even when the
           sidebar is collapsed (web/mobile have no global Back arrow). Pinned to the
           card's top-left — at the same header height + traffic-light gutter as the
-          chat/workspace headers — so the collapsed-state toggle sits by the traffic
+          chat and route headers — so the collapsed-state toggle sits by the traffic
           lights instead of floating in the centered settings body. It renders nothing
           while the sidebar is open (SidebarHeaderNavigationControls returns null), so it
           adds no navigation chrome in the common (open) state and never shifts the centered
@@ -1079,6 +1107,7 @@ function SettingsRouteView() {
                   updateSettings={updateSettings}
                   resetEpoch={resetEpoch}
                 />
+                <ExternalMcpSettingsPanel active={activeSection === "integrations"} />
                 <AdvancedSettingsPanel
                   active={activeSection === "advanced"}
                   onOpenReleaseHistory={() => setReleaseHistoryOpen(true)}

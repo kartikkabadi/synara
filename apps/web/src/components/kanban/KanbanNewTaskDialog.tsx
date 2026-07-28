@@ -108,12 +108,12 @@ export function KanbanNewTaskDialog({
   onOpenChange,
   projectOptions,
   initialProjectId,
-  initialSendAsDraft = false,
+  initialSendAsDraft: initialSendAsDraftProp,
 }: KanbanNewTaskDialogProps) {
+  const initialSendAsDraft = initialSendAsDraftProp ?? false;
   const { settings } = useAppSettings();
   const { resolvedTheme } = useTheme();
   const assistantDeliveryMode = resolveAssistantDeliveryMode(settings);
-  // Manual memoization kept: this file does not compile under React Compiler (see compile-report).
   const providerOptionsForDispatch = useMemo(() => getProviderStartOptions(settings), [settings]);
   const projects = useStore((state) => state.projects);
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
@@ -389,11 +389,7 @@ export function KanbanNewTaskDialog({
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
-      <DialogPopup
-        surface="solid"
-        className="max-w-3xl rounded-3xl"
-        onKeyDown={handleSubmitShortcut}
-      >
+      <DialogPopup className="max-w-3xl rounded-3xl" onKeyDown={handleSubmitShortcut}>
         {/* Linear-style breadcrumb header: project chip › title, same type size. */}
         <DialogHeader className="px-4 pt-3.5 pb-0">
           <div className="flex min-w-0 items-center gap-2">

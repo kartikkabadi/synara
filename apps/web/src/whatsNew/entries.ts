@@ -22,6 +22,216 @@ import type { WhatsNewEntry } from "./logic";
 
 export const WHATS_NEW_ENTRIES: readonly WhatsNewEntry[] = [
   {
+    version: "0.6.2",
+    date: "Jul 27",
+    features: [
+      {
+        id: "universal-live-tool-activity",
+        title: "Every agent's live tool work is visible",
+        description:
+          "Follow tools as they start, update, and finish across supported providers, with consistent labels and details directly in the transcript.",
+        details:
+          "Synara now normalizes live and settled tool activity into one presentation model, preserves expandable tool details and interactions, and reconciles terminal states without leaving duplicate or permanently running work rows behind.",
+      },
+      {
+        id: "reliable-live-recovery",
+        title: "Live tasks recover after reconnects",
+        description:
+          "Provider status, active turns, and thread details converge back to the server's real state after dropped connections or delayed events.",
+        details:
+          "Reconnect refreshes preserve useful status while new data arrives, stale live projections are fenced and repaired, settled turns stop polling, and thread-detail ownership is reconciled across lease, snapshot, and subscription races.",
+      },
+      {
+        id: "follow-up-dispatch-mode",
+        title: "Choose whether follow-ups queue or steer",
+        description:
+          "Set new messages sent during active work to wait their turn or steer the current agent immediately.",
+        details:
+          "The new conversation setting is searchable in Settings and is applied consistently by the composer while a task is running, with Queue as the predictable default and Steer available for more interactive workflows.",
+      },
+      {
+        id: "recover-blocked-threads",
+        title: "Blocked threads can be recovered",
+        description:
+          "When an uncertain provider delivery quarantines a thread, the error banner now offers a safe Unblock thread action.",
+        details:
+          "Synara abandons ambiguous blockers oldest-first, then replays only the skipped turn starts. This restores the conversation without risking a duplicate resend of the command whose delivery could not be proven.",
+      },
+      {
+        id: "automation-and-desktop-resilience",
+        title: "Automations and desktop recovery are tougher",
+        description:
+          "Dedicated automation runs, clearer completion policies, and bounded desktop crash recovery make unattended work more dependable.",
+        details:
+          "Automation self-cancellation is explicitly authorized, run state and completion policies persist more reliably, renderer crashes use bounded reload recovery with actionable prompts, and process supervision, executable lookup, terminal wrappers, worktrees, and Git status broadcasting handle failure boundaries more carefully.",
+      },
+      {
+        id: "faster-startup-and-diffs",
+        title: "Startup and large diffs do less work",
+        description:
+          "Synara loads expensive provider and diff machinery only when needed and computes working-tree statistics without transferring full patches.",
+        details:
+          "Shell environment probes and orchestration startup state are reused, route chunks are preloaded selectively, supervised process scans are throttled, and React Compiler coverage protects chat, picker, hook, and UI hot paths.",
+      },
+      {
+        id: "storage-and-artifact-safety",
+        title: "Local state stays safer",
+        description:
+          "Exclusive SQLite locking and stricter migration-artifact cleanup reduce the chance of competing writers or abandoned update files.",
+        details:
+          "Database access now proves exclusive ownership, migration backups and resumable artifacts receive broader retention and reclamation coverage, and orphan cleanup stays bounded to verified Synara-owned paths.",
+      },
+      {
+        id: "custom-void-space",
+        title: "Make the Void space your own",
+        description:
+          "Rename Void and choose its icon so unassigned projects fit the way you organize your workspace.",
+        details:
+          "The custom presentation is stored locally and appears consistently in the sidebar, Space switcher, project pickers, and creation flows, with validation and a one-step reset to the default.",
+      },
+      {
+        id: "readability-and-interface-polish",
+        title: "Small details are calmer and clearer",
+        description:
+          "Completion notifications retain useful Markdown context, command menus explain loading and empty states, and Settings are organized around user intent.",
+        details:
+          "This release also standardizes settings cards and elevated hover surfaces, simplifies subagent transcript rows, preserves the landing project color, keeps Ctrl-minus zoom working on Windows and browser guests, improves diff and composer hot paths, and makes fenced code, references, nested Markdown, and technical completion summaries safer and easier to read.",
+      },
+    ],
+  },
+  {
+    version: "0.6.1",
+    date: "Jul 25",
+    features: [
+      {
+        id: "database-recovery",
+        title: "Updates recover safely from interrupted migrations",
+        description:
+          "Synara now detects and repairs the database state that could leave some 0.6.0 installations stuck during startup.",
+        details:
+          "Migration lineage is validated before launch, recovery uses verified backups and resumable markers, and the desktop supervisor distinguishes recoverable migration failures from ordinary backend exits. The recovery path is covered on macOS, Linux, and Windows, including Windows-specific process and filesystem behavior.",
+      },
+      {
+        id: "simpler-project-navigation",
+        title: "Projects are easier to enter and switch",
+        description:
+          "Start from the project you want directly in the new-task heading, with fewer intermediate workspace screens and steadier navigation state.",
+        details:
+          "The project name in the empty-chat heading is now a picker trigger, Space navigation is normalized through one shared path, and Studio workspace metadata is repaired during migration so restored tasks open in the right place.",
+      },
+      {
+        id: "reliable-diffs-and-git",
+        title: "Diff and Git tools stay in sync",
+        description:
+          "Switch diff views, refresh repository state, and copy large virtualized changes without stale controls or missing content.",
+        details:
+          "The diff toolbar now derives its mode and selection consistently, Select All copies the complete virtualized diff, Git status refreshes after actions, and branch controls handle repository and worktree state more predictably.",
+      },
+      {
+        id: "steadier-agent-sessions",
+        title: "Agent sessions settle and recover more cleanly",
+        description:
+          "Claude, OpenCode, Pi, Codex, and other providers keep their model choices, runtime state, and shutdown boundaries aligned through reconnects and failures.",
+        details:
+          "This release fixes Pi model discovery against the current runtime SDK, ignores stale OpenCode plan agents, hardens Claude resume and permission handling, preserves WebSocket requests across reconnect boundaries, and proves process-tree teardown before replacing desktop or provider backends.",
+      },
+      {
+        id: "clearer-live-status",
+        title: "Live work is easier to read",
+        description:
+          "Automation rows show state-specific icons, task hydration is calmer, and active conversations avoid unnecessary projection and subscription churn.",
+        details:
+          "Automation status now distinguishes running, attention, failure, and settled states at a glance. Store projection, thread-detail retention, terminal cleanup, and sidebar updates were tightened so busy workspaces remain responsive and predictable.",
+      },
+    ],
+  },
+  {
+    version: "0.6.0",
+    date: "Jul 24",
+    features: [
+      {
+        id: "external-synara-mcp",
+        title: "Bring Synara to any MCP-capable agent",
+        description:
+          "Connect Codex, Claude Code, Claude Desktop, or another local MCP app, then let it discover your Synara workspace, launch isolated tasks, wait for results, and bring the answer back.",
+        details:
+          "Settings → Integrations now provides a copy-ready guided prompt for agentic clients, manual JSON configuration for Claude Desktop and other non-agentic clients, resumable pairing, all-or-selected project access, provider and model discovery, connection status, and immediate revocation. Connections expire, are rate-limited and capability-scoped, and default new work to managed worktrees with approval-required execution; local-checkout, full-access, and project-wide task reading stay behind explicit advanced permissions.",
+      },
+      {
+        id: "built-in-synara-mcp",
+        title: "Synara's agents can now operate Synara",
+        description:
+          "Every supported agent running inside Synara receives built-in tools to understand the app, delegate work, coordinate parallel tasks, inspect failures, and manage automations.",
+        details:
+          "The new Synara Agent Gateway can list and read projects and tasks, create one task or an exact multi-agent batch across providers and models, wait for every result, continue or interrupt work, rename or archive tasks, inspect runtime diagnostics, and manage automation lifecycles. Thread-bound authority, privilege caps, idempotent creation, isolated worktrees, and restart recovery keep delegated work visible and contained.",
+      },
+      {
+        id: "project-spaces",
+        title: "Organize projects into Spaces",
+        description:
+          "Create named, icon-based Spaces for the parts of your work that belong together, while unassigned projects remain easy to find in Void.",
+        details:
+          "Spaces support persisted ordering, project assignment, drag-and-drop movement, bulk moves, activity indicators, inline creation while adding a project, and numbered keyboard shortcuts for direct switching.",
+      },
+      {
+        id: "automation-collaborators",
+        title: "Automations become long-running collaborators",
+        description:
+          "Ask an agent to suggest or create scheduled and heartbeat automations with memory, limits, notifications, and clear review states.",
+        details:
+          "Automations now support standalone and heartbeat modes, persistent memory, cooldowns, maximum runs, notification and completion policies, pause and resume, proposal review, run reconciliation after interruptions, and richer list rows for unread results, failures, approvals, and changes that need attention.",
+      },
+      {
+        id: "claude-subagents-workflows",
+        title: "Claude subagents and workflows are first-class",
+        description:
+          "Follow Claude's native subagents and dynamic workflows as real Synara work, with live status, phases, tools, usage, steering, and background controls.",
+        details:
+          "Child tasks are navigable and independently visible, workflow cards show every phase and agent by default, model and effort stay live, and pause, resume, stop, foreground, and background actions remain synchronized through late events and provider restarts.",
+      },
+      {
+        id: "cross-task-context",
+        title: "Bring another task into the conversation",
+        description:
+          "Mention an existing Synara task from the composer to give the current agent the right recent context without copying a transcript by hand.",
+        details:
+          "Cross-task mentions include bounded recent conversation context together with the source project and provider identity, and disambiguate tasks that share the same title.",
+      },
+      {
+        id: "faster-agent-work",
+        title: "New work starts faster and streams lighter",
+        description:
+          "New chats paint sooner, model choices arrive earlier, and active turns spend less time on repeated setup, storage, and rendering work.",
+        details:
+          "Synara prefetches provider models before the composer opens, avoids a redundant first-turn Claude permission wait, prepares Codex overlays without blocking, parallelizes independent turn-start I/O, reduces streaming SQL work, and expands React Compiler coverage across the web app.",
+      },
+      {
+        id: "provider-reliability",
+        title: "Provider sessions stay truer to their capabilities",
+        description:
+          "Claude, Codex, Cursor, Droid, Grok, OpenCode, Kilo, Pi, and Antigravity receive a broad round of model, permission, resume, child-event, and completion fixes.",
+        details:
+          "Highlights include Fable 5 and Opus 4.8 in Pi, namespaced Cursor and Grok model support, accurate Claude context windows, official ACP SDK handling, app-owned OpenCode review commands, isolated Codex child events, safer provider updates, preserved blank PATH defaults, and an Antigravity hook that no longer launches Synara unexpectedly.",
+      },
+      {
+        id: "desktop-runtime-hardening",
+        title: "Desktop and browser lifecycles recover cleanly",
+        description:
+          "Browser control, Windows shutdown, managed worktrees, durable secrets, thread deletion, and macOS release finalization now fail and recover more predictably.",
+        details:
+          "The desktop browser bridge restores discovery, ownership, teardown, and reconnect behavior; Windows waits for the backend to stop; interrupted worktree cleanup resumes safely; deleted work cannot resurrect queued turns; credential writes survive interruption; and universal macOS releases preserve the correct update metadata.",
+      },
+      {
+        id: "workspace-polish",
+        title: "Hundreds of small edges feel calmer",
+        description:
+          "Sharper Markdown hierarchy, steadier pickers, better composer spacing, smarter sidebar priority, clearer Studio Git controls, and new shortcuts make daily work easier to scan.",
+        details:
+          "This release also adds Commit and Push from the active task, configurable AppSnap shortcuts, a folder opener in Studio, a slimmer running indicator, reliable Cmd+K search on macOS, fixed PR review counts, safer file-icon lookup, cleaner stacked composer panels, and a global new-task flow that uses the latest project state.",
+      },
+    ],
+  },
+  {
     version: "0.5.5",
     date: "Jul 17",
     features: [
@@ -1483,7 +1693,7 @@ export const WHATS_NEW_ENTRIES: readonly WhatsNewEntry[] = [
         description:
           "A new recent-view switcher lets you move through recent chats, terminals, and workspace surfaces with keyboard-first navigation and visible keycap hints.",
         details:
-          "Recent views are tracked in a dedicated store, activated through shared route logic, and covered by browser and unit tests so switching does not lose terminal/workspace state or collide with existing global shortcuts.",
+          "Recent views are tracked in a dedicated store, activated through shared route logic, and covered by browser and unit tests so switching does not lose terminal state or collide with existing global shortcuts.",
       },
       {
         id: "composer-mentions-drafts",
@@ -1689,9 +1899,9 @@ export const WHATS_NEW_ENTRIES: readonly WhatsNewEntry[] = [
       },
       {
         id: "sidebar-section-toggles",
-        title: "Chats and Workspace can be hidden",
+        title: "Chats can be hidden",
         description:
-          "New sidebar section toggles let you hide the standalone Chats footer list or the Workspace tab while keeping Threads always available.",
+          "A new sidebar section toggle lets you hide the standalone Chats footer list while keeping Projects available.",
       },
       {
         id: "legacy-database-repairs",

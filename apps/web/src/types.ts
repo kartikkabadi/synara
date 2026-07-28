@@ -19,6 +19,8 @@ import type {
   ProjectScript as ContractProjectScript,
   ThreadId,
   ProjectId,
+  SpaceId,
+  SpaceIconName,
   TurnId,
   MessageId,
   ProviderMentionReference,
@@ -175,15 +177,27 @@ export interface Project {
   defaultModelSelection: ModelSelection | null;
   expanded: boolean;
   isPinned?: boolean;
+  /** Missing on renderer state written before Spaces; normalized snapshots always set it. */
+  spaceId?: SpaceId | null;
   createdAt?: string | undefined;
   updatedAt?: string | undefined;
   scripts: ProjectScript[];
+}
+
+export interface Space {
+  id: SpaceId;
+  name: string;
+  icon: SpaceIconName;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ThreadWorkspaceState {
   envMode?: ThreadEnvironmentMode | undefined;
   branch: string | null;
   worktreePath: string | null;
+  workingDirectory?: string | null;
   associatedWorktreePath?: string | null;
   associatedWorktreeBranch?: string | null;
   associatedWorktreeRef?: string | null;
@@ -194,6 +208,7 @@ export interface ThreadWorkspacePatch {
   envMode?: ThreadEnvironmentMode | undefined;
   branch?: string | null;
   worktreePath?: string | null;
+  workingDirectory?: string | null;
   associatedWorktreePath?: string | null;
   associatedWorktreeBranch?: string | null;
   associatedWorktreeRef?: string | null;
@@ -293,6 +308,7 @@ export interface SidebarThreadSummary {
   envMode?: ThreadEnvironmentMode | undefined;
   branch: string | null;
   worktreePath: string | null;
+  workingDirectory?: string | null;
   associatedWorktreePath?: string | null;
   associatedWorktreeBranch?: string | null;
   associatedWorktreeRef?: string | null;
@@ -316,6 +332,18 @@ export interface SidebarThreadSummary {
   sidechatSourceThreadId?: ThreadId | null;
   handoff?: ThreadHandoff | null;
   lastKnownPr?: OrchestrationThreadPullRequest | null;
+}
+
+/** Lightweight composer identity that ignores live turn/status churn. */
+export interface ComposerThreadMentionSource {
+  id: ThreadId;
+  projectId: ProjectId;
+  title: string;
+  provider: ProviderKind;
+  createdAt: string;
+  archivedAt?: string | null;
+  lastVisitedAt?: string | undefined;
+  latestUserMessageAt: string | null;
 }
 
 export interface ThreadSession {

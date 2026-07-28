@@ -440,6 +440,15 @@ export function resolveEnvironmentPanelVisible(input: {
   return input.environmentEnabled && input.environmentPanelOpen;
 }
 
+// Normal project toolbars stay stable while repository discovery is pending. Studio folders are
+// casual context, however, so they must opt into Git UI only after a positive repository result.
+export function resolveGitRepoUiState(input: {
+  isStudioContainer: boolean;
+  queriedIsRepo: boolean | undefined;
+}): boolean {
+  return input.queriedIsRepo ?? !input.isStudioContainer;
+}
+
 // The composer live strip prefers the turn's computed diff (the
 // `thread.turn-diff-completed` event) so it can show real per-file +/- stats.
 // Before that lands, it falls back to mid-turn file-edit work-log activity so
@@ -517,6 +526,25 @@ export function resolveActiveTurnLiveDiffState(input: {
   };
 }
 
+export type ThreadDetailHydration = "ready" | "loading" | "failed";
+
+/**
+ * A server thread's shell row alone cannot distinguish "no messages" from
+ * "history not loaded yet", so an empty timeline only counts as a genuine empty
+ * landing once the detail snapshot has been applied. Local draft threads have no
+ * server detail to wait for and are always ready.
+ */
+export function resolveThreadDetailHydration(input: {
+  readonly isServerThread: boolean;
+  readonly hasTimelineEntries: boolean;
+  readonly detailSyncState: "synced" | "failed" | null;
+}): ThreadDetailHydration {
+  if (!input.isServerThread || input.hasTimelineEntries || input.detailSyncState === "synced") {
+    return "ready";
+  }
+  return input.detailSyncState === "failed" ? "failed" : "loading";
+}
+
 export function buildLocalDraftThread(
   threadId: ThreadId,
   draftThread: DraftThreadState,
@@ -540,6 +568,7 @@ export function buildLocalDraftThread(
     envMode: draftThread.envMode,
     branch: draftThread.branch,
     worktreePath: draftThread.worktreePath,
+    workingDirectory: draftThread.workingDirectory ?? null,
     lastKnownPr: draftThread.lastKnownPr ?? null,
     handoff: null,
     turnDiffSummaries: [],

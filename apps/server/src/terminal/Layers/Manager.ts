@@ -47,6 +47,7 @@ import {
   TerminalError,
   TerminalManager,
   TerminalManagerShape,
+  type TerminalCloseOpenedAtOrBeforeInput,
   TerminalSessionState,
   TerminalStartInput,
 } from "../Services/Manager";
@@ -119,6 +120,16 @@ const TERMINAL_ENV_BLOCKLIST = new Set([
   "TERM_PROGRAM",
   "TERM_PROGRAM_VERSION",
   "TERM_SESSION_ID",
+  // Color-control identity is also the host's, not the PTY's: a server launched
+  // from a non-interactive harness shell (e.g. `codex exec` sets NO_COLOR=1)
+  // would otherwise blank every ANSI color in every spawned terminal. COLORTERM
+  // is stripped here and pinned below alongside TERM.
+  "NO_COLOR",
+  "FORCE_COLOR",
+  "CLICOLOR",
+  "CLICOLOR_FORCE",
+  "COLORFGBG",
+  "COLORTERM",
   "GHOSTTY_RESOURCES_DIR",
   "GHOSTTY_BIN_DIR",
   "ITERM_PROFILE",
@@ -421,6 +432,30 @@ function findEscapeSequenceEndIndex(input: string, start: number): number | null
   return isEscapeFinalByte(input.charCodeAt(cursor)) ? cursor + 1 : start + 1;
 }
 
+/**
+ * Upper bound on how much is held back while waiting for a control-sequence terminator.
+ *
+ * String sequences (OSC/DCS/PM/APC) only end on BEL/ST, so a truncated program, a
+ * crashed TUI, or `cat` on a binary can leave one open forever. Without a bound the
+ * carryover buffer grows without limit, every flush rescans it from the start
+ * (quadratic), and nothing ever reaches scrollback — the terminal silently freezes.
+ * Real emulators abandon an over-long sequence and resume, so we do the same.
+ *
+ * The bound counts what `.length` counts — UTF-16 code units, not bytes — so an
+ * all-ASCII payload is capped at exactly 64 KiB while a non-ASCII one can be a few
+ * times that on the wire. That imprecision is deliberate: this is a runaway guard,
+ * and it only has to sit far above legitimate traffic. It is generous for the same
+ * reason, since inline-image protocols (sixel DCS, iTerm2 OSC 1337) do send large
+ * payloads. Payloads above it are abandoned for scrollback only: live output is
+ * streamed as raw PTY bytes and is never sanitized, so the visible terminal is
+ * unaffected. Scrollback itself is capped at 1 MB, so a payload this large could not
+ * survive there anyway.
+ */
+const MAX_PENDING_CONTROL_SEQUENCE_LENGTH = 65_536;
+
+/** ESC + backslash: the 7-bit String Terminator that closes an OSC/DCS/PM/APC sequence. */
+const STRING_TERMINATOR = "\u001b\\";
+
 function sanitizeTerminalHistoryChunk(
   pendingControlSequence: string,
   data: string,
@@ -440,18 +475,37 @@ function sanitizeTerminalHistoryChunk(
     visibleText += value;
   };
 
+  /**
+   * Stop parsing at an incomplete control sequence and carry it into the next
+   * chunk — unless the carryover exceeds the safety bound, in which case the
+   * sequence is abandoned: the buffered bytes are emitted (terminated by ST so a
+   * replayed transcript cannot wedge the client parser) and the parser resets.
+   */
+  const suspend = (start: number) => {
+    const pending = input.slice(start);
+    if (pending.length > MAX_PENDING_CONTROL_SEQUENCE_LENGTH) {
+      return {
+        visibleText: `${visibleText}${pending}${STRING_TERMINATOR}`,
+        pendingControlSequence: "",
+        titleSignals,
+        hookEvents,
+      };
+    }
+    return {
+      visibleText,
+      pendingControlSequence: pending,
+      titleSignals,
+      hookEvents,
+    };
+  };
+
   while (index < input.length) {
     const codePoint = input.charCodeAt(index);
 
     if (codePoint === 0x1b) {
       const nextCodePoint = input.charCodeAt(index + 1);
       if (Number.isNaN(nextCodePoint)) {
-        return {
-          visibleText,
-          pendingControlSequence: input.slice(index),
-          titleSignals,
-          hookEvents,
-        };
+        return suspend(index);
       }
 
       if (nextCodePoint === 0x5b) {
@@ -469,12 +523,7 @@ function sanitizeTerminalHistoryChunk(
           cursor += 1;
         }
         if (cursor >= input.length) {
-          return {
-            visibleText,
-            pendingControlSequence: input.slice(index),
-            titleSignals,
-            hookEvents,
-          };
+          return suspend(index);
         }
         continue;
       }
@@ -487,12 +536,7 @@ function sanitizeTerminalHistoryChunk(
       ) {
         const terminatorIndex = findStringTerminatorIndex(input, index + 2);
         if (terminatorIndex === null) {
-          return {
-            visibleText,
-            pendingControlSequence: input.slice(index),
-            titleSignals,
-            hookEvents,
-          };
+          return suspend(index);
         }
         const sequence = input.slice(index, terminatorIndex);
         const content = stripStringTerminator(input.slice(index + 2, terminatorIndex));
@@ -515,12 +559,7 @@ function sanitizeTerminalHistoryChunk(
 
       const escapeSequenceEndIndex = findEscapeSequenceEndIndex(input, index + 1);
       if (escapeSequenceEndIndex === null) {
-        return {
-          visibleText,
-          pendingControlSequence: input.slice(index),
-          titleSignals,
-          hookEvents,
-        };
+        return suspend(index);
       }
       const sequence = input.slice(index, escapeSequenceEndIndex);
       if (sequence !== "\u001b7" && sequence !== "\u001b8") {
@@ -545,12 +584,7 @@ function sanitizeTerminalHistoryChunk(
         cursor += 1;
       }
       if (cursor >= input.length) {
-        return {
-          visibleText,
-          pendingControlSequence: input.slice(index),
-          titleSignals,
-          hookEvents,
-        };
+        return suspend(index);
       }
       continue;
     }
@@ -558,12 +592,7 @@ function sanitizeTerminalHistoryChunk(
     if (codePoint === 0x9d || codePoint === 0x90 || codePoint === 0x9e || codePoint === 0x9f) {
       const terminatorIndex = findStringTerminatorIndex(input, index + 1);
       if (terminatorIndex === null) {
-        return {
-          visibleText,
-          pendingControlSequence: input.slice(index),
-          titleSignals,
-          hookEvents,
-        };
+        return suspend(index);
       }
       const sequence = input.slice(index, terminatorIndex);
       const content = stripStringTerminator(input.slice(index + 1, terminatorIndex));
@@ -590,6 +619,11 @@ function sanitizeTerminalHistoryChunk(
 
   return { visibleText, pendingControlSequence: "", titleSignals, hookEvents };
 }
+
+export const __terminalHistorySanitizeTesting = {
+  sanitizeTerminalHistoryChunk,
+  maxPendingControlSequenceLength: MAX_PENDING_CONTROL_SEQUENCE_LENGTH,
+};
 
 function legacySafeThreadId(threadId: string): string {
   return threadId.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -632,9 +666,11 @@ function createTerminalSpawnEnv(
     if (shouldExcludeTerminalEnvKey(key)) continue;
     spawnEnv[key] = value;
   }
-  // Pin TERM to the embedded renderer's capabilities; a caller-provided
-  // runtimeEnv may still override it deliberately below.
+  // Pin TERM/COLORTERM to the embedded renderer's capabilities (xterm.js
+  // renders truecolor SGR); a caller-provided runtimeEnv may still override
+  // them deliberately below.
   spawnEnv.TERM = TERMINAL_SPAWN_TERM;
+  spawnEnv.COLORTERM = "truecolor";
   if (runtimeEnv) {
     for (const [key, value] of Object.entries(runtimeEnv)) {
       spawnEnv[key] = value;
@@ -817,6 +853,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
         const history = await this.readHistory(input.threadId, input.terminalId);
         const cols = input.cols ?? DEFAULT_OPEN_COLS;
         const rows = input.rows ?? DEFAULT_OPEN_ROWS;
+        const openedAt = new Date().toISOString();
         const session: TerminalSessionState = {
           threadId: input.threadId,
           terminalId: input.terminalId,
@@ -827,7 +864,8 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
           pendingHistoryControlSequence: "",
           exitCode: null,
           exitSignal: null,
-          updatedAt: new Date().toISOString(),
+          updatedAt: openedAt,
+          lastOpenedAt: openedAt,
           cols,
           rows,
           process: null,
@@ -862,6 +900,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
         return this.snapshot(session);
       }
 
+      existing.lastOpenedAt = new Date().toISOString();
       // A re-open may flip headless mode (e.g. a viewer attaching later); honor it
       // when explicitly provided, otherwise keep the session's current mode.
       if (input.streamOutput !== undefined) {
@@ -1026,6 +1065,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
       if (!session) {
         const cols = input.cols ?? DEFAULT_OPEN_COLS;
         const rows = input.rows ?? DEFAULT_OPEN_ROWS;
+        const openedAt = new Date().toISOString();
         session = {
           threadId: input.threadId,
           terminalId: input.terminalId,
@@ -1036,7 +1076,8 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
           pendingHistoryControlSequence: "",
           exitCode: null,
           exitSignal: null,
-          updatedAt: new Date().toISOString(),
+          updatedAt: openedAt,
+          lastOpenedAt: openedAt,
           cols,
           rows,
           process: null,
@@ -1081,6 +1122,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
         );
       }
 
+      session.lastOpenedAt = new Date().toISOString();
       const cols = input.cols ?? session.cols;
       const rows = input.rows ?? session.rows;
 
@@ -1099,22 +1141,47 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
         return;
       }
 
-      const threadSessions = this.sessionsForThread(input.threadId);
-      for (const session of threadSessions) {
-        this.stopProcess(session);
-        this.sessions.delete(toSessionKey(session.threadId, session.terminalId));
-      }
-      await Promise.all(
-        threadSessions.map((session) =>
-          this.flushPersistQueue(session.threadId, session.terminalId),
-        ),
-      );
-
-      if (input.deleteHistory) {
-        await this.deleteAllHistoryForThread(input.threadId);
-      }
-      this.updateSubprocessPollingState();
+      await this.closeThreadSessions(input.threadId, input.deleteHistory === true);
     });
+  }
+
+  async closeSessionsOpenedAtOrBefore(input: TerminalCloseOpenedAtOrBeforeInput): Promise<void> {
+    const cutoff = Date.parse(input.openedAtOrBefore);
+    if (!Number.isFinite(cutoff)) {
+      throw new Error(`Invalid terminal archive fence timestamp: ${input.openedAtOrBefore}`);
+    }
+    await this.runWithThreadLock(input.threadId, () =>
+      this.closeThreadSessions(
+        input.threadId,
+        false,
+        (session) => Date.parse(session.lastOpenedAt) <= cutoff,
+      ),
+    );
+  }
+
+  private async closeThreadSessions(
+    threadId: string,
+    deleteHistory: boolean,
+    shouldClose: (session: TerminalSessionState) => boolean = () => true,
+  ): Promise<void> {
+    const threadSessions = this.sessionsForThread(threadId).filter(shouldClose);
+    for (const session of threadSessions) {
+      this.stopProcess(session);
+      this.sessions.delete(toSessionKey(session.threadId, session.terminalId));
+    }
+    await Promise.all(
+      threadSessions.map((session) => this.flushPersistQueue(session.threadId, session.terminalId)),
+    );
+    for (const session of threadSessions) {
+      this.releasePersistedHistoryCache(session.threadId, session.terminalId);
+    }
+
+    if (deleteHistory) {
+      await this.deleteAllHistoryForThread(threadId);
+    }
+    if (threadSessions.length > 0) {
+      this.updateSubprocessPollingState();
+    }
   }
 
   dispose(): void {
@@ -1746,7 +1813,7 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
         session.terminalId,
         session.history.toString(),
       ).finally(() => {
-        this.persistedHistoryByKey.delete(key);
+        this.releasePersistedHistoryCache(session.threadId, session.terminalId);
       });
       this.clearKillEscalationTimer(session.process);
     }
@@ -2154,9 +2221,24 @@ export class TerminalManagerRuntime extends EventEmitter<TerminalManagerEvents> 
     }
     this.updateSubprocessPollingState();
     await this.flushPersistQueue(threadId, terminalId);
+    this.releasePersistedHistoryCache(threadId, terminalId);
     if (deleteHistory) {
       await this.deleteHistory(threadId, terminalId);
     }
+  }
+
+  /**
+   * Drop the write-dedup entry for a session that is no longer resident.
+   *
+   * `persistedHistoryByKey` only exists to skip a redundant rewrite of identical
+   * history, and the final persist re-populates it *after* the session was removed.
+   * Without this release every closed-but-not-deleted session (archiving keeps its
+   * history on disk) would pin up to `historyByteLimit` of scrollback in memory for
+   * the lifetime of the process. Dropping the entry costs at most one redundant file
+   * write later; `readHistory` re-populates it when the terminal is reopened.
+   */
+  private releasePersistedHistoryCache(threadId: string, terminalId: string): void {
+    this.persistedHistoryByKey.delete(toSessionKey(threadId, terminalId));
   }
 
   private sessionsForThread(threadId: string): TerminalSessionState[] {
@@ -2308,6 +2390,12 @@ export const TerminalManagerLive = Layer.effect(
         Effect.tryPromise({
           try: () => runtime.close(input),
           catch: (cause) => terminalErrorFromCause("Failed to close terminal", cause),
+        }),
+      closeSessionsOpenedAtOrBefore: (input) =>
+        Effect.tryPromise({
+          try: () => runtime.closeSessionsOpenedAtOrBefore(input),
+          catch: (cause) =>
+            terminalErrorFromCause("Failed to close archived thread terminals", cause),
         }),
       subscribe: (listener) =>
         Effect.sync(() => {

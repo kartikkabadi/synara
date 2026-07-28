@@ -4,10 +4,13 @@ import {
   type KeybindingShortcut,
   type KeybindingWhenNode,
   type ResolvedKeybindingsConfig,
+  SPACE_JUMP_KEYBINDING_COMMANDS,
+  type SpaceJumpKeybindingCommand,
   THREAD_JUMP_KEYBINDING_COMMANDS,
   type ThreadJumpKeybindingCommand,
 } from "@synara/contracts";
-import { isMacPlatform } from "./lib/utils";
+import { isKeyboardShortcutsHelpChord } from "@synara/shared/browserShortcuts";
+import { isMacPlatform, isWindowsPlatform } from "./lib/utils";
 
 export interface ShortcutEventLike {
   type?: string;
@@ -17,6 +20,7 @@ export interface ShortcutEventLike {
   ctrlKey: boolean;
   shiftKey: boolean;
   altKey: boolean;
+  repeat?: boolean;
 }
 
 export interface ShortcutMatchContext {
@@ -174,6 +178,27 @@ export const DEFAULT_SHORTCUT_FALLBACKS: ResolvedKeybindingsConfig = [
     shortcut: commandShortcut("u", { shiftKey: true }),
     whenAst: whenNotTerminalFocus,
   },
+  // Cmd+Ctrl+P on macOS. On Windows/Linux the literal chord would require the
+  // Super/Windows key, which window managers routinely swallow before it reaches
+  // the app, so those platforms get Ctrl+Alt+P instead (see the sibling entry below).
+  {
+    command: "git.commitAndPush",
+    shortcut: commandShortcut("p", { metaKey: true, ctrlKey: true, modKey: false }),
+    whenAst: whenAnd(whenNotTerminalFocus, whenIdentifier("isMac")),
+  },
+  {
+    command: "git.commitAndPush",
+    shortcut: commandShortcut("p", { ctrlKey: true, altKey: true, modKey: false }),
+    whenAst: whenAnd(whenNotTerminalFocus, whenNot(whenIdentifier("isMac"))),
+  },
+  // Numbered space jumps target the switcher's visual tab order (mod+alt+1 = Void).
+  // Same guard as the creation chords: Cmd+Alt never reaches the PTY on macOS, while
+  // Ctrl+Alt+digit doubles as AltGr input on Linux/Windows and must yield to terminals.
+  ...SPACE_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
+    command,
+    shortcut: commandShortcut(String(index + 1), { altKey: true }),
+    whenAst: whenCreationAllowed,
+  })),
   {
     command: "thread.jump.1",
     shortcut: commandShortcut("1"),
@@ -534,6 +559,14 @@ export function shortcutLabelForCommand(
   const contextProvided = resolvedOptions?.context !== undefined;
 
   if (!contextProvided) {
+    // Honor platform-gated `when` clauses (e.g. `isMac` / `!isMac`) using default
+    // focus flags so labels stay correct without a full UI context.
+    const platformAware = findEffectiveShortcutForCommand(keybindings, command, { platform });
+    if (platformAware) {
+      return formatShortcutLabel(platformAware, platform);
+    }
+    // Fall back to the last binding ignoring `when` so focus-gated chords
+    // (e.g. terminal-only) still surface a label in chrome affordances.
     for (let index = keybindings.length - 1; index >= 0; index -= 1) {
       const binding = keybindings[index];
       if (!binding || binding.command !== command) continue;
@@ -565,6 +598,15 @@ export function threadJumpCommandForIndex(index: number): ThreadJumpKeybindingCo
 
 export function threadJumpIndexFromCommand(command: string): number | null {
   const index = THREAD_JUMP_KEYBINDING_COMMANDS.indexOf(command as ThreadJumpKeybindingCommand);
+  return index === -1 ? null : index;
+}
+
+export function spaceJumpCommandForIndex(index: number): SpaceJumpKeybindingCommand | null {
+  return SPACE_JUMP_KEYBINDING_COMMANDS[index] ?? null;
+}
+
+export function spaceJumpIndexFromCommand(command: string): number | null {
+  const index = SPACE_JUMP_KEYBINDING_COMMANDS.indexOf(command as SpaceJumpKeybindingCommand);
   return index === -1 ? null : index;
 }
 
@@ -680,6 +722,28 @@ export function isTerminalClearShortcut(event: ShortcutEventLike): boolean {
   const key = event.key.toLowerCase();
 
   return key === "l" && event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
+}
+
+export function isKeyboardShortcutsHelpShortcut(
+  event: ShortcutEventLike,
+  platform = navigator.platform,
+): boolean {
+  return isKeyboardShortcutsHelpChord(
+    {
+      key: event.key,
+      meta: event.metaKey,
+      ctrl: event.ctrlKey,
+      shift: event.shiftKey,
+      alt: event.altKey,
+      ...(event.type !== undefined ? { type: event.type } : {}),
+      ...(event.code !== undefined ? { code: event.code } : {}),
+      ...(event.repeat !== undefined ? { repeat: event.repeat } : {}),
+    },
+    {
+      isMac: isMacPlatform(platform),
+      isWindows: isWindowsPlatform(platform),
+    },
+  );
 }
 
 export function terminalNavigationShortcutData(

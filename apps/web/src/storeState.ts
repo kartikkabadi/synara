@@ -7,6 +7,7 @@ import type { MessageId, ThreadId, TurnId } from "@synara/contracts";
 import type {
   ChatMessage,
   Project,
+  Space,
   SidebarThreadSummary,
   Thread,
   ThreadSession,
@@ -14,7 +15,16 @@ import type {
   ThreadTurnState,
 } from "./types";
 
+/**
+ * Per-thread detail hydration status. Absence means "idle": no detail snapshot
+ * has been applied yet, so shell-only threads must not be treated as empty.
+ */
+export type ThreadDetailSyncState = "synced" | "failed";
+
 export interface AppState {
+  /** Highest authoritative snapshot integrated by this store instance. */
+  shellSnapshotSequence?: number;
+  spaces: Space[];
   projects: Project[];
   sidebarThreadSummaryById: Record<string, SidebarThreadSummary>;
   threadsHydrated: boolean;
@@ -30,8 +40,16 @@ export interface AppState {
   proposedPlanByThreadId?: Record<ThreadId, Record<string, Thread["proposedPlans"][number]>>;
   turnDiffIdsByThreadId?: Record<ThreadId, TurnId[]>;
   turnDiffSummaryByThreadId?: Record<ThreadId, Record<TurnId, Thread["turnDiffSummaries"][number]>>;
-  deletedProjectIdsById?: Record<Project["id"], true>;
-  deletedThreadIdsById?: Record<ThreadId, true>;
+  threadDetailSyncById?: Record<ThreadId, ThreadDetailSyncState>;
+  /**
+   * Deletion tombstones, keyed by id, valued by the snapshot sequence at (or after) which the
+   * deletion is guaranteed to be visible server-side. They stop a snapshot generated before the
+   * delete from resurrecting the row; `syncServerShellSnapshot` / `syncServerReadModel` retire an
+   * entry once an authoritative snapshot at or after that sequence no longer lists the id, so the
+   * maps cannot grow for the lifetime of the tab.
+   */
+  deletedProjectIdsById?: Record<Project["id"], number>;
+  deletedThreadIdsById?: Record<ThreadId, number>;
 }
 
 // These references are shared by selectors and projection writes. Keep them stable
@@ -60,6 +78,8 @@ export const EMPTY_TURN_DIFF_BY_THREAD: Record<
 > = {};
 
 export const initialState: AppState = {
+  shellSnapshotSequence: 0,
+  spaces: [],
   projects: [],
   sidebarThreadSummaryById: {},
   threadsHydrated: false,
@@ -75,6 +95,7 @@ export const initialState: AppState = {
   proposedPlanByThreadId: {},
   turnDiffIdsByThreadId: {},
   turnDiffSummaryByThreadId: {},
+  threadDetailSyncById: {},
   deletedProjectIdsById: {},
   deletedThreadIdsById: {},
 };

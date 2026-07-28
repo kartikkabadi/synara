@@ -7,6 +7,7 @@ import { CheckpointRef, MessageId, ThreadId, TurnId } from "@synara/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { formatShortTimestamp } from "../../timestampFormat";
+import type { WorkLogEntry } from "../../workLog";
 import { COLLAPSED_USER_MESSAGE_MAX_CHARS } from "./userMessageCollapse";
 
 const TOOLTIP_TRIGGER_MARKER = 'data-base-ui-tooltip-trigger=""';
@@ -33,6 +34,30 @@ vi.mock("@legendapp/list/react", async () => {
 
   return { LegendList };
 });
+
+// Baseline MessagesTimeline props shared across render tests; spread the
+// result and override individual props (or pass them as JSX after the spread).
+function makeTimelineBaseProps() {
+  return {
+    hasMessages: true,
+    isWorking: false,
+    activeTurnInProgress: false,
+    activeTurnStartedAt: null,
+    turnDiffSummaryByAssistantMessageId: new Map(),
+    nowIso: "2026-03-17T19:12:30.000Z",
+    expandedWorkGroups: {},
+    onToggleWorkGroup: () => {},
+    onOpenTurnDiff: () => {},
+    revertTurnCountByUserMessageId: new Map(),
+    onRevertUserMessage: () => {},
+    isRevertingCheckpoint: false,
+    onImageExpand: () => {},
+    markdownCwd: undefined,
+    resolvedTheme: "dark" as const,
+    timestampFormat: "locale" as const,
+    workspaceRoot: undefined,
+  };
+}
 
 function matchMedia() {
   return {
@@ -264,34 +289,64 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup.match(/data-cross-task-origin="true"/g)).toHaveLength(1);
-    expect(markup).toContain("Sent by Codex from another task");
-    expect(markup).toContain('aria-label="Open source task"');
-    expect(markup.indexOf("Sent by Codex from another task")).toBeLessThan(
+    expect(markup).toContain("Sent by Synara from another thread");
+    expect(markup).toContain('aria-label="Open source thread"');
+    expect(markup.indexOf("Sent by Synara from another thread")).toBeLessThan(
       markup.indexOf("Inspect the repository"),
     );
   });
 
+  it("shows only the cross-task label (not the agent chip) when both apply", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        hasMessages
+        isWorking={false}
+        activeTurnInProgress={false}
+        activeTurnStartedAt={null}
+        crossTaskOrigin={{
+          sourceThreadId: ThreadId.makeUnsafe("source-thread"),
+          sourceProvider: "codex",
+        }}
+        timelineEntries={[
+          {
+            id: "entry-first-user",
+            kind: "message",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            message: {
+              id: MessageId.makeUnsafe("first-user-message"),
+              role: "user",
+              text: "Inspect the repository",
+              dispatchOrigin: "agent",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              streaming: false,
+            },
+          },
+        ]}
+        turnDiffSummaryByAssistantMessageId={new Map()}
+        nowIso="2026-03-17T19:14:30.000Z"
+        expandedWorkGroups={{}}
+        onToggleWorkGroup={() => {}}
+        onOpenTurnDiff={() => {}}
+        onOpenThread={() => {}}
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        markdownCwd={undefined}
+        resolvedTheme="light"
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+      />,
+    );
+
+    expect(markup).toContain("Sent by Synara from another thread");
+    expect(markup).not.toContain("Sent by agent");
+  });
+
   it("keeps user-bubble file and folder mention icons from being overridden by plugin names", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
-    const baseProps = {
-      hasMessages: true,
-      isWorking: false,
-      activeTurnInProgress: false,
-      activeTurnStartedAt: null,
-      turnDiffSummaryByAssistantMessageId: new Map(),
-      nowIso: "2026-03-17T19:12:30.000Z",
-      expandedWorkGroups: {},
-      onToggleWorkGroup: () => {},
-      onOpenTurnDiff: () => {},
-      revertTurnCountByUserMessageId: new Map(),
-      onRevertUserMessage: () => {},
-      isRevertingCheckpoint: false,
-      onImageExpand: () => {},
-      markdownCwd: undefined,
-      resolvedTheme: "light" as const,
-      timestampFormat: "locale" as const,
-      workspaceRoot: undefined,
-    };
+    const baseProps = { ...makeTimelineBaseProps(), resolvedTheme: "light" as const };
 
     const folderMarkup = renderToStaticMarkup(
       <MessagesTimeline
@@ -1127,6 +1182,53 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Compaction failed");
   });
 
+  it("does not reserve a timestamp footer between live status updates and Thinking", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const activeTurnId = TurnId.makeUnsafe("turn-live-status");
+    const assistantCreatedAt = "2026-03-17T19:12:29.000Z";
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...makeTimelineBaseProps()}
+        isWorking
+        activeTurnInProgress
+        activeTurnId={activeTurnId}
+        activeTurnStartedAt="2026-03-17T19:12:28.000Z"
+        timelineEntries={[
+          {
+            id: "entry-tasks-updated",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.500Z",
+            entry: {
+              id: "work-tasks-updated",
+              createdAt: "2026-03-17T19:12:28.500Z",
+              label: "Tasks updated",
+              tone: "info",
+              turnId: activeTurnId,
+            },
+          },
+          {
+            id: "entry-live-assistant",
+            kind: "message",
+            createdAt: assistantCreatedAt,
+            message: {
+              id: MessageId.makeUnsafe("message-live-assistant"),
+              role: "assistant",
+              text: "",
+              createdAt: assistantCreatedAt,
+              streaming: false,
+              turnId: activeTurnId,
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("Tasks updated");
+    expect(markup).toContain("Thinking");
+    expect(markup).not.toContain(formatShortTimestamp(assistantCreatedAt, "locale"));
+    expect(markup).toMatch(/class="[^"]*\bpb-1\b[^"]*" data-timeline-row-kind="message"/);
+  });
+
   it("folds work log summaries above the next assistant message footer", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
@@ -1465,7 +1567,7 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain("```tsx");
   });
 
-  it("keeps the latest inline tool calls visible while the turn is still active", async () => {
+  it("collapses a leading tool run behind its summary once the assistant text follows, even mid-turn", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
@@ -1570,11 +1672,12 @@ describe("MessagesTimeline", () => {
       />,
     );
 
+    // The assistant's text block already follows the run, so it compacts
+    // behind the summary row even while the turn is still live.
+    expect(markup).toContain("Ran 6 tool calls");
     expect(markup).not.toContain("Tool 1");
-    expect(markup).not.toContain("Tool 2");
-    expect(markup).toContain("Tool 3");
-    expect(markup).toContain("Tool 6");
-    expect(markup).toContain("+2 more tool calls");
+    expect(markup).not.toContain("Tool 6");
+    expect(markup).not.toContain("+2 more tool calls");
   });
 
   it("renders reasoning activity as iconless tool text while Thinking remains live", async () => {
@@ -1820,7 +1923,7 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain('data-timeline-row-kind="work"');
   });
 
-  it("expands inline tool calls when the group is toggled open", async () => {
+  it("expands live inline tool calls past the cap when the group is toggled open", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
@@ -1829,6 +1932,20 @@ describe("MessagesTimeline", () => {
         activeTurnInProgress
         activeTurnStartedAt="2026-03-17T19:12:28.000Z"
         timelineEntries={[
+          // The message comes first so the tools are the turn's live inline
+          // tail: the run stays expanded and keeps the +N cap behavior.
+          {
+            id: "entry-assistant-inline-tools-expanded",
+            kind: "message",
+            createdAt: "2026-03-17T19:12:27.000Z",
+            message: {
+              id: MessageId.makeUnsafe("message-assistant-inline-tools-expanded"),
+              role: "assistant",
+              text: "done",
+              createdAt: "2026-03-17T19:12:27.000Z",
+              streaming: true,
+            },
+          },
           {
             id: "entry-inline-tools-expanded",
             kind: "work",
@@ -1882,19 +1999,6 @@ describe("MessagesTimeline", () => {
               createdAt: "2026-03-17T19:12:28.400Z",
               label: "tool 5",
               tone: "tool",
-            },
-          },
-          {
-            id: "entry-assistant-inline-tools-expanded",
-            kind: "message",
-            createdAt: "2026-03-17T19:12:29.000Z",
-            message: {
-              id: MessageId.makeUnsafe("message-assistant-inline-tools-expanded"),
-              role: "assistant",
-              text: "done",
-              createdAt: "2026-03-17T19:12:29.000Z",
-              completedAt: "2026-03-17T19:12:30.000Z",
-              streaming: false,
             },
           },
         ]}
@@ -2113,11 +2217,13 @@ describe("MessagesTimeline", () => {
 
   it("uses the GitHub logo for git and GitHub CLI command rows", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
+    // Rendered as a live turn: once settled, consecutive command rows fold into
+    // a closed "Ran N commands" summary and individual rows are not in markup.
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         hasMessages
         isWorking={false}
-        activeTurnInProgress={false}
+        activeTurnInProgress={true}
         activeTurnStartedAt={null}
         timelineEntries={[
           {
@@ -2503,25 +2609,7 @@ describe("MessagesTimeline", () => {
 
   it("shows the Synara mark for every provider-specific tool row shape", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
-    const baseProps = {
-      hasMessages: true,
-      isWorking: false,
-      activeTurnInProgress: false,
-      activeTurnStartedAt: null,
-      turnDiffSummaryByAssistantMessageId: new Map(),
-      nowIso: "2026-03-17T19:12:30.000Z",
-      expandedWorkGroups: {},
-      onToggleWorkGroup: () => {},
-      onOpenTurnDiff: () => {},
-      revertTurnCountByUserMessageId: new Map(),
-      onRevertUserMessage: () => {},
-      isRevertingCheckpoint: false,
-      onImageExpand: () => {},
-      markdownCwd: undefined,
-      resolvedTheme: "dark" as const,
-      timestampFormat: "locale" as const,
-      workspaceRoot: undefined,
-    };
+    const baseProps = makeTimelineBaseProps();
 
     // Provider-style server/tool identifier while the call is active.
     const claudeMarkup = renderToStaticMarkup(
@@ -2606,6 +2694,84 @@ describe("MessagesTimeline", () => {
     expect(failedMarkup).toContain("Claude rejected reasoningEffort");
   });
 
+  it("hides raw `ToolName: {json}` argument details behind the humanized heading", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const baseProps = makeTimelineBaseProps();
+
+    const renderSingleToolRow = (entry: WorkLogEntry) =>
+      renderToStaticMarkup(
+        <MessagesTimeline
+          {...baseProps}
+          timelineEntries={[
+            {
+              id: `entry-${entry.id}`,
+              kind: "work",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              entry,
+            },
+          ]}
+        />,
+      );
+
+    const readThreadMarkup = renderSingleToolRow({
+      id: "work-synara-read-thread-args",
+      createdAt: "2026-03-17T19:12:28.000Z",
+      label: "MCP tool call",
+      tone: "tool",
+      itemType: "mcp_tool_call",
+      toolName: "mcp__synara__synara_read_thread",
+      detail: 'mcp__synara__synara_read_thread: {"threadId":"c357d8c5-b4c1-47d0"}',
+      activityKind: "tool.completed",
+    });
+    expect(readThreadMarkup).toContain("Synara read a thread");
+    expect(readThreadMarkup).not.toContain("mcp__synara__synara_read_thread:");
+    expect(readThreadMarkup).not.toContain("threadId");
+
+    const diagnoseMarkup = renderSingleToolRow({
+      id: "work-synara-diagnose-args",
+      createdAt: "2026-03-17T19:12:28.000Z",
+      label: "MCP tool call",
+      tone: "tool",
+      itemType: "mcp_tool_call",
+      toolName: "mcp__synara__synara_diagnose_thread",
+      detail: 'mcp__synara__synara_diagnose_thread: {"threadId":"09a1615d-084f-40b9"}',
+      activityKind: "tool.completed",
+    });
+    expect(diagnoseMarkup).toContain("Synara diagnosed a thread");
+    expect(diagnoseMarkup).not.toContain("mcp__synara__synara_diagnose_thread:");
+    expect(diagnoseMarkup).not.toContain("threadId");
+
+    const dynamicToolMarkup = renderSingleToolRow({
+      id: "work-dynamic-tool-args",
+      createdAt: "2026-03-17T19:12:28.000Z",
+      label: "ToolSearch",
+      tone: "tool",
+      itemType: "dynamic_tool_call",
+      toolName: "ToolSearch",
+      toolTitle: "ToolSearch",
+      detail: 'ToolSearch: {"query":"select:mcp__synara__synara_read_thread_events"}',
+      activityKind: "tool.completed",
+    });
+    expect(dynamicToolMarkup).toContain("ToolSearch");
+    expect(dynamicToolMarkup).not.toContain("&quot;query&quot;");
+
+    // Failed calls are exempt: the JSON-shaped detail may be the only place
+    // the error surfaces, so it stays visible inline.
+    const failedArgsMarkup = renderSingleToolRow({
+      id: "work-synara-failed-args",
+      createdAt: "2026-03-17T19:12:28.000Z",
+      label: "MCP tool call",
+      tone: "tool",
+      itemType: "mcp_tool_call",
+      toolName: "mcp__synara__synara_create_threads",
+      toolStatus: "failed",
+      detail: 'McpError: {"code":-32602,"message":"Invalid params"}',
+      activityKind: "tool.completed",
+    });
+    expect(failedArgsMarkup).toContain("Synara couldn&#x27;t create threads");
+    expect(failedArgsMarkup).toContain("Invalid params");
+  });
+
   it("keeps Synara tool calls and adds a thread creation recap at the end of the turn", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const assistantMessageId = MessageId.makeUnsafe("message-synara-recap");
@@ -2662,22 +2828,9 @@ describe("MessagesTimeline", () => {
       },
     ] as const;
     const baseProps = {
-      hasMessages: true,
-      activeTurnStartedAt: null,
-      turnDiffSummaryByAssistantMessageId: new Map(),
+      ...makeTimelineBaseProps(),
       nowIso: "2026-03-17T19:12:31.000Z",
-      expandedWorkGroups: {},
-      onToggleWorkGroup: () => {},
-      onOpenTurnDiff: () => {},
       onOpenThread: () => {},
-      revertTurnCountByUserMessageId: new Map(),
-      onRevertUserMessage: () => {},
-      isRevertingCheckpoint: false,
-      onImageExpand: () => {},
-      markdownCwd: undefined,
-      resolvedTheme: "dark" as const,
-      timestampFormat: "locale" as const,
-      workspaceRoot: undefined,
     };
     const liveMarkup = renderToStaticMarkup(
       <MessagesTimeline

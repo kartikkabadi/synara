@@ -301,6 +301,13 @@ export function resolveQuickAction(
   const isDiverged = isAhead && isBehind;
 
   if (!hasBranch) {
+    if (shouldOfferCreateBranch) {
+      return {
+        label: "Create Branch",
+        disabled: false,
+        kind: "create_branch",
+      };
+    }
     return {
       label: "Commit",
       disabled: true,
@@ -472,7 +479,7 @@ export function shouldOfferCreateBranchPrompt(input: {
   createBranchFlowCompleted?: boolean;
 }): boolean {
   if (!input.activeWorktreePath) return false;
-  if (!input.gitStatus?.branch) return false;
+  if (!input.gitStatus) return false;
   if (input.gitStatus.hasUpstream) return false;
   if (input.createBranchFlowCompleted) return false;
   return true;
@@ -533,6 +540,12 @@ export function resolveLiveThreadBranchUpdate(input: {
   gitStatus: GitStatusResult | null;
 }): { branch: string | null } | null {
   if (!input.gitStatus) {
+    return null;
+  }
+
+  // Branch list not ready yet — don't treat "status arrived first" as out-of-sync
+  // or we permanently invalidate and show "Refreshing git status...".
+  if (input.threadBranch === null) {
     return null;
   }
 

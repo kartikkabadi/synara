@@ -11,6 +11,7 @@ import type {
   AutomationCreateInput,
   AutomationDefinition,
   AutomationMode,
+  AutomationNotificationPolicy,
   AutomationSchedule,
   AutomationUpdateInput,
   AutomationWorktreeMode,
@@ -24,7 +25,11 @@ import type {
 import {
   completionPolicyFromStopWhen,
   stopWhenFromCompletionPolicy,
-} from "./automationCompletionPolicy";
+} from "@synara/shared/automationCompletionPolicy";
+import {
+  automationContinuationThreadId,
+  automationRequiresTargetThread,
+} from "@synara/shared/automationMode";
 import {
   acknowledgedRiskIdsForDraft,
   buildAutomationDraftWarnings,
@@ -84,6 +89,7 @@ export type AutomationFormState = {
   readonly worktreeMode: AutomationWorktreeMode;
   readonly modelSelection: ModelSelection;
   readonly mode: AutomationMode;
+  readonly notificationPolicy: AutomationNotificationPolicy;
   readonly targetThreadId: string;
   readonly maxIterations: string;
   readonly stopOnError: boolean;
@@ -291,43 +297,77 @@ export function formatCadence(schedule: AutomationSchedule): string {
   }
 }
 
+function formatIntervalCadenceLong(seconds: number): string {
+  if (seconds === 3600) return "Hourly";
+  if (seconds % 3600 === 0) return `Every ${seconds / 3600} hours`;
+  if (seconds === 60) return "Every minute";
+  if (seconds % 60 === 0) return `Every ${seconds / 60} minutes`;
+  return seconds === 1 ? "Every second" : `Every ${seconds} seconds`;
+}
+
+/** Like {@link formatCadence} but with interval units spelled out ("Every 5 minutes"). */
+export function formatCadenceLong(schedule: AutomationSchedule): string {
+  return schedule.type === "interval"
+    ? formatIntervalCadenceLong(schedule.everySeconds)
+    : formatCadence(schedule);
+}
+
+/**
+ * Countdown phrase for an upcoming run: "now", "in 5 minutes", "in 9 hours", "in 3 days".
+ * A past-due `nextRunAt` (scheduler catching up) also reads "now". Null when unscheduled
+ * or unparseable so callers can drop the segment entirely.
+ */
+export function formatNextRun(nextRunAt: string | null, now: number = Date.now()): string | null {
+  if (!nextRunAt) return null;
+  const time = new Date(nextRunAt).getTime();
+  if (Number.isNaN(time)) return null;
+  const seconds = Math.round((time - now) / 1000);
+  if (seconds < 60) return "now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return minutes === 1 ? "in 1 minute" : `in ${minutes} minutes`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return hours === 1 ? "in 1 hour" : `in ${hours} hours`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? "in 1 day" : `in ${days} days`;
+}
+
 export function weekdayLabel(value: number): string {
   return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][value] ?? "Sun";
 }
 
 // --- Thread automation lookups ---------------------------------------------
-// Heartbeat automations are the only kind bound to a specific thread; both the
-// Environment panel and the sidebar surface them keyed by their target thread.
+// Automations that continue a thread are the only kind bound to one; both the
+// Environment panel and the sidebar surface them keyed by that thread, whether the
+// user chose it (heartbeat) or the automation created it for itself (dedicated).
 
 const byAutomationName = (left: AutomationDefinition, right: AutomationDefinition): number =>
   left.name.localeCompare(right.name);
 
-/** Heartbeat automations targeting a single thread, sorted by name. */
-export function heartbeatAutomationsForThread(
+/** Automations continuing a single thread, sorted by name. */
+export function automationsForThread(
   definitions: readonly AutomationDefinition[],
   threadId: ThreadId,
 ): AutomationDefinition[] {
   return definitions
-    .filter(
-      (definition) => definition.mode === "heartbeat" && definition.targetThreadId === threadId,
-    )
+    .filter((definition) => automationContinuationThreadId(definition) === threadId)
     .toSorted(byAutomationName);
 }
 
-/** All heartbeat automations grouped by the thread they target (each list sorted by name). */
-export function groupHeartbeatAutomationsByTargetThread(
+/** All thread-bound automations grouped by the thread they continue (each list sorted by name). */
+export function groupAutomationsByContinuedThread(
   definitions: readonly AutomationDefinition[],
 ): Map<ThreadId, AutomationDefinition[]> {
   const byThreadId = new Map<ThreadId, AutomationDefinition[]>();
   for (const definition of definitions) {
-    if (definition.mode !== "heartbeat" || !definition.targetThreadId) {
+    const continuationThreadId = automationContinuationThreadId(definition);
+    if (!continuationThreadId) {
       continue;
     }
-    const existing = byThreadId.get(definition.targetThreadId);
+    const existing = byThreadId.get(continuationThreadId);
     if (existing) {
       existing.push(definition);
     } else {
-      byThreadId.set(definition.targetThreadId, [definition]);
+      byThreadId.set(continuationThreadId, [definition]);
     }
   }
   for (const [threadId, automations] of byThreadId) {
@@ -387,6 +427,7 @@ export function formFromDefinition(
     worktreeMode: definition?.worktreeMode ?? "auto",
     modelSelection: definition?.modelSelection ?? fallbackModelSelection,
     mode: definition?.mode ?? "standalone",
+    notificationPolicy: definition?.notificationPolicy ?? "all",
     targetThreadId: definition?.targetThreadId ?? "",
     maxIterations: definition?.maxIterations != null ? String(definition.maxIterations) : "",
     stopOnError: definition?.stopOnError ?? true,
@@ -558,14 +599,15 @@ export function createInputFromForm(
     worktreeMode: form.worktreeMode,
     ...(providerOptions ? { providerOptions } : {}),
     mode: form.mode,
-    targetThreadId: form.mode === "heartbeat" ? (form.targetThreadId as ThreadId) : null,
+    notificationPolicy: form.notificationPolicy,
+    // Only heartbeat carries a thread the user picked; a dedicated automation is given
+    // its own thread by the server after its first run.
+    targetThreadId: automationRequiresTargetThread(form.mode)
+      ? (form.targetThreadId as ThreadId)
+      : null,
     maxIterations,
-    ...(form.mode === "heartbeat"
-      ? {
-          stopOnError: form.stopOnError,
-          completionPolicy: completionPolicyFromStopWhen(stopWhen),
-        }
-      : { completionPolicy: { type: "none" as const } }),
+    stopOnError: form.stopOnError,
+    completionPolicy: completionPolicyFromStopWhen(stopWhen),
     ...(acknowledgedRisks ? { acknowledgedRisks } : {}),
   };
 }
@@ -604,7 +646,7 @@ export function acknowledgedRiskIdsForFormWarnings(
 
 export function isFormSubmittable(form: AutomationFormState): boolean {
   if (!form.name.trim() || !form.prompt.trim() || !form.projectId) return false;
-  if (form.mode === "heartbeat" && !form.targetThreadId) return false;
+  if (automationRequiresTargetThread(form.mode) && !form.targetThreadId) return false;
   if (automationFastIntervalLimitMessage(form)) return false;
   if (
     form.scheduleKind === "custom" &&

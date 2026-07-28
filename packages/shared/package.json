@@ -32,6 +32,14 @@
       "types": "./src/shell.ts",
       "import": "./src/shell.ts"
     },
+    "./loginShellEnvironment": {
+      "types": "./src/loginShellEnvironment.ts",
+      "import": "./src/loginShellEnvironment.ts"
+    },
+    "./synaraHome": {
+      "types": "./src/synaraHome.ts",
+      "import": "./src/synaraHome.ts"
+    },
     "./staticSnapshot": {
       "types": "./src/staticSnapshot.ts",
       "import": "./src/staticSnapshot.ts"
@@ -76,6 +84,10 @@
       "types": "./src/browserShortcuts.ts",
       "import": "./src/browserShortcuts.ts"
     },
+    "./appSnapShortcut": {
+      "types": "./src/appSnapShortcut.ts",
+      "import": "./src/appSnapShortcut.ts"
+    },
     "./browserSession": {
       "types": "./src/browserSession.ts",
       "import": "./src/browserSession.ts"
@@ -108,6 +120,10 @@
       "types": "./src/threadSummary.ts",
       "import": "./src/threadSummary.ts"
     },
+    "./projectContainers": {
+      "types": "./src/projectContainers.ts",
+      "import": "./src/projectContainers.ts"
+    },
     "./pinnedMessages": {
       "types": "./src/pinnedMessages.ts",
       "import": "./src/pinnedMessages.ts"
@@ -127,6 +143,14 @@
     "./agentMentions": {
       "types": "./src/agentMentions.ts",
       "import": "./src/agentMentions.ts"
+    },
+    "./automationCompletionPolicy": {
+      "types": "./src/automationCompletionPolicy.ts",
+      "import": "./src/automationCompletionPolicy.ts"
+    },
+    "./automationMode": {
+      "types": "./src/automationMode.ts",
+      "import": "./src/automationMode.ts"
     },
     "./worktreeHandoff": {
       "types": "./src/worktreeHandoff.ts",
@@ -195,6 +219,18 @@
     "./migrationRecovery": {
       "types": "./src/migrationRecovery.ts",
       "import": "./src/migrationRecovery.ts"
+    },
+    "./threadMentions": {
+      "types": "./src/threadMentions.ts",
+      "import": "./src/threadMentions.ts"
+    },
+    "./unifiedPatchStats": {
+      "types": "./src/unifiedPatchStats.ts",
+      "import": "./src/unifiedPatchStats.ts"
+    },
+    "./providerDeliveryBlock": {
+      "types": "./src/providerDeliveryBlock.ts",
+      "import": "./src/providerDeliveryBlock.ts"
     }
   },
   "scripts": {

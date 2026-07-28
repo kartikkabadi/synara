@@ -73,13 +73,6 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
     keywords: "Show the Studio tab in the sidebar switcher. sidebar section content outbox",
   },
   {
-    id: "general:workspace-section",
-    section: "general",
-    title: "Workspace",
-    keywords:
-      "Show the Workspace tab in the sidebar switcher. The Threads tab always stays visible. sidebar section",
-  },
-  {
     id: "general:environment-default-open",
     section: "general",
     title: "Open by default",
@@ -220,7 +213,7 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
     section: "appsnap",
     title: "Enable AppSnap",
     keywords:
-      "Capture the frontmost macOS app window with both Option keys and add it to a recent task. appshot screenshot snap window capture alt",
+      "Capture the frontmost macOS app window with a configurable two-key shortcut and add it to a recent task. appshot screenshot snap window capture hotkey",
   },
   {
     id: "appsnap:shortcut",
@@ -252,6 +245,13 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
   },
 
   // ── Behavior ──────────────────────────────────────────────────────────────────
+  {
+    id: "behavior:follow-up-behavior",
+    section: "behavior",
+    title: "Follow-up behavior",
+    keywords:
+      "Choose whether messages sent during an active turn wait in the queue or steer the current run. Ctrl Cmd Enter opposite send",
+  },
   {
     id: "behavior:assistant-output",
     section: "behavior",
@@ -385,6 +385,13 @@ export const SETTINGS_SEARCH_ENTRIES: readonly SettingsSearchEntry[] = [
     title: "Recovery tools",
     keywords:
       "Rebuild local project indexes without clearing existing chats when the local state gets out of sync.",
+  },
+  {
+    id: "integrations:external-mcp",
+    section: "integrations",
+    title: "External MCP integrations",
+    keywords:
+      "Pair Codex Claude and other local MCP clients with scoped project access. revoke credential task create wait read worktree approval",
   },
   {
     id: "advanced:version",
