@@ -44,6 +44,7 @@ import { ExternalMcpRepositoryLive } from "./externalMcp/Layers/ExternalMcpRepos
 import { ExternalMcpServiceLive } from "./externalMcp/Layers/ExternalMcpService";
 import { ExternalMcpGatewayLive } from "./externalMcp/Layers/ExternalMcpGateway";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment";
+import { RemoteEnvironmentRegistryLive } from "./environment/Layers/RemoteEnvironmentRegistry";
 import { AutomationRepositoryLive } from "./persistence/Layers/AutomationRepository";
 import { ControlPlaneKernelLive } from "./persistence/Layers/ControlPlaneKernel";
 import { ProjectPullRequestPinsLive } from "./persistence/Layers/ProjectPullRequestPins";
@@ -192,6 +193,9 @@ export function makeServerRuntimeServicesLayer(
     Layer.provideMerge(ServerSettingsLive),
     Layer.provideMerge(providerHealthLayer),
   );
+  const remoteEnvironmentRegistryLayer = RemoteEnvironmentRegistryLive.pipe(
+    Layer.provide(ServerEnvironmentLive),
+  );
   const pullRequestServiceLayer = PullRequestServiceLive.pipe(
     Layer.provideMerge(GitLayerLive),
     Layer.provideMerge(ProjectPullRequestPinsLive),
@@ -224,6 +228,7 @@ export function makeServerRuntimeServicesLayer(
     KeybindingsLive,
     ServerSettingsLive,
     ServerEnvironmentLive,
+    remoteEnvironmentRegistryLayer,
     ProfileStatsQueryLive,
     authServicesLayer,
     ServerLifecycleEventsLive,

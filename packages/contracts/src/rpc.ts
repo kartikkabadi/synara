@@ -180,6 +180,10 @@ import {
   ServerGenerateThreadRecapInput,
   ServerGenerateThreadRecapResult,
   ServerGetEnvironmentResult,
+  ServerListEnvironmentsResult,
+  ServerRemoveEnvironmentInput,
+  ServerRemoveEnvironmentResult,
+  ServerUpsertEnvironmentInput,
   ServerGetProviderUsageSnapshotInput,
   ServerGetProviderUsageSnapshotResult,
   ServerListProviderUsageInput,
@@ -714,6 +718,24 @@ export const WsServerGetEnvironmentRpc = Rpc.make(WS_METHODS.serverGetEnvironmen
   error: WsRpcError,
 });
 
+export const WsServerListEnvironmentsRpc = Rpc.make(WS_METHODS.serverListEnvironments, {
+  payload: Schema.Struct({}),
+  success: ServerListEnvironmentsResult,
+  error: WsRpcError,
+});
+
+export const WsServerUpsertEnvironmentRpc = Rpc.make(WS_METHODS.serverUpsertEnvironment, {
+  payload: ServerUpsertEnvironmentInput,
+  success: Schema.Void,
+  error: WsRpcError,
+});
+
+export const WsServerRemoveEnvironmentRpc = Rpc.make(WS_METHODS.serverRemoveEnvironment, {
+  payload: ServerRemoveEnvironmentInput,
+  success: ServerRemoveEnvironmentResult,
+  error: WsRpcError,
+});
+
 export const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
   payload: Schema.Struct({}),
   success: ServerGetSettingsResult,
@@ -1210,6 +1232,9 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsSubscribeTerminalEventsRpc,
   WsServerGetConfigRpc,
   WsServerGetEnvironmentRpc,
+  WsServerListEnvironmentsRpc,
+  WsServerUpsertEnvironmentRpc,
+  WsServerRemoveEnvironmentRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
   WsServerRefreshProvidersRpc,

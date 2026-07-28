@@ -101,6 +101,7 @@ import { getProviderUsageSnapshot } from "./providerUsageSnapshot";
 import { ProfileStatsQuery } from "./profileStats";
 import { redactSensitiveProcessArgs } from "./processArgumentRedaction";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment";
+import { RemoteEnvironmentRegistry } from "./environment/Services/RemoteEnvironmentRegistry";
 import { ExternalMcpService } from "./externalMcp/Services/ExternalMcpService";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
@@ -349,6 +350,7 @@ const makeWsRpcHandlersLayer = () =>
       const lifecycleEvents = yield* ServerLifecycleEvents;
       const runtimeStartup = yield* ServerRuntimeStartup;
       const serverEnvironment = yield* ServerEnvironment;
+      const remoteEnvironmentRegistry = yield* RemoteEnvironmentRegistry;
       const serverSettings = yield* ServerSettingsService;
       const terminalManager = yield* TerminalManager;
       const textGeneration = yield* TextGeneration;
@@ -1387,6 +1389,23 @@ const makeWsRpcHandlersLayer = () =>
           rpcEffect(loadServerConfig, "Failed to load server config"),
         [WS_METHODS.serverGetEnvironment]: () =>
           rpcEffect(serverEnvironment.getDescriptor, "Failed to load server environment"),
+        [WS_METHODS.serverListEnvironments]: () =>
+          rpcEffect(
+            remoteEnvironmentRegistry.list().pipe(Effect.map((environments) => ({ environments }))),
+            "Failed to list environments",
+          ),
+        [WS_METHODS.serverUpsertEnvironment]: (input) =>
+          rpcEffect(
+            remoteEnvironmentRegistry.upsert(input.descriptor),
+            "Failed to upsert environment",
+          ),
+        [WS_METHODS.serverRemoveEnvironment]: (input) =>
+          rpcEffect(
+            remoteEnvironmentRegistry
+              .remove(input.environmentId)
+              .pipe(Effect.map((removed) => ({ removed }))),
+            "Failed to remove environment",
+          ),
         [WS_METHODS.serverGetSettings]: () =>
           rpcEffect(serverSettings.getSettingsView, "Failed to load server settings"),
         [WS_METHODS.serverUpdateSettings]: (input) =>
