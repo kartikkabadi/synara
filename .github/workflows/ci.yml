@@ -8,7 +8,7 @@ on:
 
 jobs:
   quality:
-    name: Format, Lint, Typecheck, Test, Build
+    name: Format, Lint, Typecheck, Test, Browser Test, Build
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -65,56 +65,6 @@ jobs:
       - name: Test
         run: bun run test
 
-      - name: Build desktop pipeline
-        run: bun run build:desktop
-
-      - name: Verify preload bundle output
-        run: |
-          test -f apps/desktop/dist-electron/preload.js
-          grep -nE "desktopBridge|getWsUrl|PICK_FOLDER_CHANNEL|wsUrl" apps/desktop/dist-electron/preload.js
-
-  # Browser tests run in their own job so a slow or hung Vitest browser run
-  # cannot time out the format/lint/typecheck/test/build gates alongside it.
-  # The stable suite has been observed stalling at vite's dependency optimizer
-  # for the full step budget on hosted runners, so it gets a larger timeout
-  # and an uncontended runner of its own.
-  browser_test:
-    name: Browser Test
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
-
-      - name: Setup Node
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: package.json
-
-      - name: Cache Bun
-        uses: actions/cache@v5
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}-${{ hashFiles('turbo.json') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}-
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v5
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('bun.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-playwright-
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
       # Run the workspace-local playwright binary directly: bunx stalled after
       # the chromium download on hosted runners. The step timeout stops any
       # remaining apt/download stalls from eating the whole job budget.
@@ -127,9 +77,7 @@ jobs:
           ./node_modules/.bin/playwright install --with-deps chromium
 
       - name: Browser test (stable)
-        timeout-minutes: 45
-        env:
-          NODE_OPTIONS: --max-old-space-size=6144
+        timeout-minutes: 20
         run: bun run --cwd apps/web test:browser:stable
 
       # Pixel/font/layout comparisons are tracked explicitly in
@@ -138,9 +86,15 @@ jobs:
       - name: Browser test (Linux geometry quarantine)
         continue-on-error: true
         timeout-minutes: 10
-        env:
-          NODE_OPTIONS: --max-old-space-size=6144
         run: bun run --cwd apps/web test:browser:geometry
+
+      - name: Build desktop pipeline
+        run: bun run build:desktop
+
+      - name: Verify preload bundle output
+        run: |
+          test -f apps/desktop/dist-electron/preload.js
+          grep -nE "desktopBridge|getWsUrl|PICK_FOLDER_CHANNEL|wsUrl" apps/desktop/dist-electron/preload.js
 
   windows_process:
     name: Windows Process Regression
