@@ -2,7 +2,7 @@
 
 - Status: Proposed (awaiting Kartik approval)
 - Date: 2026-07-28
-- Related: kartikkabadi/synara#99 (epic), kartikkabadi/synara#92 (control workboard), upstream Emanuele-web04/synara#366 (remote-host RFC), #467 (Claude over SSH), #408 (worktree-backed workspaces), #291 (agent gateway)
+- Related: kartikkabadi/synara#99 (epic; design v2 and Kartik's source-validation addendum in the issue thread), kartikkabadi/synara#92 (control workboard), upstream Emanuele-web04/synara#366 (remote-host RFC), #467 (Claude over SSH), #408 (worktree-backed workspaces), #291 (agent gateway)
 
 ## Context
 
@@ -39,6 +39,29 @@ Per-capability choice: Architecture A for quick "run this provider over there" c
 | Phone / multi-device            | No — local server must be up                                                                                 | Yes — connect directly to remote server (e.g. Tailscale)                                                 |
 | Cost                            | Low idle cost; nothing persistent remotely                                                                   | Persistent daemon per host; orphaned-server cleanup required                                             |
 
+## Per-thread execution profiles
+
+Kartik's source-validation addendum on #99 (referencing upstream Emanuele-web04/synara#284) validates making execution location a **per-thread execution profile** while orchestration and durable lifecycle state stay owned by Synara. The addendum names seven concepts an executor design must cover:
+
+1. runtime type and adapter/protocol version
+2. reproducible setup image/template and bootstrap inputs
+3. repository revision and path scope
+4. credential/secrets boundary
+5. filesystem sync direction and conflict policy
+6. event-stream normalisation
+7. teardown/reconciliation after success, crash, cancellation, expiry, or unknown outcome
+
+The contract expresses this as `ExecutionProfile` (`packages/contracts/src/orchestration.ts`), carried optionally on `ProviderSessionStartInput` — absent means local execution:
+
+- `environmentId` — which `ExecutionEnvironmentDescriptor` the thread runs on (host-level: transport, runtime, capabilities).
+- `providerKind` — which provider binary runs there.
+- `remoteWorkspaceRoot` — the path scope: the absolute remote checkout the thread is anchored to. This is per-thread, not per-host, so it lives on the profile rather than on the environment runtime (`ExecutionEnvironmentRuntime` keeps host-level `remoteBinaryPath`, `forwardedEnvNames`, and `adapterProtocolVersion`).
+- `repositoryRevision` (optional) — the revision the workspace is expected to be at, for repo-identity checks at probe time.
+- `bootstrapImage` (optional) — reproducible setup image/template for environments that are provisioned rather than pre-existing.
+- `adapterProtocolVersion` (optional) — per-thread override of the adapter/protocol version negotiated with the remote provider process.
+
+Concepts 4–7 (secrets boundary, sync policy, event normalisation, teardown/reconciliation) are covered by the threat model and the existing event/turn lifecycle rather than by profile fields; they become schema when the slices that need them land.
+
 ## Threat model
 
 | Threat                       | Notes / required mitigation                                                                                                                                                                                                                                                                                                  |
@@ -62,11 +85,23 @@ Assumptions: single-user remote hosts; existing OpenSSH client config (keys, age
 
 Non-goals for the first slice: remote Synara server bootstrap/supervision, phone/multi-device access, long work surviving local server shutdown, Windows remote hosts, multi-tenant hosts.
 
+## Source validation
+
+External evidence supporting this decision package:
+
+- Upstream Emanuele-web04/synara#467 (Claude over SSH) is a working proof of Architecture A's shape: a provider process spawned remotely with stdio streamed over the SSH channel, local server authoritative.
+- Upstream Emanuele-web04/synara#366 (remote-host RFC) is the reference design for Architecture B (remote Synara server behind an SSH broker), including its bootstrap, auth-token, and version-skew concerns.
+- Kartik's source-validation addendum on #99 validates the per-thread execution-profile shape against upstream #284 and surveys comparable systems (Better Agent's detached runners behind one authoritative backend; pingdotgg's minimal multi-provider web GUI and its tailnet-scoped access model; Crabbox's remote-lease and proof-bundle patterns) as architectural inspiration.
+
+The architectural invariant across all of it: **backends may differ, but users see one Synara lifecycle, one approval model, one recovery model, and one durable evidence trail.**
+
 ## Unresolved product questions (need Kartik's approval)
 
 1. Approve Architecture A as the first vertical slice, with B as the durability follow-up?
 2. For A, is "turn dies if the local machine sleeps" acceptable for v1, or is a remote detach/reattach layer (tmux-style) required from the start?
+   - **Assumed answer for v1: yes — the turn dies with the SSH channel.** The failure is surfaced as a settled (interrupted) turn with full evidence retained; no remote detacher in the first slice. Architecture B remains the durability path.
 3. One `SYNARA_HOME` per remote box or per connecting broker when B lands (upstream #366 open question)?
 4. Is Tailscale acceptable as the blessed multi-device path for B, with SSH port-forward as fallback?
 5. Version-skew policy for B: read-degraded + user-invoked drain-then-upgrade (per #366), or something stricter?
 6. Which providers must the A slice support first (Codex and Claude are the natural candidates)?
+   - **Assumed answer: Codex-first, Claude next behind the same seam.** `codexAppServerManager.ts` is the most complete session broker and the whole Codex path is already stdio-shaped; upstream #467 (Claude over SSH) is the precedent proving the same mechanism works for Claude, so nothing in the Codex-first order forecloses it.
