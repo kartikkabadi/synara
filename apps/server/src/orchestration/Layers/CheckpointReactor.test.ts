@@ -2189,6 +2189,9 @@ describe("CheckpointReactor", () => {
 
         // Legacy path stays authoritative and executes effects exactly once.
         await waitForEvent(harness.engine, (event) => event.type === "thread.reverted");
+        // Settlement commits after the terminal domain dispatch; drain the
+        // reactor so the durable trail is fully written before reading it.
+        await harness.drain();
         expect(harness.provider.rollbackConversation).toHaveBeenCalledTimes(1);
         expect(harness.provider.rollbackConversation).toHaveBeenCalledWith({
           threadId,
@@ -2277,6 +2280,9 @@ describe("CheckpointReactor", () => {
         // provider rollback ran exactly once.
         await waitForEvent(harness.engine, (event) => event.type === "thread.revert-started");
         await waitForEvent(harness.engine, (event) => event.type === "thread.reverted");
+        // Settlement commits after the terminal domain dispatch; drain the
+        // reactor so the durable trail is fully written before reading it.
+        await harness.drain();
         expect(harness.provider.rollbackConversation).toHaveBeenCalledTimes(1);
         const readModel = await Effect.runPromise(harness.engine.getReadModel());
         const thread = readModel.threads.find((entry) => entry.id === threadId);
