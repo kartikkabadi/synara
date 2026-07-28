@@ -294,6 +294,7 @@ describe("ProviderCommandReactor", () => {
         Effect.succeed(CheckpointRef.makeUnsafe("refs/synara-rescue/thread/0")),
       restoreRescueCheckpoint: () => Effect.succeed(true),
       deleteRescueRef: () => Effect.void,
+      listRescueRefs: () => Effect.succeed([]),
       ...input?.checkpointStore,
     };
     const stopSession = vi.fn((input: unknown) =>
