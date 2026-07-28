@@ -18,7 +18,7 @@ The local Synara server stays the single source of truth. For a remote thread it
 
 ## Architecture B: Remote Synara server with proxying
 
-An exact-version Synara server runs on the remote host (bootstrapped upload-first, supervised by systemd/launchd). The local server acts as an SSH broker: it holds the tunnel and forwards the remote server's WS/HTTP surface byte-for-byte under `/env/:envId/*`. Sessions, files, git, and state live entirely on the remote server. This is the upstream #366 RFC design, matching T3 Code and Codex remote connections.
+An exact-version Synara server runs on the remote host (bootstrapped upload-first, supervised by systemd/launchd). The local server acts as an SSH broker: it holds the tunnel and forwards the remote server's WS/HTTP surface byte-for-byte under `/env/:envId/*`. Sessions, files, git, and state live entirely on the remote server. This is the upstream #366 RFC design, matching how Codex remote connections and comparable remote-workspace tools work.
 
 ## Hybrid
 
