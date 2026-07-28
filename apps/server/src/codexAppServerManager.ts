@@ -35,7 +35,7 @@ import {
 import { getModelSelectionBooleanOptionValue, normalizeModelSlug } from "@synara/shared/model";
 import { decodeSubagentReceiverThreadIds } from "@synara/shared/subagents";
 import { prepareWindowsSafeProcess } from "@synara/shared/windowsProcess";
-import { Effect, ServiceMap } from "effect";
+import { Effect, Option, ServiceMap } from "effect";
 
 import {
   formatCodexCliUpgradeMessage,
@@ -56,6 +56,11 @@ import {
   teardownChildProcessTree,
   teardownProviderProcessTree,
 } from "./provider/supervisedProcessTeardown.ts";
+import { makeLocalProcessSpawner } from "./environment/Layers/LocalProcessSpawner.ts";
+import {
+  ProviderProcessSpawner,
+  type ProviderProcessSpawnerShape,
+} from "./environment/Services/ProviderProcessSpawner.ts";
 import { ensureIsolatedScratchWorkspace } from "./scratchWorkspaces.ts";
 import { createLogger } from "./logger";
 import { transcribeVoiceWithChatGptSession } from "./voiceTranscription.ts";
@@ -600,25 +605,6 @@ export function resolveCodexModelForAccount(
   return CODEX_DEFAULT_MODEL;
 }
 
-function spawnCodexAppServer(input: {
-  readonly binaryPath: string;
-  readonly cwd: string;
-  readonly env: NodeJS.ProcessEnv;
-}): ChildProcessWithoutNullStreams {
-  const prepared = prepareWindowsSafeProcess(input.binaryPath, ["app-server"], {
-    cwd: input.cwd,
-    env: input.env,
-  });
-  return spawn(prepared.command, prepared.args, {
-    cwd: input.cwd,
-    env: input.env,
-    stdio: ["pipe", "pipe", "pipe"],
-    shell: prepared.shell,
-    windowsHide: prepared.windowsHide,
-    windowsVerbatimArguments: prepared.windowsVerbatimArguments,
-  });
-}
-
 export function normalizeCodexModelSlug(
   model: string | undefined | null,
   preferredId?: string,
@@ -794,6 +780,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     | undefined;
   private readonly teardownProcessTree: typeof teardownProviderProcessTree;
   private readonly taskCompleteFallbackGraceMs: number;
+  private readonly processSpawner: ProviderProcessSpawnerShape;
   constructor(
     services?: ServiceMap.ServiceMap<never>,
     options?: {
@@ -812,6 +799,32 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     this.agentGatewayMcp = options?.agentGatewayMcp;
     this.teardownProcessTree = options?.teardownProcessTree ?? teardownProviderProcessTree;
     this.taskCompleteFallbackGraceMs = Math.max(0, options?.taskCompleteFallbackGraceMs ?? 750);
+    this.processSpawner = services
+      ? Option.getOrElse(
+          ServiceMap.getOption(services, ProviderProcessSpawner),
+          makeLocalProcessSpawner,
+        )
+      : makeLocalProcessSpawner();
+  }
+
+  private spawnCodexAppServer(input: {
+    readonly binaryPath: string;
+    readonly cwd: string;
+    readonly env: NodeJS.ProcessEnv;
+  }): Promise<ChildProcessWithoutNullStreams> {
+    const prepared = prepareWindowsSafeProcess(input.binaryPath, ["app-server"], {
+      cwd: input.cwd,
+      env: input.env,
+    });
+    return Effect.runPromise(
+      this.processSpawner.spawn(prepared.command, prepared.args, {
+        cwd: input.cwd,
+        env: input.env,
+        shell: prepared.shell,
+        windowsHide: prepared.windowsHide,
+        windowsVerbatimArguments: prepared.windowsVerbatimArguments,
+      }),
+    );
   }
 
   // The Synara MCP server rides on the shared overlay config (no secrets),
@@ -886,7 +899,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         ...(codexHomePath ? { homePath: codexHomePath } : {}),
       });
       gatewaySessionLease = this.agentGatewayMcp?.acquireSessionLease(threadId);
-      const child = spawnCodexAppServer({
+      const child = await this.spawnCodexAppServer({
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
         env: await this.buildSessionProcessEnv(
@@ -1447,7 +1460,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         ...(codexHomePath ? { homePath: codexHomePath } : {}),
       });
       gatewaySessionLease = this.agentGatewayMcp?.acquireSessionLease(threadId);
-      const child = spawnCodexAppServer({
+      const child = await this.spawnCodexAppServer({
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
         env: await this.buildSessionProcessEnv(
@@ -2124,7 +2137,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       binaryPath: "codex",
       cwd: normalizedCwd,
     });
-    const child = spawnCodexAppServer({
+    const child = await this.spawnCodexAppServer({
       binaryPath: "codex",
       cwd: normalizedCwd,
       env: await buildCodexProcessEnv(),

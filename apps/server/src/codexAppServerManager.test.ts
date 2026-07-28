@@ -13,7 +13,10 @@ import {
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { ApprovalRequestId, ThreadId } from "@synara/contracts";
+import { prepareWindowsSafeProcess } from "@synara/shared/windowsProcess";
+import { Effect, ServiceMap } from "effect";
 
 import {
   buildCodexProcessEnv,
@@ -40,6 +43,11 @@ import { CodexJsonlFramer, CodexJsonlWriter } from "./codexAppServerTransport";
 import { ensureIsolatedScratchWorkspace } from "./scratchWorkspaces";
 import { SYNARA_HARNESS_POLICY_MARKER } from "./agentGateway/harnessPolicy.ts";
 import { acquireAgentGatewaySessionLease } from "./agentGateway/sessionLease.ts";
+import {
+  ProviderProcessSpawner,
+  type ProviderProcessSpawnOptions,
+  type ProviderProcessSpawnerShape,
+} from "./environment/Services/ProviderProcessSpawner.ts";
 
 const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
 const fullAccessTurnOverrides = {
@@ -3698,4 +3706,202 @@ describe.skipIf(!process.env.CODEX_BINARY_PATH)("startSession live Codex resume"
       rmSync(workspaceDir, { recursive: true, force: true });
     }
   }, 180_000);
+});
+
+describe("CodexAppServerManager launch paths through ProviderProcessSpawner", () => {
+  class FakeAppServerChild extends EventEmitter {
+    readonly pid = 6060;
+    exitCode: number | null = null;
+    signalCode: NodeJS.Signals | null = null;
+    killed = false;
+    readonly stdin = new PassThrough();
+    readonly stdout = new PassThrough();
+    readonly stderr = new PassThrough();
+    readonly requestMethods: string[] = [];
+
+    constructor(respond: (method: string) => unknown) {
+      super();
+      let buffered = "";
+      this.stdin.on("data", (chunk: Buffer) => {
+        buffered += chunk.toString("utf8");
+        let newlineIndex = buffered.indexOf("\n");
+        while (newlineIndex >= 0) {
+          const line = buffered.slice(0, newlineIndex).trim();
+          buffered = buffered.slice(newlineIndex + 1);
+          newlineIndex = buffered.indexOf("\n");
+          if (!line) continue;
+          const message = JSON.parse(line) as { id?: number | string; method?: string };
+          if (message.method === undefined) continue;
+          this.requestMethods.push(message.method);
+          if (message.id === undefined) continue;
+          this.stdout.write(
+            `${JSON.stringify({ id: message.id, result: respond(message.method) })}\n`,
+          );
+        }
+      });
+    }
+  }
+
+  interface RecordedSpawn {
+    readonly command: string;
+    readonly args: readonly string[];
+    readonly options: ProviderProcessSpawnOptions;
+    readonly child: FakeAppServerChild;
+  }
+
+  function makeRecordingSpawner(respond: (method: string) => unknown): {
+    readonly spawner: ProviderProcessSpawnerShape;
+    readonly spawns: RecordedSpawn[];
+  } {
+    const spawns: RecordedSpawn[] = [];
+    const spawner: ProviderProcessSpawnerShape = {
+      spawn: (command, args, options) =>
+        Effect.sync(() => {
+          const child = new FakeAppServerChild(respond);
+          spawns.push({ command, args, options, child });
+          return child as unknown as ChildProcessWithoutNullStreams;
+        }),
+    };
+    return { spawner, spawns };
+  }
+
+  function makeManager(spawner: ProviderProcessSpawnerShape): CodexAppServerManager {
+    const teardownProcessTree = vi.fn(async () => ({
+      escalated: false as const,
+      signalErrors: [],
+    }));
+    return new CodexAppServerManager(ServiceMap.make(ProviderProcessSpawner, spawner), {
+      teardownProcessTree,
+    });
+  }
+
+  function writeFakeCodexBinary(dir: string): string {
+    const isWindows = process.platform === "win32";
+    const binaryPath = path.join(dir, isWindows ? "codex.cmd" : "codex");
+    writeFileSync(
+      binaryPath,
+      isWindows ? `@echo off\r\necho codex-cli 9.9.9\r\n` : `#!/bin/sh\necho "codex-cli 9.9.9"\n`,
+      { mode: 0o755 },
+    );
+    return binaryPath;
+  }
+
+  const respondForThreadOpen = (method: string): unknown => {
+    switch (method) {
+      case "thread/start":
+        return { thread: { id: "provider-thread-started" } };
+      case "thread/resume":
+        return { thread: { id: "provider-thread-resumed" } };
+      case "thread/read":
+        return { thread: { id: "external-thread-1", turns: [] } };
+      default:
+        return {};
+    }
+  };
+
+  async function withLaunchFixture(
+    run: (fixture: { dir: string; binaryPath: string }) => Promise<void>,
+  ): Promise<void> {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "synara-spawner-launch-"));
+    vi.stubEnv("SYNARA_HOME", path.join(dir, "runtime"));
+    const { reset } = __codexCliVersionGateTesting;
+    reset();
+    try {
+      await run({ dir, binaryPath: writeFakeCodexBinary(dir) });
+    } finally {
+      reset();
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  function expectPreparedCodexLaunch(spawn: RecordedSpawn, binaryPath: string, cwd: string): void {
+    const prepared = prepareWindowsSafeProcess(binaryPath, ["app-server"], {
+      cwd,
+      env: spawn.options.env,
+    });
+    expect(spawn.command).toBe(prepared.command);
+    expect(spawn.args).toEqual(prepared.args);
+    expect(spawn.options.cwd).toBe(cwd);
+    expect(spawn.options.shell).toBe(prepared.shell);
+    expect(typeof spawn.options.env.PATH).toBe("string");
+    expect(spawn.options.env.CODEX_HOME).toBeDefined();
+  }
+
+  it("starts a fresh session through an injected spawner with the prepared command", async () => {
+    await withLaunchFixture(async ({ dir, binaryPath }) => {
+      const { spawner, spawns } = makeRecordingSpawner(respondForThreadOpen);
+      const manager = makeManager(spawner);
+      const threadId = asThreadId("thread-spawner-start");
+
+      const session = await manager.startSession({
+        threadId,
+        cwd: dir,
+        runtimeMode: "full-access",
+        providerOptions: { codex: { binaryPath } },
+      });
+
+      expect(session.status).toBe("ready");
+      expect(spawns).toHaveLength(1);
+      const launch = spawns[0]!;
+      expectPreparedCodexLaunch(launch, binaryPath, dir);
+      expect(launch.child.requestMethods).toContain("initialize");
+      expect(launch.child.requestMethods).toContain("thread/start");
+      expect(session.resumeCursor).toEqual({ threadId: "provider-thread-started" });
+
+      await manager.stopSession(threadId);
+    });
+  });
+
+  it("resumes a session through the injected spawner via thread/resume", async () => {
+    await withLaunchFixture(async ({ dir, binaryPath }) => {
+      const { spawner, spawns } = makeRecordingSpawner(respondForThreadOpen);
+      const manager = makeManager(spawner);
+      const threadId = asThreadId("thread-spawner-resume");
+
+      const session = await manager.startSession({
+        threadId,
+        cwd: dir,
+        runtimeMode: "full-access",
+        providerOptions: { codex: { binaryPath } },
+        resumeCursor: { threadId: "provider-thread-to-resume" },
+      });
+
+      expect(session.status).toBe("ready");
+      expect(spawns).toHaveLength(1);
+      const launch = spawns[0]!;
+      expectPreparedCodexLaunch(launch, binaryPath, dir);
+      expect(launch.child.requestMethods).toContain("thread/resume");
+      expect(launch.child.requestMethods).not.toContain("thread/start");
+      expect(session.resumeCursor).toEqual({ threadId: "provider-thread-resumed" });
+
+      await manager.stopSession(threadId);
+    });
+  });
+
+  it("starts a discovery session through the injected spawner", async () => {
+    await withLaunchFixture(async ({ dir }) => {
+      vi.stubEnv("PATH", `${dir}${path.delimiter}${process.env.PATH ?? ""}`);
+      const { spawner, spawns } = makeRecordingSpawner(respondForThreadOpen);
+      const manager = makeManager(spawner);
+
+      const snapshot = await manager.readExternalThread({
+        externalThreadId: "external-thread-1",
+        cwd: dir,
+      });
+
+      expect(snapshot.threadId).toBe("external-thread-1");
+      expect(spawns).toHaveLength(1);
+      const launch = spawns[0]!;
+      const prepared = prepareWindowsSafeProcess("codex", ["app-server"], {
+        cwd: launch.options.cwd,
+        env: launch.options.env,
+      });
+      expect(launch.command).toBe(prepared.command);
+      expect(launch.args).toEqual(prepared.args);
+      expect(launch.child.requestMethods).toContain("thread/read");
+
+      await manager.stopAll();
+    });
+  });
 });

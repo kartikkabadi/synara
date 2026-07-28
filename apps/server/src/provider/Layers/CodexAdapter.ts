@@ -57,6 +57,7 @@ import {
   type CodexAppServerSendTurnInput,
   type CodexAppServerStartSessionInput,
 } from "../../codexAppServerManager.ts";
+import { LocalProcessSpawnerLive } from "../../environment/Layers/LocalProcessSpawner.ts";
 import { AgentGatewayCredentials } from "../../agentGateway/Services/AgentGatewayCredentials.ts";
 import { acquireAgentGatewaySessionLease } from "../../agentGateway/sessionLease.ts";
 import { loadProviderPromptImageBlocks } from "../promptAttachments.ts";
@@ -2158,8 +2159,12 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
     } satisfies CodexAdapterShape;
   });
 
-export const CodexAdapterLive = Layer.effect(CodexAdapter, makeCodexAdapter());
+export const CodexAdapterLive = Layer.effect(CodexAdapter, makeCodexAdapter()).pipe(
+  Layer.provide(LocalProcessSpawnerLive),
+);
 
 export function makeCodexAdapterLive(options?: CodexAdapterLiveOptions) {
-  return Layer.effect(CodexAdapter, makeCodexAdapter(options));
+  return Layer.effect(CodexAdapter, makeCodexAdapter(options)).pipe(
+    Layer.provide(LocalProcessSpawnerLive),
+  );
 }
