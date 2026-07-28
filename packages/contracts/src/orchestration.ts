@@ -1287,6 +1287,9 @@ export const ThreadTurnStartCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
   ),
+  // Present only when the thread's first turn targets a remote execution
+  // environment; absent means local execution.
+  executionProfile: Schema.optional(ExecutionProfile),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
 });
@@ -1312,6 +1315,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   ),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  executionProfile: Schema.optional(ExecutionProfile),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
 });
@@ -1357,6 +1361,7 @@ const ThreadDispatchQueuedTurnCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
   ),
+  executionProfile: Schema.optional(ExecutionProfile),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
 });
@@ -1910,6 +1915,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
   ),
+  executionProfile: Schema.optional(ExecutionProfile),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
 });

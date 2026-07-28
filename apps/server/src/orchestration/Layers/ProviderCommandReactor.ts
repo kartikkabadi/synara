@@ -6,6 +6,7 @@ import {
   type ChatAttachment,
   CommandId,
   EventId,
+  type ExecutionProfile,
   type ModelSelection,
   MessageId,
   type OrchestrationEvent,
@@ -849,6 +850,7 @@ const make = Effect.gen(function* () {
       readonly modelSelection?: ModelSelection;
       readonly providerOptions?: ProviderStartOptions;
       readonly runtimeMode?: RuntimeMode;
+      readonly executionProfile?: ExecutionProfile;
     },
   ) {
     const thread = yield* resolveThread(threadId);
@@ -910,6 +912,9 @@ const make = Effect.gen(function* () {
       modelSelection: desiredModelSelection,
       providerOptions: resolvedProviderOptions,
       runtimeMode: desiredRuntimeMode,
+      ...(options?.executionProfile !== undefined
+        ? { executionProfile: options.executionProfile }
+        : {}),
     };
 
     const resolveActiveSession = (threadId: ThreadId) =>
@@ -1098,6 +1103,7 @@ const make = Effect.gen(function* () {
     readonly runtimeMode?: RuntimeMode;
     readonly interactionMode?: "default" | "plan";
     readonly dispatchMode?: "queue" | "steer";
+    readonly executionProfile?: ExecutionProfile;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
@@ -1193,6 +1199,7 @@ const make = Effect.gen(function* () {
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
       ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
       ...(input.runtimeMode !== undefined ? { runtimeMode: input.runtimeMode } : {}),
+      ...(input.executionProfile !== undefined ? { executionProfile: input.executionProfile } : {}),
     });
     if (input.providerOptions !== undefined) {
       threadProviderOptions.set(input.threadId, input.providerOptions);
@@ -1475,6 +1482,9 @@ const make = Effect.gen(function* () {
         ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
         ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
         ...(input.runtimeMode !== undefined ? { runtimeMode: input.runtimeMode } : {}),
+        ...(input.executionProfile !== undefined
+          ? { executionProfile: input.executionProfile }
+          : {}),
       });
       const replayWithTranscriptBootstrap = (
         cause: ProviderServiceError,
@@ -2038,6 +2048,9 @@ const make = Effect.gen(function* () {
           : {}),
         interactionMode: event.payload.interactionMode,
         dispatchMode: immediateDispatchMode,
+        ...(event.payload.executionProfile !== undefined
+          ? { executionProfile: event.payload.executionProfile }
+          : {}),
         createdAt: event.payload.createdAt,
       }).pipe(
         Effect.catchCause((cause) =>
@@ -2178,6 +2191,9 @@ const make = Effect.gen(function* () {
             : {}),
           runtimeMode: nextQueuedTurn.runtimeMode,
           interactionMode: nextQueuedTurn.interactionMode,
+          ...(nextQueuedTurn.executionProfile !== undefined
+            ? { executionProfile: nextQueuedTurn.executionProfile }
+            : {}),
           ...(nextQueuedTurn.sourceProposedPlan !== undefined
             ? { sourceProposedPlan: nextQueuedTurn.sourceProposedPlan }
             : {}),

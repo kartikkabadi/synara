@@ -105,6 +105,8 @@ interface ChatHeaderProps {
   diffDisabledReason?: string | null;
   surfaceMode?: "single" | "split";
   isSidechat?: boolean;
+  /** Remote execution environment label for the thread; null renders "Local". */
+  executionEnvironmentLabel?: string | null;
   // When provided, the header collapses the
   // Open-in-editor + git-actions + diff-toggle cluster into one Environment button that
   // drives the Environment panel; otherwise the legacy cluster is rendered.
@@ -521,6 +523,7 @@ export function ChatHeader({
   diffDisabledReason: diffDisabledReasonProp,
   surfaceMode: surfaceModeProp,
   isSidechat: isSidechatProp,
+  executionEnvironmentLabel,
   environment: environmentProp,
   chatLayoutAction: chatLayoutActionProp,
   changeThreadAction: changeThreadActionProp,
@@ -726,6 +729,19 @@ export function ChatHeader({
                   </IconButton>
                 ) : null}
               </div>
+              {executionEnvironmentLabel !== undefined ? (
+                <Badge
+                  variant="outline"
+                  className="hidden !h-6 max-w-40 shrink-0 items-center rounded-md px-1.5 text-[10px] sm:inline-flex"
+                  title={
+                    executionEnvironmentLabel === null
+                      ? "Runs on this machine"
+                      : `Runs on remote environment "${executionEnvironmentLabel}"`
+                  }
+                >
+                  <span className="truncate">{executionEnvironmentLabel ?? "Local"}</span>
+                </Badge>
+              ) : null}
               {editorChatControls ? (
                 <EditorRailTabs
                   projectId={editorChatControls.projectId}
