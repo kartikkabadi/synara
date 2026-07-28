@@ -2,15 +2,19 @@
 // Purpose: Verifies filesystem checkpoint store behavior around expensive Git capture work.
 // Layer: Checkpointing tests.
 // Exports: Vitest coverage for CheckpointStoreLive.
+import path from "node:path";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Effect, Fiber, Layer, ManagedRuntime, Option } from "effect";
+import { Effect, Encoding, Fiber, FileSystem, Layer, ManagedRuntime, Option } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CheckpointStoreLive } from "./CheckpointStore.ts";
 import { CheckpointStore } from "../Services/CheckpointStore.ts";
 import { GitCore, type GitCoreShape } from "../../git/Services/GitCore.ts";
+import { GitCoreLive } from "../../git/Layers/GitCore.ts";
 import { GitCommandError } from "../../git/Errors.ts";
-import { CheckpointRef } from "@synara/contracts";
+import { ServerConfig } from "../../config.ts";
+import { CheckpointRef, ThreadId } from "@synara/contracts";
 
 async function waitFor(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
   const started = Date.now();
@@ -270,5 +274,193 @@ describe("CheckpointStoreLive", () => {
     expect(result).toBe("GitCommandError");
     expect(commands.filter((command) => command.startsWith("apply "))).toHaveLength(2);
     expect(commands.at(-1)).toMatch(/^apply --whitespace=nowarn -- /);
+  });
+});
+
+describe("CheckpointStoreLive rescue checkpoints (real Git)", () => {
+  const threadId = ThreadId.makeUnsafe("rescue-thread");
+
+  const RescueTestLayer = Layer.mergeAll(
+    NodeServices.layer,
+    CheckpointStoreLive.pipe(
+      Layer.provideMerge(
+        GitCoreLive.pipe(
+          Layer.provide(
+            ServerConfig.layerTest(process.cwd(), { prefix: "synara-checkpoint-rescue-test-" }),
+          ),
+          Layer.provide(NodeServices.layer),
+        ),
+      ),
+      Layer.provide(NodeServices.layer),
+    ),
+  );
+
+  let runtime: ManagedRuntime.ManagedRuntime<
+    CheckpointStore | GitCore | Layer.Success<typeof NodeServices.layer>,
+    unknown
+  > | null = null;
+
+  afterEach(async () => {
+    if (runtime) {
+      await runtime.dispose();
+    }
+    runtime = null;
+  });
+
+  const git = (cwd: string, args: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const core = yield* GitCore;
+      const result = yield* core.execute({
+        operation: "CheckpointStore.test.git",
+        cwd,
+        args,
+        timeoutMs: 10_000,
+      });
+      return result.stdout.trim();
+    });
+
+  /** Create a temp repo with an initial commit plus a dirty worktree. */
+  const setupDirtyRepo = Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const cwd = yield* fs.makeTempDirectory({ prefix: "rescue-repo-" });
+    yield* git(cwd, ["init"]);
+    yield* git(cwd, ["config", "user.email", "test@test.com"]);
+    yield* git(cwd, ["config", "user.name", "Test"]);
+    yield* fs.writeFileString(path.join(cwd, "tracked.txt"), "committed\n");
+    yield* git(cwd, ["add", "."]);
+    yield* git(cwd, ["commit", "-m", "initial commit"]);
+    yield* fs.writeFileString(path.join(cwd, "tracked.txt"), "modified\n");
+    yield* fs.writeFileString(path.join(cwd, "untracked.txt"), "untracked\n");
+    return cwd;
+  });
+
+  it("captures a rescue checkpoint of a dirty worktree at the saga-keyed rescue ref", async () => {
+    runtime = ManagedRuntime.make(RescueTestLayer);
+
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const store = yield* CheckpointStore;
+        const cwd = yield* setupDirtyRepo;
+
+        const checkpointRef = yield* store.captureRescueCheckpoint({
+          cwd,
+          threadId,
+          sagaId: "saga-1",
+        });
+
+        expect(checkpointRef).toBe(
+          `refs/synara-rescue/${Encoding.encodeBase64Url(threadId)}/${Encoding.encodeBase64Url("saga-1")}`,
+        );
+        expect(yield* store.hasCheckpointRef({ cwd, checkpointRef })).toBe(true);
+
+        const capturedFiles = yield* git(cwd, ["ls-tree", "--name-only", "-r", checkpointRef]);
+        expect(capturedFiles.split("\n").toSorted()).toEqual(["tracked.txt", "untracked.txt"]);
+      }),
+    );
+  });
+
+  it("retries for the same saga deterministically overwrite the same rescue ref", async () => {
+    runtime = ManagedRuntime.make(RescueTestLayer);
+
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const store = yield* CheckpointStore;
+        const cwd = yield* setupDirtyRepo;
+
+        const firstRef = yield* store.captureRescueCheckpoint({ cwd, threadId, sagaId: "saga-1" });
+        yield* fs.writeFileString(path.join(cwd, "tracked.txt"), "retried\n");
+        const secondRef = yield* store.captureRescueCheckpoint({ cwd, threadId, sagaId: "saga-1" });
+
+        expect(secondRef).toBe(firstRef);
+        expect(yield* store.listRescueRefs({ cwd, threadId })).toEqual([firstRef]);
+
+        const captured = yield* git(cwd, ["show", `${firstRef}:tracked.txt`]);
+        expect(captured).toBe("retried");
+      }),
+    );
+  });
+
+  it("enumerates rescue refs leaked by a crash between capture and delete", async () => {
+    runtime = ManagedRuntime.make(RescueTestLayer);
+
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const store = yield* CheckpointStore;
+        const cwd = yield* setupDirtyRepo;
+        const otherThreadId = ThreadId.makeUnsafe("other-thread");
+
+        // Simulate a crash after capture: the refs exist and no delete ran.
+        const leakedRef = yield* store.captureRescueCheckpoint({ cwd, threadId, sagaId: "saga-1" });
+        const otherRef = yield* store.captureRescueCheckpoint({
+          cwd,
+          threadId: otherThreadId,
+          sagaId: "saga-2",
+        });
+
+        expect(yield* store.listRescueRefs({ cwd, threadId })).toEqual([leakedRef]);
+        expect((yield* store.listRescueRefs({ cwd })).toSorted()).toEqual(
+          [leakedRef, otherRef].toSorted(),
+        );
+
+        yield* store.deleteRescueRef({ cwd, checkpointRef: leakedRef });
+        expect(yield* store.listRescueRefs({ cwd, threadId })).toEqual([]);
+      }),
+    );
+  });
+
+  it("restores the captured state over a further-modified workspace", async () => {
+    runtime = ManagedRuntime.make(RescueTestLayer);
+
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const store = yield* CheckpointStore;
+        const cwd = yield* setupDirtyRepo;
+
+        const checkpointRef = yield* store.captureRescueCheckpoint({
+          cwd,
+          threadId,
+          sagaId: "saga-1",
+        });
+
+        yield* fs.writeFileString(path.join(cwd, "tracked.txt"), "mangled by revert\n");
+        yield* fs.remove(path.join(cwd, "untracked.txt"));
+        yield* fs.writeFileString(path.join(cwd, "leftover.txt"), "revert debris\n");
+
+        const restored = yield* store.restoreRescueCheckpoint({ cwd, checkpointRef });
+
+        expect(restored).toBe(true);
+        expect(yield* fs.readFileString(path.join(cwd, "tracked.txt"))).toBe("modified\n");
+        expect(yield* fs.readFileString(path.join(cwd, "untracked.txt"))).toBe("untracked\n");
+        expect(yield* fs.exists(path.join(cwd, "leftover.txt"))).toBe(false);
+      }),
+    );
+  });
+
+  it("deletes the rescue ref and restore of a missing ref returns false", async () => {
+    runtime = ManagedRuntime.make(RescueTestLayer);
+
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const store = yield* CheckpointStore;
+        const cwd = yield* setupDirtyRepo;
+
+        const checkpointRef = yield* store.captureRescueCheckpoint({
+          cwd,
+          threadId,
+          sagaId: "saga-1",
+        });
+        expect(yield* store.hasCheckpointRef({ cwd, checkpointRef })).toBe(true);
+
+        yield* store.deleteRescueRef({ cwd, checkpointRef });
+
+        expect(yield* store.hasCheckpointRef({ cwd, checkpointRef })).toBe(false);
+        expect(yield* store.restoreRescueCheckpoint({ cwd, checkpointRef })).toBe(false);
+
+        // Best-effort delete: deleting an already-missing ref succeeds.
+        yield* store.deleteRescueRef({ cwd, checkpointRef });
+      }),
+    );
   });
 });

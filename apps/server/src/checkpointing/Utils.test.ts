@@ -1,12 +1,17 @@
 import { ProjectId, ThreadId, TurnId } from "@synara/contracts";
 import { describe, expect, it } from "vitest";
 
+import { Encoding } from "effect";
+
 import {
   checkpointRefForThreadTurn,
   checkpointRefForThreadTurnInManagedFamily,
   checkpointRefForThreadTurnStartInManagedFamily,
   isManagedCheckpointRefForThread,
+  isRescueCheckpointRefForThread,
   parseManagedCheckpointRef,
+  parseRescueCheckpointRef,
+  rescueCheckpointRefForThreadSaga,
   resolveProjectCwdForKind,
   resolveThreadWorkspaceCwd,
 } from "./Utils.ts";
@@ -51,6 +56,38 @@ describe("managed checkpoint refs", () => {
         TurnId.makeUnsafe("turn-1"),
       ),
     ).toMatch(/^refs\/historical\/checkpoints\/.+\/turn-start\//);
+  });
+});
+
+describe("rescue checkpoint refs", () => {
+  const threadId = ThreadId.makeUnsafe("thread-1");
+  const sagaId = "saga-1";
+
+  it("creates deterministic saga-keyed rescue refs under the rescue namespace", () => {
+    const expected = `refs/synara-rescue/${Encoding.encodeBase64Url(threadId)}/${Encoding.encodeBase64Url(sagaId)}`;
+    expect(rescueCheckpointRefForThreadSaga(threadId, sagaId)).toBe(expected);
+    expect(rescueCheckpointRefForThreadSaga(threadId, sagaId)).toBe(expected);
+  });
+
+  it("parses rescue refs back into thread and saga tokens", () => {
+    const parsed = parseRescueCheckpointRef(rescueCheckpointRefForThreadSaga(threadId, sagaId));
+    expect(parsed).toEqual({
+      threadToken: Encoding.encodeBase64Url(threadId),
+      sagaToken: Encoding.encodeBase64Url(sagaId),
+    });
+    expect(parseRescueCheckpointRef("refs/heads/feature")).toBeNull();
+  });
+
+  it("recognizes rescue refs by thread", () => {
+    const rescueRef = rescueCheckpointRefForThreadSaga(threadId, sagaId);
+    expect(isRescueCheckpointRefForThread(rescueRef, threadId)).toBe(true);
+    expect(isRescueCheckpointRefForThread(rescueRef, ThreadId.makeUnsafe("thread-2"))).toBe(false);
+  });
+
+  it("is not a managed checkpoint ref, so checkpoint cleanup never touches it", () => {
+    expect(
+      parseManagedCheckpointRef(rescueCheckpointRefForThreadSaga(threadId, sagaId)),
+    ).toBeNull();
   });
 });
 

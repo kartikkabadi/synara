@@ -57,6 +57,10 @@ const checkpointStoreTestLayer = Layer.succeed(CheckpointStore, {
   reverseCheckpointDiff: () => Effect.die("unused checkpoint store test method"),
   diffCheckpoints: () => Effect.die("unused checkpoint store test method"),
   deleteCheckpointRefs: (input) => deleteCheckpointRefsImpl(input),
+  captureRescueCheckpoint: () => Effect.die("unused checkpoint store test method"),
+  restoreRescueCheckpoint: () => Effect.die("unused checkpoint store test method"),
+  deleteRescueRef: () => Effect.die("unused checkpoint store test method"),
+  listRescueRefs: () => Effect.die("unused checkpoint store test method"),
 } satisfies CheckpointStoreShape);
 
 const testLayer = Layer.mergeAll(ProfileStatsQueryLive, ProfileStatsArchiveLive).pipe(

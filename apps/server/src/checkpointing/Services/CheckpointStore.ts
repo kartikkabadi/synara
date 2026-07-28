@@ -14,7 +14,7 @@ import { ServiceMap } from "effect";
 import type { Effect } from "effect";
 
 import type { CheckpointStoreError } from "../Errors.ts";
-import { CheckpointRef } from "@synara/contracts";
+import { CheckpointRef, type ThreadId } from "@synara/contracts";
 
 export interface CaptureCheckpointInput {
   readonly cwd: string;
@@ -55,6 +55,34 @@ export interface ReverseCheckpointDiffInput {
   readonly fromCheckpointRef: CheckpointRef;
   readonly toCheckpointRef: CheckpointRef;
   readonly maxOutputBytes?: number;
+}
+
+export interface CaptureRescueCheckpointInput {
+  readonly cwd: string;
+  readonly threadId: ThreadId;
+  /**
+   * Durable saga/job identity the rescue snapshot belongs to. Retries of the
+   * same saga deterministically target the same rescue ref.
+   */
+  readonly sagaId: string;
+}
+
+export interface RestoreRescueCheckpointInput {
+  readonly cwd: string;
+  readonly checkpointRef: CheckpointRef;
+}
+
+export interface DeleteRescueRefInput {
+  readonly cwd: string;
+  readonly checkpointRef: CheckpointRef;
+}
+
+export interface ListRescueRefsInput {
+  readonly cwd: string;
+  /**
+   * Restrict the listing to rescue refs belonging to one thread.
+   */
+  readonly threadId?: ThreadId;
 }
 
 export interface DeleteCheckpointRefsInput {
@@ -129,6 +157,42 @@ export interface CheckpointStoreShape {
   readonly deleteCheckpointRefs: (
     input: DeleteCheckpointRefsInput,
   ) => Effect.Effect<void, CheckpointStoreError>;
+
+  /**
+   * Capture a rescue checkpoint of the workspace before a revert mutates it.
+   *
+   * Returns the rescue ref the snapshot was stored at so the caller can later
+   * restore or delete it.
+   */
+  readonly captureRescueCheckpoint: (
+    input: CaptureRescueCheckpointInput,
+  ) => Effect.Effect<CheckpointRef, CheckpointStoreError>;
+
+  /**
+   * Restore the workspace to a previously captured rescue checkpoint.
+   *
+   * Never falls back to `HEAD`: returns false when the rescue ref is missing.
+   */
+  readonly restoreRescueCheckpoint: (
+    input: RestoreRescueCheckpointInput,
+  ) => Effect.Effect<boolean, CheckpointStoreError>;
+
+  /**
+   * Delete a rescue ref once the revert saga no longer needs it.
+   *
+   * Best-effort delete: a missing ref is tolerated.
+   */
+  readonly deleteRescueRef: (
+    input: DeleteRescueRefInput,
+  ) => Effect.Effect<void, CheckpointStoreError>;
+
+  /**
+   * Enumerate existing rescue refs so a reconciliation pass can restore or
+   * clean up refs leaked by a crash between capture and delete.
+   */
+  readonly listRescueRefs: (
+    input: ListRescueRefsInput,
+  ) => Effect.Effect<ReadonlyArray<CheckpointRef>, CheckpointStoreError>;
 }
 
 /**

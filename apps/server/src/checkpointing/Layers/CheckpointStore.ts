@@ -11,12 +11,24 @@
  */
 import { randomUUID } from "node:crypto";
 
-import { Cause, Deferred, Effect, Exit, Layer, FileSystem, Option, Path, Semaphore } from "effect";
+import {
+  Cause,
+  Deferred,
+  Effect,
+  Encoding,
+  Exit,
+  Layer,
+  FileSystem,
+  Option,
+  Path,
+  Semaphore,
+} from "effect";
 
 import { CheckpointInvariantError, type CheckpointStoreError } from "../Errors.ts";
 import { GitCommandError } from "../../git/Errors.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { CheckpointStore, type CheckpointStoreShape } from "../Services/CheckpointStore.ts";
+import { RESCUE_REFS_PREFIX, rescueCheckpointRefForThreadSaga } from "../Utils.ts";
 import { CheckpointRef } from "@synara/contracts";
 
 const CHECKPOINT_DIFF_MAX_OUTPUT_BYTES = 10_000_000;
@@ -474,6 +486,36 @@ const makeCheckpointStore = Effect.gen(function* () {
       );
     });
 
+  const captureRescueCheckpoint: CheckpointStoreShape["captureRescueCheckpoint"] = (input) =>
+    Effect.gen(function* () {
+      const checkpointRef = rescueCheckpointRefForThreadSaga(input.threadId, input.sagaId);
+      yield* captureCheckpoint({ cwd: input.cwd, checkpointRef });
+      return checkpointRef;
+    });
+
+  const restoreRescueCheckpoint: CheckpointStoreShape["restoreRescueCheckpoint"] = (input) =>
+    restoreCheckpoint({ cwd: input.cwd, checkpointRef: input.checkpointRef });
+
+  const deleteRescueRef: CheckpointStoreShape["deleteRescueRef"] = (input) =>
+    deleteCheckpointRefs({ cwd: input.cwd, checkpointRefs: [input.checkpointRef] });
+
+  const listRescueRefs: CheckpointStoreShape["listRescueRefs"] = (input) =>
+    Effect.gen(function* () {
+      const prefix = input.threadId
+        ? `${RESCUE_REFS_PREFIX}/${Encoding.encodeBase64Url(input.threadId)}`
+        : RESCUE_REFS_PREFIX;
+      const result = yield* git.execute({
+        operation: "CheckpointStore.listRescueRefs",
+        cwd: input.cwd,
+        args: ["for-each-ref", "--format=%(refname)", `${prefix}/`],
+      });
+      return result.stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => CheckpointRef.makeUnsafe(line));
+    });
+
   return {
     isGitRepository,
     captureCheckpoint,
@@ -483,6 +525,10 @@ const makeCheckpointStore = Effect.gen(function* () {
     diffCheckpoints,
     reverseCheckpointDiff,
     deleteCheckpointRefs,
+    captureRescueCheckpoint,
+    restoreRescueCheckpoint,
+    deleteRescueRef,
+    listRescueRefs,
   } satisfies CheckpointStoreShape;
 });
 
