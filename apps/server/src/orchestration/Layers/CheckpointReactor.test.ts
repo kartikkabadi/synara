@@ -23,6 +23,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect, Exit, Layer, ManagedRuntime, PubSub, Scope, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CheckpointInvariantError } from "../../checkpointing/Errors.ts";
 import { CheckpointStoreLive } from "../../checkpointing/Layers/CheckpointStore.ts";
 import { CheckpointStore } from "../../checkpointing/Services/CheckpointStore.ts";
 import { RESCUE_REFS_PREFIX } from "../../checkpointing/Utils.ts";
@@ -2401,6 +2402,219 @@ describe("CheckpointReactor", () => {
 
         // The rescue checkpoint is kept so the workspace stays explainable
         // and recoverable whichever way the operator resolves.
+        const refs = runGit(harness.cwd, [
+          "for-each-ref",
+          "--format=%(refname)",
+          RESCUE_REFS_PREFIX,
+        ]);
+        expect(
+          refs
+            .trim()
+            .split("\n")
+            .filter((ref) => ref.length > 0).length,
+        ).toBe(1);
+      } finally {
+        delete process.env.SYNARA_CONTROL_PLANE_KERNEL;
+      }
+    },
+  );
+
+  it.skipIf(!kernelAddonAvailable)(
+    "compensates from the rescue checkpoint when the filesystem restore throws mid-mutation in on mode",
+    async () => {
+      process.env.SYNARA_CONTROL_PLANE_KERNEL = "on";
+      try {
+        const harness = await createHarness({ providerName: "claudeAgent" });
+        const threadId = ThreadId.makeUnsafe("thread-1");
+        const createdAt = new Date().toISOString();
+        vi.spyOn(harness.checkpointStore, "restoreCheckpoint").mockImplementationOnce((input) => {
+          // Mutate the workspace before failing so the drill exercises a
+          // partial restore, not just a missing target ref.
+          fs.writeFileSync(path.join(harness.cwd, "README.md"), "partially-restored\n", "utf8");
+          return Effect.fail(
+            new CheckpointInvariantError({
+              operation: "restoreCheckpoint",
+              detail: `restore of ${input.checkpointRef} crashed mid-apply`,
+            }),
+          );
+        });
+
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.session.set",
+            commandId: CommandId.makeUnsafe("cmd-session-set-restore-crash"),
+            threadId,
+            session: {
+              threadId,
+              status: "ready",
+              providerName: "claudeAgent",
+              runtimeMode: "approval-required",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: createdAt,
+            },
+            createdAt,
+          }),
+        );
+        for (const turnCount of [1, 2]) {
+          await Effect.runPromise(
+            harness.engine.dispatch({
+              type: "thread.turn.diff.complete",
+              commandId: CommandId.makeUnsafe(`cmd-diff-restore-crash-${turnCount}`),
+              threadId,
+              turnId: asTurnId(`turn-restore-crash-${turnCount}`),
+              completedAt: createdAt,
+              checkpointRef: checkpointRefForThreadTurn(threadId, turnCount),
+              status: "ready",
+              files: [],
+              checkpointTurnCount: turnCount,
+              createdAt,
+            }),
+          );
+        }
+
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.checkpoint.revert",
+            commandId: CommandId.makeUnsafe("cmd-revert-request-restore-crash"),
+            threadId,
+            turnCount: 1,
+            scope: "thread",
+            createdAt,
+          }),
+        );
+        await harness.drain();
+
+        // Compensation restored the pre-revert workspace and the saga
+        // aborted without touching the provider or claiming completion.
+        expect(fs.readFileSync(path.join(harness.cwd, "README.md"), "utf8")).toBe("v3\n");
+        expect(harness.provider.rollbackConversation).not.toHaveBeenCalled();
+        const readModel = await Effect.runPromise(harness.engine.getReadModel());
+        const thread = readModel.threads.find((entry) => entry.id === threadId);
+        expect(thread?.revertSaga ?? null).toBeNull();
+        expect(
+          thread?.activities.some((activity) => activity.kind === "checkpoint.revert.succeeded"),
+        ).toBe(false);
+
+        // The durable trail explains the partial mutation and its
+        // compensation, and the job is settled (nothing left pending).
+        const kernel = await runtime!.runPromise(Effect.service(ControlPlaneKernel));
+        const steps = await runtime!.runPromise(
+          Effect.map(kernel.eventsAfter({ after: 0, limit: 100 }), (events) =>
+            events.map((event) => event.eventType),
+          ),
+        );
+        expect(steps[0]).toBe("thread.revert.started");
+        expect(steps.at(-1)).toBe("thread.revert.aborted");
+        const pendingJobs = await runtime!.runPromise(
+          kernel.jobs({ queue: REVERT_SAGA_QUEUE, state: "pending", limit: 10 }),
+        );
+        expect(pendingJobs.length).toBe(0);
+
+        // The rescue ref was deleted after confirmed compensation.
+        const refs = runGit(harness.cwd, [
+          "for-each-ref",
+          "--format=%(refname)",
+          RESCUE_REFS_PREFIX,
+        ]);
+        expect(refs.trim()).toBe("");
+      } finally {
+        delete process.env.SYNARA_CONTROL_PLANE_KERNEL;
+      }
+    },
+  );
+
+  it.skipIf(!kernelAddonAvailable)(
+    "enters uncertainty when the restore throws and rescue compensation also fails in on mode",
+    async () => {
+      process.env.SYNARA_CONTROL_PLANE_KERNEL = "on";
+      try {
+        const harness = await createHarness({ providerName: "claudeAgent" });
+        const threadId = ThreadId.makeUnsafe("thread-1");
+        const createdAt = new Date().toISOString();
+        vi.spyOn(harness.checkpointStore, "restoreCheckpoint").mockImplementationOnce(() => {
+          fs.writeFileSync(path.join(harness.cwd, "README.md"), "partially-restored\n", "utf8");
+          return Effect.fail(
+            new CheckpointInvariantError({
+              operation: "restoreCheckpoint",
+              detail: "restore crashed mid-apply",
+            }),
+          );
+        });
+        vi.spyOn(harness.checkpointStore, "restoreRescueCheckpoint").mockImplementationOnce(() =>
+          Effect.fail(
+            new CheckpointInvariantError({
+              operation: "restoreRescueCheckpoint",
+              detail: "rescue restore also crashed",
+            }),
+          ),
+        );
+
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.session.set",
+            commandId: CommandId.makeUnsafe("cmd-session-set-compensation-crash"),
+            threadId,
+            session: {
+              threadId,
+              status: "ready",
+              providerName: "claudeAgent",
+              runtimeMode: "approval-required",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: createdAt,
+            },
+            createdAt,
+          }),
+        );
+        for (const turnCount of [1, 2]) {
+          await Effect.runPromise(
+            harness.engine.dispatch({
+              type: "thread.turn.diff.complete",
+              commandId: CommandId.makeUnsafe(`cmd-diff-compensation-crash-${turnCount}`),
+              threadId,
+              turnId: asTurnId(`turn-compensation-crash-${turnCount}`),
+              completedAt: createdAt,
+              checkpointRef: checkpointRefForThreadTurn(threadId, turnCount),
+              status: "ready",
+              files: [],
+              checkpointTurnCount: turnCount,
+              createdAt,
+            }),
+          );
+        }
+
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.checkpoint.revert",
+            commandId: CommandId.makeUnsafe("cmd-revert-request-compensation-crash"),
+            threadId,
+            turnCount: 1,
+            scope: "thread",
+            createdAt,
+          }),
+        );
+
+        // With compensation impossible, the saga enters uncertainty: the
+        // domain surfaces it, the job stays unsettled, and the rescue ref
+        // is retained so the workspace stays operator-recoverable.
+        await waitForEvent(harness.engine, (event) => event.type === "thread.revert-uncertain");
+        expect(harness.provider.rollbackConversation).not.toHaveBeenCalled();
+        const readModel = await Effect.runPromise(harness.engine.getReadModel());
+        const thread = readModel.threads.find((entry) => entry.id === threadId);
+        expect(thread?.revertSaga?.status).toBe("uncertain");
+
+        const kernel = await runtime!.runPromise(Effect.service(ControlPlaneKernel));
+        const trail = await runtime!.runPromise(
+          Effect.map(kernel.eventsAfter({ after: 0, limit: 100 }), (events) =>
+            events.map((event) => event.eventType),
+          ),
+        );
+        expect(trail.at(-1)).toBe("thread.revert.uncertain");
+        const succeededJobs = await runtime!.runPromise(
+          kernel.jobs({ queue: REVERT_SAGA_QUEUE, state: "succeeded", limit: 10 }),
+        );
+        expect(succeededJobs.length).toBe(0);
         const refs = runGit(harness.cwd, [
           "for-each-ref",
           "--format=%(refname)",
