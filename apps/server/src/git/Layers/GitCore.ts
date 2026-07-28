@@ -156,9 +156,38 @@ function sanitizeRemoteName(value: string): string {
   return sanitized.length > 0 ? sanitized : "fork";
 }
 
+type RemoteUrlRewrite = {
+  readonly base: string;
+  readonly insteadOf: string;
+};
+
+function parseRemoteUrlRewrites(stdout: string): RemoteUrlRewrite[] {
+  const rewrites: RemoteUrlRewrite[] = [];
+  for (const line of stdout.split("\n")) {
+    const match = /^url\.(.+)\.insteadof (.+)$/i.exec(line.trim());
+    if (match) rewrites.push({ base: match[1] ?? "", insteadOf: match[2] ?? "" });
+  }
+  return rewrites;
+}
+
+/**
+ * Git rewrites remotes whose URL starts with a configured `url.<base>.insteadOf` prefix and
+ * reports the rewritten URL from `remote -v`/`remote get-url`. Mapping the longest matching
+ * base back to its `insteadOf` value recovers the configured URL. Only bases read from the
+ * repository's effective Git config are trusted — URL shape alone never implies a rewrite.
+ */
+function undoRemoteUrlRewrite(url: string, rewrites: readonly RemoteUrlRewrite[]): string {
+  let best: RemoteUrlRewrite | undefined;
+  for (const rewrite of rewrites) {
+    if (rewrite.base.length === 0 || !url.startsWith(rewrite.base)) continue;
+    if (best === undefined || rewrite.base.length > best.base.length) best = rewrite;
+  }
+  return best === undefined ? url : best.insteadOf + url.slice(best.base.length);
+}
+
 function normalizeRemoteUrl(value: string): string {
   // GitHub remotes normalize to their `owner/repository` identity so equivalent URL forms
-  // (ssh vs https, or rewritten via `url.<base>.insteadOf` proxies) compare equal.
+  // (ssh vs https) compare equal.
   const nameWithOwner = parseGitHubRepositoryNameWithOwnerFromRemoteUrl(value);
   if (nameWithOwner !== null) {
     return `github.com/${nameWithOwner.toLowerCase()}`;
@@ -738,6 +767,16 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
         Effect.map((result) => result.stdout),
       );
 
+    const loadRemoteUrlRewrites = (
+      cwd: string,
+    ): Effect.Effect<RemoteUrlRewrite[], GitCommandError> =>
+      runGitStdout(
+        "GitCore.loadRemoteUrlRewrites",
+        cwd,
+        ["config", "--get-regexp", "^url\\..*\\.insteadof$"],
+        true,
+      ).pipe(Effect.map(parseRemoteUrlRewrites));
+
     const repositoryMutationLocks = new Map<string, Semaphore.Semaphore>();
     const repositoryMutationCounts = new Map<string, number>();
     const repositoryMutationMapLock = yield* Semaphore.make(1);
@@ -1108,7 +1147,8 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
     const ensureRemote: GitCoreShape["ensureRemote"] = (input) =>
       Effect.gen(function* () {
         const preferredName = sanitizeRemoteName(input.preferredName);
-        const normalizedTargetUrl = normalizeRemoteUrl(input.url);
+        const rewrites = yield* loadRemoteUrlRewrites(input.cwd);
+        const normalizedTargetUrl = normalizeRemoteUrl(undoRemoteUrlRewrite(input.url, rewrites));
         const remoteFetchUrls = yield* runGitStdout(
           "GitCore.ensureRemote.listRemoteUrls",
           input.cwd,
@@ -1116,7 +1156,9 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
         ).pipe(Effect.map((stdout) => parseRemoteFetchUrls(stdout)));
 
         for (const [remoteName, remoteUrl] of remoteFetchUrls.entries()) {
-          if (normalizeRemoteUrl(remoteUrl) === normalizedTargetUrl) {
+          if (
+            normalizeRemoteUrl(undoRemoteUrlRewrite(remoteUrl, rewrites)) === normalizedTargetUrl
+          ) {
             return remoteName;
           }
         }
@@ -2614,8 +2656,10 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
             input.cwd,
             ["remote", "get-url", remoteName],
           );
-          const actualRepositoryNameWithOwner =
-            parseGitHubRepositoryNameWithOwnerFromRemoteUrl(remoteUrl);
+          const rewrites = yield* loadRemoteUrlRewrites(input.cwd);
+          const actualRepositoryNameWithOwner = parseGitHubRepositoryNameWithOwnerFromRemoteUrl(
+            undoRemoteUrlRewrite(remoteUrl.trim(), rewrites),
+          );
           if (
             actualRepositoryNameWithOwner?.toLowerCase() !==
             input.expectedRepositoryNameWithOwner.toLowerCase()

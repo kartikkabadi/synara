@@ -1704,6 +1704,35 @@ it.layer(TestLayer)("git integration", (it) => {
         }),
     );
 
+    it.effect(
+      "does not treat an arbitrary host with a GitHub-looking path as an equivalent remote",
+      () =>
+        Effect.gen(function* () {
+          const tmp = yield* makeTmpDir();
+          yield* initRepoWithCommit(tmp);
+          const core = yield* GitCore;
+
+          yield* git(tmp, [
+            "remote",
+            "add",
+            "origin",
+            "https://attacker.example/proxy/github.com/example-org/synara.git",
+          ]);
+
+          const remoteName = yield* core.ensureRemote({
+            cwd: tmp,
+            preferredName: "origin",
+            url: "https://github.com/example-org/synara.git",
+          });
+
+          expect(remoteName).toBe("origin-1");
+          expect((yield* git(tmp, ["remote"])).split("\n").filter(Boolean).sort()).toEqual([
+            "origin",
+            "origin-1",
+          ]);
+        }),
+    );
+
     it.effect("reports status details and dirty state", () =>
       Effect.gen(function* () {
         const tmp = yield* makeTmpDir();

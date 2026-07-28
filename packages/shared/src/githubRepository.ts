@@ -23,10 +23,7 @@ export function parseGitHubRepositoryNameWithOwnerFromRemoteUrl(
   const match =
     /^(?:git@github\.com:|ssh:\/\/git@github\.com\/|https:\/\/github\.com\/|git:\/\/github\.com\/)([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/i.exec(
       trimmed,
-    ) ??
-    // Forwarding proxies (for example `https://<proxy-host>/.../github.com/<owner>/<repo>`)
-    // rewrite GitHub remotes but keep the `github.com/<owner>/<repo>` identity in the path.
-    /^https:\/\/[^\s]+\/github\.com\/([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/i.exec(trimmed);
+    );
   const repositoryNameWithOwner = match?.[1]?.trim() ?? "";
   return isValidGitHubRepositoryNameWithOwner(repositoryNameWithOwner)
     ? repositoryNameWithOwner
