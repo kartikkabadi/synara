@@ -50,7 +50,17 @@ export const ExecutionEnvironmentSshTransport = Schema.Struct({
     Schema.withDecodingDefault(() => "known-hosts" as const),
   ),
   hostKeyFingerprint: Schema.optional(TrimmedNonEmptyString),
-});
+}).check(
+  Schema.makeFilter((transport) =>
+    transport.hostKeyVerification === "pinned-fingerprint" &&
+    transport.hostKeyFingerprint === undefined
+      ? {
+          path: ["hostKeyFingerprint"],
+          message: "hostKeyFingerprint is required when hostKeyVerification is pinned-fingerprint",
+        }
+      : undefined,
+  ),
+);
 export type ExecutionEnvironmentSshTransport = typeof ExecutionEnvironmentSshTransport.Type;
 
 export const ExecutionEnvironmentRuntime = Schema.Struct({
@@ -123,5 +133,22 @@ export const ExecutionEnvironmentDescriptor = Schema.Struct({
   runtime: Schema.optional(ExecutionEnvironmentRuntime),
   transport: Schema.optional(ExecutionEnvironmentSshTransport),
   connection: Schema.optional(ExecutionEnvironmentConnection),
-});
+}).check(
+  Schema.makeFilter((descriptor) => {
+    const runtimeType = descriptor.runtime?.runtimeType ?? "local";
+    if (runtimeType === "local" && descriptor.transport !== undefined) {
+      return {
+        path: ["transport"],
+        message: "transport must be absent for local runtimes",
+      };
+    }
+    if (runtimeType !== "local" && descriptor.transport === undefined) {
+      return {
+        path: ["transport"],
+        message: `transport is required when runtimeType is ${runtimeType}`,
+      };
+    }
+    return undefined;
+  }),
+);
 export type ExecutionEnvironmentDescriptor = typeof ExecutionEnvironmentDescriptor.Type;
