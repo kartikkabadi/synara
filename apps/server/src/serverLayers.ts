@@ -42,6 +42,9 @@ import { ExternalMcpServiceLive } from "./externalMcp/Layers/ExternalMcpService"
 import { ExternalMcpGatewayLive } from "./externalMcp/Layers/ExternalMcpGateway";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment";
 import { RemoteEnvironmentRegistryLive } from "./environment/Layers/RemoteEnvironmentRegistry";
+import { EnvironmentProbeLive } from "./environment/Layers/EnvironmentProbe";
+import { RemoteEnvironmentResolverLive } from "./environment/Layers/RemoteEnvironmentResolver";
+import { SshProcessProviderLive } from "./environment/Layers/SshProcessProvider";
 import { AutomationRepositoryLive } from "./persistence/Layers/AutomationRepository";
 import { ProjectPullRequestPinsLive } from "./persistence/Layers/ProjectPullRequestPins";
 import { ProjectionTurnRepositoryLive } from "./persistence/Layers/ProjectionTurns";
@@ -179,6 +182,11 @@ export function makeServerRuntimeServicesLayer(
   const remoteEnvironmentRegistryLayer = RemoteEnvironmentRegistryLive.pipe(
     Layer.provide(ServerEnvironmentLive),
   );
+  const environmentProbeLayer = EnvironmentProbeLive.pipe(
+    Layer.provide(RemoteEnvironmentResolverLive),
+    Layer.provide(SshProcessProviderLive),
+    Layer.provide(remoteEnvironmentRegistryLayer),
+  );
   const pullRequestServiceLayer = PullRequestServiceLive.pipe(
     Layer.provideMerge(GitLayerLive),
     Layer.provideMerge(ProjectPullRequestPinsLive),
@@ -211,6 +219,7 @@ export function makeServerRuntimeServicesLayer(
     ServerSettingsLive,
     ServerEnvironmentLive,
     remoteEnvironmentRegistryLayer,
+    environmentProbeLayer,
     ProfileStatsQueryLive,
     authServicesLayer,
     ServerLifecycleEventsLive,
