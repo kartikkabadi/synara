@@ -75,6 +75,12 @@ describe("ExecutionEnvironmentSshTransport", () => {
     expect(() => decodeTransport({ host: "vps", port: 70_000 })).toThrow();
   });
 
+  it("rejects pinned-fingerprint verification without a fingerprint", () => {
+    expect(() =>
+      decodeTransport({ host: "vps", hostKeyVerification: "pinned-fingerprint" }),
+    ).toThrow(/hostKeyFingerprint is required/);
+  });
+
   it("rejects disabling host-key verification", () => {
     expect(() => decodeTransport({ host: "vps", hostKeyVerification: "off" })).toThrow();
     expect(() => decodeTransport({ host: "vps", hostKeyVerification: "insecure" })).toThrow();
@@ -181,6 +187,36 @@ describe("ExecutionEnvironmentDescriptor", () => {
     });
     const reparsed = decodeDescriptor(encodeDescriptor(parsed));
     expect(reparsed).toEqual(parsed);
+  });
+
+  it("rejects a remote runtime without a transport", () => {
+    for (const runtimeType of ["ssh-process", "remote-synara-server"] as const) {
+      expect(() =>
+        decodeDescriptor({
+          environmentId: "env-remote",
+          label: "Remote",
+          platform: { os: "linux", arch: "x64" },
+          serverVersion: "0.6.2",
+          capabilities: {},
+          runtime: { runtimeType },
+        }),
+      ).toThrow(/transport is required/);
+    }
+  });
+
+  it("rejects a local runtime carrying an SSH transport", () => {
+    const base = {
+      environmentId: "env-local",
+      label: "Local",
+      platform: { os: "darwin", arch: "arm64" },
+      serverVersion: "0.6.2",
+      capabilities: {},
+      transport: { host: "vps.example.com" },
+    };
+    expect(() => decodeDescriptor(base)).toThrow(/transport must be absent/);
+    expect(() => decodeDescriptor({ ...base, runtime: { runtimeType: "local" } })).toThrow(
+      /transport must be absent/,
+    );
   });
 
   it("rejects a descriptor with an invalid platform os", () => {
