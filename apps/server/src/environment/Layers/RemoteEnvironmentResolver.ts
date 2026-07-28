@@ -6,7 +6,14 @@
 import type { ExecutionProfile, ProviderSessionStartInput } from "@synara/contracts";
 import { Effect, Layer, Option } from "effect";
 
-import { buildRemoteCommand, buildSshArgv, SshCommandError } from "../sshCommand";
+import {
+  buildAgentSshArgv,
+  buildRemoteCommand,
+  buildSshArgv,
+  DEFAULT_REMOTE_BINARY,
+  REMOTE_APP_SERVER_ARG,
+  SshCommandError,
+} from "../sshCommand";
 import { knownHostsFingerprint, verifyPinnedFingerprint } from "../sshHostKey";
 import { RemoteEnvironmentRegistry } from "../Services/RemoteEnvironmentRegistry";
 import {
@@ -26,7 +33,7 @@ export const makeRemoteEnvironmentResolver = Effect.fn(function* () {
 
   const resolve = (
     executionProfile: ExecutionProfile,
-    _providerSessionStartInput: ProviderSessionStartInput,
+    providerSessionStartInput: ProviderSessionStartInput,
   ) =>
     Effect.gen(function* () {
       const { environmentId, providerKind } = executionProfile;
@@ -84,6 +91,29 @@ export const makeRemoteEnvironmentResolver = Effect.fn(function* () {
             reason: `observed host key ${observedFingerprint} does not match the pinned fingerprint`,
           }),
         );
+      }
+
+      // reconnect: "remote-agent" selects the persistent agent transport
+      // (Architecture B); everything else keeps the direct ssh exec path.
+      if (descriptor.capabilities.reconnect === "remote-agent") {
+        const sshArgs = yield* Effect.try({
+          try: () => buildAgentSshArgv(transport, runtime),
+          catch: (cause) =>
+            cause instanceof SshCommandError
+              ? cause
+              : new SshCommandError({ reason: String(cause) }),
+        });
+        return {
+          kind: "remote-agent",
+          sshArgs,
+          remoteCommand: sshArgs[sshArgs.length - 1] ?? "",
+          threadId: providerSessionStartInput.threadId,
+          executionProfile,
+          providerArgv: [
+            runtime.remoteBinaryPath?.trim() || DEFAULT_REMOTE_BINARY,
+            REMOTE_APP_SERVER_ARG,
+          ],
+        } satisfies SpawnPlan;
       }
 
       const sshArgs = yield* Effect.try({
