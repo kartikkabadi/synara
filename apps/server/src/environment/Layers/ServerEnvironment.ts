@@ -1,5 +1,9 @@
-import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@synara/contracts";
-import { Effect, FileSystem, Layer, Path, Random } from "effect";
+import {
+  EnvironmentId,
+  ExecutionEnvironmentCapabilities,
+  type ExecutionEnvironmentDescriptor,
+} from "@synara/contracts";
+import { Effect, FileSystem, Layer, Path, Random, Schema } from "effect";
 
 import packageJson from "../../../package.json" with { type: "json" };
 import { ServerConfig } from "../../config";
@@ -74,9 +78,9 @@ export const makeServerEnvironment = Effect.fn(function* () {
       arch: platformArch(),
     },
     serverVersion: packageJson.version,
-    capabilities: {
+    capabilities: Schema.decodeUnknownSync(ExecutionEnvironmentCapabilities)({
       repositoryIdentity: true,
-    },
+    }),
   };
 
   return {
