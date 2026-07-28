@@ -11,15 +11,11 @@ import type { RemoteAgentThreadStatus } from "@synara/contracts";
 import { type Effect, ServiceMap } from "effect";
 
 import type { RemoteAgentError } from "../RemoteEnvironmentErrors";
+import type { RemoteAgentInstallerError } from "./RemoteAgentInstaller";
 import type { ProviderProcessSpawnOptions, ProviderSpawnError } from "./ProviderProcessSpawner";
 import type { RemoteAgentSpawnPlan } from "./RemoteEnvironmentResolver";
 
-/**
- * Protocol version this server speaks. Must match PROTOCOL_VERSION in
- * apps/remote-agent/src/version.ts; the hello handshake fails closed on any
- * mismatch, so drift is caught on first connect.
- */
-export const REMOTE_AGENT_PROTOCOL_VERSION = "0.1.0";
+export { REMOTE_AGENT_PROTOCOL_VERSION } from "../RemoteAgentVersion";
 
 export interface RemoteAgentAttachResult {
   readonly status: RemoteAgentThreadStatus;
@@ -47,7 +43,10 @@ export interface RemoteAgentProviderShape {
   readonly spawnRemoteAgent: (
     plan: RemoteAgentSpawnPlan,
     options: ProviderProcessSpawnOptions,
-  ) => Effect.Effect<RemoteAgentSpawnedProcess, RemoteAgentError | ProviderSpawnError>;
+  ) => Effect.Effect<
+    RemoteAgentSpawnedProcess,
+    RemoteAgentError | RemoteAgentInstallerError | ProviderSpawnError
+  >;
   /**
    * Reconnects to the agent and replays journaled events after `lastSeq`
    * through agent/attach instead of spawning a fresh provider (PR V wires
