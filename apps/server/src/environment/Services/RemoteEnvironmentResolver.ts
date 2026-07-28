@@ -6,7 +6,12 @@
 import { homedir } from "node:os";
 import path from "node:path";
 
-import type { ExecutionProfile, ProviderSessionStartInput } from "@synara/contracts";
+import type {
+  ExecutionEnvironmentRuntime,
+  ExecutionEnvironmentSshTransport,
+  ExecutionProfile,
+  ProviderSessionStartInput,
+} from "@synara/contracts";
 import { type Effect, Schema, ServiceMap } from "effect";
 
 import type { SshCommandError } from "../sshCommand";
@@ -41,6 +46,9 @@ export interface RemoteAgentSpawnPlan {
   readonly executionProfile: ExecutionProfile;
   /** The provider argv the agent spawns on the remote host. */
   readonly providerArgv: readonly string[];
+  /** Transport/runtime the installer needs to bootstrap the agent binary. */
+  readonly transport: ExecutionEnvironmentSshTransport;
+  readonly runtime: ExecutionEnvironmentRuntime;
 }
 
 export type SpawnPlan = LocalSpawnPlan | SshSpawnPlan | RemoteAgentSpawnPlan;

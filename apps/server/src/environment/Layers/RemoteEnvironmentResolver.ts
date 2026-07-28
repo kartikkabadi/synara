@@ -113,6 +113,8 @@ export const makeRemoteEnvironmentResolver = Effect.fn(function* () {
             runtime.remoteBinaryPath?.trim() || DEFAULT_REMOTE_BINARY,
             REMOTE_APP_SERVER_ARG,
           ],
+          transport,
+          runtime,
         } satisfies SpawnPlan;
       }
 

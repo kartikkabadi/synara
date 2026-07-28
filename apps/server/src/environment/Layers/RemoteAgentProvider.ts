@@ -23,6 +23,10 @@ import {
   RemoteAgentVersionMismatchError,
 } from "../RemoteEnvironmentErrors";
 import { ProviderSpawnError } from "../Services/ProviderProcessSpawner";
+import {
+  RemoteAgentInstaller,
+  type RemoteAgentInstallerShape,
+} from "../Services/RemoteAgentInstaller";
 import type { ProviderProcessSpawnOptions } from "../Services/ProviderProcessSpawner";
 import {
   REMOTE_AGENT_PROTOCOL_VERSION,
@@ -358,9 +362,13 @@ function mapSpawnRejection(threadId: string, cause: unknown): RemoteAgentError {
     : new RemoteAgentSpawnFailedError({ reason });
 }
 
-export const makeRemoteAgentProvider = (sshBinaryPath: string): RemoteAgentProviderShape => ({
+export const makeRemoteAgentProvider = (
+  sshBinaryPath: string,
+  installer: RemoteAgentInstallerShape,
+): RemoteAgentProviderShape => ({
   spawnRemoteAgent: (plan: RemoteAgentSpawnPlan, options: ProviderProcessSpawnOptions) =>
     Effect.gen(function* () {
+      yield* installer.ensureAgentInstalled({ transport: plan.transport, runtime: plan.runtime });
       const agent = yield* connectToAgent(sshBinaryPath, plan, options);
       const closeOnFailure = <A, E>(effect: Effect.Effect<A, E>) =>
         Effect.tapError(effect, () => Effect.sync(() => agent.sshChild.kill()));
@@ -408,5 +416,9 @@ export const makeRemoteAgentProvider = (sshBinaryPath: string): RemoteAgentProvi
 
 export const RemoteAgentProviderLive = Layer.effect(
   RemoteAgentProvider,
-  Effect.map(SshBinaryPath.asEffect(), makeRemoteAgentProvider),
+  Effect.gen(function* () {
+    const sshBinaryPath = yield* SshBinaryPath.asEffect();
+    const installer = yield* RemoteAgentInstaller;
+    return makeRemoteAgentProvider(sshBinaryPath, installer);
+  }),
 );
