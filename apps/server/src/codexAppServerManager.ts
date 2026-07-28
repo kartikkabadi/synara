@@ -30,6 +30,7 @@ import {
   type ProviderSession,
   type ProviderSessionStartInput,
   type ProviderTurnStartResult,
+  type ExecutionProfile,
   RuntimeMode,
   ProviderInteractionMode,
   type ServerVoiceTranscriptionInput,
@@ -65,6 +66,14 @@ import {
   ProviderProcessSpawner,
   type ProviderProcessSpawnerShape,
 } from "./environment/Services/ProviderProcessSpawner.ts";
+import {
+  RemoteEnvironmentResolver,
+  type RemoteEnvironmentResolverShape,
+} from "./environment/Services/RemoteEnvironmentResolver.ts";
+import {
+  SshProcessProvider,
+  type SshProcessProviderShape,
+} from "./environment/Services/SshProcessProvider.ts";
 import { ensureIsolatedScratchWorkspace } from "./scratchWorkspaces.ts";
 import { createLogger } from "./logger";
 import { transcribeVoiceWithChatGptSession } from "./voiceTranscription.ts";
@@ -787,6 +796,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   private readonly teardownProcessTree: typeof teardownProviderProcessTree;
   private readonly taskCompleteFallbackGraceMs: number;
   private readonly processSpawner: ProviderProcessSpawnerShape;
+  private readonly remoteEnvironmentResolver: RemoteEnvironmentResolverShape | undefined;
+  private readonly sshProcessProvider: SshProcessProviderShape | undefined;
   constructor(
     services?: ServiceMap.ServiceMap<never>,
     options?: {
@@ -811,13 +822,46 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
           makeLocalProcessSpawner,
         )
       : makeLocalProcessSpawner();
+    this.remoteEnvironmentResolver = services
+      ? Option.getOrUndefined(ServiceMap.getOption(services, RemoteEnvironmentResolver))
+      : undefined;
+    this.sshProcessProvider = services
+      ? Option.getOrUndefined(ServiceMap.getOption(services, SshProcessProvider))
+      : undefined;
   }
 
-  private spawnCodexAppServer(input: {
+  private async spawnCodexAppServer(input: {
     readonly binaryPath: string;
     readonly cwd: string;
     readonly env: NodeJS.ProcessEnv;
+    readonly remote?: {
+      readonly executionProfile: ExecutionProfile;
+      readonly sessionStartInput: ProviderSessionStartInput;
+    };
   }): Promise<ChildProcessWithoutNullStreams> {
+    if (input.remote !== undefined) {
+      const resolver = this.remoteEnvironmentResolver;
+      if (resolver === undefined) {
+        throw new Error(
+          "An executionProfile was provided but no RemoteEnvironmentResolver service is available",
+        );
+      }
+      const plan = await Effect.runPromise(
+        resolver.resolve(input.remote.executionProfile, input.remote.sessionStartInput),
+      );
+      if (plan.kind === "ssh") {
+        const sshProvider = this.sshProcessProvider;
+        if (sshProvider === undefined) {
+          throw new Error(
+            "An ssh spawn plan was resolved but no SshProcessProvider service is available",
+          );
+        }
+        const spawned = await Effect.runPromise(
+          sshProvider.spawnSsh(plan, { cwd: input.cwd, env: input.env }),
+        );
+        return spawned.child;
+      }
+    }
     const prepared = prepareWindowsSafeProcess(input.binaryPath, ["app-server"], {
       cwd: input.cwd,
       env: input.env,
