@@ -8,6 +8,8 @@
  *
  * @module CompactionReactor
  */
+import * as Crypto from "node:crypto";
+
 import {
   EventId,
   ProviderDiscoveryKind,
@@ -30,7 +32,12 @@ import { CommandId } from "@synara/contracts";
 import { Cause, Deferred, Effect, Exit, Layer, Option, Schema, Scope, Stream } from "effect";
 import { makeDrainableWorker, startDrainableWorkerProducers } from "@synara/shared/DrainableWorker";
 
-import { ProviderValidationError, type ProviderServiceError } from "../../provider/Errors.ts";
+import {
+  ProviderCompactionPersistenceError,
+  ProviderValidationError,
+  type ProviderServiceError,
+} from "../../provider/Errors.ts";
+import type { PersistenceSqlError } from "../../persistence/Errors.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProviderDiscoveryService } from "../../provider/Services/ProviderDiscoveryService.ts";
 import { ProviderSessionRuntimeRepository } from "../../persistence/Services/ProviderSessionRuntime.ts";
@@ -57,6 +64,19 @@ import { decideAutoCompaction } from "./decideCompaction.ts";
 
 const COMPACTION_REACTOR_CAPACITY = 256;
 const AUTO_COMPACTION_MAX_CONSECUTIVE_FAILURES = 2;
+const SETTLED_RESULTS_CAPACITY = 256;
+
+// Canonical fingerprint of the operation-defining request payload so a reused
+// requestId cannot silently join or replay a different operation.
+function fingerprintCompactionRequest(input: ProviderCompactionRequest): string {
+  const canonical = JSON.stringify({
+    threadId: input.threadId,
+    trigger: input.trigger,
+    instructions: input.instructions ?? null,
+    expectedLifecycleGeneration: input.expectedLifecycleGeneration ?? null,
+  });
+  return Crypto.createHash("sha256").update(canonical).digest("hex");
+}
 
 // Resolve the per-thread settings into a decider policy. Threads without an
 // evaluable trigger have no Synara-managed auto-compaction; there is no
@@ -88,6 +108,16 @@ const serverCommandId = (tag: string): CommandIdType =>
 interface PendingWaiter {
   readonly request: ProviderCompactionRequest;
   readonly deferred: Deferred.Deferred<ProviderCompactionResult, ProviderServiceError>;
+}
+
+interface InFlightEntry {
+  readonly fingerprint: string;
+  readonly deferred: Deferred.Deferred<ProviderCompactionResult, ProviderServiceError>;
+}
+
+interface SettledEntry {
+  readonly fingerprint: string;
+  readonly result: ProviderCompactionResult;
 }
 
 function failValidation(issue: string): Effect.Effect<never, ProviderValidationError> {
@@ -127,11 +157,8 @@ const make = Effect.gen(function* () {
   const autoFailureCounts = new Map<string, number>();
   const autoInFlight = new Set<string>();
   let autoScope: Scope.Closeable | null = null;
-  const inFlight = new Map<
-    string,
-    Deferred.Deferred<ProviderCompactionResult, ProviderServiceError>
-  >();
-  const settledResults = new Map<string, ProviderCompactionResult>();
+  const inFlight = new Map<string, InFlightEntry>();
+  const settledResults = new Map<string, SettledEntry>();
 
   const getState = (threadId: string): CompactionControlState =>
     states.get(threadId) ?? IDLE_COMPACTION_STATE;
@@ -284,24 +311,22 @@ const make = Effect.gen(function* () {
           break;
       }
       if (row !== null) {
-        yield* operations.upsert(row).pipe(
-          Effect.catch((error) =>
-            Effect.logWarning("compaction operation persistence failed", {
-              threadId,
-              detail: error.detail,
-            }),
-          ),
-        );
+        yield* operations.upsert(row);
       }
       return row;
     });
 
-  const applyEvent = (threadId: ThreadId, event: CompactionLifecycleInput) =>
+  const applyEvent = (
+    threadId: ThreadId,
+    event: CompactionLifecycleInput,
+  ): Effect.Effect<CompactionControlState, PersistenceSqlError> =>
     Effect.gen(function* () {
       const previous = getState(threadId);
       const next = compactionReducer(previous, event);
-      states.set(threadId, next);
+      // Persist before committing the in-memory transition so a failed
+      // durable write leaves the previous control state observable.
       const row = yield* persistOperation(threadId, next, event, previous);
+      states.set(threadId, next);
       const summary = row === null ? null : compactionSummaryFromOperation(row);
       if (summary !== null) {
         lastCompactions.set(threadId, summary);
@@ -310,22 +335,53 @@ const make = Effect.gen(function* () {
       return next;
     });
 
+  // In-memory-only transition used when the durable write itself is the
+  // failure: the control state must still reflect the outcome even though no
+  // row could be persisted.
+  const applyEventInMemory = (threadId: ThreadId, event: CompactionLifecycleInput) =>
+    Effect.gen(function* () {
+      const next = compactionReducer(getState(threadId), event);
+      states.set(threadId, next);
+      yield* publishStatus(threadId, next);
+      return next;
+    });
+
+  const applyEventBestEffort = (threadId: ThreadId, event: CompactionLifecycleInput) =>
+    applyEvent(threadId, event).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("compaction operation persistence failed", {
+          threadId,
+          detail: error.detail,
+        }).pipe(Effect.as(getState(threadId))),
+      ),
+    );
+
   const settle = (
     requestId: string,
+    fingerprint: string,
     exit:
       | { readonly _tag: "success"; readonly result: ProviderCompactionResult }
       | { readonly _tag: "failure"; readonly error: ProviderServiceError },
   ) =>
     Effect.gen(function* () {
-      const deferred = inFlight.get(requestId);
+      const entry = inFlight.get(requestId);
       inFlight.delete(requestId);
       if (exit._tag === "success") {
-        settledResults.set(requestId, exit.result);
-        if (deferred !== undefined) {
-          yield* Deferred.succeed(deferred, exit.result);
+        settledResults.set(requestId, { fingerprint, result: exit.result });
+        // Bound the settled-result memory: evict the oldest entries once the
+        // capacity is exceeded so the map cannot grow for the server lifetime.
+        while (settledResults.size > SETTLED_RESULTS_CAPACITY) {
+          const oldest = settledResults.keys().next().value;
+          if (oldest === undefined) {
+            break;
+          }
+          settledResults.delete(oldest);
         }
-      } else if (deferred !== undefined) {
-        yield* Deferred.fail(deferred, exit.error);
+        if (entry !== undefined) {
+          yield* Deferred.succeed(entry.deferred, exit.result);
+        }
+      } else if (entry !== undefined) {
+        yield* Deferred.fail(entry.deferred, exit.error);
       }
     });
 
@@ -333,12 +389,15 @@ const make = Effect.gen(function* () {
     input: ProviderCompactionRequest,
   ): Effect.Effect<ProviderCompactionResult, ProviderServiceError> =>
     Effect.gen(function* () {
+      const fingerprint = fingerprintCompactionRequest(input);
       const beforeUsage = latestUsage.get(input.threadId);
       const startedAt = new Date().toISOString();
       const startedAtMs = Date.now();
       // Persist the running state before the provider call so a crash between
-      // the two is visible to startup reconciliation.
-      yield* applyEvent(input.threadId, {
+      // the two is visible to startup reconciliation. A failed durable write
+      // must abort the operation: the provider effect is irreversible, so it
+      // may only execute after the running row is durable.
+      const startPersist = yield* applyEvent(input.threadId, {
         type: "thread.compaction-started",
         payload: {
           requestId: input.requestId,
@@ -347,14 +406,38 @@ const make = Effect.gen(function* () {
           ...(beforeUsage !== undefined ? { beforeUsage } : {}),
           createdAt: startedAt,
         },
-      });
+      }).pipe(
+        Effect.map(() => ({ _tag: "ok" as const })),
+        Effect.catch((error) => Effect.succeed({ _tag: "err" as const, error })),
+      );
+      if (startPersist._tag === "err") {
+        const persistError = new ProviderCompactionPersistenceError({
+          operation: "CompactionReactor.start",
+          detail: startPersist.error.message,
+          outcomeKnown: true,
+          cause: startPersist.error,
+        });
+        yield* applyEventInMemory(input.threadId, {
+          type: "thread.compaction-failed",
+          payload: {
+            requestId: input.requestId,
+            outcomeKnown: true,
+            retryable: true,
+            failureKind: "persistence-failure",
+            detail: persistError.detail,
+            createdAt: new Date().toISOString(),
+          },
+        });
+        yield* settle(input.requestId, fingerprint, { _tag: "failure", error: persistError });
+        return yield* Effect.fail(persistError);
+      }
       const outcome = yield* providerService.compactThread(input).pipe(
         Effect.map((result) => ({ _tag: "ok" as const, result })),
         Effect.catch((error) => Effect.succeed({ _tag: "err" as const, error })),
       );
       if (outcome._tag === "ok") {
         const afterUsage = latestUsage.get(input.threadId);
-        yield* applyEvent(input.threadId, {
+        const completePersist = yield* applyEvent(input.threadId, {
           type: "thread.compaction-completed",
           payload: {
             requestId: input.requestId,
@@ -367,13 +450,40 @@ const make = Effect.gen(function* () {
             durationMs: Math.max(0, Date.now() - startedAtMs),
             createdAt: new Date().toISOString(),
           },
-        });
-        yield* settle(input.requestId, { _tag: "success", result: outcome.result });
+        }).pipe(
+          Effect.map(() => ({ _tag: "ok" as const })),
+          Effect.catch((error) => Effect.succeed({ _tag: "err" as const, error })),
+        );
+        if (completePersist._tag === "err") {
+          // The provider compacted but the completed row could not be made
+          // durable; the operation must surface as uncertain, never as a
+          // clean completion.
+          const persistError = new ProviderCompactionPersistenceError({
+            operation: "CompactionReactor.complete",
+            detail: completePersist.error.message,
+            outcomeKnown: false,
+            cause: completePersist.error,
+          });
+          yield* applyEventInMemory(input.threadId, {
+            type: "thread.compaction-failed",
+            payload: {
+              requestId: input.requestId,
+              outcomeKnown: false,
+              retryable: false,
+              failureKind: "persistence-failure",
+              detail: persistError.detail,
+              createdAt: new Date().toISOString(),
+            },
+          });
+          yield* settle(input.requestId, fingerprint, { _tag: "failure", error: persistError });
+          return yield* Effect.fail(persistError);
+        }
+        yield* settle(input.requestId, fingerprint, { _tag: "success", result: outcome.result });
         return outcome.result;
       }
       const error = outcome.error;
       const outcomeKnown = outcomeKnownForError(error);
-      yield* applyEvent(input.threadId, {
+      const failPersist = yield* applyEvent(input.threadId, {
         type: "thread.compaction-failed",
         payload: {
           requestId: input.requestId,
@@ -383,8 +493,31 @@ const make = Effect.gen(function* () {
           detail: error.message,
           createdAt: new Date().toISOString(),
         },
-      });
-      yield* settle(input.requestId, { _tag: "failure", error });
+      }).pipe(
+        Effect.map(() => ({ _tag: "ok" as const })),
+        Effect.catch((persistError) => Effect.succeed({ _tag: "err" as const, persistError })),
+      );
+      if (failPersist._tag === "err") {
+        // The failed row could not be made durable; hold the thread in an
+        // explicit uncertain state so restart reconciliation and operators
+        // can see the unresolved operation.
+        yield* Effect.logWarning("compaction terminal persistence failed", {
+          threadId: input.threadId,
+          detail: failPersist.persistError.detail,
+        });
+        yield* applyEventInMemory(input.threadId, {
+          type: "thread.compaction-failed",
+          payload: {
+            requestId: input.requestId,
+            outcomeKnown: false,
+            retryable: false,
+            failureKind: "persistence-failure",
+            detail: failPersist.persistError.message,
+            createdAt: new Date().toISOString(),
+          },
+        });
+      }
+      yield* settle(input.requestId, fingerprint, { _tag: "failure", error });
       return yield* Effect.fail(error);
     });
 
@@ -412,14 +545,28 @@ const make = Effect.gen(function* () {
         );
       }
       if (input.expectedLifecycleGeneration !== undefined) {
+        // Fail closed: the request is explicitly guarding against a stale
+        // provider lifecycle, so an unreadable or absent authoritative
+        // generation is a refusal, not permission to compact.
         const runtime = yield* sessionRuntimeRepository
           .getByThreadId({ threadId: input.threadId })
-          .pipe(Effect.catch(() => Effect.succeed(Option.none())));
+          .pipe(
+            Effect.mapError(
+              (error) =>
+                new ProviderValidationError({
+                  operation: "CompactionReactor.request",
+                  issue: `Could not verify the lifecycle generation for thread '${input.threadId}': ${error.message}`,
+                  cause: error,
+                }),
+            ),
+          );
         const currentGeneration = Option.getOrUndefined(runtime)?.lifecycleGeneration;
-        if (
-          currentGeneration !== undefined &&
-          currentGeneration !== input.expectedLifecycleGeneration
-        ) {
+        if (currentGeneration === undefined) {
+          return yield* failValidation(
+            `No authoritative lifecycle generation is recorded for thread '${input.threadId}'.`,
+          );
+        }
+        if (currentGeneration !== input.expectedLifecycleGeneration) {
           return yield* failValidation(
             `Stale lifecycle generation for thread '${input.threadId}'.`,
           );
@@ -430,14 +577,26 @@ const make = Effect.gen(function* () {
 
   const request: CompactionReactorShape["request"] = (input) =>
     Effect.gen(function* () {
-      // Dedupe by requestId: a repeated request joins the existing operation.
+      // Dedupe by requestId: a repeated request joins the existing operation,
+      // but only when its payload fingerprint matches the original request.
+      const fingerprint = fingerprintCompactionRequest(input);
       const settled = settledResults.get(input.requestId);
       if (settled !== undefined) {
-        return settled;
+        if (settled.fingerprint !== fingerprint) {
+          return yield* failValidation(
+            `Request id '${input.requestId}' was already used for a different compaction request.`,
+          );
+        }
+        return settled.result;
       }
       const existing = inFlight.get(input.requestId);
       if (existing !== undefined) {
-        return yield* Deferred.await(existing);
+        if (existing.fingerprint !== fingerprint) {
+          return yield* failValidation(
+            `Request id '${input.requestId}' is already in flight for a different compaction request.`,
+          );
+        }
+        return yield* Deferred.await(existing.deferred);
       }
       const state = getState(input.threadId);
       if (state.status === "suspended") {
@@ -452,11 +611,13 @@ const make = Effect.gen(function* () {
       }
       const session = yield* validate(input);
       const deferred = yield* Deferred.make<ProviderCompactionResult, ProviderServiceError>();
-      inFlight.set(input.requestId, deferred);
+      inFlight.set(input.requestId, { fingerprint, deferred });
       if (session.activeTurnId !== null) {
         // Defer behind the active turn; the turn-completion runtime event
-        // promotes the pending request.
-        yield* applyEvent(input.threadId, {
+        // promotes the pending request. The pending row must be durable
+        // before the request may wait: an in-memory-only pending request
+        // would silently disappear on restart.
+        const pendingPersist = yield* applyEvent(input.threadId, {
           type: "thread.compaction-requested",
           payload: {
             requestId: input.requestId,
@@ -464,7 +625,31 @@ const make = Effect.gen(function* () {
             ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
             createdAt: new Date().toISOString(),
           },
-        });
+        }).pipe(
+          Effect.map(() => ({ _tag: "ok" as const })),
+          Effect.catch((error) => Effect.succeed({ _tag: "err" as const, error })),
+        );
+        if (pendingPersist._tag === "err") {
+          const persistError = new ProviderCompactionPersistenceError({
+            operation: "CompactionReactor.request",
+            detail: pendingPersist.error.message,
+            outcomeKnown: true,
+            cause: pendingPersist.error,
+          });
+          yield* applyEventInMemory(input.threadId, {
+            type: "thread.compaction-failed",
+            payload: {
+              requestId: input.requestId,
+              outcomeKnown: true,
+              retryable: true,
+              failureKind: "persistence-failure",
+              detail: persistError.detail,
+              createdAt: new Date().toISOString(),
+            },
+          });
+          yield* settle(input.requestId, fingerprint, { _tag: "failure", error: persistError });
+          return yield* Effect.fail(persistError);
+        }
         pendingWaiters.set(input.threadId, { request: input, deferred });
         return yield* Deferred.await(deferred);
       }
@@ -472,7 +657,7 @@ const make = Effect.gen(function* () {
     });
 
   const suspendAutoCompaction = (threadId: ThreadId, reason: string, detail?: string) =>
-    applyEvent(threadId, {
+    applyEventBestEffort(threadId, {
       type: "thread.compaction-suspended",
       payload: {
         reason,
@@ -588,7 +773,7 @@ const make = Effect.gen(function* () {
         return;
       }
       const beforeUsage = latestUsage.get(event.threadId);
-      yield* applyEvent(event.threadId, {
+      yield* applyEventBestEffort(event.threadId, {
         type: "thread.compaction-started",
         payload: {
           requestId,
@@ -607,7 +792,7 @@ const make = Effect.gen(function* () {
         return;
       }
       const afterUsage = latestUsage.get(event.threadId);
-      yield* applyEvent(event.threadId, {
+      yield* applyEventBestEffort(event.threadId, {
         type: "thread.compaction-completed",
         payload: {
           requestId: state.requestId,
@@ -697,7 +882,7 @@ const make = Effect.gen(function* () {
             },
       );
       const outcomeKnown = operation.status === "pending";
-      yield* applyEvent(threadId, {
+      yield* applyEventBestEffort(threadId, {
         type: "thread.compaction-failed",
         payload: {
           requestId: operation.requestId,
@@ -768,7 +953,10 @@ const make = Effect.gen(function* () {
   } satisfies CompactionReactorShape;
 });
 
-export const CompactionReactorLive = Layer.effect(CompactionReactor, make).pipe(
+/** Reactor layer without its repository dependencies, for tests that inject failing repositories. */
+export const CompactionReactorBase = Layer.effect(CompactionReactor, make);
+
+export const CompactionReactorLive = CompactionReactorBase.pipe(
   Layer.provide(ThreadCompactionOperationRepositoryLive),
   Layer.provide(ProviderSessionRuntimeRepositoryLive),
 );

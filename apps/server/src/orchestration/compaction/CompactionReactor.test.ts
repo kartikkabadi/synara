@@ -26,9 +26,13 @@ import {
 } from "../../provider/Services/ProviderDiscoveryService.ts";
 import { ProviderSessionRuntimeRepository } from "../../persistence/Services/ProviderSessionRuntime.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../../persistence/Layers/ProviderSessionRuntime.ts";
-import { ThreadCompactionOperationRepository } from "../../persistence/Services/ThreadCompactionOperations.ts";
+import {
+  ThreadCompactionOperationRepository,
+  type ThreadCompactionOperation,
+} from "../../persistence/Services/ThreadCompactionOperations.ts";
 import { ThreadCompactionOperationRepositoryLive } from "../../persistence/Layers/ThreadCompactionOperations.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import { PersistenceSqlError } from "../../persistence/Errors.ts";
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
@@ -38,7 +42,7 @@ import {
   type ProjectionSnapshotQueryShape,
 } from "../Services/ProjectionSnapshotQuery.ts";
 import { CompactionReactor } from "../Services/CompactionReactor.ts";
-import { CompactionReactorLive } from "./CompactionReactor.ts";
+import { CompactionReactorBase } from "./CompactionReactor.ts";
 
 const THREAD_ID = ThreadId.makeUnsafe("thread-1");
 
@@ -75,6 +79,8 @@ function makeHarness(options?: {
     input: ProviderCompactionRequest,
   ) => Effect.Effect<ProviderCompactionResult, ProviderServiceError>;
   readonly compaction?: typeof NATIVE_AUTO_COMPACTION | typeof MANUAL_ONLY_COMPACTION;
+  /** Injects a durable-write failure for rows matching the predicate. */
+  readonly failUpsert?: (operation: ThreadCompactionOperation) => boolean;
 }) {
   const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
   const compactThread = vi.fn(
@@ -150,13 +156,33 @@ function makeHarness(options?: {
       Effect.succeed(Option.some(threadState.current as unknown as OrchestrationThread)),
   } as unknown as ProjectionSnapshotQueryShape;
 
-  const layer = CompactionReactorLive.pipe(
+  const failUpsert = options?.failUpsert;
+  const operationsLayer =
+    failUpsert === undefined
+      ? ThreadCompactionOperationRepositoryLive
+      : Layer.effect(
+          ThreadCompactionOperationRepository,
+          Effect.map(Effect.service(ThreadCompactionOperationRepository), (real) => ({
+            ...real,
+            upsert: (operation: ThreadCompactionOperation) =>
+              failUpsert(operation)
+                ? Effect.fail(
+                    new PersistenceSqlError({
+                      operation: "threadCompactionOperations.upsert",
+                      detail: "injected write failure",
+                    }),
+                  )
+                : real.upsert(operation),
+          })),
+        ).pipe(Layer.provide(ThreadCompactionOperationRepositoryLive));
+
+  const layer = CompactionReactorBase.pipe(
+    Layer.provideMerge(operationsLayer),
+    Layer.provideMerge(ProviderSessionRuntimeRepositoryLive),
     Layer.provideMerge(Layer.succeed(ProviderService, providerService)),
     Layer.provideMerge(Layer.succeed(ProviderDiscoveryService, providerDiscoveryService)),
     Layer.provideMerge(Layer.succeed(OrchestrationEngineService, orchestrationEngine)),
     Layer.provideMerge(Layer.succeed(ProjectionSnapshotQuery, projectionSnapshotQuery)),
-    Layer.provideMerge(ThreadCompactionOperationRepositoryLive),
-    Layer.provideMerge(ProviderSessionRuntimeRepositoryLive),
     Layer.provideMerge(SqlitePersistenceMemory),
     Layer.provideMerge(NodeServices.layer),
   );
@@ -370,6 +396,131 @@ describe("CompactionReactor", () => {
     );
     expect(Exit.isFailure(exit)).toBe(true);
     expect(harness.compactThread).not.toHaveBeenCalled();
+  });
+
+  it("refuses a guarded request when no authoritative lifecycle generation exists", async () => {
+    const harness = makeHarness();
+    const { reactor } = await startReactor(harness);
+
+    const exit = await runtime!.runPromiseExit(
+      reactor.request({
+        requestId: "req-1",
+        threadId: THREAD_ID,
+        trigger: "manual",
+        expectedLifecycleGeneration: "gen-1",
+      }),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(harness.compactThread).not.toHaveBeenCalled();
+  });
+
+  it("rejects a reused request id whose payload differs from the settled operation", async () => {
+    const harness = makeHarness();
+    const { reactor } = await startReactor(harness);
+
+    const first = await runtime!.runPromise(
+      reactor.request({ requestId: "req-1", threadId: THREAD_ID, trigger: "manual" }),
+    );
+    expect(first).toEqual({ kind: "same-session" });
+
+    const exit = await runtime!.runPromiseExit(
+      reactor.request({
+        requestId: "req-1",
+        threadId: THREAD_ID,
+        trigger: "manual",
+        instructions: "different payload",
+      }),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(harness.compactThread).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts a deferred request when the pending row cannot be persisted", async () => {
+    const harness = makeHarness({
+      failUpsert: (operation) => operation.status === "pending",
+    });
+    const { reactor, operations } = await startReactor(harness);
+    harness.threadState.current = {
+      session: { ...harness.threadState.current.session!, activeTurnId: "turn-1" },
+    };
+
+    const exit = await runtime!.runPromiseExit(
+      reactor.request({ requestId: "req-1", threadId: THREAD_ID, trigger: "manual" }),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(String(exit)).toContain("ProviderCompactionPersistenceError");
+    expect(harness.compactThread).not.toHaveBeenCalled();
+    // The request never waits in memory only: no waiter survives, and the
+    // failed persistence leaves no durable row behind.
+    expect(Option.isNone(await runtime!.runPromise(operations.getByThreadId(THREAD_ID)))).toBe(
+      true,
+    );
+    const state = await runtime!.runPromise(reactor.getControlState(THREAD_ID));
+    expect(state).toEqual({ status: "idle" });
+  });
+
+  it("aborts before the provider call when the running row cannot be persisted", async () => {
+    const harness = makeHarness({
+      failUpsert: (operation) => operation.status === "running",
+    });
+    const { reactor, operations } = await startReactor(harness);
+
+    const exit = await runtime!.runPromiseExit(
+      reactor.request({ requestId: "req-1", threadId: THREAD_ID, trigger: "manual" }),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(String(exit)).toContain("ProviderCompactionPersistenceError");
+    // The durable-before-effect invariant: no provider compaction may run
+    // without a durable running row.
+    expect(harness.compactThread).not.toHaveBeenCalled();
+    expect(Option.isNone(await runtime!.runPromise(operations.getByThreadId(THREAD_ID)))).toBe(
+      true,
+    );
+    const state = await runtime!.runPromise(reactor.getControlState(THREAD_ID));
+    expect(state).toEqual({ status: "idle" });
+  });
+
+  it("reports uncertain instead of clean completion when the completed row cannot be persisted", async () => {
+    const harness = makeHarness({
+      failUpsert: (operation) => operation.status === "completed",
+    });
+    const { reactor, operations } = await startReactor(harness);
+
+    const exit = await runtime!.runPromiseExit(
+      reactor.request({ requestId: "req-1", threadId: THREAD_ID, trigger: "manual" }),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(String(exit)).toContain("ProviderCompactionPersistenceError");
+    expect(harness.compactThread).toHaveBeenCalledTimes(1);
+    const state = await runtime!.runPromise(reactor.getControlState(THREAD_ID));
+    expect(state).toMatchObject({ status: "uncertain", requestId: "req-1" });
+    // The durable row still shows the last durable transition (running), so
+    // startup reconciliation classifies the interrupted pass as uncertain.
+    const row = Option.getOrThrow(await runtime!.runPromise(operations.getByThreadId(THREAD_ID)));
+    expect(row.status).toBe("running");
+  });
+
+  it("holds an uncertain state when the failed row cannot be persisted", async () => {
+    const harness = makeHarness({
+      compactThread: () =>
+        Effect.fail(
+          new ProviderAdapterProcessError({
+            provider: "codex",
+            threadId: THREAD_ID,
+            detail: "process exited mid-compaction",
+          }),
+        ),
+      failUpsert: (operation) => operation.status === "failed" || operation.status === "uncertain",
+    });
+    const { reactor } = await startReactor(harness);
+
+    const exit = await runtime!.runPromiseExit(
+      reactor.request({ requestId: "req-1", threadId: THREAD_ID, trigger: "manual" }),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(String(exit)).toContain("ProviderAdapterProcessError");
+    const state = await runtime!.runPromise(reactor.getControlState(THREAD_ID));
+    expect(state).toMatchObject({ status: "uncertain", requestId: "req-1" });
   });
 
   it("does not retry an uncertain operation automatically", async () => {
