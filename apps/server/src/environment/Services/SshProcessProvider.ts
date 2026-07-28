@@ -2,7 +2,8 @@
 // Purpose: Service contract for spawning provider app-server processes on a
 //          remote host through the system ssh client. The returned child looks
 //          exactly like a local provider child: its stdout starts *after* the
-//          remote PID line printed by the remote command (`echo $$ && ...`).
+//          sentinel remote PID line (`__SYNARA_REMOTE_PID__=<pid>`) printed by
+//          the remote command.
 
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 
@@ -52,7 +53,7 @@ export type SshProcessExit =
 export interface SshSpawnedProcess {
   /** The ssh child; `stdout` begins after the remote PID line is consumed. */
   readonly child: ChildProcessWithoutNullStreams;
-  /** Remote shell PID from the first stdout line; null when unparseable. */
+  /** Remote shell PID from the sentinel first stdout line; null on failure. */
   readonly remotePid: Promise<number | null>;
   /** Resolves once the ssh child exits, with the exit classified. */
   readonly exit: Promise<SshProcessExit>;
