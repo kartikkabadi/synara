@@ -85,6 +85,11 @@ import {
   useRetainedThreadDetailIds,
 } from "../threadDetailSubscriptionRetention";
 import { canApplyThreadSnapshot, selectOrphanedThreadDetailIds } from "./-threadDetailOwnership";
+import {
+  classifySequenceProgress,
+  drainContiguousSequenceEvents,
+  shouldStartGapBackfill,
+} from "./-eventSequenceGap";
 import { getThreadFromState, getThreadsFromState } from "../threadDerivation";
 import { useAppDensity } from "../hooks/useAppDensity";
 import { useAppTypography } from "../hooks/useAppTypography";
@@ -1008,6 +1013,7 @@ function EventRouter() {
     const pendingThreadEventsById = new Map<ThreadId, OrchestrationEvent[]>();
     const threadSnapshotRequestInFlight = new Set<ThreadId>();
     const threadReplayRequestInFlight = new Set<ThreadId>();
+    const threadGapBackfillAttemptedTargetById = new Map<ThreadId, number>();
     const threadProjectionReconcileInFlight = new Map<ThreadId, number>();
     const threadProjectionTerminalFencePending = new Set<ThreadId>();
     const threadSubscriptionGenerationById = new Map<ThreadId, number>();
@@ -1019,6 +1025,7 @@ function EventRouter() {
       threadSnapshotSequenceById.delete(threadId);
       pendingThreadEventsById.set(threadId, []);
       threadSnapshotRequestInFlight.delete(threadId);
+      threadGapBackfillAttemptedTargetById.delete(threadId);
       threadProjectionReconcileInFlight.delete(threadId);
       threadProjectionTerminalFencePending.delete(threadId);
       nextThreadSubscriptionGeneration += 1;
@@ -1066,6 +1073,7 @@ function EventRouter() {
         pendingThreadEventsById.delete(threadId);
         threadSnapshotRequestInFlight.delete(threadId);
         threadReplayRequestInFlight.delete(threadId);
+        threadGapBackfillAttemptedTargetById.delete(threadId);
         threadProjectionReconcileInFlight.delete(threadId);
         threadProjectionTerminalFencePending.delete(threadId);
         threadSubscriptionGenerationById.delete(threadId);
@@ -1153,7 +1161,9 @@ function EventRouter() {
     };
 
     const loadShellSnapshotOnce = async () => {
+      if (disposed) return;
       const snapshot = await api.orchestration.getShellSnapshot();
+      if (disposed) return;
       if (!shouldApplyBootstrapShellSnapshot(snapshot)) {
         return;
       }
@@ -1173,6 +1183,7 @@ function EventRouter() {
         pendingThreadEventsById.clear();
         threadSnapshotRequestInFlight.clear();
         threadReplayRequestInFlight.clear();
+        threadGapBackfillAttemptedTargetById.clear();
         threadProjectionReconcileInFlight.clear();
         threadProjectionTerminalFencePending.clear();
         threadSubscriptionGenerationById.clear();
@@ -1346,7 +1357,61 @@ function EventRouter() {
         })
         .finally(() => {
           threadReplayRequestInFlight.delete(threadId);
+          drainBufferedThreadEvents(threadId);
         });
+    };
+
+    const applyLiveThreadEvent = (threadId: ThreadId, event: OrchestrationEvent) => {
+      threadSnapshotSequenceById.set(threadId, event.sequence);
+      nextThreadProjectionReconcileAtById.set(
+        threadId,
+        Date.now() + THREAD_DETAIL_PROJECTION_RECONCILE_INTERVAL_MS,
+      );
+      queueDomainEvent(event);
+    };
+
+    // Each target is attempted at most once so a replay that cannot surface
+    // the missing event (it never reached the server log) does not loop; the
+    // buffered event is then recovered by the periodic projection reconcile.
+    // While a replay is in flight the request is deferred without recording
+    // the target: the replay's completion drain re-requests any remaining gap,
+    // and recording early would suppress that retry (a larger gap discovered
+    // mid-replay would otherwise never be replayed).
+    const requestThreadGapBackfill = (threadId: ThreadId, targetSequence: number) => {
+      const shouldStart = shouldStartGapBackfill({
+        attemptedTargetSequence: threadGapBackfillAttemptedTargetById.get(threadId),
+        targetSequence,
+        replayInFlight: threadReplayRequestInFlight.has(threadId),
+      });
+      if (!shouldStart) {
+        return;
+      }
+      threadGapBackfillAttemptedTargetById.set(threadId, targetSequence);
+      void replayThreadEvents(threadId, targetSequence).catch(() => undefined);
+    };
+
+    const drainBufferedThreadEvents = (threadId: ThreadId) => {
+      const buffered = pendingThreadEventsById.get(threadId);
+      const latestThreadSequence = threadSnapshotSequenceById.get(threadId);
+      if (buffered === undefined || buffered.length === 0 || latestThreadSequence === undefined) {
+        return;
+      }
+      const { applicable, remaining } = drainContiguousSequenceEvents(
+        latestThreadSequence,
+        buffered,
+      );
+      if (remaining.length === 0) {
+        pendingThreadEventsById.delete(threadId);
+      } else {
+        pendingThreadEventsById.set(threadId, [...remaining]);
+      }
+      for (const event of applicable) {
+        applyLiveThreadEvent(threadId, event);
+      }
+      const lastRemaining = remaining.at(-1);
+      if (lastRemaining !== undefined) {
+        requestThreadGapBackfill(threadId, lastRemaining.sequence - 1);
+      }
     };
 
     const reconcileThreadProjection = async (threadId: ThreadId): Promise<void> => {
@@ -1443,23 +1508,7 @@ function EventRouter() {
     reconcileThreadSubscriptionsRef.current = (threadIds) =>
       enqueueThreadSubscriptionReconcile(threadIds);
 
-    const unsubShellEvent = api.orchestration.onShellEvent((item) => {
-      if (item.kind === "snapshot") {
-        shellSnapshotSequence = item.snapshot.snapshotSequence;
-        syncServerShellSnapshot(item.snapshot);
-        reconcilePromotedDraftsFromShellThreads(item.snapshot.threads);
-        removeOrphanedTerminalsForCurrentState();
-        flushShellBuffer(item.snapshot.snapshotSequence);
-        return;
-      }
-
-      if (shellSnapshotSequence < 0) {
-        appendBounded(pendingShellEvents, item, PENDING_SHELL_EVENT_BUFFER_LIMIT);
-        return;
-      }
-      if (item.sequence <= shellSnapshotSequence) {
-        return;
-      }
+    const applyContiguousShellEvent = (item: OrchestrationShellStreamEvent) => {
       shellSnapshotSequence = item.sequence;
       applyShellEvent(item);
       if (item.kind === "thread-upserted") {
@@ -1487,6 +1536,92 @@ function EventRouter() {
       if (item.kind === "thread-upserted" && subscribedThreadIds.has(item.thread.id)) {
         void replayThreadEvents(item.thread.id, item.sequence).catch(() => undefined);
       }
+    };
+
+    const drainPendingShellEvents = () => {
+      if (pendingShellEvents.length === 0 || shellSnapshotSequence < 0) {
+        return;
+      }
+      const { applicable, remaining } = drainContiguousSequenceEvents(
+        shellSnapshotSequence,
+        pendingShellEvents,
+      );
+      pendingShellEvents = [...remaining];
+      for (const event of applicable) {
+        applyContiguousShellEvent(event);
+      }
+    };
+
+    // Shell events share the global event sequence with the thread detail
+    // streams, so skipped numbers can be detail traffic on other streams
+    // rather than lost shell events. Once the authoritative snapshot has been
+    // consulted, apply the held upserts in order instead of waiting for a
+    // contiguity that may never come.
+    const flushBufferedShellEventsMonotonic = () => {
+      const nextPending = pendingShellEvents
+        .filter((event) => event.sequence > shellSnapshotSequence)
+        .toSorted((left, right) => left.sequence - right.sequence);
+      pendingShellEvents = [];
+      for (const event of nextPending) {
+        applyContiguousShellEvent(event);
+      }
+    };
+
+    // There is no targeted replay RPC for the shell stream, so a sequence gap
+    // resyncs from the authoritative shell snapshot instead.
+    let shellGapResyncInFlight = false;
+    const resyncShellSnapshotForSequenceGap = () => {
+      if (disposed || shellGapResyncInFlight) {
+        return;
+      }
+      shellGapResyncInFlight = true;
+      void api.orchestration
+        .getShellSnapshot()
+        .then((snapshot) => {
+          if (disposed) {
+            return;
+          }
+          if (snapshot.snapshotSequence > shellSnapshotSequence) {
+            shellSnapshotSequence = snapshot.snapshotSequence;
+            syncServerShellSnapshot(snapshot);
+            reconcilePromotedDraftsFromShellThreads(snapshot.threads);
+            removeOrphanedTerminalsForCurrentState();
+          }
+          flushBufferedShellEventsMonotonic();
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          shellGapResyncInFlight = false;
+        });
+    };
+
+    const unsubShellEvent = api.orchestration.onShellEvent((item) => {
+      if (item.kind === "snapshot") {
+        shellSnapshotSequence = item.snapshot.snapshotSequence;
+        syncServerShellSnapshot(item.snapshot);
+        reconcilePromotedDraftsFromShellThreads(item.snapshot.threads);
+        removeOrphanedTerminalsForCurrentState();
+        flushShellBuffer(item.snapshot.snapshotSequence);
+        return;
+      }
+
+      if (shellSnapshotSequence < 0) {
+        appendBounded(pendingShellEvents, item, PENDING_SHELL_EVENT_BUFFER_LIMIT);
+        return;
+      }
+      const progress = classifySequenceProgress(shellSnapshotSequence, item.sequence);
+      if (progress.kind === "duplicate") {
+        return;
+      }
+      if (progress.kind === "gap") {
+        // A shell sequence was skipped: hold this event and resync so the
+        // sidebar does not desync until a manual refresh (CORRECTNESS-03).
+        appendBounded(pendingShellEvents, item, PENDING_SHELL_EVENT_BUFFER_LIMIT);
+        resyncShellSnapshotForSequenceGap();
+        return;
+      }
+      applyContiguousShellEvent(item);
+      drainPendingShellEvents();
     });
     const unsubThreadEvent = api.orchestration.onThreadEvent((item) => {
       if (item.kind === "snapshot") {
@@ -1532,15 +1667,21 @@ function EventRouter() {
         }
         return;
       }
-      if (item.event.sequence <= latestThreadSequence) {
+      const progress = classifySequenceProgress(latestThreadSequence, item.event.sequence);
+      if (progress.kind === "duplicate") {
         return;
       }
-      threadSnapshotSequenceById.set(threadId, item.event.sequence);
-      nextThreadProjectionReconcileAtById.set(
-        threadId,
-        Date.now() + THREAD_DETAIL_PROJECTION_RECONCILE_INTERVAL_MS,
-      );
-      queueDomainEvent(item.event);
+      if (progress.kind === "gap") {
+        // A sequence was skipped: hold this event and backfill the missing
+        // range first, otherwise the transcript desyncs until a manual refresh.
+        const pendingThreadEvents = pendingThreadEventsById.get(threadId) ?? [];
+        appendBounded(pendingThreadEvents, item.event, PENDING_THREAD_EVENT_BUFFER_LIMIT);
+        pendingThreadEventsById.set(threadId, pendingThreadEvents);
+        requestThreadGapBackfill(threadId, progress.backfillTargetSequence);
+        return;
+      }
+      applyLiveThreadEvent(threadId, item.event);
+      drainBufferedThreadEvents(threadId);
     });
     const unsubThreadStreamFailure = onThreadStreamFailure((failure) => {
       const threadId = ThreadId.makeUnsafe(failure.threadId);
@@ -1852,6 +1993,7 @@ function DesktopProjectBootstrap() {
   const attemptedRecoveryRef = useRef(false);
 
   useEffect(() => {
+    let disposed = false;
     const api = readNativeApi();
     if (!api || attemptedRecoveryRef.current || !threadsHydrated) {
       return;
@@ -1870,6 +2012,7 @@ function DesktopProjectBootstrap() {
     void api.orchestration
       .getShellSnapshot()
       .then((snapshot) => {
+        if (disposed) return;
         const needsRepair =
           (snapshot.projects.length === 0 && snapshot.threads.length === 0) ||
           hasLiveThreadsWithMissingProjects(snapshot);
@@ -1878,6 +2021,7 @@ function DesktopProjectBootstrap() {
           return snapshot;
         }
         return api.orchestration.repairState().then((repairedSnapshot) => {
+          if (disposed) return;
           syncServerReadModel(repairedSnapshot);
           return repairedSnapshot;
         });
@@ -1885,6 +2029,10 @@ function DesktopProjectBootstrap() {
       .catch(() => {
         attemptedRecoveryRef.current = false;
       });
+
+    return () => {
+      disposed = true;
+    };
   }, [projects, syncServerReadModel, threads, threadsHydrated]);
 
   // Desktop hydration normally runs through EventRouter project + orchestration sync.
