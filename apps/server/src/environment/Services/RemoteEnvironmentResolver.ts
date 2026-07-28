@@ -26,7 +26,24 @@ export interface SshSpawnPlan {
   readonly remoteCommand: string;
 }
 
-export type SpawnPlan = LocalSpawnPlan | SshSpawnPlan;
+/**
+ * The provider process runs on a remote host behind the persistent
+ * synara-remote-agent (Architecture B; capabilities.reconnect "remote-agent").
+ */
+export interface RemoteAgentSpawnPlan {
+  readonly kind: "remote-agent";
+  /** Full ssh argument vector connecting to the agent (without leading ssh). */
+  readonly sshArgs: readonly string[];
+  /** The remote command string, last element of `sshArgs` (for logging/tests). */
+  readonly remoteCommand: string;
+  /** Stable per-session thread id passed to agent/spawn and agent/attach. */
+  readonly threadId: string;
+  readonly executionProfile: ExecutionProfile;
+  /** The provider argv the agent spawns on the remote host. */
+  readonly providerArgv: readonly string[];
+}
+
+export type SpawnPlan = LocalSpawnPlan | SshSpawnPlan | RemoteAgentSpawnPlan;
 
 /**
  * RemoteEnvironmentNotFoundError - No environment descriptor exists for the
