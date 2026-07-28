@@ -1219,11 +1219,102 @@ const make = Effect.gen(function* () {
       yield* shadowSaga.recordStep("rescue-checkpoint", rescueCheckpointRef);
     }
 
-    const restored = yield* checkpointStore.restoreCheckpoint({
-      cwd: sessionRuntime.value.cwd,
-      checkpointRef: targetCheckpointRef,
-    });
-    if (!restored) {
+    // A post-mutation failure must never be silent: record the uncertain
+    // step durably, surface the domain saga uncertainty (in "on" mode), and
+    // return without settling the job so the expiring lease transitions it
+    // to Uncertain for explicit operator resolution.
+    const enterUncertain = (stepId: string, detail: string) =>
+      Effect.gen(function* () {
+        if (!shadowSaga) {
+          return;
+        }
+        yield* shadowSaga.recordUncertain(stepId, detail);
+        if (kernelAuthoritative) {
+          yield* orchestrationEngine
+            .dispatch({
+              type: "thread.revert.uncertain",
+              commandId: serverCommandId("checkpoint-revert-saga-uncertain"),
+              threadId: event.payload.threadId,
+              turnCount: event.payload.turnCount,
+              sagaId: shadowSaga.sagaId,
+              stepId,
+              detail,
+              createdAt: now,
+            })
+            .pipe(Effect.catch(() => Effect.void));
+        }
+        yield* appendRevertFailureActivity({
+          threadId: event.payload.threadId,
+          turnCount: event.payload.turnCount,
+          detail,
+          createdAt: now,
+        }).pipe(Effect.catch(() => Effect.void));
+      });
+
+    // Compensation for "on"-mode failures after the workspace may have been
+    // mutated but before the revert is durable: restore the rescue
+    // checkpoint so the workspace returns to its pre-revert state and abort
+    // the saga. When compensation itself fails, the saga enters uncertainty
+    // (rescue ref retained) instead of guessing.
+    const compensateWithRescue = (stepId: string, detail: string) =>
+      Effect.gen(function* () {
+        if (!kernelAuthoritative || !shadowSaga || !rescueCheckpointRef) {
+          yield* enterUncertain(stepId, detail);
+          return;
+        }
+        const compensated = yield* checkpointStore
+          .restoreRescueCheckpoint({
+            cwd: sessionRuntime.value.cwd,
+            checkpointRef: rescueCheckpointRef,
+          })
+          .pipe(Effect.catch(() => Effect.succeed(false)));
+        if (!compensated) {
+          yield* enterUncertain(stepId, detail);
+          return;
+        }
+        clearWorkspaceIndexCache(sessionRuntime.value.cwd);
+        yield* shadowSaga.recordStep("rescue-restore", stepId);
+        yield* shadowSaga.abort(detail);
+        yield* checkpointStore
+          .deleteRescueRef({
+            cwd: sessionRuntime.value.cwd,
+            checkpointRef: rescueCheckpointRef,
+          })
+          .pipe(Effect.catch(() => Effect.void));
+        yield* appendRevertFailureActivity({
+          threadId: event.payload.threadId,
+          turnCount: event.payload.turnCount,
+          detail,
+          createdAt: now,
+        }).pipe(Effect.catch(() => Effect.void));
+      });
+
+    // The restore can throw after partially mutating the workspace, so in
+    // "on" mode a thrown restore compensates from the rescue checkpoint (or
+    // enters uncertainty) instead of exiting with an unexplained claim.
+    const restoreOutcome = yield* checkpointStore
+      .restoreCheckpoint({
+        cwd: sessionRuntime.value.cwd,
+        checkpointRef: targetCheckpointRef,
+      })
+      .pipe(
+        Effect.map((restored) => (restored ? ("restored" as const) : ("missing" as const))),
+        Effect.catch((error) =>
+          kernelAuthoritative
+            ? Effect.as(
+                compensateWithRescue(
+                  "filesystem-restore",
+                  `Filesystem restore failed after possible partial mutation: ${error.message}`,
+                ),
+                "failed" as const,
+              )
+            : Effect.fail(error),
+        ),
+      );
+    if (restoreOutcome === "failed") {
+      return;
+    }
+    if (restoreOutcome === "missing") {
       if (shadowSaga) {
         yield* shadowSaga.abort(
           `Filesystem checkpoint is unavailable for turn ${event.payload.turnCount}; nothing was mutated.`,
@@ -1251,8 +1342,11 @@ const make = Effect.gen(function* () {
     if (kernelAuthoritative && shadowSaga) {
       // From here the workspace is mutated: surface the active saga in the
       // domain so the decider blocks turn-starting commands until the saga
-      // reaches a terminal state.
-      yield* orchestrationEngine
+      // reaches a terminal state. This event is the domain lock; when it
+      // cannot be established the saga must not proceed into provider
+      // rollback — compensate from the rescue checkpoint or enter
+      // uncertainty.
+      const started = yield* orchestrationEngine
         .dispatch({
           type: "thread.revert.started",
           commandId: serverCommandId("checkpoint-revert-saga-started"),
@@ -1262,14 +1356,20 @@ const make = Effect.gen(function* () {
           createdAt: now,
         })
         .pipe(
+          Effect.as(true),
           Effect.catch((error) =>
-            Effect.logWarning("revert saga could not record domain saga start", {
-              threadId: event.payload.threadId,
-              sagaId: shadowSaga.sagaId,
-              detail: error.message,
-            }),
+            Effect.as(
+              compensateWithRescue(
+                "revert-started-dispatch",
+                `Revert saga could not record its domain start: ${error.message}`,
+              ),
+              false,
+            ),
           ),
         );
+      if (!started) {
+        return;
+      }
     }
 
     // Invalidate the workspace entry cache so the @-mention file picker
@@ -1293,30 +1393,16 @@ const make = Effect.gen(function* () {
           Effect.as("applied" as const),
           Effect.catch((error) =>
             Effect.gen(function* () {
-              if (shadowSaga) {
-                yield* shadowSaga.recordUncertain("provider-rollback", error.message);
-              }
               if (!kernelAuthoritative || !shadowSaga) {
+                if (shadowSaga) {
+                  yield* shadowSaga.recordUncertain("provider-rollback", error.message);
+                }
                 return yield* Effect.fail(error);
               }
-              yield* orchestrationEngine
-                .dispatch({
-                  type: "thread.revert.uncertain",
-                  commandId: serverCommandId("checkpoint-revert-saga-uncertain"),
-                  threadId: event.payload.threadId,
-                  turnCount: event.payload.turnCount,
-                  sagaId: shadowSaga.sagaId,
-                  stepId: "provider-rollback",
-                  detail: error.message,
-                  createdAt: now,
-                })
-                .pipe(Effect.catch(() => Effect.void));
-              yield* appendRevertFailureActivity({
-                threadId: event.payload.threadId,
-                turnCount: event.payload.turnCount,
-                detail: `Provider rollback outcome is uncertain: ${error.message}`,
-                createdAt: now,
-              }).pipe(Effect.catch(() => Effect.void));
+              yield* enterUncertain(
+                "provider-rollback",
+                `Provider rollback outcome is uncertain: ${error.message}`,
+              );
               return "uncertain" as const;
             }),
           ),
@@ -1334,26 +1420,66 @@ const make = Effect.gen(function* () {
       .map((checkpoint) => checkpoint.checkpointRef);
 
     if (staleCheckpointRefs.length > 0) {
-      yield* checkpointStore.deleteCheckpointRefs({
-        cwd: sessionRuntime.value.cwd,
-        checkpointRefs: staleCheckpointRefs,
-      });
+      // The GC step is only recorded after confirmed deletion; a failed
+      // deletion in "on" mode leaves the job to become Uncertain (deletion
+      // is idempotent, so an operator retry re-runs it safely).
+      const staleRefsDeleted = yield* checkpointStore
+        .deleteCheckpointRefs({
+          cwd: sessionRuntime.value.cwd,
+          checkpointRefs: staleCheckpointRefs,
+        })
+        .pipe(
+          Effect.as(true),
+          Effect.catch((error) =>
+            kernelAuthoritative
+              ? Effect.as(
+                  enterUncertain(
+                    "checkpoint-ref-gc",
+                    `Stale checkpoint ref deletion failed: ${error.message}`,
+                  ),
+                  false,
+                )
+              : Effect.fail(error),
+          ),
+        );
+      if (!staleRefsDeleted) {
+        return;
+      }
       if (shadowSaga) {
         yield* shadowSaga.recordStep("checkpoint-ref-gc", `refs:${staleCheckpointRefs.length}`);
       }
     }
 
     if (kernelAuthoritative && shadowSaga && rescueCheckpointRef) {
-      yield* checkpointStore
+      // Only record the GC step after confirmed deletion; a swallowed
+      // failure here would both leak the rescue ref and forge the trail.
+      const rescueDeleted = yield* checkpointStore
         .deleteRescueRef({
           cwd: sessionRuntime.value.cwd,
           checkpointRef: rescueCheckpointRef,
         })
-        .pipe(Effect.catch(() => Effect.void));
+        .pipe(
+          Effect.as(true),
+          Effect.catch((error) =>
+            Effect.as(
+              enterUncertain(
+                "rescue-checkpoint-gc",
+                `Rescue checkpoint ref deletion failed: ${error.message}`,
+              ),
+              false,
+            ),
+          ),
+        );
+      if (!rescueDeleted) {
+        return;
+      }
       yield* shadowSaga.recordStep("rescue-checkpoint-gc");
     }
 
-    yield* orchestrationEngine
+    // The terminal domain event is itself a post-mutation boundary: when it
+    // fails the saga must not claim completion, so the job is left to
+    // surface as Uncertain rather than acknowledged.
+    const completed = yield* orchestrationEngine
       .dispatch({
         type: "thread.revert.complete",
         commandId: serverCommandId("checkpoint-revert-complete"),
@@ -1362,18 +1488,28 @@ const make = Effect.gen(function* () {
         createdAt: now,
       })
       .pipe(
+        Effect.as(true),
         Effect.catch((error) =>
-          appendRevertFailureActivity({
-            threadId: event.payload.threadId,
-            turnCount: event.payload.turnCount,
-            detail: error.message,
-            createdAt: now,
+          Effect.gen(function* () {
+            if (shadowSaga) {
+              yield* enterUncertain(
+                "revert-complete-dispatch",
+                `Terminal revert dispatch failed: ${error.message}`,
+              );
+            } else {
+              yield* appendRevertFailureActivity({
+                threadId: event.payload.threadId,
+                turnCount: event.payload.turnCount,
+                detail: error.message,
+                createdAt: now,
+              }).pipe(Effect.catch(() => Effect.void));
+            }
+            return false;
           }),
         ),
-        Effect.asVoid,
       );
 
-    if (shadowSaga) {
+    if (completed && shadowSaga) {
       yield* shadowSaga.complete();
     }
   });
