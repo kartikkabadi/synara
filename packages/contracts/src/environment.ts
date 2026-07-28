@@ -63,6 +63,12 @@ export const ExecutionEnvironmentRuntime = Schema.Struct({
   ),
   bootstrapImage: Schema.optional(TrimmedNonEmptyString),
   installPath: Schema.optional(TrimmedNonEmptyString),
+  // ssh-process runtimes: provider binary on the remote host; default is a
+  // remote PATH lookup. Per-thread workspace scope lives in ExecutionProfile.
+  remoteBinaryPath: Schema.optional(TrimmedNonEmptyString),
+  // Env-var names (never values) forwarded to the remote provider process.
+  forwardedEnvNames: Schema.Array(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => [])),
+  adapterProtocolVersion: Schema.optional(TrimmedNonEmptyString),
 });
 export type ExecutionEnvironmentRuntime = typeof ExecutionEnvironmentRuntime.Type;
 
