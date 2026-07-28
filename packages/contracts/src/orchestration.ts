@@ -600,6 +600,9 @@ export const OrchestrationThreadRevertSaga = Schema.Struct({
   status: ThreadRevertSagaStatus,
   turnCount: NonNegativeInt,
   sagaId: TrimmedNonEmptyString,
+  uncertainStepId: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
 });
 export type OrchestrationThreadRevertSaga = typeof OrchestrationThreadRevertSaga.Type;
 
@@ -1559,6 +1562,7 @@ const ThreadRevertCompleteCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   turnCount: NonNegativeInt,
+  sagaId: Schema.optional(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
 });
 
@@ -1983,6 +1987,7 @@ export const ThreadRevertUncertainPayload = Schema.Struct({
 export const ThreadRevertedPayload = Schema.Struct({
   threadId: ThreadId,
   turnCount: NonNegativeInt,
+  sagaId: Schema.optional(TrimmedNonEmptyString),
 });
 
 export const ThreadConversationRollbackRequestedPayload = Schema.Struct({

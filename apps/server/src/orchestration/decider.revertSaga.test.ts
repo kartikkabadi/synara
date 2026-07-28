@@ -59,8 +59,9 @@ function makeReadModel(input?: {
 
 function activeSaga(
   status: OrchestrationThreadRevertSaga["status"],
+  overrides?: Partial<OrchestrationThreadRevertSaga>,
 ): OrchestrationThreadRevertSaga {
-  return { status, turnCount: 1, sagaId: SAGA_ID };
+  return { status, turnCount: 1, sagaId: SAGA_ID, uncertainStepId: null, ...overrides };
 }
 
 function revertStartedCommand() {
@@ -139,6 +140,138 @@ describe("revert saga decider", () => {
       _tag: "OrchestrationCommandInvariantError",
       commandType: "thread.revert.started",
       detail: `Thread '${THREAD_ID}' already has an active revert saga.`,
+    });
+  });
+
+  it("rejects thread.revert.uncertain when no revert saga is active", async () => {
+    const error = await Effect.runPromise(
+      Effect.flip(
+        decideOrchestrationCommand({
+          command: revertUncertainCommand(),
+          readModel: makeReadModel(),
+        }),
+      ),
+    );
+
+    expect(error).toMatchObject({
+      _tag: "OrchestrationCommandInvariantError",
+      commandType: "thread.revert.uncertain",
+      detail: `Thread '${THREAD_ID}' has no active revert saga.`,
+    });
+  });
+
+  it("rejects thread.revert.uncertain from an older saga while a newer saga is active", async () => {
+    const error = await Effect.runPromise(
+      Effect.flip(
+        decideOrchestrationCommand({
+          command: revertUncertainCommand(),
+          readModel: makeReadModel({
+            revertSaga: activeSaga("reverting", { sagaId: "saga-2" }),
+          }),
+        }),
+      ),
+    );
+
+    expect(error).toMatchObject({
+      _tag: "OrchestrationCommandInvariantError",
+      commandType: "thread.revert.uncertain",
+      detail: `Saga '${SAGA_ID}' does not match the active revert saga on thread '${THREAD_ID}'.`,
+    });
+  });
+
+  it("rejects thread.revert.uncertain whose turn count does not match the active saga", async () => {
+    const error = await Effect.runPromise(
+      Effect.flip(
+        decideOrchestrationCommand({
+          command: revertUncertainCommand(),
+          readModel: makeReadModel({
+            revertSaga: activeSaga("reverting", { turnCount: 2 }),
+          }),
+        }),
+      ),
+    );
+
+    expect(error).toMatchObject({
+      _tag: "OrchestrationCommandInvariantError",
+      commandType: "thread.revert.uncertain",
+      detail: `Turn count 1 does not match the active revert saga on thread '${THREAD_ID}'.`,
+    });
+  });
+
+  it("treats duplicate thread.revert.uncertain for the same step as a no-op", async () => {
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: revertUncertainCommand(),
+        readModel: makeReadModel({
+          revertSaga: activeSaga("uncertain", { uncertainStepId: "step-fs-restore" }),
+        }),
+      }),
+    );
+
+    expect(result).toEqual([]);
+  });
+
+  it("rejects stale thread.revert.uncertain after the saga completed", async () => {
+    const sagaReadModel = makeReadModel({ revertSaga: activeSaga("reverting") });
+    const decided = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.revert.complete",
+          commandId: CommandId.makeUnsafe("cmd-complete-before-uncertain"),
+          threadId: THREAD_ID,
+          turnCount: 1,
+          sagaId: SAGA_ID,
+          createdAt: NOW,
+        },
+        readModel: sagaReadModel,
+      }),
+    );
+    const events = Array.isArray(decided) ? decided : [decided];
+    let readModel = sagaReadModel;
+    for (const [index, event] of events.entries()) {
+      readModel = await Effect.runPromise(
+        projectEvent(readModel, { ...event, sequence: index + 2 }),
+      );
+    }
+    expect(readModel.threads[0]?.revertSaga).toBeNull();
+
+    const error = await Effect.runPromise(
+      Effect.flip(
+        decideOrchestrationCommand({
+          command: revertUncertainCommand(),
+          readModel,
+        }),
+      ),
+    );
+
+    expect(error).toMatchObject({
+      _tag: "OrchestrationCommandInvariantError",
+      commandType: "thread.revert.uncertain",
+      detail: `Thread '${THREAD_ID}' has no active revert saga.`,
+    });
+  });
+
+  it("rejects a stale thread.revert.complete from a different saga", async () => {
+    const error = await Effect.runPromise(
+      Effect.flip(
+        decideOrchestrationCommand({
+          command: {
+            type: "thread.revert.complete",
+            commandId: CommandId.makeUnsafe("cmd-stale-complete"),
+            threadId: THREAD_ID,
+            turnCount: 1,
+            sagaId: "saga-0",
+            createdAt: NOW,
+          },
+          readModel: makeReadModel({ revertSaga: activeSaga("reverting") }),
+        }),
+      ),
+    );
+
+    expect(error).toMatchObject({
+      _tag: "OrchestrationCommandInvariantError",
+      commandType: "thread.revert.complete",
+      detail: `Saga 'saga-0' does not match the active revert saga on thread '${THREAD_ID}'.`,
     });
   });
 
@@ -297,6 +430,7 @@ describe("revert saga projector", () => {
       status: "reverting",
       turnCount: 1,
       sagaId: SAGA_ID,
+      uncertainStepId: null,
     });
   });
 
@@ -318,6 +452,7 @@ describe("revert saga projector", () => {
       status: "uncertain",
       turnCount: 1,
       sagaId: SAGA_ID,
+      uncertainStepId: "step-fs-restore",
     });
   });
 
