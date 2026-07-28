@@ -31,6 +31,27 @@ export function classifySequenceProgress(
   return { kind: "gap", backfillTargetSequence: incomingSequence - 1 };
 }
 
+/**
+ * Decides whether a gap backfill replay to `targetSequence` should start now.
+ * The caller records `targetSequence` as attempted only when this returns
+ * true. While a replay is in flight the decision is deferred WITHOUT
+ * recording: the replay's completion drain re-requests any still-missing
+ * range, and recording early would permanently suppress that retry.
+ */
+export function shouldStartGapBackfill(options: {
+  readonly attemptedTargetSequence: number | undefined;
+  readonly targetSequence: number;
+  readonly replayInFlight: boolean;
+}): boolean {
+  if (
+    options.attemptedTargetSequence !== undefined &&
+    options.attemptedTargetSequence >= options.targetSequence
+  ) {
+    return false;
+  }
+  return !options.replayInFlight;
+}
+
 export type SequenceDrainResult<T extends SequencedEvent> = {
   /** Contiguous buffered events to apply, in sequence order. */
   readonly applicable: readonly T[];

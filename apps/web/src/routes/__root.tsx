@@ -85,7 +85,11 @@ import {
   useRetainedThreadDetailIds,
 } from "../threadDetailSubscriptionRetention";
 import { canApplyThreadSnapshot, selectOrphanedThreadDetailIds } from "./-threadDetailOwnership";
-import { classifySequenceProgress, drainContiguousSequenceEvents } from "./-eventSequenceGap";
+import {
+  classifySequenceProgress,
+  drainContiguousSequenceEvents,
+  shouldStartGapBackfill,
+} from "./-eventSequenceGap";
 import { getThreadFromState, getThreadsFromState } from "../threadDerivation";
 import { useAppDensity } from "../hooks/useAppDensity";
 import { useAppTypography } from "../hooks/useAppTypography";
@@ -1369,9 +1373,17 @@ function EventRouter() {
     // Each target is attempted at most once so a replay that cannot surface
     // the missing event (it never reached the server log) does not loop; the
     // buffered event is then recovered by the periodic projection reconcile.
+    // While a replay is in flight the request is deferred without recording
+    // the target: the replay's completion drain re-requests any remaining gap,
+    // and recording early would suppress that retry (a larger gap discovered
+    // mid-replay would otherwise never be replayed).
     const requestThreadGapBackfill = (threadId: ThreadId, targetSequence: number) => {
-      const attemptedTarget = threadGapBackfillAttemptedTargetById.get(threadId);
-      if (attemptedTarget !== undefined && attemptedTarget >= targetSequence) {
+      const shouldStart = shouldStartGapBackfill({
+        attemptedTargetSequence: threadGapBackfillAttemptedTargetById.get(threadId),
+        targetSequence,
+        replayInFlight: threadReplayRequestInFlight.has(threadId),
+      });
+      if (!shouldStart) {
         return;
       }
       threadGapBackfillAttemptedTargetById.set(threadId, targetSequence);
