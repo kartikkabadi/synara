@@ -217,9 +217,7 @@ describe("RemoteAgentProvider", () => {
     const journalDir = mkdtempSync(path.join(tempDir, "journal-attach-"));
     const plan = makePlan("thread-attach");
 
-    const first = await Effect.runPromise(
-      provider.spawnRemoteAgent(plan, makeOptions(journalDir)),
-    );
+    const first = await Effect.runPromise(provider.spawnRemoteAgent(plan, makeOptions(journalDir)));
     const firstStdout = collect(first.child.stdout);
     first.child.stdin.write("turn-one\n");
     await waitFor(() => firstStdout.read().includes("echo:turn-one"), "first connection echo");

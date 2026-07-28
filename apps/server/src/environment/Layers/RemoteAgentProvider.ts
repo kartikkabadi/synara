@@ -124,14 +124,15 @@ class AgentRpcConnection {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`, (
-        error,
-      ) => {
-        if (error) {
-          this.pending.delete(id);
-          reject(error);
-        }
-      });
+      this.child.stdin.write(
+        `${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`,
+        (error) => {
+          if (error) {
+            this.pending.delete(id);
+            reject(error);
+          }
+        },
+      );
     });
   }
 
@@ -235,10 +236,9 @@ class RemoteAgentChildAdapter extends EventEmitter {
         this.sshChild.kill(signal);
       }
     };
-    this.connection.request("agent/kill", { threadId: this.threadId }).then(
-      closeTransport,
-      closeTransport,
-    );
+    this.connection
+      .request("agent/kill", { threadId: this.threadId })
+      .then(closeTransport, closeTransport);
     return true;
   }
 
@@ -394,8 +394,7 @@ export const makeRemoteAgentProvider = (sshBinaryPath: string): RemoteAgentProvi
       const spawned = makeSpawnedProcess(agent, plan);
       const result = yield* closeOnFailure(
         Effect.tryPromise({
-          try: () =>
-            agent.connection.request("agent/attach", { threadId: plan.threadId, lastSeq }),
+          try: () => agent.connection.request("agent/attach", { threadId: plan.threadId, lastSeq }),
           catch: (cause) =>
             new RemoteAgentAttachFailedError({
               reason: cause instanceof Error ? cause.message : String(cause),
