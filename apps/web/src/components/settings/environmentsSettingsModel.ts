@@ -138,7 +138,7 @@ export function descriptorFromEnvironmentForm(
       devServerForwarding: existing?.capabilities.devServerForwarding ?? false,
       checkpoint: existing?.capabilities.checkpoint ?? false,
       sync: existing?.capabilities.sync ?? false,
-      reconnect: existing?.capabilities.reconnect ?? false,
+      reconnect: existing?.capabilities.reconnect ?? "none",
       providerKinds: form.providerKinds,
     },
     runtime: {
