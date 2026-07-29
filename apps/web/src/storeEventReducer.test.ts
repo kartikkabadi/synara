@@ -5,6 +5,7 @@ import {
   ApprovalRequestId,
   CheckpointRef,
   CommandId,
+  EnvironmentId,
   EventId,
   LoopActivationId,
   MessageId,
@@ -69,6 +70,54 @@ describe("store event reducer", () => {
     expect(state.spaces).toEqual([]);
     expect(state.projects[0]?.spaceId).toBeNull();
     expect(state.projects[0]?.updatedAt).toBe("2026-07-15T10:00:02.000Z");
+  });
+
+  it("tracks remote agent connection status per thread", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const environmentId = EnvironmentId.makeUnsafe("env-devbox");
+    const reconnecting = applyOrchestrationEvents(makeState(makeThread()), [
+      makeDomainEvent("thread.remote-agent-connection-status-changed", {
+        threadId,
+        environmentId,
+        status: "reconnecting",
+        retryCount: 2,
+        lastSeq: 41,
+      }),
+    ]);
+    expect(reconnecting.remoteAgentStatusByThreadId?.[threadId]).toEqual({
+      status: "reconnecting",
+      retryCount: 2,
+      lastSeq: 41,
+    });
+
+    const disconnected = applyOrchestrationEvents(reconnecting, [
+      makeDomainEvent("thread.remote-agent-connection-status-changed", {
+        threadId,
+        environmentId,
+        status: "disconnected",
+        retryCount: 5,
+        lastSeq: 41,
+        message: "ssh transport closed",
+      }),
+    ]);
+    expect(disconnected.remoteAgentStatusByThreadId?.[threadId]).toEqual({
+      status: "disconnected",
+      retryCount: 5,
+      lastSeq: 41,
+      message: "ssh transport closed",
+    });
+
+    const unchanged = applyOrchestrationEvents(disconnected, [
+      makeDomainEvent("thread.remote-agent-connection-status-changed", {
+        threadId,
+        environmentId,
+        status: "disconnected",
+        retryCount: 5,
+        lastSeq: 41,
+        message: "ssh transport closed",
+      }),
+    ]);
+    expect(unchanged).toBe(disconnected);
   });
 
   it("preserves plugin mention references from live thread.message-sent events", () => {
