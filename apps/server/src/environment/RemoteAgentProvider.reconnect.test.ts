@@ -14,6 +14,7 @@ import {
   ExecutionEnvironmentRuntime,
   ExecutionEnvironmentSshTransport,
   ExecutionProfile,
+  type RemoteAgentConnectionStatusChanged,
 } from "@synara/contracts";
 import { Effect, Schema } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
@@ -211,10 +212,12 @@ describe("RemoteAgentProvider reconnect", () => {
     const journalDir = mkdtempSync(path.join(tempDir, "journal-drop-"));
     const dropFile = path.join(journalDir, "drop-once");
     writeFileSync(dropFile, "drop");
+    const statusChanges: RemoteAgentConnectionStatusChanged[] = [];
     const provider = makeRemoteAgentProvider(
       process.execPath,
       { ensureAgentInstalled: () => Effect.void },
       { baseDelayMs: 10, maxDelayMs: 40 },
+      (event) => statusChanges.push(event),
     );
 
     const spawned = await Effect.runPromise(
@@ -251,6 +254,22 @@ describe("RemoteAgentProvider reconnect", () => {
     spawned.kill();
     expect(await exit).toBe(0);
     expect(spawned.child.exitCode).toBe(0);
+
+    // The drop/reconnect cycle emits degraded → reconnecting → connected
+    // domain events tagged with the thread and environment.
+    expect(statusChanges.map((event) => event.status)).toEqual([
+      "degraded",
+      "reconnecting",
+      "connected",
+    ]);
+    expect(statusChanges[0]).toMatchObject({
+      _tag: "RemoteAgentConnectionStatusChanged",
+      threadId: "thread-drop",
+      environmentId: "env-remote",
+    });
+    const connected = statusChanges.at(-1);
+    expect(connected?.retryCount).toBe(1);
+    expect(connected?.lastSeq).toBeGreaterThan(0);
   });
 
   it("settles the exit with RemoteAgentReconnectFailedError when retries are exhausted", async () => {
@@ -258,10 +277,12 @@ describe("RemoteAgentProvider reconnect", () => {
     const dropFile = path.join(journalDir, "drop-once");
     const poisonFile = path.join(journalDir, "poison");
     writeFileSync(dropFile, "drop");
+    const statusChanges: RemoteAgentConnectionStatusChanged[] = [];
     const provider = makeRemoteAgentProvider(
       process.execPath,
       { ensureAgentInstalled: () => Effect.void },
       { baseDelayMs: 10, maxDelayMs: 20, maxAttempts: 2 },
+      (event) => statusChanges.push(event),
     );
 
     const spawned = await Effect.runPromise(
@@ -278,5 +299,18 @@ describe("RemoteAgentProvider reconnect", () => {
 
     expect(await exit).toBe(255);
     expect(errors.some((error) => error._tag === "RemoteAgentReconnectFailedError")).toBe(true);
+
+    // Exhausted retries end in a terminal disconnected status.
+    expect(statusChanges.map((event) => event.status)).toEqual([
+      "degraded",
+      "reconnecting",
+      "degraded",
+      "reconnecting",
+      "degraded",
+      "disconnected",
+    ]);
+    const disconnected = statusChanges.at(-1);
+    expect(disconnected?.retryCount).toBe(2);
+    expect(disconnected?.message).toBeDefined();
   });
 });
