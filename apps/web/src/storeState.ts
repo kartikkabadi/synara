@@ -2,7 +2,7 @@
 // Purpose: Defines the normalized web-store state shape and stable empty slice sentinels.
 // Exports: AppState, its initial value, and immutable empty normalized records.
 
-import type { MessageId, ThreadId, TurnId } from "@synara/contracts";
+import type { MessageId, RemoteAgentConnectionStatus, ThreadId, TurnId } from "@synara/contracts";
 
 import type {
   ChatMessage,
@@ -20,6 +20,14 @@ import type {
  * has been applied yet, so shell-only threads must not be treated as empty.
  */
 export type ThreadDetailSyncState = "synced" | "failed";
+
+/** Latest remote agent transport status for a thread (#99 PR VI). */
+export interface RemoteAgentThreadStatus {
+  readonly status: RemoteAgentConnectionStatus;
+  readonly retryCount: number;
+  readonly lastSeq: number;
+  readonly message?: string;
+}
 
 export interface AppState {
   /** Highest authoritative snapshot integrated by this store instance. */
@@ -41,6 +49,7 @@ export interface AppState {
   turnDiffIdsByThreadId?: Record<ThreadId, TurnId[]>;
   turnDiffSummaryByThreadId?: Record<ThreadId, Record<TurnId, Thread["turnDiffSummaries"][number]>>;
   threadDetailSyncById?: Record<ThreadId, ThreadDetailSyncState>;
+  remoteAgentStatusByThreadId?: Record<ThreadId, RemoteAgentThreadStatus>;
   /**
    * Deletion tombstones, keyed by id, valued by the snapshot sequence at (or after) which the
    * deletion is guaranteed to be visible server-side. They stop a snapshot generated before the
@@ -96,6 +105,7 @@ export const initialState: AppState = {
   turnDiffIdsByThreadId: {},
   turnDiffSummaryByThreadId: {},
   threadDetailSyncById: {},
+  remoteAgentStatusByThreadId: {},
   deletedProjectIdsById: {},
   deletedThreadIdsById: {},
 };

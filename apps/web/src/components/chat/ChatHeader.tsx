@@ -9,6 +9,7 @@ import {
   type ProjectScript,
   PROVIDER_DISPLAY_NAMES,
   type ProviderKind,
+  type RemoteAgentConnectionStatus,
   type ResolvedKeybindingsConfig,
   type ThreadId,
 } from "@synara/contracts";
@@ -71,6 +72,58 @@ import { EnvironmentToggle, type EnvironmentToggleState } from "./environment/En
  */
 const HEADER_COMPACT_BREAKPOINT = 700;
 
+function environmentBadgeLabel(
+  label: string | null,
+  status: RemoteAgentConnectionStatus | null,
+): string {
+  const name = label ?? "Local";
+  switch (status) {
+    case "reconnecting":
+      return `${name} — reconnecting…`;
+    case "degraded":
+      return `${name} — degraded`;
+    case "disconnected":
+      return `${name} — disconnected`;
+    default:
+      return name;
+  }
+}
+
+function environmentBadgeTitle(
+  label: string | null,
+  status: RemoteAgentConnectionStatus | null,
+): string {
+  if (label === null) {
+    return "Runs on this machine";
+  }
+  const base = `Runs on remote environment "${label}"`;
+  switch (status) {
+    case "reconnecting":
+      return `${base} — reconnecting to the remote agent`;
+    case "degraded":
+      return `${base} — connection degraded, retrying`;
+    case "disconnected":
+      return `${base} — remote agent disconnected`;
+    default:
+      return base;
+  }
+}
+
+function remoteAgentConnectionStatusClassName(
+  status: RemoteAgentConnectionStatus | null,
+): string | undefined {
+  switch (status) {
+    case "reconnecting":
+      return "animate-pulse text-amber-600 dark:text-amber-400";
+    case "degraded":
+      return "text-amber-600 dark:text-amber-400";
+    case "disconnected":
+      return "text-destructive";
+    default:
+      return undefined;
+  }
+}
+
 interface ChatHeaderProps {
   activeThreadId: ThreadId;
   activeThreadTitle: string;
@@ -107,6 +160,8 @@ interface ChatHeaderProps {
   isSidechat?: boolean;
   /** Remote execution environment label for the thread; null renders "Local". */
   executionEnvironmentLabel?: string | null;
+  /** Remote agent transport status; null/"connected" renders the plain label. */
+  remoteAgentConnectionStatus?: RemoteAgentConnectionStatus | null;
   // When provided, the header collapses the
   // Open-in-editor + git-actions + diff-toggle cluster into one Environment button that
   // drives the Environment panel; otherwise the legacy cluster is rendered.
@@ -524,6 +579,7 @@ export function ChatHeader({
   surfaceMode: surfaceModeProp,
   isSidechat: isSidechatProp,
   executionEnvironmentLabel,
+  remoteAgentConnectionStatus,
   environment: environmentProp,
   chatLayoutAction: chatLayoutActionProp,
   changeThreadAction: changeThreadActionProp,
@@ -733,13 +789,22 @@ export function ChatHeader({
                 <Badge
                   variant="outline"
                   className="hidden !h-6 max-w-40 shrink-0 items-center rounded-md px-1.5 text-[10px] sm:inline-flex"
-                  title={
-                    executionEnvironmentLabel === null
-                      ? "Runs on this machine"
-                      : `Runs on remote environment "${executionEnvironmentLabel}"`
-                  }
+                  title={environmentBadgeTitle(
+                    executionEnvironmentLabel,
+                    remoteAgentConnectionStatus ?? null,
+                  )}
                 >
-                  <span className="truncate">{executionEnvironmentLabel ?? "Local"}</span>
+                  <span
+                    className={cn(
+                      "truncate",
+                      remoteAgentConnectionStatusClassName(remoteAgentConnectionStatus ?? null),
+                    )}
+                  >
+                    {environmentBadgeLabel(
+                      executionEnvironmentLabel,
+                      remoteAgentConnectionStatus ?? null,
+                    )}
+                  </span>
                 </Badge>
               ) : null}
               {editorChatControls ? (
