@@ -1731,6 +1731,39 @@ const ThreadConversationRollbackCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+// Client-facing status of a remote agent thread's transport (#99 PR VI).
+// "reconnecting" covers the backoff loop's in-flight reattach attempts.
+export const RemoteAgentConnectionStatus = Schema.Literals([
+  "connected",
+  "degraded",
+  "reconnecting",
+  "disconnected",
+]);
+export type RemoteAgentConnectionStatus = typeof RemoteAgentConnectionStatus.Type;
+
+export const ThreadRemoteAgentConnectionStatusChangedPayload = Schema.Struct({
+  threadId: ThreadId,
+  environmentId: EnvironmentId,
+  status: RemoteAgentConnectionStatus,
+  retryCount: NonNegativeInt,
+  lastSeq: NonNegativeInt,
+  message: Schema.optional(Schema.String),
+});
+export type ThreadRemoteAgentConnectionStatusChangedPayload =
+  typeof ThreadRemoteAgentConnectionStatusChangedPayload.Type;
+
+export const ThreadRemoteAgentConnectionStatusSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.remote-agent.connection-status.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  environmentId: EnvironmentId,
+  status: RemoteAgentConnectionStatus,
+  retryCount: NonNegativeInt,
+  lastSeq: NonNegativeInt,
+  message: Schema.optional(Schema.String),
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessagesImportCommand,
@@ -1747,6 +1780,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadDispatchQueuedTurnCommand,
   ThreadTurnCancelStartCommand,
   ThreadLoopContinueCommand,
+  ThreadRemoteAgentConnectionStatusSetCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -1805,6 +1839,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.loop-off",
   "thread.loop-continued",
   "thread.loop-wait-noted",
+  "thread.remote-agent-connection-status-changed",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -2492,6 +2527,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.loop-wait-noted"),
     payload: ThreadLoopWaitNotedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.remote-agent-connection-status-changed"),
+    payload: ThreadRemoteAgentConnectionStatusChangedPayload,
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;
