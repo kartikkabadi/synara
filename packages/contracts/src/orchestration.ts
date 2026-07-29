@@ -4,7 +4,6 @@ import {
   ClaudeModelOptions,
   CodexModelOptions,
   CursorModelOptions,
-  DevinModelOptions,
   DroidModelOptions,
   GrokModelOptions,
   OpenCodeModelOptions,
@@ -30,13 +29,6 @@ import {
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas";
-import {
-  LoopActivationId,
-  LoopPrompt,
-  LoopStopReason,
-  ThreadLoop,
-  ThreadTurnPurpose,
-} from "./loop";
 
 export const ORCHESTRATION_WS_METHODS = {
   getSnapshot: "orchestration.getSnapshot",
@@ -67,7 +59,6 @@ export const ProviderKind = Schema.Literals([
   "claudeAgent",
   "cursor",
   "antigravity",
-  "devin",
   "grok",
   "droid",
   "kilo",
@@ -145,13 +136,6 @@ export const DroidModelSelection = Schema.Struct({
 });
 export type DroidModelSelection = typeof DroidModelSelection.Type;
 
-export const DevinModelSelection = Schema.Struct({
-  provider: Schema.Literal("devin"),
-  model: TrimmedNonEmptyString,
-  options: Schema.optional(DevinModelOptions),
-});
-export type DevinModelSelection = typeof DevinModelSelection.Type;
-
 export const OpenCodeModelSelection = Schema.Struct({
   provider: Schema.Literal("opencode"),
   model: TrimmedNonEmptyString,
@@ -180,7 +164,6 @@ export const ModelSelection = Schema.Union([
   AntigravityModelSelection,
   GrokModelSelection,
   DroidModelSelection,
-  DevinModelSelection,
   KiloModelSelection,
   OpenCodeModelSelection,
   PiModelSelection,
@@ -215,10 +198,6 @@ export const DroidProviderStartOptions = Schema.Struct({
   binaryPath: Schema.optional(TrimmedNonEmptyString),
 });
 
-export const DevinProviderStartOptions = Schema.Struct({
-  binaryPath: Schema.optional(TrimmedNonEmptyString),
-});
-
 export const OpenCodeProviderStartOptions = Schema.Struct({
   binaryPath: Schema.optional(TrimmedNonEmptyString),
   serverUrl: Schema.optional(TrimmedNonEmptyString),
@@ -242,7 +221,6 @@ export const ProviderStartOptions = Schema.Struct({
   antigravity: Schema.optional(AntigravityProviderStartOptions),
   grok: Schema.optional(GrokProviderStartOptions),
   droid: Schema.optional(DroidProviderStartOptions),
-  devin: Schema.optional(DevinProviderStartOptions),
   kilo: Schema.optional(KiloProviderStartOptions),
   opencode: Schema.optional(OpenCodeProviderStartOptions),
   pi: Schema.optional(PiProviderStartOptions),
@@ -514,7 +492,6 @@ export const OrchestrationMessage = Schema.Struct({
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
   source: OrchestrationMessageSource.pipe(Schema.withDecodingDefault(() => "native")),
-  purpose: Schema.optional(ThreadTurnPurpose),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -620,37 +597,16 @@ const OrchestrationLatestTurnState = Schema.Literals([
 export type OrchestrationLatestTurnState = typeof OrchestrationLatestTurnState.Type;
 
 export const OrchestrationLatestTurn = Schema.Struct({
-  turnId: Schema.NullOr(TurnId),
+  turnId: TurnId,
   state: OrchestrationLatestTurnState,
   requestedAt: IsoDateTime,
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
   assistantMessageId: Schema.NullOr(MessageId),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
-  // Persisted purpose of the initiating user message, if any. Used to identify
-  // loop-owned turns without scanning the full transcript.
-  purpose: Schema.optional(ThreadTurnPurpose),
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
-export const OrchestrationPendingTurnStart = Schema.Struct({
-  messageId: MessageId,
-  requestedAt: IsoDateTime,
-  purpose: Schema.optional(ThreadTurnPurpose),
-  sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
-});
-export type OrchestrationPendingTurnStart = typeof OrchestrationPendingTurnStart.Type;
-
-export const ThreadRevertSagaStatus = Schema.Literals(["reverting", "uncertain"]);
-export type ThreadRevertSagaStatus = typeof ThreadRevertSagaStatus.Type;
-
-/** Live compensated-saga state for a checkpoint revert on this thread. */
-export const OrchestrationThreadRevertSaga = Schema.Struct({
-  status: ThreadRevertSagaStatus,
-  turnCount: NonNegativeInt,
-  sagaId: TrimmedNonEmptyString,
-});
-export type OrchestrationThreadRevertSaga = typeof OrchestrationThreadRevertSaga.Type;
 export const OrchestrationThreadPullRequest = Schema.Struct({
   number: PositiveInt,
   title: TrimmedNonEmptyString,
@@ -816,19 +772,10 @@ export const OrchestrationThread = Schema.Struct({
     Schema.withDecodingDefault(() => null),
   ),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
-  revertSaga: Schema.optional(Schema.NullOr(OrchestrationThreadRevertSaga)).pipe(
-    Schema.withDecodingDefault(() => null),
-  ),
   latestUserMessageAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   hasPendingApprovals: Schema.optional(Schema.Boolean),
   hasPendingUserInput: Schema.optional(Schema.Boolean),
   hasActionableProposedPlan: Schema.optional(Schema.Boolean),
-  hasPendingTurnStart: Schema.optional(Schema.Boolean).pipe(
-    Schema.withDecodingDefault(() => false),
-  ),
-  pendingTurnStart: Schema.optional(Schema.NullOr(OrchestrationPendingTurnStart)).pipe(
-    Schema.withDecodingDefault(() => null),
-  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
@@ -845,7 +792,6 @@ export const OrchestrationThread = Schema.Struct({
   pendingInteractions: Schema.optional(Schema.Array(OrchestrationPendingInteraction)),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
-  loop: Schema.optional(Schema.NullOr(ThreadLoop)).pipe(Schema.withDecodingDefault(() => null)),
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
@@ -914,20 +860,13 @@ export const OrchestrationThreadShell = Schema.Struct({
   hasPendingApprovals: Schema.optional(Schema.Boolean),
   hasPendingUserInput: Schema.optional(Schema.Boolean),
   hasActionableProposedPlan: Schema.optional(Schema.Boolean),
-  hasPendingTurnStart: Schema.optional(Schema.Boolean).pipe(
-    Schema.withDecodingDefault(() => false),
-  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
     Schema.withDecodingDefault(() => null),
   ),
-  deletedAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
-    Schema.withDecodingDefault(() => null),
-  ),
   handoff: Schema.NullOr(ThreadHandoff).pipe(Schema.withDecodingDefault(() => null)),
   session: Schema.NullOr(OrchestrationSession),
-  loop: Schema.optional(Schema.NullOr(ThreadLoop)).pipe(Schema.withDecodingDefault(() => null)),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 
@@ -1352,8 +1291,6 @@ export const ThreadTurnStartCommand = Schema.Struct({
   // environment; absent means local execution.
   executionProfile: Schema.optional(ExecutionProfile),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
-  // Set by the loop reactor so the UI can label loop-owned turns.
-  purpose: Schema.optional(ThreadTurnPurpose),
   createdAt: IsoDateTime,
 });
 
@@ -1426,7 +1363,6 @@ const ThreadDispatchQueuedTurnCommand = Schema.Struct({
   ),
   executionProfile: Schema.optional(ExecutionProfile),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
-  purpose: Schema.optional(ThreadTurnPurpose),
   createdAt: IsoDateTime,
 });
 
@@ -1489,57 +1425,6 @@ const ThreadSessionStopCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
-const ThreadLoopSetCommand = Schema.Struct({
-  type: Schema.Literal("thread.loop.set"),
-  commandId: CommandId,
-  threadId: ThreadId,
-  prompt: Schema.NullOr(LoopPrompt),
-  maxIterations: Schema.NullOr(PositiveInt),
-  durationSeconds: Schema.NullOr(PositiveInt),
-  // Edit-save guard: when supplied, the command only applies while the loop
-  // activation with this id is still active; otherwise it is rejected.
-  expectedActivationId: Schema.optional(LoopActivationId),
-  createdAt: IsoDateTime,
-});
-
-// Lifecycle and policy paths supply the authoritative stop reason. Clients may
-// send this command but their `reason` is stripped at the dispatch boundary: a
-// client-initiated off is always a user action.
-const ThreadLoopOffCommand = Schema.Struct({
-  type: Schema.Literal("thread.loop.off"),
-  commandId: CommandId,
-  threadId: ThreadId,
-  reason: Schema.optional(LoopStopReason),
-  createdAt: IsoDateTime,
-});
-
-const ThreadLoopToggleCommand = Schema.Struct({
-  type: Schema.Literal("thread.loop.toggle"),
-  commandId: CommandId,
-  threadId: ThreadId,
-  createdAt: IsoDateTime,
-});
-
-// Internal settlement for a durable pending turn start that will never reach
-// the provider. Only server reactors and lifecycle paths dispatch it.
-const ThreadTurnCancelStartCommand = Schema.Struct({
-  type: Schema.Literal("thread.turn.cancel-start"),
-  commandId: CommandId,
-  threadId: ThreadId,
-  messageId: MessageId,
-  purpose: Schema.optional(ThreadTurnPurpose),
-  createdAt: IsoDateTime,
-});
-
-const ThreadLoopContinueCommand = Schema.Struct({
-  type: Schema.Literal("thread.loop.continue"),
-  commandId: CommandId,
-  threadId: ThreadId,
-  expectedUpdatedAt: Schema.optional(IsoDateTime),
-  expectedActivationId: Schema.optional(LoopActivationId),
-  createdAt: IsoDateTime,
-});
-
 const ThreadActivityAppendCommand = Schema.Struct({
   type: Schema.Literal("thread.activity.append"),
   commandId: CommandId,
@@ -1584,9 +1469,6 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadMessageEditAndResendCommand,
   ThreadActivityAppendCommand,
   ThreadSessionStopCommand,
-  ThreadLoopSetCommand,
-  ThreadLoopOffCommand,
-  ThreadLoopToggleCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
@@ -1627,9 +1509,6 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadMessageEditAndResendCommand,
   ThreadActivityAppendCommand,
   ThreadSessionStopCommand,
-  ThreadLoopSetCommand,
-  ThreadLoopOffCommand,
-  ThreadLoopToggleCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
 
@@ -1700,26 +1579,6 @@ const ThreadRevertCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
-const ThreadRevertStartedCommand = Schema.Struct({
-  type: Schema.Literal("thread.revert.started"),
-  commandId: CommandId,
-  threadId: ThreadId,
-  turnCount: NonNegativeInt,
-  sagaId: TrimmedNonEmptyString,
-  createdAt: IsoDateTime,
-});
-
-const ThreadRevertUncertainCommand = Schema.Struct({
-  type: Schema.Literal("thread.revert.uncertain"),
-  commandId: CommandId,
-  threadId: ThreadId,
-  turnCount: NonNegativeInt,
-  sagaId: TrimmedNonEmptyString,
-  stepId: TrimmedNonEmptyString,
-  detail: Schema.String,
-  createdAt: IsoDateTime,
-});
-
 const ThreadConversationRollbackCompleteCommand = Schema.Struct({
   type: Schema.Literal("thread.conversation.rollback.complete"),
   commandId: CommandId,
@@ -1731,12 +1590,11 @@ const ThreadConversationRollbackCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
-// Client-facing status of a remote agent thread's transport (#99 PR VI).
-// "reconnecting" covers the backoff loop's in-flight reattach attempts.
 export const RemoteAgentConnectionStatus = Schema.Literals([
+  "connecting",
   "connected",
-  "degraded",
   "reconnecting",
+  "degraded",
   "disconnected",
 ]);
 export type RemoteAgentConnectionStatus = typeof RemoteAgentConnectionStatus.Type;
@@ -1746,21 +1604,21 @@ export const ThreadRemoteAgentConnectionStatusChangedPayload = Schema.Struct({
   environmentId: EnvironmentId,
   status: RemoteAgentConnectionStatus,
   retryCount: NonNegativeInt,
-  lastSeq: NonNegativeInt,
-  message: Schema.optional(Schema.String),
+  lastSeq: Schema.Number,
+  message: Schema.optional(TrimmedNonEmptyString),
 });
 export type ThreadRemoteAgentConnectionStatusChangedPayload =
   typeof ThreadRemoteAgentConnectionStatusChangedPayload.Type;
 
-export const ThreadRemoteAgentConnectionStatusSetCommand = Schema.Struct({
+const ThreadRemoteAgentConnectionStatusSetCommand = Schema.Struct({
   type: Schema.Literal("thread.remote-agent.connection-status.set"),
   commandId: CommandId,
   threadId: ThreadId,
   environmentId: EnvironmentId,
   status: RemoteAgentConnectionStatus,
   retryCount: NonNegativeInt,
-  lastSeq: NonNegativeInt,
-  message: Schema.optional(Schema.String),
+  lastSeq: Schema.Number,
+  message: Schema.optional(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
 });
 
@@ -1773,13 +1631,9 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
-  ThreadRevertStartedCommand,
-  ThreadRevertUncertainCommand,
   ThreadConversationRollbackCommand,
   ThreadConversationRollbackCompleteCommand,
   ThreadDispatchQueuedTurnCommand,
-  ThreadTurnCancelStartCommand,
-  ThreadLoopContinueCommand,
   ThreadRemoteAgentConnectionStatusSetCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
@@ -1817,15 +1671,12 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.message-sent",
   "thread.turn-queued",
   "thread.turn-start-requested",
-  "thread.turn-start-cancelled",
   "thread.turn-interrupt-requested",
   "thread.task-stop-requested",
   "thread.task-background-requested",
   "thread.approval-response-requested",
   "thread.user-input-response-requested",
   "thread.checkpoint-revert-requested",
-  "thread.revert-started",
-  "thread.revert-uncertain",
   "thread.reverted",
   "thread.conversation-rollback-requested",
   "thread.conversation-rolled-back",
@@ -1835,10 +1686,6 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
-  "thread.loop-set",
-  "thread.loop-off",
-  "thread.loop-continued",
-  "thread.loop-wait-noted",
   "thread.remote-agent-connection-status-changed",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
@@ -2085,7 +1932,6 @@ export const ThreadMessageSentPayload = Schema.Struct({
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
   source: OrchestrationMessageSource.pipe(Schema.withDecodingDefault(() => "native")),
-  purpose: Schema.optional(ThreadTurnPurpose),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -2105,22 +1951,10 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   ),
   executionProfile: Schema.optional(ExecutionProfile),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
-  purpose: Schema.optional(ThreadTurnPurpose),
   createdAt: IsoDateTime,
 });
 
 export const ThreadTurnQueuedPayload = ThreadTurnStartRequestedPayload;
-
-// Durable settlement for a persisted turn start that will never reach the
-// provider (stale loop authority, loop off/reconfigure). Carries the exact
-// pending message identity so projectors retire only the matching pending
-// start and never an unrelated manual one.
-export const ThreadTurnStartCancelledPayload = Schema.Struct({
-  threadId: ThreadId,
-  messageId: MessageId,
-  purpose: Schema.optional(ThreadTurnPurpose),
-  createdAt: IsoDateTime,
-});
 
 export const ThreadTurnInterruptRequestedPayload = Schema.Struct({
   threadId: ThreadId,
@@ -2163,20 +1997,6 @@ export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
     Schema.withDecodingDefault(() => "thread"),
   ),
   createdAt: IsoDateTime,
-});
-
-export const ThreadRevertStartedPayload = Schema.Struct({
-  threadId: ThreadId,
-  turnCount: NonNegativeInt,
-  sagaId: TrimmedNonEmptyString,
-});
-
-export const ThreadRevertUncertainPayload = Schema.Struct({
-  threadId: ThreadId,
-  turnCount: NonNegativeInt,
-  sagaId: TrimmedNonEmptyString,
-  stepId: TrimmedNonEmptyString,
-  detail: Schema.String,
 });
 
 export const ThreadRevertedPayload = Schema.Struct({
@@ -2243,32 +2063,6 @@ export const ThreadTurnDiffCompletedPayload = Schema.Struct({
 export const ThreadActivityAppendedPayload = Schema.Struct({
   threadId: ThreadId,
   activity: OrchestrationThreadActivity,
-});
-
-export const ThreadLoopSetPayload = Schema.Struct({
-  threadId: ThreadId,
-  loop: ThreadLoop,
-});
-
-export const ThreadLoopOffPayload = Schema.Struct({
-  threadId: ThreadId,
-  stopReason: LoopStopReason,
-  loop: ThreadLoop,
-});
-
-export const ThreadLoopContinuedPayload = Schema.Struct({
-  threadId: ThreadId,
-  nextIteration: NonNegativeInt,
-  nextConsecutiveErrors: NonNegativeInt,
-  loop: ThreadLoop,
-});
-
-// A `thread.loop.continue` that resolved to a wait. Carries the unchanged loop
-// with a bumped `updatedAt` so the next deterministic continuation commandId
-// rotates, without re-triggering LoopReactor the way `thread.loop-set` does.
-export const ThreadLoopWaitNotedPayload = Schema.Struct({
-  threadId: ThreadId,
-  loop: ThreadLoop,
 });
 
 export const OrchestrationEventMetadata = Schema.Struct({
@@ -2420,11 +2214,6 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
-    type: Schema.Literal("thread.turn-start-cancelled"),
-    payload: ThreadTurnStartCancelledPayload,
-  }),
-  Schema.Struct({
-    ...EventBaseFields,
     type: Schema.Literal("thread.turn-interrupt-requested"),
     payload: ThreadTurnInterruptRequestedPayload,
   }),
@@ -2452,16 +2241,6 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.checkpoint-revert-requested"),
     payload: ThreadCheckpointRevertRequestedPayload,
-  }),
-  Schema.Struct({
-    ...EventBaseFields,
-    type: Schema.Literal("thread.revert-started"),
-    payload: ThreadRevertStartedPayload,
-  }),
-  Schema.Struct({
-    ...EventBaseFields,
-    type: Schema.Literal("thread.revert-uncertain"),
-    payload: ThreadRevertUncertainPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
@@ -2507,26 +2286,6 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
-  }),
-  Schema.Struct({
-    ...EventBaseFields,
-    type: Schema.Literal("thread.loop-set"),
-    payload: ThreadLoopSetPayload,
-  }),
-  Schema.Struct({
-    ...EventBaseFields,
-    type: Schema.Literal("thread.loop-off"),
-    payload: ThreadLoopOffPayload,
-  }),
-  Schema.Struct({
-    ...EventBaseFields,
-    type: Schema.Literal("thread.loop-continued"),
-    payload: ThreadLoopContinuedPayload,
-  }),
-  Schema.Struct({
-    ...EventBaseFields,
-    type: Schema.Literal("thread.loop-wait-noted"),
-    payload: ThreadLoopWaitNotedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
