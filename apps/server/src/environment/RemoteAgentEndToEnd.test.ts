@@ -17,7 +17,7 @@
 
 import { execFileSync } from "node:child_process";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -42,6 +42,7 @@ const socketPath = path.join(tempDir, "agent.sock");
 const bundlePath = path.join(tempDir, "remote-agent.cjs");
 const sshShimPath = path.join(tempDir, "fake-ssh.cjs");
 const mockCodexPath = path.join(tempDir, "mock-codex.cjs");
+const barrierPath = path.join(tempDir, "reconnect-barrier");
 
 // Build the real agent bundle exactly like `bun run --cwd apps/remote-agent build`.
 const agentEntry = fileURLToPath(new URL("../../../remote-agent/src/index.ts", import.meta.url));
@@ -132,9 +133,19 @@ function handle(message) {
 // unix-socket server in the test process bridging one live "ssh connection"
 // at a time onto that stdio. Events emitted while no connection is attached
 // are dropped here (like on a dead ssh channel) but survive in the journal.
+//
+// A reconnect barrier file controls whether new ssh connections are accepted.
+// While the barrier exists the bridge immediately destroys incoming sockets,
+// so the reconnector cannot establish a transport. This lets the test emit a
+// provider delta while no transport exists, prove it only reaches the journal,
+// then remove the barrier and observe attach replay deliver it exactly once.
 let agentChild: ChildProcessWithoutNullStreams;
 let activeSocket: net.Socket | undefined;
 const bridge = net.createServer((socket) => {
+  if (existsSync(barrierPath)) {
+    socket.destroy();
+    return;
+  }
   activeSocket?.destroy();
   activeSocket = socket;
   socket.on("data", (chunk) => agentChild.stdin.write(chunk));
@@ -313,19 +324,26 @@ describe("remote agent end-to-end survival", () => {
     const sshPid = spawned.child.pid;
     expect(sshPid).toBeDefined();
     process.kill(sshPid as number, "SIGKILL");
+
+    // Raise a reconnect barrier before the first retry can succeed. The
+    // bridge will now reject any new ssh socket, so the reconnector cannot
+    // establish a transport until we deliberately lower it.
+    writeFileSync(barrierPath, "");
     await waitFor(
       () => statusChanges.some((event) => event.status === "degraded"),
       "degraded status",
     );
 
-    // While disconnected, the mock Codex keeps producing output: it reaches
-    // the journal but not the (dead) transport.
+    // While no transport exists, the mock Codex keeps producing output: it
+    // reaches the journal but not the harness.
     writeFileSync(path.join(markerDir, `mid-${turnId}`), "");
     await waitFor(() => journaledText(threadId).includes(" missed"), "journaled missed delta");
     expect(harness.deltas().join("")).toBe("Hello");
 
-    // Let the turn finish; the reconnector reattaches with backoff and
-    // agent/attach replays everything past lastReceivedSeq exactly once.
+    // Lower the barrier. The next reconnector attempt opens a real transport,
+    // agent/attach replays everything past lastReceivedSeq exactly once, and
+    // the final live delta arrives over the new transport.
+    rmSync(barrierPath, { force: true });
     writeFileSync(path.join(markerDir, `resume-${turnId}`), "");
     await waitFor(() => harness.response(2) !== undefined, "post-reconnect turn response");
 
@@ -334,19 +352,17 @@ describe("remote agent end-to-end survival", () => {
     expect(harness.notifications("turn/started")).toHaveLength(1);
     expect(harness.notifications("turn/completed")).toHaveLength(1);
 
-    // connected (initial spawn) → degraded → reconnecting → connected.
-    expect(statusChanges.map((event) => event.status)).toEqual([
-      "degraded",
-      "reconnecting",
-      "connected",
-    ]);
-    expect(statusChanges[0]).toMatchObject({
-      _tag: "RemoteAgentConnectionStatusChanged",
-      threadId,
-      environmentId: "env-remote",
-    });
+    // Status must show degradation followed by a successful reconnection.
+    // The exact attempt count depends on how many barrier-blocked retries
+    // occurred before the barrier was lowered, so only the final state and the
+    // presence of the degraded transition are asserted.
+    expect(statusChanges.some((event) => event.status === "degraded")).toBe(true);
     const connected = statusChanges.at(-1);
-    expect(connected?.retryCount).toBe(1);
+    expect(connected?.status).toBe("connected");
+    expect(connected?._tag).toBe("RemoteAgentConnectionStatusChanged");
+    expect(connected?.threadId).toBe(threadId);
+    expect(connected?.environmentId).toBe("env-remote");
+    expect(connected?.retryCount).toBeGreaterThanOrEqual(1);
     expect(connected?.lastSeq).toBeGreaterThan(0);
 
     // The thread still tears down over the reconnected transport. kill sends
