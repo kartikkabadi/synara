@@ -27,8 +27,13 @@ export interface RemoteAgentReconnectRequest {
   readonly disconnectCode: number;
   /** Idempotent agent binary bootstrap, run before each reattach attempt. */
   readonly ensureInstalled: () => Promise<void>;
-  /** Opens a fresh transport, rebinds the proxy, and sends agent/attach. */
-  readonly reattach: () => Promise<void>;
+  /**
+   * Opens a fresh transport, rebinds the proxy, and sends agent/attach.
+   * Resolves with the authoritative attach status: "running" reconnects,
+   * "exited" means the thread terminated while disconnected. A rejection
+   * (including a non-authoritative "unknown" status) keeps the loop retrying.
+   */
+  readonly reattach: () => Promise<"running" | "exited">;
   /** True once the thread exited or was killed; stops the loop. */
   readonly isSettled: () => boolean;
   /** Called when all attempts failed; the caller finalizes the thread. */
@@ -114,7 +119,14 @@ export class RemoteAgentReconnector {
       state.status = "connecting";
       try {
         await request.ensureInstalled();
-        await request.reattach();
+        const status = await request.reattach();
+        if (status === "exited") {
+          // Authoritative terminal state: the thread exited while we were
+          // disconnected; the adapter is settled, nothing to reconnect.
+          state.status = "disconnected";
+          state.active = false;
+          return;
+        }
         state.status = "connected";
         state.active = false;
         return;
