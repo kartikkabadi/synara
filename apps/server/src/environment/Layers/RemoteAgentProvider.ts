@@ -10,11 +10,11 @@ import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";
 
 import {
+  RemoteAgentEventEnvelope,
   ThreadId,
   type RemoteAgentConnectionStatusChanged,
-  type RemoteAgentEventKind,
 } from "@synara/contracts";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer, Option, Schema } from "effect";
 
 import {
   type RemoteAgentError,
@@ -51,40 +51,7 @@ import {
 const HELLO_TIMEOUT_MS = 15_000;
 const STDERR_TAIL_MAX_CHARS = 8_192;
 
-// Lenient structural parse of RemoteAgentEventEnvelope: exit events carry an
-// empty `data` payload, which the contracts schema (TrimmedNonEmptyString)
-// rejects, so the transport validates the envelope shape itself.
-interface AgentEventEnvelope {
-  readonly threadId: string;
-  readonly seq: number;
-  readonly kind: RemoteAgentEventKind;
-  readonly data: string;
-  readonly exitCode?: number;
-}
-
-function parseEventEnvelope(params: unknown): AgentEventEnvelope {
-  if (typeof params !== "object" || params === null) {
-    throw new Error("agent/event params must be an object");
-  }
-  const record = params as Record<string, unknown>;
-  const { threadId, seq, kind, data, exitCode } = record;
-  if (typeof threadId !== "string" || threadId.length === 0) {
-    throw new Error("agent/event threadId must be a non-empty string");
-  }
-  if (typeof seq !== "number" || !Number.isInteger(seq)) {
-    throw new Error("agent/event seq must be an integer");
-  }
-  if (kind !== "stdout" && kind !== "stderr" && kind !== "exit") {
-    throw new Error(`agent/event kind is invalid: ${String(kind)}`);
-  }
-  if (typeof data !== "string") {
-    throw new Error("agent/event data must be a string");
-  }
-  if (exitCode !== undefined && typeof exitCode !== "number") {
-    throw new Error("agent/event exitCode must be a number when present");
-  }
-  return { threadId, seq, kind, data, ...(exitCode !== undefined ? { exitCode } : {}) };
-}
+const decodeEventEnvelope = Schema.decodeUnknownSync(RemoteAgentEventEnvelope);
 
 interface JsonRpcResponse {
   readonly jsonrpc: "2.0";
@@ -189,8 +156,10 @@ class AgentRpcConnection {
  * transport reconnects: `bind` swaps the underlying ssh connection while the
  * manager keeps reading/writing the proxy streams. Events are deduplicated by
  * journal seq so an agent/attach replay never re-emits already-seen data.
- * Exit fires from agent exit events; a transport death without an exit event
- * either settles the exit (no reconnect) or signals `onDisconnect`.
+ * Exit settles only from an agent exit event or a completed kill() flow; a
+ * transport (ssh) death is surfaced as a "disconnect" event (and the
+ * `onDisconnect` callback) instead, because the remote provider outlives the
+ * channel and the owning layer may reconnect via agent/attach.
  */
 class RemoteAgentChildAdapter extends EventEmitter {
   readonly stdout = new PassThrough();
@@ -230,6 +199,15 @@ class RemoteAgentChildAdapter extends EventEmitter {
     return this.highestSeq;
   }
 
+  /**
+   * Seeds the replay high-water mark with the caller's consumed seq so a
+   * reattachment never replays events the caller already saw, even when the
+   * first attach replays nothing.
+   */
+  seedHighWaterMark(lastSeq: number): void {
+    this.highestSeq = Math.max(this.highestSeq, lastSeq);
+  }
+
   /** Subscribes to raw transport stderr, stable across reconnects. */
   onTransportStderr(callback: (chunk: string) => void): void {
     this.transportStderrCallbacks.push(callback);
@@ -251,22 +229,23 @@ class RemoteAgentChildAdapter extends EventEmitter {
       for (const callback of this.transportStderrCallbacks) callback(chunk);
     });
     agent.sshChild.once("close", (code, signal) => {
-      // A stale transport we already replaced must not settle or reconnect.
-      if (this.agent !== agent || this.exitCode !== null) return;
-      if (!this.killed && this.onDisconnect !== undefined) {
-        this.onDisconnect(code ?? -1, signal ?? null);
-        return;
-      }
-      // The transport died without a provider exit event: surface it as an
-      // exit so the manager's teardown path runs exactly once.
-      this.settleExit(code ?? -1, signal ?? null);
+      // A stale transport we already replaced must not signal anything, and
+      // a transport death never settles the provider: keep streams open,
+      // surface a disconnect, and let the owning layer reconnect.
+      if (this.agent !== agent || this.exitCode !== null || this.killed) return;
+      this.emit("disconnect", code, signal);
+      this.onDisconnect?.(code ?? -1, signal ?? null);
+    });
+    agent.sshChild.once("error", (error) => {
+      if (this.agent !== agent || this.exitCode !== null || this.killed) return;
+      this.emit("disconnect", null, null, error);
     });
   }
 
   handleEvent(params: unknown, onParseError: (error: RemoteAgentEventParseError) => void): void {
-    let envelope: AgentEventEnvelope;
+    let envelope: RemoteAgentEventEnvelope;
     try {
-      envelope = parseEventEnvelope(params);
+      envelope = decodeEventEnvelope(params);
     } catch (cause) {
       onParseError(new RemoteAgentEventParseError({ reason: String(cause) }));
       return;
@@ -276,16 +255,15 @@ class RemoteAgentChildAdapter extends EventEmitter {
     // already forwarded on a previous connection.
     if (envelope.seq <= this.highestSeq) return;
     this.highestSeq = envelope.seq;
-    const data = Buffer.from(envelope.data, "base64");
     switch (envelope.kind) {
       case "stdout":
-        this.stdout.write(data);
+        this.stdout.write(Buffer.from(envelope.data, "base64"));
         return;
       case "stderr":
-        this.stderr.write(data);
+        this.stderr.write(Buffer.from(envelope.data, "base64"));
         return;
       case "exit":
-        this.settleExit(envelope.exitCode ?? -1, null);
+        this.settleExit(envelope.exitCode, null);
         return;
     }
   }
@@ -293,15 +271,19 @@ class RemoteAgentChildAdapter extends EventEmitter {
   kill(signal?: NodeJS.Signals): boolean {
     this.killed = true;
     const agent = this.agent;
-    if (agent === undefined) return true;
-    const closeTransport = () => {
+    if (agent === undefined) {
+      this.settleExit(-1, signal ?? null);
+      return true;
+    }
+    const finalize = () => {
       if (agent.sshChild.exitCode === null && !agent.sshChild.killed) {
         agent.sshChild.kill(signal);
       }
+      // The kill flow completed: settle even if the exit event never arrived
+      // (e.g. the transport dropped it) so teardown runs exactly once.
+      this.settleExit(-1, signal ?? null);
     };
-    agent.connection
-      .request("agent/kill", { threadId: this.threadId })
-      .then(closeTransport, closeTransport);
+    agent.connection.request("agent/kill", { threadId: this.threadId }).then(finalize, finalize);
     return true;
   }
 
@@ -415,21 +397,37 @@ export const makeRemoteAgentProvider = (
 ): RemoteAgentProviderShape => {
   const reconnector = new RemoteAgentReconnector(reconnectOptions);
 
-  /** Opens a fresh transport, rebinds the proxy, and replays via agent/attach. */
+  /**
+   * Opens a fresh transport, rebinds the proxy, and replays via agent/attach.
+   * Only an authoritative attach status counts: "running" is a successful
+   * reconnect, "exited" settles the adapter from the terminal state, and any
+   * other status fails the attempt so the reconnector keeps retrying.
+   */
   const reattach = async (
     plan: RemoteAgentSpawnPlan,
     options: ProviderProcessSpawnOptions,
     adapter: RemoteAgentChildAdapter,
-  ): Promise<void> => {
+  ): Promise<"running" | "exited"> => {
     const agent = await Effect.runPromise(connectToAgent(sshBinaryPath, plan, options));
     try {
       await Effect.runPromise(performHello(agent.connection));
       // Bind before agent/attach so replayed events land on the proxy streams.
       adapter.bind(agent);
-      await agent.connection.request("agent/attach", {
+      const result = (await agent.connection.request("agent/attach", {
         threadId: plan.threadId,
         lastSeq: adapter.lastReceivedSeq,
-      });
+      })) as RemoteAgentAttachResult;
+      if (result.status === "exited") {
+        // The replayed exit event normally settles the adapter with the real
+        // code; settle from the attach result if it was already consumed.
+        adapter.settleExit(-1, null);
+        agent.sshChild.kill();
+        return "exited";
+      }
+      if (result.status !== "running") {
+        throw new Error(`agent/attach returned non-authoritative status "${result.status}"`);
+      }
+      return "running";
     } catch (cause) {
       agent.sshChild.kill();
       throw cause;
@@ -517,6 +515,7 @@ export const makeRemoteAgentProvider = (
         yield* closeOnFailure(performHello(agent.connection));
         // Bind before agent/attach so replayed events land on the streams.
         const { adapter, spawned } = makeSpawnedProcess(plan, options);
+        adapter.seedHighWaterMark(lastSeq);
         adapter.bind(agent);
         const result = yield* closeOnFailure(
           Effect.tryPromise({

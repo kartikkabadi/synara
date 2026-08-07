@@ -5,7 +5,7 @@
 //          them through agent/attach on the next connection. "ssh" is
 //          replaced by the node binary running the fake agent.
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Readable } from "node:stream";
@@ -42,6 +42,8 @@ const journalDir = process.env.SYNARA_AGENT_JOURNAL_DIR;
 mkdirSync(journalDir, { recursive: true });
 const dropFile = process.env.FAKE_DROP_FILE;
 const poisonFile = process.env.FAKE_POISON_FILE;
+const attachUnknownFile = process.env.FAKE_ATTACH_UNKNOWN_FILE;
+const dropAfterAttachFile = process.env.FAKE_DROP_AFTER_ATTACH_FILE;
 const threads = new Map();
 
 const write = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
@@ -56,8 +58,10 @@ const readJournal = (threadId) => {
 const journalEntry = (threadId, kind, data, exitCode) => {
   const state = threads.get(threadId);
   state.seq += 1;
-  const entry = { seq: state.seq, kind, data: Buffer.from(data).toString("base64") };
-  if (exitCode !== undefined) entry.exitCode = exitCode;
+  const entry =
+    kind === "exit"
+      ? { seq: state.seq, kind, exitCode }
+      : { seq: state.seq, kind, data: Buffer.from(data).toString("base64") };
   appendFileSync(journalPath(threadId), JSON.stringify(entry) + "\\n");
   return entry;
 };
@@ -128,6 +132,12 @@ function handle(message) {
       return;
     }
     case "agent/attach": {
+      appendFileSync(join(journalDir, params.threadId + ".attach.log"), params.lastSeq + "\\n");
+      if (attachUnknownFile && existsSync(attachUnknownFile)) {
+        unlinkSync(attachUnknownFile);
+        respond(id, { status: "unknown", lastSeq: 0 });
+        return;
+      }
       const entries = readJournal(params.threadId);
       for (const entry of entries) {
         if (entry.seq > params.lastSeq) {
@@ -144,6 +154,12 @@ function handle(message) {
         threads.set(params.threadId, { seq: lastSeq, status: "running" });
       }
       respond(id, { status: exited ? "exited" : "running", lastSeq });
+      if (dropAfterAttachFile && existsSync(dropAfterAttachFile)) {
+        unlinkSync(dropAfterAttachFile);
+        journalEntry(params.threadId, "stdout", "missed-after-attach\\n");
+        setTimeout(() => process.exit(255), 50);
+        return;
+      }
       if (!exited) emitEvent(params.threadId, "stdout", "agent-reattached\\n");
       return;
     }
@@ -312,5 +328,93 @@ describe("RemoteAgentProvider reconnect", () => {
     const disconnected = statusChanges.at(-1);
     expect(disconnected?.retryCount).toBe(2);
     expect(disconnected?.message).toBeDefined();
+  });
+
+  it("retries when agent/attach returns a non-authoritative unknown status", async () => {
+    const journalDir = mkdtempSync(path.join(tempDir, "journal-unknown-"));
+    const dropFile = path.join(journalDir, "drop-once");
+    const unknownFile = path.join(journalDir, "attach-unknown-once");
+    writeFileSync(dropFile, "drop");
+    writeFileSync(unknownFile, "unknown");
+    const provider = makeRemoteAgentProvider(
+      process.execPath,
+      { ensureAgentInstalled: () => Effect.void },
+      { baseDelayMs: 10, maxDelayMs: 40 },
+    );
+
+    const spawned = await Effect.runPromise(
+      provider.spawnRemoteAgent(
+        makePlan("thread-unknown"),
+        makeOptions(journalDir, {
+          FAKE_DROP_FILE: dropFile,
+          FAKE_ATTACH_UNKNOWN_FILE: unknownFile,
+        }),
+      ),
+    );
+    const stdout = collect(spawned.child.stdout);
+    let exited = false;
+    spawned.child.once("exit", () => {
+      exited = true;
+    });
+
+    // First reattach answers "unknown" and must not count as connected; the
+    // loop retries and the second attach succeeds and replays missed events.
+    await waitFor(() => stdout.read().includes("agent-reattached"), "reattach after unknown");
+    const attachLog = readFileSync(path.join(journalDir, "thread-unknown.attach.log"), "utf8")
+      .split("\n")
+      .filter(Boolean);
+    expect(attachLog.length).toBeGreaterThanOrEqual(2);
+    expect(exited).toBe(false);
+    expect(count(stdout.read(), "missed-1")).toBe(1);
+    expect(count(stdout.read(), "missed-2")).toBe(1);
+    spawned.kill();
+  });
+
+  it("reattaches with the seeded non-zero lastSeq when the first attach replayed nothing", async () => {
+    const journalDir = mkdtempSync(path.join(tempDir, "journal-seeded-"));
+    const dropAfterAttachFile = path.join(journalDir, "drop-after-attach-once");
+    writeFileSync(dropAfterAttachFile, "drop");
+    const threadId = "thread-seeded";
+    // Pre-populate the journal with three already-consumed events.
+    writeFileSync(
+      path.join(journalDir, `${threadId}.journal`),
+      [1, 2, 3]
+        .map((seq) =>
+          JSON.stringify({
+            seq,
+            kind: "stdout",
+            data: Buffer.from(`pre-${seq}\n`).toString("base64"),
+          }),
+        )
+        .join("\n") + "\n",
+    );
+    const provider = makeRemoteAgentProvider(
+      process.execPath,
+      { ensureAgentInstalled: () => Effect.void },
+      { baseDelayMs: 10, maxDelayMs: 40 },
+    );
+
+    // First attach starts at lastSeq 3: nothing is replayed, then the fake
+    // agent journals one missed event and drops the transport.
+    const { process: spawned, attach } = await Effect.runPromise(
+      provider.attachRemoteAgent(
+        makePlan(threadId),
+        3,
+        makeOptions(journalDir, { FAKE_DROP_AFTER_ATTACH_FILE: dropAfterAttachFile }),
+      ),
+    );
+    expect(attach.status).toBe("running");
+    const stdout = collect(spawned.child.stdout);
+
+    // The reattach must send the seeded lastSeq (3), not 0, so only the
+    // missed event is replayed and the consumed pre-* events never re-emit.
+    await waitFor(() => stdout.read().includes("missed-after-attach"), "replayed missed event");
+    await waitFor(() => stdout.read().includes("agent-reattached"), "post-reattach event");
+    const attachLog = readFileSync(path.join(journalDir, `${threadId}.attach.log`), "utf8")
+      .split("\n")
+      .filter(Boolean);
+    expect(attachLog).toEqual(["3", "3"]);
+    expect(stdout.read()).not.toContain("pre-");
+    spawned.kill();
   });
 });
