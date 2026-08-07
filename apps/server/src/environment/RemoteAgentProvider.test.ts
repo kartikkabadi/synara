@@ -47,8 +47,10 @@ const readJournal = (threadId) => {
 const emitEvent = (threadId, kind, data, exitCode) => {
   const state = threads.get(threadId);
   state.seq += 1;
-  const entry = { seq: state.seq, kind, data: Buffer.from(data).toString("base64") };
-  if (exitCode !== undefined) entry.exitCode = exitCode;
+  const entry =
+    kind === "exit"
+      ? { seq: state.seq, kind, exitCode }
+      : { seq: state.seq, kind, data: Buffer.from(data).toString("base64") };
   appendFileSync(journalPath(threadId), JSON.stringify(entry) + "\\n");
   write({ jsonrpc: "2.0", method: "agent/event", params: { threadId, ...entry } });
 };
@@ -166,8 +168,10 @@ const getThread = (threadId) => {
 const emitEvent = (threadId, kind, data, exitCode) => {
   const state = getThread(threadId);
   state.seq += 1;
-  const entry = { seq: state.seq, kind, data: Buffer.from(data).toString("base64") };
-  if (exitCode !== undefined) entry.exitCode = exitCode;
+  const entry =
+    kind === "exit"
+      ? { seq: state.seq, kind, exitCode }
+      : { seq: state.seq, kind, data: Buffer.from(data).toString("base64") };
   state.journal.push(entry);
   broadcast({ jsonrpc: "2.0", method: "agent/event", params: { threadId, ...entry } });
 };
@@ -386,6 +390,29 @@ describe("RemoteAgentProvider", () => {
     expect(attach.status).toBe("exited");
     expect(attach.lastSeq).toBeGreaterThanOrEqual(4);
     second.kill();
+  });
+
+  it("settles the adapter (exit and close) on a contract-valid exit event", async () => {
+    const journalDir = mkdtempSync(path.join(tempDir, "journal-settle-"));
+    const spawned = await Effect.runPromise(
+      provider.spawnRemoteAgent(makePlan("thread-settle"), makeOptions(journalDir)),
+    );
+    const stdout = collect(spawned.child.stdout);
+    await waitFor(() => stdout.read().includes("provider-started"), "provider stdout");
+
+    const events: Array<{ name: string; code: number | null }> = [];
+    spawned.child.once("exit", (code) => events.push({ name: "exit", code }));
+    spawned.child.once("close", (code) => events.push({ name: "close", code }));
+
+    // agent/kill makes the fake agent emit { seq, kind: "exit", exitCode }
+    // with no data field — the exact contract envelope shape.
+    spawned.kill();
+    await waitFor(() => events.length === 2, "exit and close events");
+    expect(events).toEqual([
+      { name: "exit", code: 0 },
+      { name: "close", code: 0 },
+    ]);
+    expect(spawned.child.exitCode).toBe(0);
   });
 
   it("does not emit exit when only the transport drops; a fresh attach continues the thread", async () => {
