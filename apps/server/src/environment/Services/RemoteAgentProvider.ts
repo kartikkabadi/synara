@@ -26,7 +26,10 @@ export interface RemoteAgentSpawnedProcess {
   /**
    * ChildProcess-shaped adapter: stdout/stderr replay the provider's output
    * demultiplexed from agent/event notifications, stdin writes travel as
-   * agent/send requests, and "exit"/"close" fire on the provider's exit event.
+   * agent/send requests, and "exit"/"close" fire only on the provider's exit
+   * event or a completed kill() flow. A transport (ssh) close fires a
+   * "disconnect" event instead — the provider outlives the channel and the
+   * owner may reconnect via attachRemoteAgent.
    */
   readonly child: ChildProcessWithoutNullStreams;
   /** Subscribes to raw ssh transport stderr output (never parsed as events). */

@@ -1731,12 +1731,11 @@ const ThreadConversationRollbackCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
-// Client-facing status of a remote agent thread's transport (#99 PR VI).
-// "reconnecting" covers the backoff loop's in-flight reattach attempts.
 export const RemoteAgentConnectionStatus = Schema.Literals([
+  "connecting",
   "connected",
-  "degraded",
   "reconnecting",
+  "degraded",
   "disconnected",
 ]);
 export type RemoteAgentConnectionStatus = typeof RemoteAgentConnectionStatus.Type;
@@ -1746,21 +1745,21 @@ export const ThreadRemoteAgentConnectionStatusChangedPayload = Schema.Struct({
   environmentId: EnvironmentId,
   status: RemoteAgentConnectionStatus,
   retryCount: NonNegativeInt,
-  lastSeq: NonNegativeInt,
-  message: Schema.optional(Schema.String),
+  lastSeq: Schema.Number,
+  message: Schema.optional(TrimmedNonEmptyString),
 });
 export type ThreadRemoteAgentConnectionStatusChangedPayload =
   typeof ThreadRemoteAgentConnectionStatusChangedPayload.Type;
 
-export const ThreadRemoteAgentConnectionStatusSetCommand = Schema.Struct({
+const ThreadRemoteAgentConnectionStatusSetCommand = Schema.Struct({
   type: Schema.Literal("thread.remote-agent.connection-status.set"),
   commandId: CommandId,
   threadId: ThreadId,
   environmentId: EnvironmentId,
   status: RemoteAgentConnectionStatus,
   retryCount: NonNegativeInt,
-  lastSeq: NonNegativeInt,
-  message: Schema.optional(Schema.String),
+  lastSeq: Schema.Number,
+  message: Schema.optional(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
 });
 
