@@ -94,7 +94,6 @@ describe("ExecutionEnvironmentRuntime", () => {
     expect(parsed.supervisor).toBe("none");
     expect(parsed.serverVersion).toBeUndefined();
     expect(parsed.remoteBinaryPath).toBeUndefined();
-    expect(parsed.forwardedEnvNames).toEqual([]);
     expect(parsed.adapterProtocolVersion).toBeUndefined();
   });
 
@@ -113,18 +112,17 @@ describe("ExecutionEnvironmentRuntime", () => {
     const parsed = decodeRuntime({
       runtimeType: "ssh-process",
       remoteBinaryPath: "/usr/local/bin/codex",
-      forwardedEnvNames: ["CODEX_HOME", "HTTPS_PROXY"],
       adapterProtocolVersion: "1",
     });
     expect(parsed.runtimeType).toBe("ssh-process");
     expect(parsed.remoteBinaryPath).toBe("/usr/local/bin/codex");
-    expect(parsed.forwardedEnvNames).toEqual(["CODEX_HOME", "HTTPS_PROXY"]);
     expect(parsed.adapterProtocolVersion).toBe("1");
     expect(parsed).not.toHaveProperty("remoteWorkspaceRoot");
   });
 
-  it("rejects blank forwarded env names", () => {
-    expect(() => decodeRuntime({ forwardedEnvNames: ["  "] })).toThrow();
+  it("does not admit generic environment forwarding", () => {
+    const parsed = decodeRuntime({ runtimeType: "local" });
+    expect(parsed).not.toHaveProperty("forwardedEnvNames");
   });
 
   it("rejects unknown runtime types and supervisors", () => {
