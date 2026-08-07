@@ -103,6 +103,20 @@ export class RemoteAgentStatusFailedError extends Schema.TaggedErrorClass<Remote
   }
 }
 
+/** All reconnect attempts after a transport disconnect were exhausted. */
+export class RemoteAgentReconnectFailedError extends Schema.TaggedErrorClass<RemoteAgentReconnectFailedError>()(
+  "RemoteAgentReconnectFailedError",
+  {
+    threadId: Schema.String,
+    attempts: Schema.Number,
+    reason: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Remote agent reconnect failed for thread ${this.threadId} after ${this.attempts} attempts: ${this.reason}`;
+  }
+}
+
 /** An `agent/event` notification did not decode as a valid envelope. */
 export class RemoteAgentEventParseError extends Schema.TaggedErrorClass<RemoteAgentEventParseError>()(
   "RemoteAgentEventParseError",
@@ -124,4 +138,5 @@ export type RemoteAgentError =
   | RemoteAgentSendFailedError
   | RemoteAgentKillFailedError
   | RemoteAgentStatusFailedError
+  | RemoteAgentReconnectFailedError
   | RemoteAgentEventParseError;

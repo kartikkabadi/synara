@@ -37,6 +37,10 @@ import {
 } from "../Services/RemoteAgentProvider";
 import type { RemoteAgentSpawnPlan } from "../Services/RemoteEnvironmentResolver";
 import { SshBinaryPath } from "../Services/SshProcessProvider";
+import {
+  RemoteAgentReconnector,
+  type RemoteAgentReconnectorOptions,
+} from "./RemoteAgentReconnector";
 
 const HELLO_TIMEOUT_MS = 15_000;
 const STDERR_TAIL_MAX_CHARS = 8_192;
@@ -141,43 +145,93 @@ class AgentRpcConnection {
 }
 
 /**
- * ChildProcess-shaped adapter for one agent thread. Real Readable/Writable
- * streams back stdout/stderr/stdin. Exit settles only from an agent exit
- * event or a completed kill() flow; a transport (ssh) close is surfaced as a
- * "disconnect" event instead, because the remote provider outlives the
+ * ChildProcess-shaped stable proxy for one agent thread. Real Readable/
+ * Writable streams back stdout/stderr/stdin and stay the same objects across
+ * transport reconnects: `bind` swaps the underlying ssh connection while the
+ * manager keeps reading/writing the proxy streams. Events are deduplicated by
+ * journal seq so an agent/attach replay never re-emits already-seen data.
+ * Exit settles only from an agent exit event or a completed kill() flow; a
+ * transport (ssh) death is surfaced as a "disconnect" event (and the
+ * `onDisconnect` callback) instead, because the remote provider outlives the
  * channel and the owning layer may reconnect via agent/attach.
  */
 class RemoteAgentChildAdapter extends EventEmitter {
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
   readonly stdin: Writable;
-  readonly pid: number | undefined;
+  pid: number | undefined;
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
   killed = false;
 
+  private agent: AgentConnection | undefined;
+  private highestSeq = 0;
+  private readonly transportStderrCallbacks: Array<(chunk: string) => void> = [];
+
   constructor(
-    private readonly connection: AgentRpcConnection,
-    private readonly sshChild: ChildProcessWithoutNullStreams,
     private readonly threadId: string,
+    private readonly onDisconnect?: (code: number, signal: NodeJS.Signals | null) => void,
   ) {
     super();
-    this.pid = sshChild.pid;
     this.stdin = new Writable({
       write: (chunk: Buffer | string, _encoding, callback) => {
+        const connection = this.agent?.connection;
+        if (connection === undefined) {
+          callback(new RemoteAgentSendFailedError({ reason: "agent transport is disconnected" }));
+          return;
+        }
         const payload = `b64:${Buffer.from(chunk).toString("base64")}`;
-        connection.request("agent/send", { threadId, payload }).then(
+        connection.request("agent/send", { threadId: this.threadId, payload }).then(
           () => callback(),
           (error: Error) => callback(new RemoteAgentSendFailedError({ reason: error.message })),
         );
       },
     });
-    sshChild.once("close", (code, signal) => {
-      // The transport died, not the provider: keep streams open and let the
-      // owning layer decide whether to reconnect through agent/attach.
-      this.emit("disconnect", code, signal);
+  }
+
+  get lastReceivedSeq(): number {
+    return this.highestSeq;
+  }
+
+  /**
+   * Seeds the replay high-water mark with the caller's consumed seq so a
+   * reattachment never replays events the caller already saw, even when the
+   * first attach replays nothing.
+   */
+  seedHighWaterMark(lastSeq: number): void {
+    this.highestSeq = Math.max(this.highestSeq, lastSeq);
+  }
+
+  /** Subscribes to raw transport stderr, stable across reconnects. */
+  onTransportStderr(callback: (chunk: string) => void): void {
+    this.transportStderrCallbacks.push(callback);
+  }
+
+  /** Points the proxy at a (new) transport connection and subscribes events. */
+  bind(agent: AgentConnection): void {
+    const previous = this.agent;
+    this.agent = agent;
+    this.pid = agent.sshChild.pid;
+    if (previous !== undefined && previous.sshChild.exitCode === null) {
+      previous.sshChild.kill();
+    }
+    agent.connection.onNotification((method, params) => {
+      if (method !== "agent/event") return;
+      this.handleEvent(params, (error) => this.emit("error", error));
     });
-    sshChild.once("error", (error) => {
+    agent.onStderr((chunk) => {
+      for (const callback of this.transportStderrCallbacks) callback(chunk);
+    });
+    agent.sshChild.once("close", (code, signal) => {
+      // A stale transport we already replaced must not signal anything, and
+      // a transport death never settles the provider: keep streams open,
+      // surface a disconnect, and let the owning layer reconnect.
+      if (this.agent !== agent || this.exitCode !== null || this.killed) return;
+      this.emit("disconnect", code, signal);
+      this.onDisconnect?.(code ?? -1, signal ?? null);
+    });
+    agent.sshChild.once("error", (error) => {
+      if (this.agent !== agent || this.exitCode !== null || this.killed) return;
       this.emit("disconnect", null, null, error);
     });
   }
@@ -191,6 +245,10 @@ class RemoteAgentChildAdapter extends EventEmitter {
       return;
     }
     if (envelope.threadId !== this.threadId) return;
+    // Replayed events (agent/attach) at or below the high-water mark were
+    // already forwarded on a previous connection.
+    if (envelope.seq <= this.highestSeq) return;
+    this.highestSeq = envelope.seq;
     switch (envelope.kind) {
       case "stdout":
         this.stdout.write(Buffer.from(envelope.data, "base64"));
@@ -206,19 +264,24 @@ class RemoteAgentChildAdapter extends EventEmitter {
 
   kill(signal?: NodeJS.Signals): boolean {
     this.killed = true;
+    const agent = this.agent;
+    if (agent === undefined) {
+      this.settleExit(-1, signal ?? null);
+      return true;
+    }
     const finalize = () => {
-      if (this.sshChild.exitCode === null && !this.sshChild.killed) {
-        this.sshChild.kill(signal);
+      if (agent.sshChild.exitCode === null && !agent.sshChild.killed) {
+        agent.sshChild.kill(signal);
       }
       // The kill flow completed: settle even if the exit event never arrived
       // (e.g. the transport dropped it) so teardown runs exactly once.
       this.settleExit(-1, signal ?? null);
     };
-    this.connection.request("agent/kill", { threadId: this.threadId }).then(finalize, finalize);
+    agent.connection.request("agent/kill", { threadId: this.threadId }).then(finalize, finalize);
     return true;
   }
 
-  private settleExit(code: number, signal: NodeJS.Signals | null): void {
+  settleExit(code: number, signal: NodeJS.Signals | null): void {
     if (this.exitCode !== null) return;
     this.exitCode = code;
     this.signalCode = signal;
@@ -311,20 +374,6 @@ function performHello(
   });
 }
 
-function makeSpawnedProcess(agent: AgentConnection, plan: RemoteAgentSpawnPlan) {
-  const adapter = new RemoteAgentChildAdapter(agent.connection, agent.sshChild, plan.threadId);
-  agent.connection.onNotification((method, params) => {
-    if (method !== "agent/event") return;
-    adapter.handleEvent(params, (error) => adapter.emit("error", error));
-  });
-  const spawned: RemoteAgentSpawnedProcess = {
-    child: adapter as unknown as ChildProcessWithoutNullStreams,
-    onStderr: agent.onStderr,
-    kill: (signal?: NodeJS.Signals) => adapter.kill(signal),
-  };
-  return spawned;
-}
-
 const THREAD_EXISTS_MESSAGE = "already exists";
 
 function mapSpawnRejection(threadId: string, cause: unknown): RemoteAgentError {
@@ -337,54 +386,134 @@ function mapSpawnRejection(threadId: string, cause: unknown): RemoteAgentError {
 export const makeRemoteAgentProvider = (
   sshBinaryPath: string,
   installer: RemoteAgentInstallerShape,
-): RemoteAgentProviderShape => ({
-  spawnRemoteAgent: (plan: RemoteAgentSpawnPlan, options: ProviderProcessSpawnOptions) =>
-    Effect.gen(function* () {
-      yield* installer.ensureAgentInstalled({ transport: plan.transport, runtime: plan.runtime });
-      const agent = yield* connectToAgent(sshBinaryPath, plan, options);
-      const closeOnFailure = <A, E>(effect: Effect.Effect<A, E>) =>
-        Effect.tapError(effect, () => Effect.sync(() => agent.sshChild.kill()));
-      yield* closeOnFailure(performHello(agent.connection));
-      // Subscribe before agent/spawn resolves so no early event is dropped.
-      const spawned = makeSpawnedProcess(agent, plan);
-      yield* closeOnFailure(
-        Effect.tryPromise({
-          try: () =>
-            agent.connection.request("agent/spawn", {
-              threadId: plan.threadId,
-              executionProfile: plan.executionProfile,
-              providerArgv: plan.providerArgv,
-            }),
-          catch: (cause) => mapSpawnRejection(plan.threadId, cause),
-        }),
-      );
-      return spawned;
-    }),
-  attachRemoteAgent: (
+  reconnectOptions: RemoteAgentReconnectorOptions = {},
+): RemoteAgentProviderShape => {
+  const reconnector = new RemoteAgentReconnector(reconnectOptions);
+
+  /**
+   * Opens a fresh transport, rebinds the proxy, and replays via agent/attach.
+   * Only an authoritative attach status counts: "running" is a successful
+   * reconnect, "exited" settles the adapter from the terminal state, and any
+   * other status fails the attempt so the reconnector keeps retrying.
+   */
+  const reattach = async (
     plan: RemoteAgentSpawnPlan,
-    lastSeq: number,
     options: ProviderProcessSpawnOptions,
-  ) =>
-    Effect.gen(function* () {
-      const agent = yield* connectToAgent(sshBinaryPath, plan, options);
-      const closeOnFailure = <A, E>(effect: Effect.Effect<A, E>) =>
-        Effect.tapError(effect, () => Effect.sync(() => agent.sshChild.kill()));
-      yield* closeOnFailure(performHello(agent.connection));
-      // Subscribe before agent/attach so replayed events land on the streams.
-      const spawned = makeSpawnedProcess(agent, plan);
-      const result = yield* closeOnFailure(
-        Effect.tryPromise({
-          try: () => agent.connection.request("agent/attach", { threadId: plan.threadId, lastSeq }),
-          catch: (cause) =>
-            new RemoteAgentAttachFailedError({
-              reason: cause instanceof Error ? cause.message : String(cause),
-            }),
-        }),
-      );
-      const attach = result as RemoteAgentAttachResult;
-      return { process: spawned, attach };
-    }),
-});
+    adapter: RemoteAgentChildAdapter,
+  ): Promise<"running" | "exited"> => {
+    const agent = await Effect.runPromise(connectToAgent(sshBinaryPath, plan, options));
+    try {
+      await Effect.runPromise(performHello(agent.connection));
+      // Bind before agent/attach so replayed events land on the proxy streams.
+      adapter.bind(agent);
+      const result = (await agent.connection.request("agent/attach", {
+        threadId: plan.threadId,
+        lastSeq: adapter.lastReceivedSeq,
+      })) as RemoteAgentAttachResult;
+      if (result.status === "exited") {
+        // The replayed exit event normally settles the adapter with the real
+        // code; settle from the attach result if it was already consumed.
+        adapter.settleExit(-1, null);
+        agent.sshChild.kill();
+        return "exited";
+      }
+      if (result.status !== "running") {
+        throw new Error(`agent/attach returned non-authoritative status "${result.status}"`);
+      }
+      return "running";
+    } catch (cause) {
+      agent.sshChild.kill();
+      throw cause;
+    }
+  };
+
+  /**
+   * Creates the stable proxy adapter for a thread. On transport disconnect
+   * the reconnector marks the thread degraded and reattaches with backoff;
+   * the manager keeps the same stdin/stdout/stderr streams throughout.
+   */
+  const makeSpawnedProcess = (plan: RemoteAgentSpawnPlan, options: ProviderProcessSpawnOptions) => {
+    const adapter: RemoteAgentChildAdapter = new RemoteAgentChildAdapter(plan.threadId, (code) => {
+      reconnector.scheduleReconnect({
+        threadId: plan.threadId,
+        disconnectCode: code,
+        ensureInstalled: () =>
+          Effect.runPromise(
+            installer.ensureAgentInstalled({ transport: plan.transport, runtime: plan.runtime }),
+          ),
+        reattach: () => reattach(plan, options, adapter),
+        isSettled: () => adapter.exitCode !== null || adapter.killed,
+        onExhausted: (error) => {
+          adapter.emit("error", error);
+          adapter.settleExit(code, null);
+        },
+      });
+    });
+    adapter.once("exit", () => reconnector.finalize(plan.threadId));
+    const spawned: RemoteAgentSpawnedProcess = {
+      child: adapter as unknown as ChildProcessWithoutNullStreams,
+      onStderr: (callback: (chunk: string) => void) => adapter.onTransportStderr(callback),
+      kill: (signal?: NodeJS.Signals) => {
+        reconnector.cancel(plan.threadId);
+        adapter.kill(signal);
+      },
+    };
+    return { adapter, spawned };
+  };
+
+  return {
+    spawnRemoteAgent: (plan: RemoteAgentSpawnPlan, options: ProviderProcessSpawnOptions) =>
+      Effect.gen(function* () {
+        yield* installer.ensureAgentInstalled({ transport: plan.transport, runtime: plan.runtime });
+        const agent = yield* connectToAgent(sshBinaryPath, plan, options);
+        const closeOnFailure = <A, E>(effect: Effect.Effect<A, E>) =>
+          Effect.tapError(effect, () => Effect.sync(() => agent.sshChild.kill()));
+        yield* closeOnFailure(performHello(agent.connection));
+        // Bind before agent/spawn resolves so no early event is dropped.
+        const { adapter, spawned } = makeSpawnedProcess(plan, options);
+        adapter.bind(agent);
+        yield* closeOnFailure(
+          Effect.tryPromise({
+            try: () =>
+              agent.connection.request("agent/spawn", {
+                threadId: plan.threadId,
+                executionProfile: plan.executionProfile,
+                providerArgv: plan.providerArgv,
+              }),
+            catch: (cause) => mapSpawnRejection(plan.threadId, cause),
+          }),
+        );
+        return spawned;
+      }),
+    attachRemoteAgent: (
+      plan: RemoteAgentSpawnPlan,
+      lastSeq: number,
+      options: ProviderProcessSpawnOptions,
+    ) =>
+      Effect.gen(function* () {
+        const agent = yield* connectToAgent(sshBinaryPath, plan, options);
+        const closeOnFailure = <A, E>(effect: Effect.Effect<A, E>) =>
+          Effect.tapError(effect, () => Effect.sync(() => agent.sshChild.kill()));
+        yield* closeOnFailure(performHello(agent.connection));
+        // Bind before agent/attach so replayed events land on the streams.
+        const { adapter, spawned } = makeSpawnedProcess(plan, options);
+        adapter.seedHighWaterMark(lastSeq);
+        adapter.bind(agent);
+        const result = yield* closeOnFailure(
+          Effect.tryPromise({
+            try: () =>
+              agent.connection.request("agent/attach", { threadId: plan.threadId, lastSeq }),
+            catch: (cause) =>
+              new RemoteAgentAttachFailedError({
+                reason: cause instanceof Error ? cause.message : String(cause),
+              }),
+          }),
+        );
+        const attach = result as RemoteAgentAttachResult;
+        return { process: spawned, attach };
+      }),
+  };
+};
 
 export const RemoteAgentProviderLive = Layer.effect(
   RemoteAgentProvider,
