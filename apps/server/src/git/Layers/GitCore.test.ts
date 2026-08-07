@@ -1726,7 +1726,73 @@ it.layer(TestLayer)("git integration", (it) => {
           });
 
           expect(remoteName).toBe("origin-1");
-          expect((yield* git(tmp, ["remote"])).split("\n").filter(Boolean).sort()).toEqual([
+          expect((yield* git(tmp, ["remote"])).split("\n").filter(Boolean).toSorted()).toEqual([
+            "origin",
+            "origin-1",
+          ]);
+        }),
+    );
+
+    it.effect("reuses origin when a single insteadOf proxy rewrites the stored GitHub remote", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const core = yield* GitCore;
+
+        yield* git(tmp, [
+          "config",
+          "url.https://proxy.example/github.com/.insteadOf",
+          "https://github.com/",
+        ]);
+        yield* git(tmp, ["remote", "add", "origin", "https://github.com/example-org/synara.git"]);
+
+        const remoteName = yield* core.ensureRemote({
+          cwd: tmp,
+          preferredName: "origin",
+          url: "https://github.com/example-org/synara.git",
+        });
+
+        expect(remoteName).toBe("origin");
+        expect((yield* git(tmp, ["remote"])).split("\n").filter(Boolean)).toEqual(["origin"]);
+      }),
+    );
+
+    it.effect(
+      "does not equate a remote expanded through overlapping insteadOf rules with the GitHub target",
+      () =>
+        Effect.gen(function* () {
+          const tmp = yield* makeTmpDir();
+          yield* initRepoWithCommit(tmp);
+          const core = yield* GitCore;
+
+          // Git expands `https://evil.example/github.com/...` to the same URL that the second
+          // rule produces for `https://github.com/...`, so any attempt to invert the expanded
+          // URL is ambiguous. Identity must come from the literal configured remote URL.
+          yield* git(tmp, [
+            "config",
+            "url.https://proxy.example/.insteadOf",
+            "https://evil.example/",
+          ]);
+          yield* git(tmp, [
+            "config",
+            "url.https://proxy.example/github.com/.insteadOf",
+            "https://github.com/",
+          ]);
+          yield* git(tmp, [
+            "remote",
+            "add",
+            "origin",
+            "https://evil.example/github.com/example-org/synara.git",
+          ]);
+
+          const remoteName = yield* core.ensureRemote({
+            cwd: tmp,
+            preferredName: "origin",
+            url: "https://github.com/example-org/synara.git",
+          });
+
+          expect(remoteName).toBe("origin-1");
+          expect((yield* git(tmp, ["remote"])).split("\n").filter(Boolean).toSorted()).toEqual([
             "origin",
             "origin-1",
           ]);
