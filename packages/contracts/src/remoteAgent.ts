@@ -64,11 +64,24 @@ export type RemoteAgentStatusOutput = typeof RemoteAgentStatusOutput.Type;
 export const RemoteAgentEventKind = Schema.Literals(["stdout", "stderr", "exit"]);
 export type RemoteAgentEventKind = typeof RemoteAgentEventKind.Type;
 
-export const RemoteAgentEventEnvelope = Schema.Struct({
+export const RemoteAgentOutputEventEnvelope = Schema.Struct({
   threadId: TrimmedNonEmptyString,
   seq: Schema.Int,
-  kind: RemoteAgentEventKind,
+  kind: Schema.Literals(["stdout", "stderr"]),
   data: TrimmedNonEmptyString,
-  exitCode: Schema.optional(Schema.Int),
 });
+export type RemoteAgentOutputEventEnvelope = typeof RemoteAgentOutputEventEnvelope.Type;
+
+export const RemoteAgentExitEventEnvelope = Schema.Struct({
+  threadId: TrimmedNonEmptyString,
+  seq: Schema.Int,
+  kind: Schema.Literal("exit"),
+  exitCode: Schema.Int,
+});
+export type RemoteAgentExitEventEnvelope = typeof RemoteAgentExitEventEnvelope.Type;
+
+export const RemoteAgentEventEnvelope = Schema.Union([
+  RemoteAgentOutputEventEnvelope,
+  RemoteAgentExitEventEnvelope,
+]);
 export type RemoteAgentEventEnvelope = typeof RemoteAgentEventEnvelope.Type;
