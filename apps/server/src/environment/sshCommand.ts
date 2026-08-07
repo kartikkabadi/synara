@@ -152,10 +152,18 @@ export function buildSshArgv(
 export const DEFAULT_REMOTE_AGENT_INSTALL_PATH = "~/.synara/bin/remote-agent.cjs";
 
 /**
+ * Resolves the remote agent install path from the runtime descriptor,
+ * defaulting to the well-known per-user location.
+ */
+export function resolveRemoteAgentInstallPath(runtime: ExecutionEnvironmentRuntime): string {
+  return runtime.installPath?.trim() || DEFAULT_REMOTE_AGENT_INSTALL_PATH;
+}
+
+/**
  * Quotes a remote path while preserving `~/` home expansion by rewriting the
  * tilde prefix to a double-quoted `$HOME` reference.
  */
-function quoteRemotePath(remotePath: string): string {
+export function quoteRemotePath(remotePath: string): string {
   return remotePath.startsWith("~/")
     ? `"$HOME"${posixQuote(remotePath.slice(1))}`
     : posixQuote(remotePath);
@@ -167,8 +175,60 @@ function quoteRemotePath(remotePath: string): string {
  * install does not depend on the file's executable bit.
  */
 export function buildRemoteAgentCommand(runtime: ExecutionEnvironmentRuntime): string {
-  const installPath = runtime.installPath?.trim() || DEFAULT_REMOTE_AGENT_INSTALL_PATH;
-  return `exec node ${quoteRemotePath(installPath)}`;
+  return `exec node ${quoteRemotePath(resolveRemoteAgentInstallPath(runtime))}`;
+}
+
+/**
+ * Builds the full `ssh` argument array for running an arbitrary remote
+ * command over the same transport as the agent connection. Used by the
+ * installer for probe/mkdir/copy steps; the caller quotes the command.
+ */
+export function buildSshExecArgv(
+  transport: ExecutionEnvironmentSshTransport,
+  runtime: ExecutionEnvironmentRuntime,
+  remoteCommand: string,
+): string[] {
+  const argv = buildSshBaseArgv(transport, runtime);
+  argv.push("--", remoteCommand);
+  return argv;
+}
+
+/**
+ * Builds the `scp` argument array (without the leading `scp`) copying a local
+ * file to a remote path over the same transport. `~/`-prefixed remote paths
+ * become home-relative, matching scp's default working directory.
+ */
+export function buildScpArgv(
+  transport: ExecutionEnvironmentSshTransport,
+  runtime: ExecutionEnvironmentRuntime,
+  localPath: string,
+  remotePath: string,
+): string[] {
+  if (runtime.runtimeType !== "ssh-process") {
+    throw new SshCommandError({
+      reason: `runtimeType must be "ssh-process", got "${runtime.runtimeType}"`,
+    });
+  }
+  const host = requireSafeCliValue(requireNonEmpty(transport.host, "host"), "host");
+  const port = validatePort(transport.port);
+  const argv: string[] = ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes"];
+  if (port !== 22) {
+    argv.push("-P", String(port));
+  }
+  if (transport.identityFile !== undefined) {
+    argv.push("-i", requireNonEmpty(transport.identityFile, "identityFile"));
+  }
+  if (transport.sshConfigPath !== undefined) {
+    argv.push("-F", requireNonEmpty(transport.sshConfigPath, "sshConfigPath"));
+  }
+  if (transport.jumpHost !== undefined) {
+    argv.push("-J", requireNonEmpty(transport.jumpHost, "jumpHost"));
+  }
+  const user = transport.user !== undefined ? requireNonEmpty(transport.user, "user") : undefined;
+  const destination = user !== undefined ? `${user}@${host}` : host;
+  const homeRelative = remotePath.startsWith("~/") ? remotePath.slice(2) : remotePath;
+  argv.push("--", localPath, `${destination}:${homeRelative}`);
+  return argv;
 }
 
 /**

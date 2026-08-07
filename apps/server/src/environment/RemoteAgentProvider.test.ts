@@ -10,7 +10,11 @@ import os from "node:os";
 import path from "node:path";
 import type { Readable } from "node:stream";
 
-import { ExecutionProfile } from "@synara/contracts";
+import {
+  ExecutionEnvironmentRuntime,
+  ExecutionEnvironmentSshTransport,
+  ExecutionProfile,
+} from "@synara/contracts";
 import { Effect, Schema } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -291,6 +295,13 @@ const executionProfile = Schema.decodeUnknownSync(ExecutionProfile)({
   remoteWorkspaceRoot: "/srv/workspaces/repo",
 });
 
+const transport = Schema.decodeUnknownSync(ExecutionEnvironmentSshTransport)({
+  host: "remote.example",
+});
+const runtime = Schema.decodeUnknownSync(ExecutionEnvironmentRuntime)({
+  runtimeType: "ssh-process",
+});
+
 const makePlan = (threadId: string): RemoteAgentSpawnPlan => ({
   kind: "remote-agent",
   // The "ssh binary" is node and the argv is just the fake agent script.
@@ -299,6 +310,8 @@ const makePlan = (threadId: string): RemoteAgentSpawnPlan => ({
   threadId,
   executionProfile,
   providerArgv: ["codex", "app-server"],
+  transport,
+  runtime,
 });
 
 const makeOptions = (journalDir: string, extraEnv: NodeJS.ProcessEnv = {}) => ({
@@ -306,7 +319,10 @@ const makeOptions = (journalDir: string, extraEnv: NodeJS.ProcessEnv = {}) => ({
   env: { ...process.env, SYNARA_AGENT_JOURNAL_DIR: journalDir, ...extraEnv },
 });
 
-const provider = makeRemoteAgentProvider(process.execPath);
+// The transport tests exercise the wire protocol only; installation is a no-op.
+const provider = makeRemoteAgentProvider(process.execPath, {
+  ensureAgentInstalled: () => Effect.void,
+});
 
 function collect(stream: Readable): { read: () => string } {
   let data = "";

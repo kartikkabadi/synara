@@ -12,6 +12,7 @@ import { LocalProcessSpawnerLive } from "../environment/Layers/LocalProcessSpawn
 import { RemoteEnvironmentRegistryLive } from "../environment/Layers/RemoteEnvironmentRegistry";
 import { RemoteEnvironmentResolverLive } from "../environment/Layers/RemoteEnvironmentResolver";
 import { ServerEnvironmentLive } from "../environment/Layers/ServerEnvironment";
+import { RemoteAgentInstallerLive } from "../environment/Layers/RemoteAgentInstaller";
 import { RemoteAgentProviderLive } from "../environment/Layers/RemoteAgentProvider";
 import { SshProcessProviderLive } from "../environment/Layers/SshProcessProvider";
 import { makeClaudeAdapterLive } from "./Layers/ClaudeAdapter";
@@ -62,7 +63,7 @@ export function makeServerProviderLayer(
     const executionEnvironmentLayer = Layer.mergeAll(
       LocalProcessSpawnerLive,
       SshProcessProviderLive,
-      RemoteAgentProviderLive,
+      RemoteAgentProviderLive.pipe(Layer.provide(RemoteAgentInstallerLive)),
       RemoteEnvironmentResolverLive.pipe(
         Layer.provide(RemoteEnvironmentRegistryLive.pipe(Layer.provide(ServerEnvironmentLive))),
       ),
