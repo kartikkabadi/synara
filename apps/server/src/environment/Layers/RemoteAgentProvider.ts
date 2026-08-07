@@ -9,8 +9,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";
 
-import type { RemoteAgentEventKind } from "@synara/contracts";
-import { Effect, Layer, Option } from "effect";
+import { RemoteAgentEventEnvelope } from "@synara/contracts";
+import { Effect, Layer, Option, Schema } from "effect";
 
 import {
   type RemoteAgentError,
@@ -41,40 +41,7 @@ import { SshBinaryPath } from "../Services/SshProcessProvider";
 const HELLO_TIMEOUT_MS = 15_000;
 const STDERR_TAIL_MAX_CHARS = 8_192;
 
-// Lenient structural parse of RemoteAgentEventEnvelope: exit events carry an
-// empty `data` payload, which the contracts schema (TrimmedNonEmptyString)
-// rejects, so the transport validates the envelope shape itself.
-interface AgentEventEnvelope {
-  readonly threadId: string;
-  readonly seq: number;
-  readonly kind: RemoteAgentEventKind;
-  readonly data: string;
-  readonly exitCode?: number;
-}
-
-function parseEventEnvelope(params: unknown): AgentEventEnvelope {
-  if (typeof params !== "object" || params === null) {
-    throw new Error("agent/event params must be an object");
-  }
-  const record = params as Record<string, unknown>;
-  const { threadId, seq, kind, data, exitCode } = record;
-  if (typeof threadId !== "string" || threadId.length === 0) {
-    throw new Error("agent/event threadId must be a non-empty string");
-  }
-  if (typeof seq !== "number" || !Number.isInteger(seq)) {
-    throw new Error("agent/event seq must be an integer");
-  }
-  if (kind !== "stdout" && kind !== "stderr" && kind !== "exit") {
-    throw new Error(`agent/event kind is invalid: ${String(kind)}`);
-  }
-  if (typeof data !== "string") {
-    throw new Error("agent/event data must be a string");
-  }
-  if (exitCode !== undefined && typeof exitCode !== "number") {
-    throw new Error("agent/event exitCode must be a number when present");
-  }
-  return { threadId, seq, kind, data, ...(exitCode !== undefined ? { exitCode } : {}) };
-}
+const decodeEventEnvelope = Schema.decodeUnknownSync(RemoteAgentEventEnvelope);
 
 interface JsonRpcResponse {
   readonly jsonrpc: "2.0";
@@ -175,8 +142,10 @@ class AgentRpcConnection {
 
 /**
  * ChildProcess-shaped adapter for one agent thread. Real Readable/Writable
- * streams back stdout/stderr/stdin; exit fires from agent exit events (or
- * from the ssh transport closing underneath us).
+ * streams back stdout/stderr/stdin. Exit settles only from an agent exit
+ * event or a completed kill() flow; a transport (ssh) close is surfaced as a
+ * "disconnect" event instead, because the remote provider outlives the
+ * channel and the owning layer may reconnect via agent/attach.
  */
 class RemoteAgentChildAdapter extends EventEmitter {
   readonly stdout = new PassThrough();
@@ -204,45 +173,48 @@ class RemoteAgentChildAdapter extends EventEmitter {
       },
     });
     sshChild.once("close", (code, signal) => {
-      // The transport died without a provider exit event: surface it as an
-      // exit so the manager's teardown path runs exactly once.
-      this.settleExit(code ?? -1, signal ?? null);
+      // The transport died, not the provider: keep streams open and let the
+      // owning layer decide whether to reconnect through agent/attach.
+      this.emit("disconnect", code, signal);
+    });
+    sshChild.once("error", (error) => {
+      this.emit("disconnect", null, null, error);
     });
   }
 
   handleEvent(params: unknown, onParseError: (error: RemoteAgentEventParseError) => void): void {
-    let envelope: AgentEventEnvelope;
+    let envelope: RemoteAgentEventEnvelope;
     try {
-      envelope = parseEventEnvelope(params);
+      envelope = decodeEventEnvelope(params);
     } catch (cause) {
       onParseError(new RemoteAgentEventParseError({ reason: String(cause) }));
       return;
     }
     if (envelope.threadId !== this.threadId) return;
-    const data = Buffer.from(envelope.data, "base64");
     switch (envelope.kind) {
       case "stdout":
-        this.stdout.write(data);
+        this.stdout.write(Buffer.from(envelope.data, "base64"));
         return;
       case "stderr":
-        this.stderr.write(data);
+        this.stderr.write(Buffer.from(envelope.data, "base64"));
         return;
       case "exit":
-        this.settleExit(envelope.exitCode ?? -1, null);
+        this.settleExit(envelope.exitCode, null);
         return;
     }
   }
 
   kill(signal?: NodeJS.Signals): boolean {
     this.killed = true;
-    const closeTransport = () => {
+    const finalize = () => {
       if (this.sshChild.exitCode === null && !this.sshChild.killed) {
         this.sshChild.kill(signal);
       }
+      // The kill flow completed: settle even if the exit event never arrived
+      // (e.g. the transport dropped it) so teardown runs exactly once.
+      this.settleExit(-1, signal ?? null);
     };
-    this.connection
-      .request("agent/kill", { threadId: this.threadId })
-      .then(closeTransport, closeTransport);
+    this.connection.request("agent/kill", { threadId: this.threadId }).then(finalize, finalize);
     return true;
   }
 
