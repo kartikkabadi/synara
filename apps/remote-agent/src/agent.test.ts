@@ -2,10 +2,15 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Schema } from "effect";
 import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
+
+import { RemoteAgentEventEnvelope } from "@synara/contracts/remoteAgent";
 
 const packageRoot = join(__dirname, "..");
 const binaryPath = join(packageRoot, "dist", "remote-agent.cjs");
+
+const decodeEvent = Schema.decodeUnknownSync(RemoteAgentEventEnvelope);
 
 interface RpcMessage {
   jsonrpc: "2.0";
@@ -47,6 +52,7 @@ class AgentHarness {
   }
 
   private receive(message: RpcMessage): void {
+    if (message.method === "agent/event") decodeEvent(message.params);
     this.messages.push(message);
     for (let i = this.waiters.length - 1; i >= 0; i -= 1) {
       const waiter = this.waiters[i]!;
@@ -160,6 +166,52 @@ test("agent/spawn emits journaled stdout and exit events", async () => {
     providerArgv: [process.execPath, "-e", ""],
   });
   expect(duplicate.error?.message).toContain("already exists");
+});
+
+test("agent/spawn settles a thread whose executable cannot be launched", async () => {
+  harness = new AgentHarness();
+  const threadId = "thread-enoent";
+  const response = await harness.request("agent/spawn", {
+    threadId,
+    executionProfile,
+    providerArgv: ["/nonexistent/synara-provider-binary"],
+  });
+  expect(response.result).toEqual({ ok: true });
+
+  const exitEvent = await harness.waitFor(
+    (message) =>
+      message.method === "agent/event" &&
+      message.params?.["threadId"] === threadId &&
+      message.params?.["kind"] === "exit",
+  );
+  expect(exitEvent.params?.["exitCode"]).toBe(-1);
+
+  const exitEvents = harness
+    .events(threadId)
+    .filter((message) => message.params?.["kind"] === "exit");
+  expect(exitEvents).toHaveLength(1);
+
+  const stderrEvents = harness
+    .events(threadId)
+    .filter((message) => message.params?.["kind"] === "stderr");
+  const combined = stderrEvents
+    .map((message) => Buffer.from(message.params?.["data"] as string, "base64").toString("utf8"))
+    .join("");
+  expect(combined).toContain("ENOENT");
+
+  const status = await harness.request("agent/status");
+  const threads = status.result?.["threads"] as Array<{ threadId: string; status: string }>;
+  expect(threads.find((thread) => thread.threadId === threadId)?.status).toBe("exited");
+
+  const attach = await harness.request("agent/attach", { threadId, lastSeq: 0 });
+  expect(attach.result?.["status"]).toBe("exited");
+  expect(attach.result?.["lastSeq"]).toBe(exitEvent.params?.["seq"]);
+
+  const journal = readFileSync(join(harness.journalDir, `${threadId}.journal`), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as { kind: string });
+  expect(journal[journal.length - 1]?.kind).toBe("exit");
 });
 
 test("agent/attach replays journal entries after lastSeq", async () => {
