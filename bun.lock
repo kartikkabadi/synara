@@ -41,6 +41,16 @@
         "typescript": "catalog:",
       },
     },
+    "apps/remote-agent": {
+      "name": "@synara/remote-agent",
+      "devDependencies": {
+        "@synara/contracts": "workspace:*",
+        "@types/node": "catalog:",
+        "effect": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "apps/server": {
       "name": "@synara/cli",
       "version": "0.6.2",
@@ -965,6 +975,8 @@
     "@synara/desktop": ["@synara/desktop@workspace:apps/desktop"],
 
     "@synara/marketing": ["@synara/marketing@workspace:apps/marketing"],
+
+    "@synara/remote-agent": ["@synara/remote-agent@workspace:apps/remote-agent"],
 
     "@synara/scripts": ["@synara/scripts@workspace:scripts"],
 

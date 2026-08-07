@@ -1,0 +1,17 @@
+{
+  "name": "@synara/remote-agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build --target=node --format=cjs --outfile=dist/remote-agent.cjs src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --maxWorkers=1 --no-file-parallelism"
+  },
+  "devDependencies": {
+    "@synara/contracts": "workspace:*",
+    "@types/node": "catalog:",
+    "effect": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
