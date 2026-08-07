@@ -2030,6 +2030,32 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.remote-agent.connection-status.set": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+          metadata: {},
+        }),
+        type: "thread.remote-agent-connection-status-changed",
+        payload: {
+          threadId: command.threadId,
+          environmentId: command.environmentId,
+          status: command.status,
+          retryCount: command.retryCount,
+          lastSeq: command.lastSeq,
+          ...(command.message !== undefined ? { message: command.message } : {}),
+        },
+      };
+    }
+
     case "thread.messages.import": {
       yield* requireThread({
         readModel,

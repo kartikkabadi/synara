@@ -1590,6 +1590,38 @@ const ThreadConversationRollbackCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+export const RemoteAgentConnectionStatus = Schema.Literals([
+  "connecting",
+  "connected",
+  "reconnecting",
+  "degraded",
+  "disconnected",
+]);
+export type RemoteAgentConnectionStatus = typeof RemoteAgentConnectionStatus.Type;
+
+export const ThreadRemoteAgentConnectionStatusChangedPayload = Schema.Struct({
+  threadId: ThreadId,
+  environmentId: EnvironmentId,
+  status: RemoteAgentConnectionStatus,
+  retryCount: NonNegativeInt,
+  lastSeq: Schema.Number,
+  message: Schema.optional(TrimmedNonEmptyString),
+});
+export type ThreadRemoteAgentConnectionStatusChangedPayload =
+  typeof ThreadRemoteAgentConnectionStatusChangedPayload.Type;
+
+const ThreadRemoteAgentConnectionStatusSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.remote-agent.connection-status.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  environmentId: EnvironmentId,
+  status: RemoteAgentConnectionStatus,
+  retryCount: NonNegativeInt,
+  lastSeq: Schema.Number,
+  message: Schema.optional(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessagesImportCommand,
@@ -1602,6 +1634,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadConversationRollbackCommand,
   ThreadConversationRollbackCompleteCommand,
   ThreadDispatchQueuedTurnCommand,
+  ThreadRemoteAgentConnectionStatusSetCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -1653,6 +1686,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.remote-agent-connection-status-changed",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -2252,6 +2286,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.remote-agent-connection-status-changed"),
+    payload: ThreadRemoteAgentConnectionStatusChangedPayload,
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;

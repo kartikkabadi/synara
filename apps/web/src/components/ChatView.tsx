@@ -2106,6 +2106,9 @@ export default function ChatView({
   const activeThreadEnvironmentSelection = useThreadExecutionEnvironmentStore((state) =>
     activeThread ? (state.selectionByThreadId[activeThread.id] ?? null) : null,
   );
+  const activeThreadRemoteAgentStatus = useStore((state) =>
+    activeThread ? (state.remoteAgentStatusByThreadId?.[activeThread.id] ?? null) : null,
+  );
   const lockedProvider: ProviderKind | null = hasThreadStarted
     ? (sessionProvider ?? threadProvider ?? selectedProviderByThreadId ?? null)
     : null;
@@ -10909,6 +10912,7 @@ export default function ChatView({
         <ChatHeader
           activeThreadId={activeThread.id}
           executionEnvironmentLabel={activeThreadEnvironmentSelection?.environmentLabel ?? null}
+          remoteAgentConnectionStatus={activeThreadRemoteAgentStatus?.status ?? null}
           activeThreadTitle={activeThreadDisplayTitle}
           activeThreadEntryPoint={terminalState.entryPoint}
           activeProvider={activeThread.session?.provider ?? activeThread.modelSelection.provider}

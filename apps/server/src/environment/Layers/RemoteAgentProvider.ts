@@ -9,7 +9,11 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";
 
-import { RemoteAgentEventEnvelope } from "@synara/contracts";
+import {
+  RemoteAgentEventEnvelope,
+  ThreadId,
+  type RemoteAgentConnectionStatusChanged,
+} from "@synara/contracts";
 import { Effect, Layer, Option, Schema } from "effect";
 
 import {
@@ -37,9 +41,11 @@ import {
 } from "../Services/RemoteAgentProvider";
 import type { RemoteAgentSpawnPlan } from "../Services/RemoteEnvironmentResolver";
 import { SshBinaryPath } from "../Services/SshProcessProvider";
+import { publishRemoteAgentStatus } from "../remoteAgentStatusBus";
 import {
   RemoteAgentReconnector,
   type RemoteAgentReconnectorOptions,
+  type RemoteAgentStatusChange,
 } from "./RemoteAgentReconnector";
 
 const HELLO_TIMEOUT_MS = 15_000;
@@ -387,6 +393,7 @@ export const makeRemoteAgentProvider = (
   sshBinaryPath: string,
   installer: RemoteAgentInstallerShape,
   reconnectOptions: RemoteAgentReconnectorOptions = {},
+  onConnectionStatusChanged?: (event: RemoteAgentConnectionStatusChanged) => void,
 ): RemoteAgentProviderShape => {
   const reconnector = new RemoteAgentReconnector(reconnectOptions);
 
@@ -433,6 +440,16 @@ export const makeRemoteAgentProvider = (
    * the manager keeps the same stdin/stdout/stderr streams throughout.
    */
   const makeSpawnedProcess = (plan: RemoteAgentSpawnPlan, options: ProviderProcessSpawnOptions) => {
+    const emitStatusChange = (adapter: RemoteAgentChildAdapter, change: RemoteAgentStatusChange) =>
+      onConnectionStatusChanged?.({
+        _tag: "RemoteAgentConnectionStatusChanged",
+        threadId: ThreadId.makeUnsafe(plan.threadId),
+        environmentId: plan.executionProfile.environmentId,
+        status: change.status,
+        retryCount: change.retryCount,
+        lastSeq: adapter.lastReceivedSeq,
+        ...(change.message !== undefined ? { message: change.message } : {}),
+      });
     const adapter: RemoteAgentChildAdapter = new RemoteAgentChildAdapter(plan.threadId, (code) => {
       reconnector.scheduleReconnect({
         threadId: plan.threadId,
@@ -447,6 +464,7 @@ export const makeRemoteAgentProvider = (
           adapter.emit("error", error);
           adapter.settleExit(code, null);
         },
+        onStatusChange: (change) => emitStatusChange(adapter, change),
       });
     });
     adapter.once("exit", () => reconnector.finalize(plan.threadId));
@@ -520,6 +538,6 @@ export const RemoteAgentProviderLive = Layer.effect(
   Effect.gen(function* () {
     const sshBinaryPath = yield* SshBinaryPath.asEffect();
     const installer = yield* RemoteAgentInstaller;
-    return makeRemoteAgentProvider(sshBinaryPath, installer);
+    return makeRemoteAgentProvider(sshBinaryPath, installer, {}, publishRemoteAgentStatus);
   }),
 );

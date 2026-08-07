@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 
-import { TrimmedNonEmptyString } from "./baseSchemas";
-import { ExecutionProfile } from "./orchestration";
+import { EnvironmentId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
+import { ExecutionProfile, RemoteAgentConnectionStatus } from "./orchestration";
 
 // RPC schemas for the persistent remote agent that keeps provider sessions
 // alive across client disconnects (environments with reconnect: "remote-agent").
@@ -85,3 +85,16 @@ export const RemoteAgentEventEnvelope = Schema.Union([
   RemoteAgentExitEventEnvelope,
 ]);
 export type RemoteAgentEventEnvelope = typeof RemoteAgentEventEnvelope.Type;
+
+// Emitted by the server whenever a remote thread's transport status changes;
+// persisted as the `thread.remote-agent-connection-status-changed` domain event.
+export const RemoteAgentConnectionStatusChanged = Schema.Struct({
+  _tag: Schema.Literal("RemoteAgentConnectionStatusChanged"),
+  threadId: ThreadId,
+  environmentId: EnvironmentId,
+  status: RemoteAgentConnectionStatus,
+  retryCount: Schema.Number,
+  lastSeq: Schema.Number,
+  message: Schema.optional(Schema.String),
+});
+export type RemoteAgentConnectionStatusChanged = typeof RemoteAgentConnectionStatusChanged.Type;

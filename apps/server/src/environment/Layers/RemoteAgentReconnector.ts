@@ -6,9 +6,18 @@
 //          install/reattach closures; this class only owns per-thread state,
 //          scheduling, and cancellation.
 
-import type { ExecutionEnvironmentConnectionStatus } from "@synara/contracts";
+import type {
+  ExecutionEnvironmentConnectionStatus,
+  RemoteAgentConnectionStatus,
+} from "@synara/contracts";
 
 import { RemoteAgentReconnectFailedError } from "../RemoteEnvironmentErrors";
+
+export interface RemoteAgentStatusChange {
+  readonly status: RemoteAgentConnectionStatus;
+  readonly retryCount: number;
+  readonly message?: string;
+}
 
 export interface RemoteAgentReconnectState {
   readonly status: ExecutionEnvironmentConnectionStatus;
@@ -38,6 +47,8 @@ export interface RemoteAgentReconnectRequest {
   readonly isSettled: () => boolean;
   /** Called when all attempts failed; the caller finalizes the thread. */
   readonly onExhausted: (error: RemoteAgentReconnectFailedError) => void;
+  /** Observes client-facing status transitions of the reconnect loop. */
+  readonly onStatusChange?: (change: RemoteAgentStatusChange) => void;
 }
 
 interface ThreadState {
@@ -83,6 +94,11 @@ export class RemoteAgentReconnector {
       timer: undefined,
     };
     this.threads.set(request.threadId, state);
+    request.onStatusChange?.({
+      status: "degraded",
+      retryCount: 0,
+      message: "transport disconnected",
+    });
     void this.runLoop(request, state);
   }
 
@@ -117,6 +133,7 @@ export class RemoteAgentReconnector {
       }
       state.attempt = attempt;
       state.status = "connecting";
+      request.onStatusChange?.({ status: "reconnecting", retryCount: attempt });
       try {
         await request.ensureInstalled();
         const status = await request.reattach();
@@ -129,15 +146,22 @@ export class RemoteAgentReconnector {
         }
         state.status = "connected";
         state.active = false;
+        request.onStatusChange?.({ status: "connected", retryCount: attempt });
         return;
       } catch (cause) {
         lastReason = cause instanceof Error ? cause.message : String(cause);
         state.status = "degraded";
+        request.onStatusChange?.({ status: "degraded", retryCount: attempt, message: lastReason });
       }
     }
     state.active = false;
     if (state.cancelled || request.isSettled()) return;
     state.status = "error";
+    request.onStatusChange?.({
+      status: "disconnected",
+      retryCount: this.maxAttempts,
+      message: lastReason,
+    });
     request.onExhausted(
       new RemoteAgentReconnectFailedError({
         threadId: request.threadId,

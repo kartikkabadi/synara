@@ -29,6 +29,7 @@ import {
   type OrchestrationEngineShape,
 } from "./orchestration/Services/OrchestrationEngine";
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor";
+import { startRemoteAgentStatusReactor } from "./orchestration/Layers/RemoteAgentStatusReactor";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor";
 import { reconcileRestartStuckTurns } from "./orchestration/startupTurnReconciliation";
@@ -202,6 +203,7 @@ export const createEffectServer = Effect.fn(function* (
     }),
   );
   yield* Scope.provide(orchestrationReactor.start, subscriptionsScope);
+  yield* Scope.provide(startRemoteAgentStatusReactor(orchestrationEngine), subscriptionsScope);
   yield* Scope.provide(automationScheduler.start(), subscriptionsScope);
   yield* Scope.provide(automationRunReactor.start(), subscriptionsScope);
   yield* Scope.provide(threadDeletionReactor.start(), subscriptionsScope);
