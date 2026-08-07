@@ -4,7 +4,8 @@
 //          stdio, journals events, and simulates a provider process (#99 PR
 //          III). "ssh" is replaced by the node binary running the fake agent.
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { type ChildProcess, spawn } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { Readable } from "node:stream";
@@ -50,8 +51,10 @@ const readJournal = (threadId) => {
 const emitEvent = (threadId, kind, data, exitCode) => {
   const state = threads.get(threadId);
   state.seq += 1;
-  const entry = { seq: state.seq, kind, data: Buffer.from(data).toString("base64") };
-  if (exitCode !== undefined) entry.exitCode = exitCode;
+  const entry =
+    kind === "exit"
+      ? { seq: state.seq, kind, exitCode }
+      : { seq: state.seq, kind, data: Buffer.from(data).toString("base64") };
   appendFileSync(journalPath(threadId), JSON.stringify(entry) + "\\n");
   write({ jsonrpc: "2.0", method: "agent/event", params: { threadId, ...entry } });
 };
@@ -138,7 +141,151 @@ function handle(message) {
 `,
 );
 
+// Long-running fake agent daemon on a Unix domain socket, plus a stdio<->
+// socket shim child. Killing the shim drops only the transport while the
+// daemon (and its simulated provider threads) keeps running — the shape the
+// disconnect-vs-exit regression test needs. NOTE: this daemon/attach model
+// exists only for the test; the production `buildAgentSshArgv` command still
+// needs the real remote daemon decision from issue #99.
+const fakeAgentServerPath = path.join(tempDir, "fake-agent-server.cjs");
+writeFileSync(
+  fakeAgentServerPath,
+  `
+const net = require("node:net");
+
+const socketPath = process.argv[2];
+const threads = new Map();
+const sockets = new Set();
+
+const broadcast = (message) => {
+  const line = JSON.stringify(message) + "\\n";
+  for (const socket of sockets) socket.write(line);
+};
+const getThread = (threadId) => {
+  let state = threads.get(threadId);
+  if (!state) {
+    state = { seq: 0, status: "missing", journal: [] };
+    threads.set(threadId, state);
+  }
+  return state;
+};
+const emitEvent = (threadId, kind, data, exitCode) => {
+  const state = getThread(threadId);
+  state.seq += 1;
+  const entry =
+    kind === "exit"
+      ? { seq: state.seq, kind, exitCode }
+      : { seq: state.seq, kind, data: Buffer.from(data).toString("base64") };
+  state.journal.push(entry);
+  broadcast({ jsonrpc: "2.0", method: "agent/event", params: { threadId, ...entry } });
+};
+
+function handle(socket, message) {
+  const { id, method, params } = message;
+  const respond = (result) => socket.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+  const respondError = (code, msg) =>
+    socket.write(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message: msg } }) + "\\n");
+  switch (method) {
+    case "agent/hello":
+      respond({ agentVersion: "fake-agent-daemon", protocolVersion: "0.1.0" });
+      return;
+    case "agent/spawn": {
+      if (threads.has(params.threadId)) {
+        respondError(-32000, "Thread already exists: " + params.threadId);
+        return;
+      }
+      getThread(params.threadId).status = "running";
+      respond({ ok: true });
+      emitEvent(params.threadId, "stdout", "provider-started\\n");
+      return;
+    }
+    case "agent/send": {
+      const state = threads.get(params.threadId);
+      if (!state || state.status !== "running") {
+        respondError(-32001, "Thread not running: " + params.threadId);
+        return;
+      }
+      const data = params.payload.startsWith("b64:")
+        ? Buffer.from(params.payload.slice(4), "base64")
+        : Buffer.from(params.payload, "utf8");
+      respond({ ok: true });
+      emitEvent(params.threadId, "stdout", "echo:" + data.toString("utf8"));
+      return;
+    }
+    case "agent/kill": {
+      const state = threads.get(params.threadId);
+      if (!state) {
+        respondError(-32001, "Thread not found: " + params.threadId);
+        return;
+      }
+      state.status = "exited";
+      emitEvent(params.threadId, "exit", "", 0);
+      respond({ ok: true });
+      return;
+    }
+    case "agent/attach": {
+      const state = threads.get(params.threadId);
+      const journal = state ? state.journal : [];
+      for (const entry of journal) {
+        if (entry.seq > params.lastSeq) {
+          socket.write(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              method: "agent/event",
+              params: { threadId: params.threadId, ...entry },
+            }) + "\\n",
+          );
+        }
+      }
+      respond({
+        status: state ? state.status : "missing",
+        lastSeq: state ? state.seq : 0,
+      });
+      return;
+    }
+    default:
+      respondError(-32601, "Method not found: " + method);
+  }
+}
+
+const server = net.createServer((socket) => {
+  sockets.add(socket);
+  socket.setEncoding("utf8");
+  let buffer = "";
+  socket.on("data", (chunk) => {
+    buffer += chunk;
+    let newline = buffer.indexOf("\\n");
+    while (newline !== -1) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (line) handle(socket, JSON.parse(line));
+      newline = buffer.indexOf("\\n");
+    }
+  });
+  socket.on("close", () => sockets.delete(socket));
+  socket.on("error", () => sockets.delete(socket));
+});
+server.listen(socketPath);
+`,
+);
+
+const shimPath = path.join(tempDir, "shim.cjs");
+writeFileSync(
+  shimPath,
+  `
+const net = require("node:net");
+const socket = net.connect(process.argv[2]);
+process.stdin.pipe(socket);
+socket.pipe(process.stdout);
+socket.on("close", () => process.exit(0));
+socket.on("error", () => process.exit(1));
+`,
+);
+
+const daemons: ChildProcess[] = [];
+
 afterAll(() => {
+  for (const daemon of daemons) daemon.kill("SIGKILL");
   rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -259,5 +406,88 @@ describe("RemoteAgentProvider", () => {
     expect(attach.status).toBe("exited");
     expect(attach.lastSeq).toBeGreaterThanOrEqual(4);
     second.kill();
+  });
+
+  it("settles the adapter (exit and close) on a contract-valid exit event", async () => {
+    const journalDir = mkdtempSync(path.join(tempDir, "journal-settle-"));
+    const spawned = await Effect.runPromise(
+      provider.spawnRemoteAgent(makePlan("thread-settle"), makeOptions(journalDir)),
+    );
+    const stdout = collect(spawned.child.stdout);
+    await waitFor(() => stdout.read().includes("provider-started"), "provider stdout");
+
+    const events: Array<{ name: string; code: number | null }> = [];
+    spawned.child.once("exit", (code) => events.push({ name: "exit", code }));
+    spawned.child.once("close", (code) => events.push({ name: "close", code }));
+
+    // agent/kill makes the fake agent emit { seq, kind: "exit", exitCode }
+    // with no data field — the exact contract envelope shape.
+    spawned.kill();
+    await waitFor(() => events.length === 2, "exit and close events");
+    expect(events).toEqual([
+      { name: "exit", code: 0 },
+      { name: "close", code: 0 },
+    ]);
+    expect(spawned.child.exitCode).toBe(0);
+  });
+
+  it("does not emit exit when only the transport drops; a fresh attach continues the thread", async () => {
+    const socketPath = path.join(tempDir, "agent.sock");
+    const daemon = spawn(process.execPath, [fakeAgentServerPath, socketPath], {
+      stdio: "ignore",
+    });
+    daemons.push(daemon);
+    await waitFor(() => existsSync(socketPath), "daemon socket");
+
+    const plan: RemoteAgentSpawnPlan = {
+      ...makePlan("thread-transport-drop"),
+      sshArgs: [shimPath, socketPath],
+      remoteCommand: shimPath,
+    };
+    const journalDir = mkdtempSync(path.join(tempDir, "journal-transport-"));
+
+    const first = await Effect.runPromise(provider.spawnRemoteAgent(plan, makeOptions(journalDir)));
+    const firstStdout = collect(first.child.stdout);
+    await waitFor(() => firstStdout.read().includes("provider-started"), "provider stdout");
+    first.child.stdin.write("turn-one\n");
+    await waitFor(() => firstStdout.read().includes("echo:turn-one"), "first echo");
+
+    // Drop only the transport: SIGKILL the shim. The daemon and its provider
+    // thread keep running; the adapter must report a disconnect, not an exit.
+    let exited = false;
+    let disconnected = false;
+    first.child.once("exit", () => {
+      exited = true;
+    });
+    first.child.once("disconnect", () => {
+      disconnected = true;
+    });
+    process.kill(first.child.pid as number, "SIGKILL");
+    await waitFor(() => disconnected, "transport disconnect");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(exited).toBe(false);
+    expect(first.child.exitCode).toBe(null);
+
+    // Reconnect through a fresh shim and continue the same thread.
+    const { process: second, attach } = await Effect.runPromise(
+      provider.attachRemoteAgent(plan, 0, makeOptions(journalDir)),
+    );
+    const secondStdout = collect(second.child.stdout);
+    await waitFor(
+      () =>
+        secondStdout.read().includes("provider-started") &&
+        secondStdout.read().includes("echo:turn-one"),
+      "replayed events after transport drop",
+    );
+    expect(attach.status).toBe("running");
+
+    second.child.stdin.write("turn-two\n");
+    await waitFor(() => secondStdout.read().includes("echo:turn-two"), "post-reattach echo");
+
+    const exit = new Promise<number | null>((resolve) => {
+      second.child.once("exit", (code) => resolve(code));
+    });
+    second.kill();
+    expect(await exit).toBe(0);
   });
 });
