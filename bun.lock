@@ -46,6 +46,7 @@
       "devDependencies": {
         "@synara/contracts": "workspace:*",
         "@types/node": "catalog:",
+        "effect": "catalog:",
         "typescript": "catalog:",
         "vitest": "catalog:",
       },

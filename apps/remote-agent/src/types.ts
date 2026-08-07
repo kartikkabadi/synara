@@ -2,12 +2,9 @@ import type { ChildProcess } from "node:child_process";
 
 import type { RemoteAgentEventKind, RemoteAgentThreadStatus } from "@synara/contracts/remoteAgent";
 
-export interface JournalEntry {
-  seq: number;
-  kind: RemoteAgentEventKind;
-  data: string;
-  exitCode?: number;
-}
+export type JournalEntry =
+  | { seq: number; kind: Exclude<RemoteAgentEventKind, "exit">; data: string }
+  | { seq: number; kind: "exit"; exitCode: number };
 
 export interface ThreadState {
   threadId: string;

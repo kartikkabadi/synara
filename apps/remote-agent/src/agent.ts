@@ -121,15 +121,20 @@ export class RemoteAgent {
       status: "running",
     };
     this.threads.set(threadId, state);
-    child.on("error", (error) => {
-      this.emitEvent(state, "stderr", Buffer.from(`spawn error: ${error.message}`));
-    });
-    child.stdout?.on("data", (data: Buffer) => this.emitEvent(state, "stdout", data));
-    child.stderr?.on("data", (data: Buffer) => this.emitEvent(state, "stderr", data));
-    child.on("exit", (code) => {
+    let settled = false;
+    const settle = (exitCode: number): void => {
+      if (settled) return;
+      settled = true;
       state.status = "exited";
-      this.emitEvent(state, "exit", Buffer.alloc(0), code ?? -1);
+      this.emitExit(state, exitCode);
+    };
+    child.on("error", (error) => {
+      this.emitOutput(state, "stderr", Buffer.from(`spawn error: ${error.message}`));
+      settle(-1);
     });
+    child.stdout?.on("data", (data: Buffer) => this.emitOutput(state, "stdout", data));
+    child.stderr?.on("data", (data: Buffer) => this.emitOutput(state, "stderr", data));
+    child.on("exit", (code) => settle(code ?? -1));
     this.respond(id, { ok: true });
   }
 
@@ -143,13 +148,7 @@ export class RemoteAgent {
     }
     for (const entry of entries) {
       if (entry.seq > lastSeq) {
-        this.notify("agent/event", {
-          threadId,
-          seq: entry.seq,
-          kind: entry.kind,
-          data: entry.data,
-          ...(entry.exitCode !== undefined ? { exitCode: entry.exitCode } : {}),
-        });
+        this.notify("agent/event", { threadId, ...entry });
       }
     }
     const latestSeq = entries.length > 0 ? entries[entries.length - 1]!.seq : (live?.seq ?? 0);
@@ -244,21 +243,23 @@ export class RemoteAgent {
     }
   }
 
-  private emitEvent(
-    state: ThreadState,
-    kind: JournalEntry["kind"],
-    payload: Buffer,
-    exitCode?: number,
-  ): void {
+  private emitOutput(state: ThreadState, kind: "stdout" | "stderr", payload: Buffer): void {
     state.seq += 1;
-    const entry: JournalEntry = {
+    this.journalAndNotify(state.threadId, {
       seq: state.seq,
       kind,
       data: payload.toString("base64"),
-      ...(exitCode !== undefined ? { exitCode } : {}),
-    };
-    this.appendJournal(state.threadId, entry);
-    this.notify("agent/event", { threadId: state.threadId, ...entry });
+    });
+  }
+
+  private emitExit(state: ThreadState, exitCode: number): void {
+    state.seq += 1;
+    this.journalAndNotify(state.threadId, { seq: state.seq, kind: "exit", exitCode });
+  }
+
+  private journalAndNotify(threadId: string, entry: JournalEntry): void {
+    this.appendJournal(threadId, entry);
+    this.notify("agent/event", { threadId, ...entry });
   }
 
   private journalPath(threadId: string): string {
