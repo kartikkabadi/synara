@@ -76,14 +76,12 @@ export function buildRemoteCommand(
 }
 
 /**
- * Builds the full `ssh` argument array (without the leading `ssh`), ending
- * with `--` and the remote command string. Never embeds secret material; env
- * forwarding uses `SendEnv` with names only.
+ * Builds the shared `ssh` option/destination argument prefix (everything up to
+ * and including `user@host`). Callers append `--` and their remote command.
  */
-export function buildSshArgv(
+function buildSshBaseArgv(
   transport: ExecutionEnvironmentSshTransport,
   runtime: ExecutionEnvironmentRuntime,
-  executionProfile: ExecutionProfile,
 ): string[] {
   if (runtime.runtimeType !== "ssh-process") {
     throw new SshCommandError({
@@ -133,7 +131,56 @@ export function buildSshArgv(
 
   const user = transport.user !== undefined ? requireNonEmpty(transport.user, "user") : undefined;
   argv.push(user !== undefined ? `${user}@${host}` : host);
+  return argv;
+}
+
+/**
+ * Builds the full `ssh` argument array (without the leading `ssh`), ending
+ * with `--` and the remote command string. Never embeds secret material; env
+ * forwarding uses `SendEnv` with names only.
+ */
+export function buildSshArgv(
+  transport: ExecutionEnvironmentSshTransport,
+  runtime: ExecutionEnvironmentRuntime,
+  executionProfile: ExecutionProfile,
+): string[] {
+  const argv = buildSshBaseArgv(transport, runtime);
   argv.push("--", buildRemoteCommand(runtime, executionProfile));
+  return argv;
+}
+
+export const DEFAULT_REMOTE_AGENT_INSTALL_PATH = "~/.synara/bin/remote-agent.cjs";
+
+/**
+ * Quotes a remote path while preserving `~/` home expansion by rewriting the
+ * tilde prefix to a double-quoted `$HOME` reference.
+ */
+function quoteRemotePath(remotePath: string): string {
+  return remotePath.startsWith("~/")
+    ? `"$HOME"${posixQuote(remotePath.slice(1))}`
+    : posixQuote(remotePath);
+}
+
+/**
+ * Builds the remote command that starts the persistent remote agent
+ * (reconnect: "remote-agent"). Runs the bundled cjs through `node` so the
+ * install does not depend on the file's executable bit.
+ */
+export function buildRemoteAgentCommand(runtime: ExecutionEnvironmentRuntime): string {
+  const installPath = runtime.installPath?.trim() || DEFAULT_REMOTE_AGENT_INSTALL_PATH;
+  return `exec node ${quoteRemotePath(installPath)}`;
+}
+
+/**
+ * Builds the full `ssh` argument array for connecting to the remote agent
+ * binary instead of execing the provider directly (Architecture B).
+ */
+export function buildAgentSshArgv(
+  transport: ExecutionEnvironmentSshTransport,
+  runtime: ExecutionEnvironmentRuntime,
+): string[] {
+  const argv = buildSshBaseArgv(transport, runtime);
+  argv.push("--", buildRemoteAgentCommand(runtime));
   return argv;
 }
 

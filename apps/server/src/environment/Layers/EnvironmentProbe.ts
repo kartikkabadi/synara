@@ -29,6 +29,7 @@ import { RemoteEnvironmentRegistry } from "../Services/RemoteEnvironmentRegistry
 import {
   RemoteEnvironmentNotFoundError,
   RemoteEnvironmentResolver,
+  type RemoteAgentSpawnPlan,
   type SshSpawnPlan,
 } from "../Services/RemoteEnvironmentResolver";
 import { SshProcessProvider, type SshProcessExit } from "../Services/SshProcessProvider";
@@ -58,8 +59,15 @@ const failedConnection = (message: string): ExecutionEnvironmentConnection => ({
   healthCheckResult: { status: "failed", checkedAt: nowIso(), message },
 });
 
-/** Swaps the plan's remote command (its last argv element) for a probe command. */
-const probePlan = (plan: SshSpawnPlan, remoteCommand: string): SshSpawnPlan => ({
+/**
+ * Swaps the plan's remote command (its last argv element) for a probe
+ * command. Works for both ssh and remote-agent plans: the probe checks host
+ * reachability and the provider binary, not the agent transport.
+ */
+const probePlan = (
+  plan: SshSpawnPlan | RemoteAgentSpawnPlan,
+  remoteCommand: string,
+): SshSpawnPlan => ({
   kind: "ssh",
   sshArgs: [
     "-o",
@@ -75,7 +83,7 @@ export const makeEnvironmentProbe = Effect.fn(function* () {
   const resolver = yield* RemoteEnvironmentResolver;
   const sshProvider = yield* SshProcessProvider;
 
-  const runProbeCommand = (plan: SshSpawnPlan, remoteCommand: string) =>
+  const runProbeCommand = (plan: SshSpawnPlan | RemoteAgentSpawnPlan, remoteCommand: string) =>
     sshProvider
       .spawnSsh(probePlan(plan, remoteCommand), { cwd: process.cwd(), env: process.env })
       .pipe(

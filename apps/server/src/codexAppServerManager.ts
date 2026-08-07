@@ -70,6 +70,10 @@ import {
   SshProcessProvider,
   type SshProcessProviderShape,
 } from "./environment/Services/SshProcessProvider.ts";
+import {
+  RemoteAgentProvider,
+  type RemoteAgentProviderShape,
+} from "./environment/Services/RemoteAgentProvider.ts";
 import { ensureIsolatedScratchWorkspace } from "./scratchWorkspaces.ts";
 import { createLogger } from "./logger";
 import { transcribeVoiceWithChatGptSession } from "./voiceTranscription.ts";
@@ -793,6 +797,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   private readonly processSpawner: ProviderProcessSpawnerShape;
   private readonly remoteEnvironmentResolver: RemoteEnvironmentResolverShape | undefined;
   private readonly sshProcessProvider: SshProcessProviderShape | undefined;
+  private readonly remoteAgentProvider: RemoteAgentProviderShape | undefined;
   constructor(
     services?: ServiceMap.ServiceMap<never>,
     options?: {
@@ -822,6 +827,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       : undefined;
     this.sshProcessProvider = services
       ? Option.getOrUndefined(ServiceMap.getOption(services, SshProcessProvider))
+      : undefined;
+    this.remoteAgentProvider = services
+      ? Option.getOrUndefined(ServiceMap.getOption(services, RemoteAgentProvider))
       : undefined;
   }
 
@@ -853,6 +861,18 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         }
         const spawned = await Effect.runPromise(
           sshProvider.spawnSsh(plan, { cwd: input.cwd, env: input.env }),
+        );
+        return spawned.child;
+      }
+      if (plan.kind === "remote-agent") {
+        const agentProvider = this.remoteAgentProvider;
+        if (agentProvider === undefined) {
+          throw new Error(
+            "A remote-agent spawn plan was resolved but no RemoteAgentProvider service is available",
+          );
+        }
+        const spawned = await Effect.runPromise(
+          agentProvider.spawnRemoteAgent(plan, { cwd: input.cwd, env: input.env }),
         );
         return spawned.child;
       }
