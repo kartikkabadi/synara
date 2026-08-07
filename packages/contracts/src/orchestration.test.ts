@@ -99,6 +99,12 @@ it.effect("rejects execution profiles with missing or invalid fields", () =>
       { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "./repo" },
       { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "../repo" },
       { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "~/repo" },
+      { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "/" },
+      { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "/../" },
+      { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "/srv/repo/../other" },
+      { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "/srv/./repo" },
+      { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "/srv//repo" },
+      { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "/srv/repo/" },
       {
         environmentId: "env-1",
         providerKind: "codex",

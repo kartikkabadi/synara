@@ -18,10 +18,22 @@ export const ProcessEnvRecord = Schema.Record(ProcessEnvKey, ProcessEnvValue).ch
 );
 export type ProcessEnvRecord = typeof ProcessEnvRecord.Type;
 
-// Absolute POSIX path (v1 remote hosts are POSIX-only). Cross-platform path
-// syntax would be modeled explicitly rather than by weakening this boundary.
+// Canonical absolute POSIX path (v1 remote hosts are POSIX-only). Rejects the
+// bare root, empty/repeated separators, trailing slashes, and `.`/`..`
+// segments, so persisted paths are unambiguous scope boundaries. Runtime
+// realpath/containment checks against the remote filesystem still apply at
+// execution time. Cross-platform path syntax would be modeled explicitly
+// rather than by weakening this boundary.
 export const AbsolutePosixPath = TrimmedNonEmptyString.check(
-  Schema.isPattern(/^\//, { message: "must be an absolute POSIX path" }),
+  Schema.isPattern(/^(\/[^/]+)+$/, {
+    message: "must be a canonical absolute POSIX path",
+  }),
+).check(
+  Schema.makeFilter((path: string) =>
+    path.split("/").some((segment) => segment === "." || segment === "..")
+      ? { path: [], message: "must not contain '.' or '..' path segments" }
+      : undefined,
+  ),
 );
 export type AbsolutePosixPath = typeof AbsolutePosixPath.Type;
 
