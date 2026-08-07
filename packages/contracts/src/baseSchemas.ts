@@ -18,6 +18,13 @@ export const ProcessEnvRecord = Schema.Record(ProcessEnvKey, ProcessEnvValue).ch
 );
 export type ProcessEnvRecord = typeof ProcessEnvRecord.Type;
 
+// Absolute POSIX path (v1 remote hosts are POSIX-only). Cross-platform path
+// syntax would be modeled explicitly rather than by weakening this boundary.
+export const AbsolutePosixPath = TrimmedNonEmptyString.check(
+  Schema.isPattern(/^\//, { message: "must be an absolute POSIX path" }),
+);
+export type AbsolutePosixPath = typeof AbsolutePosixPath.Type;
+
 export const IsoDateTime = Schema.String;
 export type IsoDateTime = typeof IsoDateTime.Type;
 

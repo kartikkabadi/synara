@@ -12,6 +12,7 @@ import {
 import { ProviderMentionReference, ProviderSkillReference } from "./providerDiscovery";
 import { ProjectKind } from "./project";
 import {
+  AbsolutePosixPath,
   ApprovalRequestId,
   CheckpointRef,
   CommandId,
@@ -73,7 +74,7 @@ export type ProviderKind = typeof ProviderKind.Type;
 export const ExecutionProfile = Schema.Struct({
   environmentId: EnvironmentId,
   providerKind: ProviderKind,
-  remoteWorkspaceRoot: TrimmedNonEmptyString,
+  remoteWorkspaceRoot: AbsolutePosixPath,
   repositoryRevision: Schema.optional(TrimmedNonEmptyString),
   bootstrapImage: Schema.optional(TrimmedNonEmptyString),
   adapterProtocolVersion: Schema.optional(TrimmedNonEmptyString),
