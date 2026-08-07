@@ -171,8 +171,10 @@ class AgentRpcConnection {
 
 /**
  * ChildProcess-shaped adapter for one agent thread. Real Readable/Writable
- * streams back stdout/stderr/stdin; exit fires from agent exit events (or
- * from the ssh transport closing underneath us).
+ * streams back stdout/stderr/stdin. Exit settles only from an agent exit
+ * event or a completed kill() flow; a transport (ssh) close is surfaced as a
+ * "disconnect" event instead, because the remote provider outlives the
+ * channel and the owning layer may reconnect via agent/attach.
  */
 class RemoteAgentChildAdapter extends EventEmitter {
   readonly stdout = new PassThrough();
@@ -200,9 +202,12 @@ class RemoteAgentChildAdapter extends EventEmitter {
       },
     });
     sshChild.once("close", (code, signal) => {
-      // The transport died without a provider exit event: surface it as an
-      // exit so the manager's teardown path runs exactly once.
-      this.settleExit(code ?? -1, signal ?? null);
+      // The transport died, not the provider: keep streams open and let the
+      // owning layer decide whether to reconnect through agent/attach.
+      this.emit("disconnect", code, signal);
+    });
+    sshChild.once("error", (error) => {
+      this.emit("disconnect", null, null, error);
     });
   }
 
@@ -231,14 +236,15 @@ class RemoteAgentChildAdapter extends EventEmitter {
 
   kill(signal?: NodeJS.Signals): boolean {
     this.killed = true;
-    const closeTransport = () => {
+    const finalize = () => {
       if (this.sshChild.exitCode === null && !this.sshChild.killed) {
         this.sshChild.kill(signal);
       }
+      // The kill flow completed: settle even if the exit event never arrived
+      // (e.g. the transport dropped it) so teardown runs exactly once.
+      this.settleExit(-1, signal ?? null);
     };
-    this.connection
-      .request("agent/kill", { threadId: this.threadId })
-      .then(closeTransport, closeTransport);
+    this.connection.request("agent/kill", { threadId: this.threadId }).then(finalize, finalize);
     return true;
   }
 
