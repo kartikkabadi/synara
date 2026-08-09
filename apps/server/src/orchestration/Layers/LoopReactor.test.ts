@@ -265,16 +265,26 @@ function makeSnapshot(thread: OrchestrationThread): OrchestrationReadModel {
   } as unknown as OrchestrationReadModel;
 }
 
-function makeFakes(snapshot: OrchestrationReadModel, thread: Option.Option<OrchestrationThread>) {
+function makeFakes(
+  snapshot: OrchestrationReadModel,
+  thread: Option.Option<OrchestrationThread>,
+  options: { dispatchFailures?: number } = {},
+) {
   const eventQueue = Effect.runSync(Queue.unbounded<OrchestrationEvent>());
   const dispatchLog = Effect.runSync(Ref.make<OrchestrationCommand[]>([]));
+  let dispatchFailuresRemaining = options.dispatchFailures ?? 0;
 
   // Fakes implement only the members LoopReactor consumes.
   const fakeEngine: OrchestrationEngineShape = {
-    dispatch: (command: OrchestrationCommand) =>
-      Ref.update(dispatchLog, (commands) => [...commands, command]).pipe(
+    dispatch: (command: OrchestrationCommand) => {
+      if (dispatchFailuresRemaining > 0) {
+        dispatchFailuresRemaining -= 1;
+        return Effect.fail(new Error("dispatch unavailable"));
+      }
+      return Ref.update(dispatchLog, (commands) => [...commands, command]).pipe(
         Effect.as({ sequence: 1 }),
-      ),
+      );
+    },
     streamDomainEvents: Stream.fromQueue(eventQueue),
   } as unknown as OrchestrationEngineShape;
 
@@ -330,7 +340,7 @@ interface ReactorScenario {
 async function withReactor(
   thread: OrchestrationThread,
   body: (scenario: ReactorScenario) => Promise<void>,
-  options: { start?: boolean } = {},
+  options: { start?: boolean; dispatchFailures?: number } = {},
 ): Promise<void> {
   const {
     eventQueue,
@@ -338,7 +348,7 @@ async function withReactor(
     fakeEngine,
     fakeSnapshotQuery,
     fakeProjectionThreadLoopRepository,
-  } = makeFakes(makeSnapshot(thread), Option.some(thread));
+  } = makeFakes(makeSnapshot(thread), Option.some(thread), options);
   const runtime = ManagedRuntime.make(
     Layer.mergeAll(
       Layer.provide(
@@ -486,6 +496,35 @@ describe("LoopReactor", () => {
       await advance(50);
       await expectLastDispatched("thread.loop.off", { threadId: thread.id, reason });
     });
+  });
+
+  it("keeps retrying a failed lifecycle off dispatch until cleanup is accepted", async () => {
+    const thread = makeThread({ loop: makeLoop() });
+    await withReactor(
+      thread,
+      async ({ offer, advance, commandsOfType }) => {
+        await offer(makeArchivedEvent());
+
+        // Drain the bounded inline retries. Persistent failures then move to
+        // the supervised retry, which must recover without a second lifecycle
+        // event or an unrelated thread trigger.
+        for (let i = 0; i < 8; i += 1) {
+          await advance(1_000);
+        }
+        expect(await commandsOfType("thread.loop.off")).toHaveLength(0);
+
+        for (let i = 0; i < 10; i += 1) {
+          await advance(30_000);
+        }
+        const commands = await commandsOfType("thread.loop.off");
+        expect(commands).toHaveLength(1);
+        expect(commands[0]).toMatchObject({
+          threadId: thread.id,
+          reason: "thread_archived",
+        });
+      },
+      { dispatchFailures: 8 },
+    );
   });
 
   it("dispatches startup restore for active loop via restoreActiveLoops", async () => {

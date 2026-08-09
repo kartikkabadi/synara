@@ -40,7 +40,7 @@ function formatDurationPreset(seconds: number): string {
 type CustomEntry =
   | { kind: "none" }
   | { kind: "count"; raw: string }
-  | { kind: "duration"; raw: string; unit: "minutes" | "hours" };
+  | { kind: "duration"; raw: string; unit: "seconds" | "minutes" | "hours" };
 
 export function loopBudgetRadioValue(budget: LoopBudgetChoice, custom: CustomEntry): string {
   if (custom.kind === "count") return "custom-count";
@@ -74,7 +74,8 @@ export function LoopBudgetPicker(props: {
     } else if (entry.kind === "duration") {
       const value = Number(entry.raw);
       const seconds = Number.isFinite(value)
-        ? Math.trunc(value) * (entry.unit === "hours" ? 3600 : 60)
+        ? Math.trunc(value) *
+          (entry.unit === "hours" ? 3600 : entry.unit === "minutes" ? 60 : 1)
         : 0;
       props.onChange({ kind: "duration", seconds });
     }
@@ -229,7 +230,12 @@ export function LoopBudgetPicker(props: {
                         const next: CustomEntry = {
                           kind: "duration",
                           raw: previous.kind === "duration" ? previous.raw : "",
-                          unit: unit === "hours" ? "hours" : "minutes",
+                          unit:
+                            unit === "hours"
+                              ? "hours"
+                              : unit === "seconds"
+                                ? "seconds"
+                                : "minutes",
                         };
                         commitCustom(next);
                         return next;
@@ -240,6 +246,7 @@ export function LoopBudgetPicker(props: {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectPopup>
+                      <SelectItem value="seconds">seconds</SelectItem>
                       <SelectItem value="minutes">minutes</SelectItem>
                       <SelectItem value="hours">hours</SelectItem>
                     </SelectPopup>

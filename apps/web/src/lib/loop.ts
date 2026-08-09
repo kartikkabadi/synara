@@ -26,7 +26,7 @@ export const LOOP_COUNT_PRESETS = [5, 10, 25, 50] as const;
 export const LOOP_DURATION_PRESETS_SECONDS = [30 * 60, 60 * 60] as const;
 
 export const LOOP_BUDGET_COUNT_ERROR = "Choose between 1 and 100 turns.";
-export const LOOP_BUDGET_DURATION_MIN_ERROR = "Choose a duration of at least 1 minute.";
+export const LOOP_BUDGET_DURATION_MIN_ERROR = "Choose a duration of at least 1 second.";
 export const LOOP_BUDGET_DURATION_MAX_ERROR = "Choose a duration of 24 hours or less.";
 export const LOOP_BUDGET_INVALID_ERROR = "That budget isn't valid. Choose a budget below.";
 export const LOOP_CHOOSE_BUDGET_NOTE = "Choose how long the loop should run.";
@@ -48,11 +48,14 @@ export function loopBudgetChoiceFromParsed(budget: LoopBudget | null): LoopBudge
 
 export function loopBudgetChoiceFromLoop(loop: ThreadLoop): LoopBudgetChoice {
   if (loop.maxIterations !== null) return { kind: "count", turns: loop.maxIterations };
+  if (loop.durationSeconds !== null && loop.durationSeconds !== undefined) {
+    return { kind: "duration", seconds: loop.durationSeconds };
+  }
   if (loop.endsAt !== null) {
     const totalMs = new Date(loop.endsAt).getTime() - new Date(loop.createdAt).getTime();
     return {
       kind: "duration",
-      seconds: Math.max(60, Math.round(totalMs / 1000)),
+      seconds: Math.max(1, Math.round(totalMs / 1000)),
     };
   }
   return { kind: "until-stopped" };
@@ -70,7 +73,7 @@ export function validateLoopBudgetChoice(choice: LoopBudgetChoice): string | nul
     return null;
   }
   if (choice.kind === "duration") {
-    if (!Number.isFinite(choice.seconds) || choice.seconds < 60) {
+    if (!Number.isFinite(choice.seconds) || choice.seconds < 1) {
       return LOOP_BUDGET_DURATION_MIN_ERROR;
     }
     if (choice.seconds > LOOP_MAX_DURATION_SECONDS) {
@@ -86,6 +89,9 @@ export function formatLoopBudgetChoiceLabel(choice: LoopBudgetChoice): string {
     return `Stop after ${choice.turns} ${choice.turns === 1 ? "turn" : "turns"}`;
   }
   if (choice.kind === "duration") {
+    if (choice.seconds < 60) {
+      return `Stop after ${choice.seconds} ${choice.seconds === 1 ? "second" : "seconds"}`;
+    }
     const minutes = Math.round(choice.seconds / 60);
     if (minutes < 60) return `Stop after ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
     const hours = Math.floor(minutes / 60);

@@ -138,6 +138,9 @@ describe("budget choices", () => {
       loopBudgetChoiceFromLoop(makeLoop({ maxIterations: null, durationSeconds: 30 * 60 })),
     ).toEqual({ kind: "duration", seconds: 30 * 60 });
     expect(
+      loopBudgetChoiceFromLoop(makeLoop({ maxIterations: null, durationSeconds: 7 })),
+    ).toEqual({ kind: "duration", seconds: 7 });
+    expect(
       loopBudgetChoiceFromLoop(makeLoop({ maxIterations: null, durationSeconds: null })),
     ).toEqual({
       kind: "until-stopped",
@@ -149,8 +152,9 @@ describe("budget choices", () => {
     [{ kind: "count", turns: 100 } as const, null],
     [{ kind: "count", turns: 0 } as const, LOOP_BUDGET_COUNT_ERROR],
     [{ kind: "count", turns: 101 } as const, LOOP_BUDGET_COUNT_ERROR],
+    [{ kind: "duration", seconds: 1 } as const, null],
     [{ kind: "duration", seconds: 60 } as const, null],
-    [{ kind: "duration", seconds: 59 } as const, LOOP_BUDGET_DURATION_MIN_ERROR],
+    [{ kind: "duration", seconds: 0 } as const, LOOP_BUDGET_DURATION_MIN_ERROR],
     [{ kind: "duration", seconds: 24 * 3600 } as const, null],
     [{ kind: "duration", seconds: 24 * 3600 + 1 } as const, LOOP_BUDGET_DURATION_MAX_ERROR],
     [{ kind: "until-stopped" } as const, null],
@@ -176,6 +180,12 @@ describe("budget choices", () => {
 
   it("formats trigger labels", () => {
     expect(formatLoopBudgetChoiceLabel({ kind: "count", turns: 5 })).toBe("Stop after 5 turns");
+    expect(formatLoopBudgetChoiceLabel({ kind: "duration", seconds: 1 })).toBe(
+      "Stop after 1 second",
+    );
+    expect(formatLoopBudgetChoiceLabel({ kind: "duration", seconds: 59 })).toBe(
+      "Stop after 59 seconds",
+    );
     expect(formatLoopBudgetChoiceLabel({ kind: "duration", seconds: 30 * 60 })).toBe(
       "Stop after 30 minutes",
     );

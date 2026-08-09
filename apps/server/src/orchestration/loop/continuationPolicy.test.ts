@@ -192,6 +192,46 @@ describe("decideLoopContinuation", () => {
     });
   });
 
+  it("accounts the final iteration before stopping at the count budget", () => {
+    const result = decideLoopContinuation({
+      loop: makeLoop({
+        maxIterations: 1,
+        iteration: 1,
+        lastSettledIteration: 0,
+        unsettled: [settled("completed", 1)],
+      }),
+      nowMs: NOW,
+      thread: makeThread(),
+    });
+    expect(result).toEqual({
+      type: "off",
+      reason: "budget_iterations",
+      nextConsecutiveErrors: 0,
+      nextLastSettledIteration: 1,
+      nextUnsettled: [],
+    });
+  });
+
+  it("accounts a settled iteration before stopping at duration expiry", () => {
+    const result = decideLoopContinuation({
+      loop: makeLoop({
+        endsAt: "2026-07-19T11:59:59.000Z",
+        iteration: 1,
+        lastSettledIteration: 0,
+        unsettled: [settled("error", 1)],
+      }),
+      nowMs: NOW,
+      thread: makeThread(),
+    });
+    expect(result).toEqual({
+      type: "off",
+      reason: "budget_duration",
+      nextConsecutiveErrors: 1,
+      nextLastSettledIteration: 1,
+      nextUnsettled: [],
+    });
+  });
+
   it("turns off when the hard cap is reached", () => {
     const result = decideLoopContinuation({
       loop: makeLoop({ iteration: 100, lastSettledIteration: 100 }),
@@ -240,6 +280,39 @@ describe("decideLoopContinuation", () => {
       nextIteration: 3,
       nextConsecutiveErrors: 0,
       nextLastSettledIteration: 2,
+      nextUnsettled: [],
+    });
+  });
+
+  it.each([
+    ["whitespace-only", "   ", 0],
+    ["slash command", "/clear", 0],
+    ["empty after the first iteration", "", 1],
+  ] as const)("turns off for an invalid persisted %s prompt", (_name, prompt, iteration) => {
+    const result = decideLoopContinuation({
+      loop: makeLoop({ prompt, iteration }),
+      nowMs: NOW,
+      thread: makeThread(),
+    });
+    expect(result).toEqual({
+      type: "off",
+      reason: "prompt_invalid",
+      nextConsecutiveErrors: 0,
+      nextLastSettledIteration: 0,
+      nextUnsettled: [],
+    });
+  });
+
+  it("waits for the first prompt when the persisted loop is exactly armed", () => {
+    const result = decideLoopContinuation({
+      loop: makeLoop({ prompt: "", iteration: 0 }),
+      nowMs: NOW,
+      thread: makeThread(),
+    });
+    expect(result).toEqual({
+      type: "wait",
+      nextConsecutiveErrors: 0,
+      nextLastSettledIteration: 0,
       nextUnsettled: [],
     });
   });

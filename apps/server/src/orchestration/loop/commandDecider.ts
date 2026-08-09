@@ -352,8 +352,29 @@ export function decideLoopContinue(
   }
   const prompt = thread.loop.prompt;
   if (prompt === "") {
-    // Unreachable: the decision policy waits on a missing prompt.
-    return events([]);
+    // Defensive fallback for a legacy or malformed projection. The policy
+    // treats an exactly armed iteration-zero loop as wait-only; an empty
+    // prompt reaching this branch must never become a silent no-op.
+    return events([
+      ...buildPendingLoopStartCancellationDrafts({
+        thread,
+        activationId: thread.loop.activationId,
+        createdAt: command.createdAt,
+      }),
+      {
+        type: "thread.loop-off",
+        payload: {
+          threadId: command.threadId,
+          stopReason: "prompt_invalid",
+          loop: {
+            ...thread.loop,
+            active: false,
+            lastStopReason: "prompt_invalid",
+            updatedAt: command.createdAt,
+          },
+        },
+      },
+    ]);
   }
   const messageId = loopMessageIdForCommand(command);
   const nextIteration = decision.nextIteration;

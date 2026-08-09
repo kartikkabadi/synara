@@ -9,7 +9,7 @@ import {
   type OrchestrationThreadShell,
   type ThreadLoop,
 } from "@synara/contracts";
-import { Effect, Layer, Option, Queue, Ref, Schedule, Stream } from "effect";
+import { Clock, Effect, Layer, Option, Queue, Ref, Schedule, Stream } from "effect";
 
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { classifyLoopReactorEvent } from "../loop/reactorTriggers.ts";
@@ -79,6 +79,7 @@ const EXPIRY_RETRY_BACKOFF_MS = 30_000;
 
 const RESTORE_SNAPSHOT_RETRY_SCHEDULE = Schedule.exponential("250 millis").pipe(Schedule.take(3));
 const RESTORE_DISPATCH_RETRY_SCHEDULE = Schedule.exponential("250 millis").pipe(Schedule.take(3));
+const LIFECYCLE_OFF_RETRY_SCHEDULE = Schedule.exponential("250 millis").pipe(Schedule.take(3));
 // Supervised restore retry: exponential backoff capped at 30s, unbounded. A
 // count/unbounded loop has no timer and may receive no unrelated event, so a
 // restore must keep retrying until the loop deactivates or its activation
@@ -205,6 +206,46 @@ const makeLoopReactor = Effect.gen(function* () {
       Effect.catch((error) =>
         Effect.logWarning("supervised loop restore retry failed", {
           threadId,
+          error: String(error),
+        }),
+      ),
+    );
+
+  const superviseLifecycleOffDispatch = (input: {
+    readonly command: Extract<OrchestrationCommand, { type: "thread.loop.off" }>;
+    readonly activationId: ThreadLoop["activationId"];
+    readonly eventType: string;
+  }) =>
+    Effect.gen(function* () {
+      const loopOption = yield* projectionThreadLoopRepository.getByThreadId({
+        threadId: input.command.threadId,
+      });
+      if (
+        Option.isNone(loopOption) ||
+        loopOption.value.loop.active !== true ||
+        loopOption.value.loop.activationId !== input.activationId
+      ) {
+        return;
+      }
+      const dispatched = yield* orchestrationEngine.dispatch(input.command).pipe(
+        Effect.as(true),
+        Effect.catch((error) =>
+          Effect.logWarning("supervised loop lifecycle off dispatch failed", {
+            threadId: input.command.threadId,
+            eventType: input.eventType,
+            error: String(error),
+          }).pipe(Effect.as(false)),
+        ),
+      );
+      if (!dispatched) {
+        return yield* Effect.fail(new Error("supervised lifecycle off dispatch failed"));
+      }
+    }).pipe(
+      Effect.retry(RESTORE_SUPERVISED_RETRY_SCHEDULE),
+      Effect.catch((error) =>
+        Effect.logWarning("supervised loop lifecycle off retry failed", {
+          threadId: input.command.threadId,
+          eventType: input.eventType,
           error: String(error),
         }),
       ),
@@ -357,15 +398,36 @@ const makeLoopReactor = Effect.gen(function* () {
                 reason: trigger.reason,
                 createdAt: event.occurredAt,
               } satisfies Extract<OrchestrationCommand, { type: "thread.loop.off" }>;
-              yield* orchestrationEngine.dispatch(command).pipe(
+              const dispatched = yield* orchestrationEngine.dispatch(command).pipe(
+                Effect.as(true),
                 Effect.catch((error) =>
                   Effect.logWarning("loop lifecycle off dispatch failed", {
                     threadId: trigger.threadId,
                     eventType: event.type,
                     error: String(error),
-                  }),
+                  }).pipe(Effect.as(false)),
+                ),
+                Effect.flatMap((ok) =>
+                  ok ? Effect.succeed(true) : Effect.fail(new Error("lifecycle off dispatch failed")),
+                ),
+                Effect.retry(LIFECYCLE_OFF_RETRY_SCHEDULE),
+                Effect.catch((error) =>
+                  Effect.logWarning("loop lifecycle off dispatch failed after retries", {
+                    threadId: trigger.threadId,
+                    eventType: event.type,
+                    error: String(error),
+                  }).pipe(Effect.as(false)),
                 ),
               );
+              if (!dispatched) {
+                yield* Effect.forkDetach(
+                  superviseLifecycleOffDispatch({
+                    command,
+                    activationId: loopOption.value.loop.activationId,
+                    eventType: event.type,
+                  }),
+                );
+              }
               return;
             }
           }

@@ -10,6 +10,8 @@ import type {
   ThreadLoop,
   ThreadTurnPurpose,
 } from "@synara/contracts";
+import { LoopPrompt } from "@synara/contracts";
+import { Schema } from "effect";
 
 import { chooseStopReason, isLoopBudgetExhausted, isLoopExpired } from "./budget.ts";
 import { consumeLoopSettlements } from "./settlement.ts";
@@ -79,6 +81,21 @@ export function buildLoopContinuationThreadView(
 // way a manual turn can.
 export const RUNNING_SESSION_STATUSES = new Set(["starting", "running", "stopping"]);
 
+function isPersistedLoopPromptValid(loop: ThreadLoop): boolean {
+  // An empty prompt is the only valid armed state, and it cannot survive the
+  // first accepted iteration. Persisted non-empty prompts use the same schema
+  // as new loop commands so legacy rows cannot dispatch invalid turn bodies.
+  if (loop.prompt === "") {
+    return loop.iteration === 0;
+  }
+  try {
+    Schema.decodeUnknownSync(LoopPrompt)(loop.prompt);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Pure continue-on-yield policy (issue #49 section 6). `loop.iteration` counts
  * loop-owned turns already accepted/dispatched in this activation; a continue
@@ -111,34 +128,36 @@ export function decideLoopContinuation(input: {
   if (thread.parentThreadId !== null) {
     return { type: "off", reason: "thread_unrunnable", ...unchanged };
   }
+
+  // Account every observed terminal outcome before expiry, final-budget, or
+  // prompt decisions. A final iteration can settle just as the duration or
+  // count boundary is reached; retiring it without carrying the ledger fields
+  // would lose the outcome and make the next activation inherit stale state.
+  const accounting = consumeLoopSettlements(loop);
+  const accounted = {
+    nextConsecutiveErrors: accounting.nextConsecutiveErrors,
+    nextLastSettledIteration: accounting.nextLastSettledIteration,
+    nextUnsettled: accounting.nextUnsettled,
+  };
   if (isLoopExpired(loop, nowMs)) {
-    return { type: "off", reason: "budget_duration", ...unchanged };
+    return { type: "off", reason: "budget_duration", ...accounted };
   }
   if (isLoopBudgetExhausted(loop)) {
-    return { type: "off", reason: chooseStopReason(loop), ...unchanged };
+    return { type: "off", reason: chooseStopReason(loop), ...accounted };
   }
-  if (loop.prompt === "") {
-    return { type: "wait", ...unchanged };
+  if (!isPersistedLoopPromptValid(loop)) {
+    return { type: "off", reason: "prompt_invalid", ...accounted };
   }
 
-  // Error accounting consumes the loop's durable per-attempt settlement
-  // ledger, not the mutable `latestTurn`: a queued replacement that becomes
-  // latest before an earlier attempt is accounted can never erase that
-  // attempt's outcome, duplicate or out-of-order terminal notifications never
-  // recount a settled attempt, and the watermark only advances across
-  // contiguous accounted outcomes (a gap is never skipped).
-  const accounting = consumeLoopSettlements(loop);
-  const nextConsecutiveErrors = accounting.nextConsecutiveErrors;
-  const nextLastSettledIteration = accounting.nextLastSettledIteration;
-  const nextUnsettled = accounting.nextUnsettled;
   if (accounting.errorThresholdReached) {
     return {
       type: "off",
       reason: "consecutive_errors",
-      nextConsecutiveErrors,
-      nextLastSettledIteration,
-      nextUnsettled,
+      ...accounted,
     };
+  }
+  if (loop.prompt === "") {
+    return { type: "wait", ...accounted };
   }
   if (
     thread.sessionActiveTurnId !== null ||
@@ -149,14 +168,12 @@ export function decideLoopContinuation(input: {
     thread.interactionMode === "plan" ||
     (thread.sessionStatus !== null && RUNNING_SESSION_STATUSES.has(thread.sessionStatus))
   ) {
-    return { type: "wait", nextConsecutiveErrors, nextLastSettledIteration, nextUnsettled };
+    return { type: "wait", ...accounted };
   }
 
   return {
     type: "continue",
     nextIteration: loop.iteration + 1,
-    nextConsecutiveErrors,
-    nextLastSettledIteration,
-    nextUnsettled,
+    ...accounted,
   };
 }
