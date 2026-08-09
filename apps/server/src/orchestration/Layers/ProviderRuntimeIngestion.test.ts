@@ -4303,6 +4303,46 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.status).toBe("error");
   });
 
+  it("settles an abort-like runtime.error as interrupted without lastError", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-turn-started-abort-runtime-error"),
+      provider: "opencode",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-abort-runtime-error"),
+    });
+    await waitForThread(
+      harness.engine,
+      (thread) =>
+        thread.session?.status === "running" &&
+        thread.session?.activeTurnId === "turn-abort-runtime-error",
+    );
+
+    harness.emit({
+      type: "runtime.error",
+      eventId: asEventId("evt-runtime-error-abort"),
+      provider: "opencode",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-abort-runtime-error"),
+      payload: {
+        message: "The operation was aborted",
+      },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) => entry.session?.status === "interrupted",
+    );
+    expect(thread.session?.status).toBe("interrupted");
+    expect(thread.session?.lastError ?? null).toBeNull();
+    expect(thread.session?.activeTurnId ?? null).toBeNull();
+  });
+
   it("spills oversized buffered deltas and still finalizes full assistant text", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

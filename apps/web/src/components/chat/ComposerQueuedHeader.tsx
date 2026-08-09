@@ -57,6 +57,8 @@ export function compactQueuedComposerPreviewMarkdown(value: string): string {
 
 interface ComposerQueuedHeaderProps {
   queuedTurns: QueuedComposerTurn[];
+  // Relabels chip actions to "Next objective" copy while a loop is active.
+  loopActive?: boolean;
   onSteer: (queuedTurn: QueuedComposerTurn) => void;
   onRemove: (queuedTurnId: string) => void;
   onEdit: (queuedTurn: QueuedComposerTurn) => void;
@@ -67,6 +69,7 @@ interface ComposerQueuedHeaderProps {
 
 export const ComposerQueuedHeader = function ComposerQueuedHeader({
   queuedTurns,
+  loopActive = false,
   onSteer,
   onRemove,
   onEdit,
@@ -98,6 +101,7 @@ export const ComposerQueuedHeader = function ComposerQueuedHeader({
           </ComposerStackedPanelRowMain>
           <QueuedComposerActions
             queuedTurn={queuedTurn}
+            loopActive={loopActive}
             onSteer={onSteer}
             onRemove={onRemove}
             onEdit={onEdit}

@@ -28,6 +28,13 @@ import {
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas";
+import {
+  LoopActivationId,
+  LoopPrompt,
+  LoopStopReason,
+  ThreadLoop,
+  ThreadTurnPurpose,
+} from "./loop";
 
 export const ORCHESTRATION_WS_METHODS = {
   getSnapshot: "orchestration.getSnapshot",
@@ -487,6 +494,7 @@ export const OrchestrationMessage = Schema.Struct({
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
   source: OrchestrationMessageSource.pipe(Schema.withDecodingDefault(() => "native")),
+  purpose: Schema.optional(ThreadTurnPurpose),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -592,15 +600,26 @@ const OrchestrationLatestTurnState = Schema.Literals([
 export type OrchestrationLatestTurnState = typeof OrchestrationLatestTurnState.Type;
 
 export const OrchestrationLatestTurn = Schema.Struct({
-  turnId: TurnId,
+  turnId: Schema.NullOr(TurnId),
   state: OrchestrationLatestTurnState,
   requestedAt: IsoDateTime,
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
   assistantMessageId: Schema.NullOr(MessageId),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  // Persisted purpose of the initiating user message, if any. Used to identify
+  // loop-owned turns without scanning the full transcript.
+  purpose: Schema.optional(ThreadTurnPurpose),
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
+
+export const OrchestrationPendingTurnStart = Schema.Struct({
+  messageId: MessageId,
+  requestedAt: IsoDateTime,
+  purpose: Schema.optional(ThreadTurnPurpose),
+  sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+});
+export type OrchestrationPendingTurnStart = typeof OrchestrationPendingTurnStart.Type;
 
 export const OrchestrationThreadPullRequest = Schema.Struct({
   number: PositiveInt,
@@ -771,6 +790,12 @@ export const OrchestrationThread = Schema.Struct({
   hasPendingApprovals: Schema.optional(Schema.Boolean),
   hasPendingUserInput: Schema.optional(Schema.Boolean),
   hasActionableProposedPlan: Schema.optional(Schema.Boolean),
+  hasPendingTurnStart: Schema.optional(Schema.Boolean).pipe(
+    Schema.withDecodingDefault(() => false),
+  ),
+  pendingTurnStart: Schema.optional(Schema.NullOr(OrchestrationPendingTurnStart)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
@@ -790,6 +815,7 @@ export const OrchestrationThread = Schema.Struct({
   pendingInteractions: Schema.optional(Schema.Array(OrchestrationPendingInteraction)),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
+  loop: Schema.optional(Schema.NullOr(ThreadLoop)).pipe(Schema.withDecodingDefault(() => null)),
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
@@ -858,6 +884,9 @@ export const OrchestrationThreadShell = Schema.Struct({
   hasPendingApprovals: Schema.optional(Schema.Boolean),
   hasPendingUserInput: Schema.optional(Schema.Boolean),
   hasActionableProposedPlan: Schema.optional(Schema.Boolean),
+  hasPendingTurnStart: Schema.optional(Schema.Boolean).pipe(
+    Schema.withDecodingDefault(() => false),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
@@ -866,8 +895,12 @@ export const OrchestrationThreadShell = Schema.Struct({
   settledAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
     Schema.withDecodingDefault(() => null),
   ),
+  deletedAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   handoff: Schema.NullOr(ThreadHandoff).pipe(Schema.withDecodingDefault(() => null)),
   session: Schema.NullOr(OrchestrationSession),
+  loop: Schema.optional(Schema.NullOr(ThreadLoop)).pipe(Schema.withDecodingDefault(() => null)),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 
@@ -1291,6 +1324,8 @@ export const ThreadTurnStartCommand = Schema.Struct({
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  // Set by the loop reactor so the UI can label loop-owned turns.
+  purpose: Schema.optional(ThreadTurnPurpose),
   createdAt: IsoDateTime,
 });
 
@@ -1361,6 +1396,7 @@ const ThreadDispatchQueuedTurnCommand = Schema.Struct({
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  purpose: Schema.optional(ThreadTurnPurpose),
   createdAt: IsoDateTime,
 });
 
@@ -1423,6 +1459,57 @@ const ThreadSessionStopCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadLoopSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.loop.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  prompt: Schema.NullOr(LoopPrompt),
+  maxIterations: Schema.NullOr(PositiveInt),
+  durationSeconds: Schema.NullOr(PositiveInt),
+  // Edit-save guard: when supplied, the command only applies while the loop
+  // activation with this id is still active; otherwise it is rejected.
+  expectedActivationId: Schema.optional(LoopActivationId),
+  createdAt: IsoDateTime,
+});
+
+// Lifecycle and policy paths supply the authoritative stop reason. Clients may
+// send this command but their `reason` is stripped at the dispatch boundary: a
+// client-initiated off is always a user action.
+const ThreadLoopOffCommand = Schema.Struct({
+  type: Schema.Literal("thread.loop.off"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  reason: Schema.optional(LoopStopReason),
+  createdAt: IsoDateTime,
+});
+
+const ThreadLoopToggleCommand = Schema.Struct({
+  type: Schema.Literal("thread.loop.toggle"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
+// Internal settlement for a durable pending turn start that will never reach
+// the provider. Only server reactors and lifecycle paths dispatch it.
+const ThreadTurnCancelStartCommand = Schema.Struct({
+  type: Schema.Literal("thread.turn.cancel-start"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messageId: MessageId,
+  purpose: Schema.optional(ThreadTurnPurpose),
+  createdAt: IsoDateTime,
+});
+
+const ThreadLoopContinueCommand = Schema.Struct({
+  type: Schema.Literal("thread.loop.continue"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedUpdatedAt: Schema.optional(IsoDateTime),
+  expectedActivationId: Schema.optional(LoopActivationId),
+  createdAt: IsoDateTime,
+});
+
 const ThreadActivityAppendCommand = Schema.Struct({
   type: Schema.Literal("thread.activity.append"),
   commandId: CommandId,
@@ -1467,6 +1554,9 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadMessageEditAndResendCommand,
   ThreadActivityAppendCommand,
   ThreadSessionStopCommand,
+  ThreadLoopSetCommand,
+  ThreadLoopOffCommand,
+  ThreadLoopToggleCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
@@ -1507,6 +1597,9 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadMessageEditAndResendCommand,
   ThreadActivityAppendCommand,
   ThreadSessionStopCommand,
+  ThreadLoopSetCommand,
+  ThreadLoopOffCommand,
+  ThreadLoopToggleCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
 
@@ -1602,6 +1695,8 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadConversationRollbackCommand,
   ThreadConversationRollbackCompleteCommand,
   ThreadDispatchQueuedTurnCommand,
+  ThreadTurnCancelStartCommand,
+  ThreadLoopContinueCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -1638,6 +1733,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.message-sent",
   "thread.turn-queued",
   "thread.turn-start-requested",
+  "thread.turn-start-cancelled",
   "thread.turn-interrupt-requested",
   "thread.task-stop-requested",
   "thread.task-background-requested",
@@ -1653,6 +1749,10 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.loop-set",
+  "thread.loop-off",
+  "thread.loop-continued",
+  "thread.loop-wait-noted",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -1899,6 +1999,7 @@ export const ThreadMessageSentPayload = Schema.Struct({
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
   source: OrchestrationMessageSource.pipe(Schema.withDecodingDefault(() => "native")),
+  purpose: Schema.optional(ThreadTurnPurpose),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1917,10 +2018,22 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  purpose: Schema.optional(ThreadTurnPurpose),
   createdAt: IsoDateTime,
 });
 
 export const ThreadTurnQueuedPayload = ThreadTurnStartRequestedPayload;
+
+// Durable settlement for a persisted turn start that will never reach the
+// provider (stale loop authority, loop off/reconfigure). Carries the exact
+// pending message identity so projectors retire only the matching pending
+// start and never an unrelated manual one.
+export const ThreadTurnStartCancelledPayload = Schema.Struct({
+  threadId: ThreadId,
+  messageId: MessageId,
+  purpose: Schema.optional(ThreadTurnPurpose),
+  createdAt: IsoDateTime,
+});
 
 export const ThreadTurnInterruptRequestedPayload = Schema.Struct({
   threadId: ThreadId,
@@ -2029,6 +2142,32 @@ export const ThreadTurnDiffCompletedPayload = Schema.Struct({
 export const ThreadActivityAppendedPayload = Schema.Struct({
   threadId: ThreadId,
   activity: OrchestrationThreadActivity,
+});
+
+export const ThreadLoopSetPayload = Schema.Struct({
+  threadId: ThreadId,
+  loop: ThreadLoop,
+});
+
+export const ThreadLoopOffPayload = Schema.Struct({
+  threadId: ThreadId,
+  stopReason: LoopStopReason,
+  loop: ThreadLoop,
+});
+
+export const ThreadLoopContinuedPayload = Schema.Struct({
+  threadId: ThreadId,
+  nextIteration: NonNegativeInt,
+  nextConsecutiveErrors: NonNegativeInt,
+  loop: ThreadLoop,
+});
+
+// A `thread.loop.continue` that resolved to a wait. Carries the unchanged loop
+// with a bumped `updatedAt` so the next deterministic continuation commandId
+// rotates, without re-triggering LoopReactor the way `thread.loop-set` does.
+export const ThreadLoopWaitNotedPayload = Schema.Struct({
+  threadId: ThreadId,
+  loop: ThreadLoop,
 });
 
 export const OrchestrationEventMetadata = Schema.Struct({
@@ -2180,6 +2319,11 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("thread.turn-start-cancelled"),
+    payload: ThreadTurnStartCancelledPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("thread.turn-interrupt-requested"),
     payload: ThreadTurnInterruptRequestedPayload,
   }),
@@ -2252,6 +2396,26 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.loop-set"),
+    payload: ThreadLoopSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.loop-off"),
+    payload: ThreadLoopOffPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.loop-continued"),
+    payload: ThreadLoopContinuedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.loop-wait-noted"),
+    payload: ThreadLoopWaitNotedPayload,
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;

@@ -77,8 +77,16 @@ function centralIconWrapper(name: string, variant?: CentralIconVariant): LucideI
   return function CentralIconWrapper({ className, style, ...rest }) {
     const ariaLabelRaw = (rest as { ["aria-label"]?: unknown })["aria-label"];
     const label = typeof ariaLabelRaw === "string" ? ariaLabelRaw : undefined;
+    // Forward data-* attributes (test ids, state markers) to the rendered span.
+    const dataProps: Record<`data-${string}`, unknown> = {};
+    for (const [key, value] of Object.entries(rest)) {
+      if (key.startsWith("data-")) {
+        dataProps[key as `data-${string}`] = value;
+      }
+    }
     return (
       <CentralIcon
+        {...dataProps}
         name={name}
         variant={variant}
         className={typeof className === "string" ? className : undefined}
@@ -234,6 +242,9 @@ export const PlayIcon: LucideIcon = centralIconWrapper("play", "fill");
 export const Plus = adaptIcon(IconPlus);
 export const PlusIcon = adaptIcon(IconPlus);
 export const RefreshCwIcon = adaptIcon(IconRefresh);
+// Canonical `/loop` glyph — one feature, one glyph (command menu, setup header,
+// runtime rail, transcript metadata, completion summary).
+export const LoopIcon: LucideIcon = centralIconWrapper("repeat");
 export const RotateCcwIcon = adaptIcon(IconRotate2);
 export const Rows3Icon = adaptIcon(IconLayoutDistributeHorizontal);
 export const SearchIcon: LucideIcon = centralIconWrapper("magnifying-glass");

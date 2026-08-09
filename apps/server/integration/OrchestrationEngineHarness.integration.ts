@@ -59,6 +59,7 @@ import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "../src/orchestration/Services/OrchestrationEngine.ts";
+import { LoopReactor } from "../src/orchestration/Services/LoopReactor.ts";
 import { OrchestrationReactor } from "../src/orchestration/Services/OrchestrationReactor.ts";
 import { ProjectionSnapshotQuery } from "../src/orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadGitMetadataReactor } from "../src/orchestration/Services/ThreadGitMetadataReactor.ts";
@@ -337,6 +338,12 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(checkpointReactorLayer),
       Layer.provideMerge(studioOutputReactorLayer),
       Layer.provideMerge(threadGitMetadataReactorLayer),
+      Layer.provideMerge(
+        Layer.succeed(LoopReactor, {
+          start: Effect.void,
+          restoreActiveLoops: Effect.void,
+        }),
+      ),
     );
     const layer = orchestrationReactorLayer.pipe(
       Layer.provide(persistenceLayer),

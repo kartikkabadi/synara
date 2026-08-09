@@ -16,6 +16,9 @@ import { ComposerPickerMenuPopup } from "./ComposerPickerMenuPopup";
 
 type QueuedComposerActionsProps = {
   queuedTurn: QueuedComposerTurn;
+  // While a loop is active the server folds the chip into the loop as the
+  // next objective instead of interrupting, so the copy promises exactly that.
+  loopActive?: boolean;
   onSteer: (queuedTurn: QueuedComposerTurn) => void;
   onRemove: (queuedTurnId: string) => void;
   onEdit: (queuedTurn: QueuedComposerTurn) => void;
@@ -23,20 +26,26 @@ type QueuedComposerActionsProps = {
 
 function QueuedComposerActions({
   queuedTurn,
+  loopActive = false,
   onSteer,
   onRemove,
   onEdit,
 }: QueuedComposerActionsProps) {
   return (
     <div className="flex shrink-0 items-center gap-0">
-      <Button variant="subtle" size="chip" onClick={() => void onSteer(queuedTurn)}>
+      <Button
+        variant="subtle"
+        size="chip"
+        title={loopActive ? "Applies as the loop's objective when this turn ends" : undefined}
+        onClick={() => void onSteer(queuedTurn)}
+      >
         <SteerIcon />
-        <span>Steer</span>
+        <span>{loopActive ? "Next objective" : "Steer"}</span>
       </Button>
       <IconButton
         variant="ghost"
         size="icon-chip"
-        label="Delete queued follow-up"
+        label={loopActive ? "Delete queued objective" : "Delete queued follow-up"}
         onClick={() => onRemove(queuedTurn.id)}
       >
         <Trash2 />
@@ -55,8 +64,12 @@ function QueuedComposerActions({
           <EllipsisIcon />
         </MenuTrigger>
         <ComposerPickerMenuPopup align="end" side="top" sideOffset={6}>
-          <MenuItem onClick={() => onEdit(queuedTurn)}>Edit queued prompt</MenuItem>
-          <MenuItem onClick={() => onRemove(queuedTurn.id)}>Delete queued prompt</MenuItem>
+          <MenuItem onClick={() => onEdit(queuedTurn)}>
+            {loopActive ? "Edit queued objective" : "Edit queued prompt"}
+          </MenuItem>
+          <MenuItem onClick={() => onRemove(queuedTurn.id)}>
+            {loopActive ? "Delete queued objective" : "Delete queued prompt"}
+          </MenuItem>
         </ComposerPickerMenuPopup>
       </Menu>
     </div>

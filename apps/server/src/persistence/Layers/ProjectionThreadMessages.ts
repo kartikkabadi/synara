@@ -30,6 +30,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
         row.attachments !== undefined ? JSON.stringify(row.attachments) : null;
       const nextSkillsJson = row.skills !== undefined ? JSON.stringify(row.skills) : null;
       const nextMentionsJson = row.mentions !== undefined ? JSON.stringify(row.mentions) : null;
+      const nextPurposeJson = row.purpose !== undefined ? JSON.stringify(row.purpose) : null;
       return sql`
         INSERT INTO projection_thread_messages (
           message_id,
@@ -44,6 +45,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           dispatch_origin,
           is_streaming,
           source,
+          purpose_json,
           sequence,
           created_at,
           updated_at
@@ -61,6 +63,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           ${row.dispatchOrigin ?? null},
           ${row.isStreaming ? 1 : 0},
           ${row.source},
+          ${nextPurposeJson},
           ${row.sequence ?? null},
           ${row.createdAt},
           ${row.updatedAt}
@@ -92,6 +95,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           ),
           is_streaming = excluded.is_streaming,
           source = excluded.source,
+          purpose_json = excluded.purpose_json,
           sequence = COALESCE(projection_thread_messages.sequence, excluded.sequence),
           created_at = excluded.created_at,
           updated_at = excluded.updated_at
@@ -117,6 +121,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           dispatch_origin AS "dispatchOrigin",
           is_streaming AS "isStreaming",
           source,
+          purpose_json AS "purpose",
           sequence,
           created_at AS "createdAt",
           updated_at AS "updatedAt"
@@ -167,6 +172,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           dispatch_origin AS "dispatchOrigin",
           is_streaming AS "isStreaming",
           source,
+          purpose_json AS "purpose",
           sequence,
           created_at AS "createdAt",
           updated_at AS "updatedAt"

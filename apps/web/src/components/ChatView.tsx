@@ -310,6 +310,8 @@ import {
   ComposerSendArrowIcon,
   LayoutSidebarIcon,
   LoaderCircleIcon,
+  SteerIcon,
+  StopIcon,
   RefreshCwIcon,
   TemporaryThreadIcon,
 } from "~/lib/icons";
@@ -487,6 +489,9 @@ import { ComposerPendingApprovalPanel } from "./chat/ComposerPendingApprovalPane
 import { ComposerExtrasMenu } from "./chat/ComposerExtrasMenu";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { ComposerInputBanners } from "./chat/ComposerInputBanners";
+import { LoopComposerModeCta, LoopComposerModeHeader } from "./chat/loop/LoopComposerMode";
+import { deriveLoopComposerPlaceholder, isLoopSteerSendSignal } from "./chat/composerPlaceholder";
+import { useLoopController } from "./chat/loop/useLoopController";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerVoiceButton } from "./chat/ComposerVoiceButton";
 import { ComposerVoiceRecorderBar } from "./chat/ComposerVoiceRecorderBar";
@@ -2806,7 +2811,7 @@ export default function ChatView({
     // marking every task completed, and an unfinished list must not linger forever.
     return latestTurnSettled
       ? null
-      : deriveActiveTaskListState(threadActivities, activeLatestTurn?.turnId);
+      : deriveActiveTaskListState(threadActivities, activeLatestTurn?.turnId ?? undefined);
   }, [activeLatestTurn?.turnId, latestTurnSettled, showDebugTaskBanner, threadActivities]);
   const activeBackgroundTasks = useMemo(
     () =>
@@ -4698,6 +4703,7 @@ export default function ChatView({
       createdAt: new Date().toISOString(),
     });
   }, [activeThread, isServerThread]);
+
   const {
     handoffBusy,
     worktreeHandoffDialogOpen,
@@ -10086,6 +10092,75 @@ export default function ChatView({
     ],
   );
 
+  const loopController = useLoopController({
+    threadId,
+    activeThread,
+    activeProject,
+    isServerThread,
+    selectedModelSelection,
+    runtimeMode,
+    interactionMode,
+    isComposerApprovalState,
+    unsupportedContext: {
+      imageCount: composerImages.length,
+      fileCount: composerFiles.length,
+      terminalContextCount: composerTerminalContexts.length,
+      selectedSkillCount: composerSkills.length,
+      selectedMentionCount: composerMentions.length,
+      assistantSelectionCount: composerAssistantSelections.length,
+    },
+    composer: {
+      objective: prompt,
+      setObjective: setComposerPromptValue,
+      clearObjective: clearComposerSlashDraft,
+      focusEditor: scheduleComposerFocus,
+    },
+    syncServerShellSnapshot,
+  });
+  const {
+    composerMode: loopComposer,
+    actions: { stopAfterTurn: handleStopLoopAfterTurn, stopNow: handleStopLoopNow },
+    ensureLoopThreadReady,
+    isLoopOwnedTurnActive,
+    hasUnsupportedContext: hasUnsupportedLoopContext,
+  } = loopController;
+  const loopComposerModeOpen = loopComposer.mode.kind !== "closed";
+  const isLoopSteerSend = isLoopSteerSendSignal({
+    loop: activeThread?.loop ?? null,
+    hasUnsupportedLoopContext,
+  });
+
+  const composerPlaceholder = useMemo(
+    () =>
+      deriveLoopComposerPlaceholder({
+        isApprovalState: isComposerApprovalState,
+        pendingProgressQuestion: activePendingProgress
+          ? activePendingProgress.activeQuestion?.options.length === 0
+            ? "free-form"
+            : "with-options"
+          : null,
+        loopSetupOpen: loopComposerModeOpen,
+        showPlanFollowUp: showPlanFollowUpPrompt && activeProposedPlan != null,
+        loop: activeThread?.loop ?? null,
+        isLoopOwnedTurnRunning: isLoopOwnedTurnActive,
+        isSubagentThread: activeThread?.parentThreadId != null,
+        hasLiveTurn,
+        isDisconnected: phase === "disconnected",
+      }),
+    [
+      isComposerApprovalState,
+      activePendingProgress,
+      loopComposerModeOpen,
+      showPlanFollowUpPrompt,
+      activeProposedPlan,
+      activeThread?.loop,
+      isLoopOwnedTurnActive,
+      activeThread?.parentThreadId,
+      hasLiveTurn,
+      phase,
+    ],
+  );
+
   const {
     handleForkTargetSelection,
     handleReviewTargetSelection,
@@ -10110,6 +10185,7 @@ export default function ChatView({
     fastModeEnabled,
     providerNativeCommands,
     providerCommandDiscoveryCwd: composerSkillCwd,
+    hasUnsupportedLoopContext: loopController.hasUnsupportedContext,
     selectedProvider,
     currentProviderModelOptions,
     selectedModelSelection,
@@ -10117,6 +10193,9 @@ export default function ChatView({
     runtimeMode,
     interactionMode,
     threadId,
+    openLoopSetup: loopComposer.openCreate,
+    openLoopEdit: loopComposer.openEdit,
+    ensureLoopThreadReady,
     syncServerShellSnapshot,
     navigateToThread: (nextThreadId, options) =>
       navigate({
@@ -11129,7 +11208,39 @@ export default function ChatView({
       >
         <form
           ref={composerFormRef}
-          onSubmit={onSend}
+          onSubmit={
+            loopComposerModeOpen
+              ? (event) => {
+                  event.preventDefault();
+                  void loopComposer.submit();
+                }
+              : onSend
+          }
+          onKeyDownCapture={
+            loopComposerModeOpen
+              ? (event) => {
+                  if (
+                    event.key !== "Escape" ||
+                    event.defaultPrevented ||
+                    event.nativeEvent.isComposing
+                  ) {
+                    return;
+                  }
+                  // Escape inside the budget picker's custom inputs dismisses
+                  // that control, not the whole setup mode.
+                  const target = event.target;
+                  if (
+                    target instanceof HTMLElement &&
+                    target.closest("input[type='number'], [data-slot='menu-popup']") !== null
+                  ) {
+                    return;
+                  }
+                  event.preventDefault();
+                  event.stopPropagation();
+                  loopComposer.cancel();
+                }
+              : undefined
+          }
           className="relative z-10 w-full overflow-visible"
           data-chat-composer-form="true"
           data-chat-pane-scope={paneScopeId}
@@ -11183,6 +11294,7 @@ export default function ChatView({
               ) : null}
               <ComposerQueuedHeader
                 queuedTurns={queuedComposerTurns}
+                loopActive={activeThread?.loop?.active === true}
                 onSteer={onSteerQueuedComposerTurn}
                 onRemove={removeQueuedComposerTurn}
                 onEdit={onEditQueuedComposerTurn}
@@ -11243,6 +11355,11 @@ export default function ChatView({
               >
                 <ComposerInputBanners
                   roundedTopReset={false}
+                  thread={activeThread}
+                  loopDraftUnsupported={hasUnsupportedLoopContext}
+                  onStopLoopAfterTurn={handleStopLoopAfterTurn}
+                  onStopLoopNow={handleStopLoopNow}
+                  onEditLoop={loopComposer.openEdit}
                   planFollowUp={
                     !activePendingApproval &&
                     pendingUserInputs.length === 0 &&
@@ -11263,10 +11380,22 @@ export default function ChatView({
                       : null
                   }
                 />
+                {loopComposer.mode.kind !== "closed" && !isComposerApprovalState ? (
+                  <LoopComposerModeHeader
+                    mode={loopComposer.mode}
+                    isDispatching={loopComposer.isDispatching}
+                    isLoopTurnRunning={isLoopOwnedTurnActive}
+                    note={loopComposer.note}
+                    error={loopComposer.error}
+                    isUnsupportedContext={loopComposer.isUnsupportedContext}
+                    onBudgetChange={loopComposer.setBudget}
+                  />
+                ) : null}
                 <div
                   className={cn(
                     COMPOSER_EDITOR_PADDING_CLASS_NAME,
                     composerMenuOpen && !isComposerApprovalState && "overflow-visible",
+                    loopComposerModeOpen && "min-h-[112px]",
                   )}
                 >
                   {composerMenuOpen && !isComposerApprovalState ? (
@@ -11287,6 +11416,7 @@ export default function ChatView({
                           items={composerMenuItems}
                           resolvedTheme={resolvedTheme}
                           isLoading={isComposerMenuLoading}
+                          isLoopActive={activeThread?.loop?.active === true}
                           triggerKind={
                             composerCommandPicker !== null
                               ? "slash-command"
@@ -11359,23 +11489,7 @@ export default function ChatView({
                     {...(canCollapsePastedTextToDraft
                       ? { onCollapsePastedText: addPastedTextToDraft }
                       : {})}
-                    placeholder={
-                      isComposerApprovalState
-                        ? "Resolve this approval request to continue"
-                        : activePendingProgress
-                          ? activePendingProgress.activeQuestion?.options.length === 0
-                            ? "Type your answer to continue"
-                            : "Type your own answer, or leave this blank to use the selected option"
-                          : showPlanFollowUpPrompt && activeProposedPlan
-                            ? "Add feedback to refine the plan, or leave this blank to implement it"
-                            : activeThread?.parentThreadId
-                              ? "Message this subagent while it works"
-                              : hasLiveTurn
-                                ? "Ask for follow-up changes"
-                                : phase === "disconnected"
-                                  ? "Ask for follow-up changes or attach images"
-                                  : "Ask anything, @tag files/folders, or use / to show available commands"
-                    }
+                    placeholder={composerPlaceholder}
                     disabled={isComposerEditorDisabled}
                   />
                 </div>
@@ -11511,19 +11625,35 @@ export default function ChatView({
                           variant="prominent"
                           size="icon-xs"
                           className="sm:size-[26px]"
-                          onClick={onInterruptFromStopControl}
-                          aria-label="Stop generation"
-                          title="Stop the current response. On Mac, press Ctrl+C to interrupt."
+                          onClick={() =>
+                            isLoopOwnedTurnActive
+                              ? void handleStopLoopNow()
+                              : onInterruptFromStopControl()
+                          }
+                          aria-label={isLoopOwnedTurnActive ? "Stop loop" : "Stop generation"}
+                          title={
+                            isLoopOwnedTurnActive
+                              ? "Stop the current iteration and end the loop. Use the loop bar to stop after this turn instead."
+                              : "Stop the current response. On Mac, press Ctrl+C to interrupt."
+                          }
                         >
-                          <span
-                            aria-hidden="true"
-                            className="block size-2 rounded-[1px] bg-current"
-                          />
+                          <StopIcon aria-hidden className="size-3" />
                         </Button>
                       ) : pendingUserInputs.length === 0 &&
                         !isVoiceRecording &&
                         !isVoiceTranscribing ? (
-                        showPlanFollowUpPrompt ? (
+                        loopComposer.mode.kind !== "closed" ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10.5px] text-muted-foreground/50">
+                              Esc to cancel
+                            </span>
+                            <LoopComposerModeCta
+                              mode={loopComposer.mode}
+                              isDispatching={loopComposer.isDispatching}
+                              startDisabled={loopComposer.startDisabled}
+                            />
+                          </div>
+                        ) : showPlanFollowUpPrompt ? (
                           prompt.trim().length > 0 ? (
                             <Button
                               type="submit"
@@ -11602,6 +11732,8 @@ export default function ChatView({
                                         ? "Preparing worktree"
                                         : isSendBusy
                                           ? "Sending"
+                                          : isLoopSteerSend
+                                            ? "Steer the loop"
                                           : "Send message"
                               }
                             >
@@ -11624,6 +11756,8 @@ export default function ChatView({
                                     strokeDasharray="20 12"
                                   />
                                 </svg>
+                              ) : isLoopSteerSend ? (
+                                <SteerIcon aria-hidden="true" className="size-4 shrink-0" />
                               ) : (
                                 <ComposerSendArrowIcon
                                   aria-hidden="true"
@@ -11924,6 +12058,7 @@ export default function ChatView({
                   <ChatTranscriptPane
                     activeThreadId={activeThread.id}
                     activeTurnId={activeTurnIdForTranscript}
+                    activeTurnPurpose={activeThread.latestTurn?.purpose ?? null}
                     agentActivityDetail={openAgentActivityDetail}
                     hasMessages={timelineEntries.length > 0}
                     isWorking={isWorking}
@@ -11931,6 +12066,7 @@ export default function ChatView({
                     worktreeSetup={activeWorktreeSetup}
                     worktreeSetupPendingAction={worktreeSetupPendingAction}
                     onResolveWorktreeSetup={onResolveWorktreeSetup}
+                    loop={activeThread.loop ?? null}
                     activeTurnInProgress={activeTurnInProgress}
                     activeTurnStartedAt={activeWorkStartedAt}
                     listRef={legendListRef}

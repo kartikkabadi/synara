@@ -144,7 +144,7 @@ function createProviderServiceHarness(
 async function waitForThread(
   engine: OrchestrationEngineShape,
   predicate: (thread: {
-    latestTurn: { turnId: string } | null;
+    latestTurn: { turnId: string | null } | null;
     checkpoints: ReadonlyArray<{
       checkpointTurnCount: number;
       status: "ready" | "missing" | "error";
@@ -157,7 +157,7 @@ async function waitForThread(
 ) {
   const deadline = Date.now() + timeoutMs;
   const poll = async (): Promise<{
-    latestTurn: { turnId: string } | null;
+    latestTurn: { turnId: string | null } | null;
     checkpoints: ReadonlyArray<{
       checkpointTurnCount: number;
       status: "ready" | "missing" | "error";

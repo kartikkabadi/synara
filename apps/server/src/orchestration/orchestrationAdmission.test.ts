@@ -47,6 +47,12 @@ describe("orchestration command admission", () => {
         yield* takeNextOrchestrationCommand(queues);
         expect(admit("task-background", "thread.task.background")).toEqual({ accepted: true });
 
+        // Pending-start cancellation is a control-plane settlement command: it
+        // must stay admissible under normal-command saturation so a stale
+        // loop-owned start can always be durably retired.
+        yield* takeNextOrchestrationCommand(queues);
+        expect(admit("cancel-start", "thread.turn.cancel-start")).toEqual({ accepted: true });
+
         yield* Queue.shutdown(queues.control);
         yield* Queue.shutdown(queues.user);
         yield* Queue.shutdown(queues.normal);
