@@ -262,7 +262,7 @@ const makeLoopReactor = Effect.gen(function* () {
     const activeThreads = readModel.threads.filter((thread) => thread.loop?.active === true);
     yield* Ref.set(activeLoopThreadsRef, new Set(activeThreads.map((thread) => thread.id)));
     yield* Ref.set(activeLoopsSeededRef, true);
-    const now = new Date().toISOString();
+    const now = new Date(yield* Clock.currentTimeMillis).toISOString();
     for (const thread of activeThreads) {
       const loop = thread.loop;
       if (loop?.active !== true) {
@@ -311,7 +311,8 @@ const makeLoopReactor = Effect.gen(function* () {
         yield* Queue.take(timerWakeQueue);
         continue;
       }
-      const delayMs = Math.max(0, nextWakeMs - Date.now());
+      const nowMs = yield* Clock.currentTimeMillis;
+      const delayMs = Math.max(0, nextWakeMs - nowMs);
       const outcome = yield* Effect.race(
         Queue.take(timerWakeQueue).pipe(Effect.as("reset" as const)),
         Effect.sleep(delayMs).pipe(Effect.as("expired" as const)),
@@ -319,7 +320,6 @@ const makeLoopReactor = Effect.gen(function* () {
       if (outcome === "reset") {
         continue;
       }
-      const nowMs = Date.now();
       const nowIso = new Date(nowMs).toISOString();
       const expired = [...deadlines].filter(([, endsAtMs]) => endsAtMs <= nowMs);
       // Drop fired entries up front so a rejected dispatch cannot hot-loop the
@@ -346,7 +346,7 @@ const makeLoopReactor = Effect.gen(function* () {
           yield* Ref.update(durationDeadlinesRef, (current) => {
             const next = new Map(current);
             if (!next.has(threadId)) {
-              next.set(threadId, Date.now() + EXPIRY_RETRY_BACKOFF_MS);
+              next.set(threadId, nowMs + EXPIRY_RETRY_BACKOFF_MS);
             }
             return next;
           });

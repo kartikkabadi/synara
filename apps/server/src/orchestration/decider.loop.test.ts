@@ -36,23 +36,28 @@ const modelSelection: ModelSelection = {
 function makeEvent(input: {
   sequence: number;
   type: OrchestrationEvent["type"];
-  occurredAt: string;
-  aggregateKind: OrchestrationEvent["aggregateKind"];
-  aggregateId: string;
-  commandId: string | null;
+  occurredAt?: string;
+  aggregateKind?: OrchestrationEvent["aggregateKind"];
+  aggregateId?: string;
+  commandId?: string | null;
   payload: unknown;
 }): OrchestrationEvent {
+  const aggregateKind = input.aggregateKind ?? "thread";
+  const aggregateId = input.aggregateId ?? "thread-loop";
   return {
     sequence: input.sequence,
     eventId: EventId.makeUnsafe(`event-${input.sequence}`),
     type: input.type,
-    aggregateKind: input.aggregateKind,
+    aggregateKind,
     aggregateId:
-      input.aggregateKind === "project"
-        ? ProjectId.makeUnsafe(input.aggregateId)
-        : ThreadId.makeUnsafe(input.aggregateId),
-    occurredAt: input.occurredAt,
-    commandId: input.commandId === null ? null : CommandId.makeUnsafe(input.commandId),
+      aggregateKind === "project"
+        ? ProjectId.makeUnsafe(aggregateId)
+        : ThreadId.makeUnsafe(aggregateId),
+    occurredAt: input.occurredAt ?? NOW,
+    commandId:
+      input.commandId === undefined || input.commandId === null
+        ? null
+        : CommandId.makeUnsafe(input.commandId),
     causationEventId: null,
     correlationId: null,
     metadata: {},
@@ -352,6 +357,106 @@ async function addActiveTurn(
       makeSessionSetEvent({ activeTurnId: options.turnId, updatedAt: messageTimestamp }),
     ),
   );
+}
+
+async function projectAll(
+  readModel: Awaited<ReturnType<typeof makeReadModelWithThread>>,
+  events: ReadonlyArray<OrchestrationEvent>,
+) {
+  let current = readModel;
+  for (const event of events) {
+    current = await Effect.runPromise(projectEvent(current, event));
+  }
+  return current;
+}
+
+type DeciderCommand = Parameters<typeof decideOrchestrationCommand>[0]["command"];
+
+async function decide(readModel: Awaited<ReturnType<typeof makeReadModelWithThread>>, command: DeciderCommand) {
+  const result = await Effect.runPromise(decideOrchestrationCommand({ command, readModel }));
+  return Array.isArray(result) ? result : [result];
+}
+
+function makeTurnSignalEvent(options: {
+  type: "thread.turn-queued" | "thread.turn-start-requested";
+  messageId: string;
+  purpose?: ThreadTurnPurpose;
+  createdAt?: string;
+}): OrchestrationEvent {
+  const occurredAt = options.createdAt ?? NOW;
+  return makeEvent({
+    sequence: 4,
+    type: options.type,
+    aggregateKind: "thread",
+    aggregateId: "thread-loop",
+    occurredAt,
+    commandId: "cmd-turn-signal",
+    payload: {
+      threadId: "thread-loop",
+      messageId: options.messageId,
+      purpose: options.purpose,
+      createdAt: occurredAt,
+    },
+  });
+}
+
+const LOOP_ITERATION_PURPOSE = {
+  kind: "loop-iteration",
+  activationId: LoopActivationId.makeUnsafe("test-activation"),
+  iteration: 1,
+} as ThreadTurnPurpose;
+
+function loopSetCommand(
+  commandId: string,
+  overrides: Partial<Extract<DeciderCommand, { type: "thread.loop.set" }>> = {},
+): DeciderCommand {
+  return {
+    type: "thread.loop.set",
+    commandId: asCommandId(commandId),
+    threadId: asThreadId("thread-loop"),
+    prompt: "fix tests",
+    maxIterations: null,
+    durationSeconds: null,
+    createdAt: NOW,
+    ...overrides,
+  };
+}
+
+function loopOffCommand(commandId: string, reason: "user_stop" | "thread_deleted"): DeciderCommand {
+  return {
+    type: "thread.loop.off",
+    commandId: asCommandId(commandId),
+    threadId: asThreadId("thread-loop"),
+    reason,
+    createdAt: NOW,
+  };
+}
+
+function loopToggleCommand(commandId: string): DeciderCommand {
+  return {
+    type: "thread.loop.toggle",
+    commandId: asCommandId(commandId),
+    threadId: asThreadId("thread-loop"),
+    createdAt: NOW,
+  };
+}
+
+function loopContinueCommand(commandId: string, createdAt = NOW): DeciderCommand {
+  return {
+    type: "thread.loop.continue",
+    commandId: asCommandId(commandId),
+    threadId: asThreadId("thread-loop"),
+    createdAt,
+  };
+}
+
+function turnInterruptCommand(commandId: string): DeciderCommand {
+  return {
+    type: "thread.turn.interrupt",
+    commandId: asCommandId(commandId),
+    threadId: asThreadId("thread-loop"),
+    createdAt: NOW,
+  };
 }
 
 describe("decider loop commands", () => {
@@ -1424,7 +1529,12 @@ describe("durable pending loop start cancellation", () => {
 
     const cleared = await projectAll(readModel, [
       makeEvent({
+        sequence: 5,
         type: "thread.turn-start-cancelled",
+        aggregateKind: "thread",
+        aggregateId: "thread-loop",
+        occurredAt: NOW,
+        commandId: "cmd-cancel-projected",
         payload: {
           threadId: "thread-loop",
           messageId: "msg-pending-loop-1",
@@ -1440,7 +1550,12 @@ describe("durable pending loop start cancellation", () => {
     // A cancellation for a different message never clears the pending start.
     const mismatched = await projectAll(readModel, [
       makeEvent({
+        sequence: 6,
         type: "thread.turn-start-cancelled",
+        aggregateKind: "thread",
+        aggregateId: "thread-loop",
+        occurredAt: NOW,
+        commandId: "cmd-cancel-mismatched",
         payload: {
           threadId: "thread-loop",
           messageId: "msg-other-1",
