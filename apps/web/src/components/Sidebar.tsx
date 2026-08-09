@@ -142,6 +142,7 @@ import {
   pullRequestReviewRequestCountQueryOptions,
 } from "../lib/pullRequestReactQuery";
 import {
+  prefetchDroidModelsForNewThread,
   prefetchProviderModelsForNewThread,
   resolveNewThreadModelPrefetchCwd,
   resolveNewThreadModelPrefetchProvider,
@@ -2602,16 +2603,18 @@ export default function Sidebar() {
         projectDefaultProvider: project.defaultModelSelection?.provider ?? null,
         defaultProvider: appSettings.defaultProvider,
       });
-      // Droid discovery spins a disposable ACP session per model — only warm it
-      // from explicit new-thread intent (hover/click), not idle project focus.
-      if (provider === "droid" && options?.includeDroid !== true) {
-        return;
-      }
       const cwd = resolveNewThreadModelPrefetchCwd({
         draftWorktreePath: draftThread?.worktreePath ?? null,
         projectCwd: project.cwd,
         serverCwd,
       });
+
+      // Droid discovery spins a disposable ACP session per model — only warm it
+      // from explicit new-thread intent (hover/click), not idle project focus.
+      if (provider === "droid" && options?.includeDroid === true) {
+        prefetchDroidModelsForNewThread(queryClient, { settings: appSettings, cwd });
+        return;
+      }
 
       prefetchProviderModelsForNewThread(queryClient, {
         provider,

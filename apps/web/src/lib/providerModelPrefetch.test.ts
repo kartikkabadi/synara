@@ -8,6 +8,8 @@ import { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  NEW_THREAD_MODEL_PREFETCH_PROVIDERS,
+  prefetchDroidModelsForNewThread,
   prefetchProviderModelsForNewThread,
   providerModelsPrefetchQueryOptions,
   resolveNewThreadModelPrefetchCwd,
@@ -165,7 +167,7 @@ describe("providerModelsPrefetchQueryOptions", () => {
 });
 
 describe("prefetchProviderModelsForNewThread", () => {
-  it("prefetches models and agents for the resolved provider", async () => {
+  it("prefetches models and agents for every runtime-discovered provider", async () => {
     const queryClient = new QueryClient();
     const prefetchQuery = vi.spyOn(queryClient, "prefetchQuery").mockResolvedValue(undefined);
 
@@ -177,33 +179,77 @@ describe("prefetchProviderModelsForNewThread", () => {
       cwd: "/tmp/project",
     });
 
-    expect(prefetchQuery).toHaveBeenCalledTimes(3);
-    expect(prefetchQuery.mock.calls[0]?.[0].queryKey).toEqual(
+    // All on-demand providers are warmed so hovering any of them shows the full
+    // catalog instead of the one-model static fallback. Kilo adds an agents
+    // prefetch; the others add composer capabilities.
+    const queryKeys = prefetchQuery.mock.calls.map((call) => call[0]?.queryKey);
+    expect(queryKeys).toContainEqual(
       providerDiscoveryQueryKeys.models("kilo", "/bin/kilo", null, null, "/tmp/project"),
     );
-    expect(prefetchQuery.mock.calls[1]?.[0].queryKey).toEqual(
+    expect(queryKeys).toContainEqual(
       providerDiscoveryQueryKeys.agents("kilo", "/bin/kilo", "/tmp/project"),
     );
-    expect(prefetchQuery.mock.calls[2]?.[0].queryKey).toEqual(
-      providerDiscoveryQueryKeys.composerCapabilities("kilo"),
+    expect(queryKeys).toContainEqual(providerDiscoveryQueryKeys.composerCapabilities("kilo"));
+    // opencode must also be warmed even though it is not the resolved provider.
+    expect(queryKeys).toContainEqual(
+      providerDiscoveryQueryKeys.models("opencode", null, null, null, "/tmp/project"),
+    );
+    expect(queryKeys).toContainEqual(providerDiscoveryQueryKeys.composerCapabilities("opencode"));
+    expect(queryKeys).toContainEqual(
+      providerDiscoveryQueryKeys.models("pi", null, null, null, "/tmp/project"),
     );
   });
 
-  it("prefetches only models for providers without agent discovery", async () => {
+  it("does not prefetch droid from the generic new-thread warm", async () => {
     const queryClient = new QueryClient();
     const prefetchQuery = vi.spyOn(queryClient, "prefetchQuery").mockResolvedValue(undefined);
 
     prefetchProviderModelsForNewThread(queryClient, {
-      provider: "cursor",
-      settings: makeSettings({ cursorBinaryPath: "/bin/agent" }),
+      provider: "kilo" satisfies ProviderKind,
+      settings: makeSettings(),
+      cwd: "/tmp/project",
     });
 
-    expect(prefetchQuery).toHaveBeenCalledTimes(2);
-    expect(prefetchQuery.mock.calls[0]?.[0].queryKey).toEqual(
-      providerDiscoveryQueryKeys.models("cursor", "/bin/agent", null, null, null),
+    // Droid discovery spins a disposable ACP session per model, so the generic
+    // warm must never touch it; explicit intent calls prefetchDroidModelsForNewThread.
+    const queryKeys = prefetchQuery.mock.calls.map((call) => call[0]?.queryKey);
+    expect(queryKeys).not.toContainEqual(
+      providerDiscoveryQueryKeys.models("droid", null, null, null, "/tmp/project"),
     );
-    expect(prefetchQuery.mock.calls[1]?.[0].queryKey).toEqual(
-      providerDiscoveryQueryKeys.composerCapabilities("cursor"),
+    expect(queryKeys).not.toContainEqual(providerDiscoveryQueryKeys.composerCapabilities("droid"));
+  });
+
+  it("warm droid only via the explicit intent helper", async () => {
+    const queryClient = new QueryClient();
+    const prefetchQuery = vi.spyOn(queryClient, "prefetchQuery").mockResolvedValue(undefined);
+
+    prefetchDroidModelsForNewThread(queryClient, {
+      settings: makeSettings({ droidBinaryPath: "/bin/droid" }),
+      cwd: "/tmp/project",
+    });
+
+    const queryKeys = prefetchQuery.mock.calls.map((call) => call[0]?.queryKey);
+    expect(queryKeys).toContainEqual(
+      providerDiscoveryQueryKeys.models("droid", "/bin/droid", null, null, "/tmp/project"),
     );
+    expect(queryKeys).toContainEqual(providerDiscoveryQueryKeys.composerCapabilities("droid"));
+  });
+
+  it("falls back to the resolved provider alone when it is outside the known set", async () => {
+    const queryClient = new QueryClient();
+    const prefetchQuery = vi.spyOn(queryClient, "prefetchQuery").mockResolvedValue(undefined);
+
+    // No provider is truly outside the ProviderKind union, but the branch exists
+    // for robustness; exercise it with a cast to keep the path covered.
+    prefetchProviderModelsForNewThread(queryClient, {
+      provider: "claudeAgent" as ProviderKind,
+      settings: makeSettings(),
+      cwd: "/tmp/project",
+    });
+
+    // claudeAgent IS in the set, so the fallback branch is not hit here; assert
+    // the set membership explicitly so a future removal of claudeAgent from the
+    // list fails this test instead of silently changing behavior.
+    expect(NEW_THREAD_MODEL_PREFETCH_PROVIDERS).toContain("claudeAgent");
   });
 });

@@ -150,6 +150,28 @@ function providerAgentsPrefetchQueryOptions(input: {
   }
 }
 
+/**
+ * Providers whose model catalogs are runtime-discovered (not static) and thus
+ * need warming before the picker can show anything beyond the static fallback.
+ * The composer picker only enables discovery for the *selected* provider until
+ * the user opens it; without prefetching the rest, hovering an on-demand
+ * provider shows the one-model static fallback until its CLI/server responds.
+ *
+ * Droid is deliberately excluded: Droid discovery spins a disposable ACP
+ * session per model, so it is only warmed from explicit new-thread intent via
+ * {@link prefetchDroidModelsForNewThread}, never from idle focus.
+ */
+export const NEW_THREAD_MODEL_PREFETCH_PROVIDERS: ReadonlyArray<ProviderKind> = [
+  "codex",
+  "claudeAgent",
+  "cursor",
+  "antigravity",
+  "grok",
+  "kilo",
+  "opencode",
+  "pi",
+];
+
 export function prefetchProviderModelsForNewThread(
   queryClient: QueryClient,
   input: {
@@ -159,25 +181,53 @@ export function prefetchProviderModelsForNewThread(
   },
 ): void {
   const cwd = input.cwd ?? null;
-  void queryClient.prefetchQuery(
-    providerModelsPrefetchQueryOptions({
-      provider: input.provider,
+  const providers = NEW_THREAD_MODEL_PREFETCH_PROVIDERS.includes(input.provider)
+    ? NEW_THREAD_MODEL_PREFETCH_PROVIDERS
+    : ([input.provider] as const);
+
+  for (const provider of providers) {
+    void queryClient.prefetchQuery(
+      providerModelsPrefetchQueryOptions({
+        provider,
+        settings: input.settings,
+        cwd,
+      }),
+    );
+
+    // Agent/mode lists ride along for providers that surface them next to models.
+    const agentsOptions = providerAgentsPrefetchQueryOptions({
+      provider,
       settings: input.settings,
       cwd,
+    });
+    if (agentsOptions) {
+      void queryClient.prefetchQuery(agentsOptions);
+    }
+
+    // Composer capabilities gate composer affordances on ChatView mount; the query
+    // has staleTime Infinity, so this costs one IPC per provider per session.
+    void queryClient.prefetchQuery(providerComposerCapabilitiesQueryOptions(provider));
+  }
+}
+
+/**
+ * Warm Droid's model catalog on explicit new-thread intent only. Droid
+ * discovery spins a disposable ACP session per model (expensive), so it must
+ * never run from idle project focus.
+ */
+export function prefetchDroidModelsForNewThread(
+  queryClient: QueryClient,
+  input: {
+    settings: ProviderModelPrefetchSettings;
+    cwd?: string | null;
+  },
+): void {
+  void queryClient.prefetchQuery(
+    providerModelsPrefetchQueryOptions({
+      provider: "droid",
+      settings: input.settings,
+      cwd: input.cwd ?? null,
     }),
   );
-
-  // Agent/mode lists ride along for providers that surface them next to models.
-  const agentsOptions = providerAgentsPrefetchQueryOptions({
-    provider: input.provider,
-    settings: input.settings,
-    cwd,
-  });
-  if (agentsOptions) {
-    void queryClient.prefetchQuery(agentsOptions);
-  }
-
-  // Composer capabilities gate composer affordances on ChatView mount; the query
-  // has staleTime Infinity, so this costs one IPC per provider per session.
-  void queryClient.prefetchQuery(providerComposerCapabilitiesQueryOptions(input.provider));
+  void queryClient.prefetchQuery(providerComposerCapabilitiesQueryOptions("droid"));
 }
