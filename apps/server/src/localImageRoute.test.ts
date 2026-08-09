@@ -191,7 +191,10 @@ describe("localImageEffectRouteLayer", () => {
     writeFileSync(imagePath, Buffer.from("%PDF-1.7"));
     const config = makeServerConfig({ cwd: workspace });
 
-    const grant = await createLocalPreviewGrant({ requestedPath: imagePath });
+    const grant = await createLocalPreviewGrant({
+      requestedPath: imagePath,
+      allowedRoots: [externalRoot],
+    });
 
     await withEffectServer(config, localImageEffectRouteLayer, async (origin) => {
       const params = new URLSearchParams({ path: imagePath, cwd: workspace, grant: grant.grant });
@@ -202,6 +205,29 @@ describe("localImageEffectRouteLayer", () => {
       params.delete("grant");
       const ungrantedResponse = await fetch(`${origin}/api/local-image?${params}`);
       expect(ungrantedResponse.status).toBe(404);
+    });
+  });
+
+  it("never issues grants for outside-root paths and rejects forged tokens end-to-end", async () => {
+    const workspace = makeTempDir("synara-effect-image-workspace-");
+    writeFileSync(path.join(workspace, ".git"), "gitdir: .git");
+    const outsideRoot = makeTempDir("synara-effect-outside-secret-");
+    const secretPath = path.join(outsideRoot, "secret.pdf");
+    writeFileSync(secretPath, Buffer.from("%PDF-1.7"));
+    const config = makeServerConfig({ cwd: workspace });
+
+    await expect(
+      createLocalPreviewGrant({ requestedPath: secretPath, allowedRoots: [workspace] }),
+    ).rejects.toThrow(/outside the allowed workspace roots/);
+
+    await withEffectServer(config, localImageEffectRouteLayer, async (origin) => {
+      const forged = new URLSearchParams({
+        path: secretPath,
+        cwd: workspace,
+        grant: crypto.randomUUID(),
+      });
+      const forgedResponse = await fetch(`${origin}/api/local-image?${forged}`);
+      expect(forgedResponse.status).toBe(404);
     });
   });
 
