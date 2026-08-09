@@ -66,6 +66,9 @@ describe("parseGitHubRepositoryNameWithOwnerFromRemoteUrl", () => {
     "https://gitlab.com/openai/codex",
     "https://github.com/owner",
     "https://github.com/-owner/repo",
+    // A GitHub-looking path on another host must never be treated as a GitHub identity.
+    "https://attacker.example/proxy/github.com/openai/codex.git",
+    "https://proxy.example.com/mirror/github.com/openai/codex",
   ])("rejects unsupported remote %s", (remote) => {
     expect(parseGitHubRepositoryNameWithOwnerFromRemoteUrl(remote)).toBeNull();
   });
