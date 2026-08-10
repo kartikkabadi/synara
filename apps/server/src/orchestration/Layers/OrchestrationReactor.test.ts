@@ -122,8 +122,8 @@ describe("OrchestrationReactor", () => {
     expect(stopped).toEqual([
       "provider-command-reactor",
       "provider-runtime-ingestion",
-      "thread-git-metadata-reactor",
       "loop-reactor",
+      "thread-git-metadata-reactor",
       "checkpoint-reactor",
       "studio-output-reactor",
     ]);
