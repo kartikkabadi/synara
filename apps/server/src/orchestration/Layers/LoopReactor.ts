@@ -408,7 +408,9 @@ const makeLoopReactor = Effect.gen(function* () {
                   }).pipe(Effect.as(false)),
                 ),
                 Effect.flatMap((ok) =>
-                  ok ? Effect.succeed(true) : Effect.fail(new Error("lifecycle off dispatch failed")),
+                  ok
+                    ? Effect.succeed(true)
+                    : Effect.fail(new Error("lifecycle off dispatch failed")),
                 ),
                 Effect.retry(LIFECYCLE_OFF_RETRY_SCHEDULE),
                 Effect.catch((error) =>

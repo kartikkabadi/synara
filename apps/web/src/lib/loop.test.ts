@@ -137,9 +137,9 @@ describe("budget choices", () => {
     expect(
       loopBudgetChoiceFromLoop(makeLoop({ maxIterations: null, durationSeconds: 30 * 60 })),
     ).toEqual({ kind: "duration", seconds: 30 * 60 });
-    expect(
-      loopBudgetChoiceFromLoop(makeLoop({ maxIterations: null, durationSeconds: 7 })),
-    ).toEqual({ kind: "duration", seconds: 7 });
+    expect(loopBudgetChoiceFromLoop(makeLoop({ maxIterations: null, durationSeconds: 7 }))).toEqual(
+      { kind: "duration", seconds: 7 },
+    );
     expect(
       loopBudgetChoiceFromLoop(makeLoop({ maxIterations: null, durationSeconds: null })),
     ).toEqual({

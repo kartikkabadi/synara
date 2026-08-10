@@ -39,7 +39,7 @@ export interface PendingInteractionDerivationOptions {
   // trusts only latest-turn requests; true additionally retains the newest
   // unresolved older request so a background prompt can outlive later turns.
   readonly authoritativeHasPending: boolean | undefined;
-  readonly latestTurnId: TurnId | undefined;
+  readonly latestTurnId: TurnId | null | undefined;
   // The active composer supplies a wall-clock reference so durable failures
   // and orphaned response claims become actionable under the same atomic
   // reclaim policy enforced by persistence. Historical/sidebar derivations

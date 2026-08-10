@@ -414,7 +414,7 @@ agentGatewayRetentionLegacyLayer(
           [87, "DropUnusedOrchestrationEventIndexes"],
           [88, "ProjectionThreadsSettledAt"],
           [89, "RecoverRetentionHiddenThreads"],
-        [90, "ProjectionThreadLoop"],
+          [90, "ProjectionThreadLoop"],
         ]);
 
         const columns = yield* sql<{ readonly name: string }>`
@@ -526,7 +526,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [87, "DropUnusedOrchestrationEventIndexes"],
           [88, "ProjectionThreadsSettledAt"],
           [89, "RecoverRetentionHiddenThreads"],
-        [90, "ProjectionThreadLoop"],
+          [90, "ProjectionThreadLoop"],
         ],
       );
 
@@ -629,7 +629,7 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [87, "DropUnusedOrchestrationEventIndexes"],
           [88, "ProjectionThreadsSettledAt"],
           [89, "RecoverRetentionHiddenThreads"],
-        [90, "ProjectionThreadLoop"],
+          [90, "ProjectionThreadLoop"],
         ],
       );
       const preservedSpaces = yield* sql<{ readonly spaceId: string }>`

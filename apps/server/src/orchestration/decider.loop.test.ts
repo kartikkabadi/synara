@@ -27,6 +27,7 @@ const asTurnId = (value: string) => TurnId.makeUnsafe(value);
 const asMessageId = (value: string) => MessageId.makeUnsafe(value);
 
 const NOW = new Date().toISOString();
+let nextSequence = 1;
 
 const modelSelection: ModelSelection = {
   provider: "codex",
@@ -34,7 +35,7 @@ const modelSelection: ModelSelection = {
 };
 
 function makeEvent(input: {
-  sequence: number;
+  sequence?: number;
   type: OrchestrationEvent["type"];
   occurredAt?: string;
   aggregateKind?: OrchestrationEvent["aggregateKind"];
@@ -42,11 +43,12 @@ function makeEvent(input: {
   commandId?: string | null;
   payload: unknown;
 }): OrchestrationEvent {
+  const sequence = input.sequence ?? nextSequence++;
   const aggregateKind = input.aggregateKind ?? "thread";
   const aggregateId = input.aggregateId ?? "thread-loop";
   return {
-    sequence: input.sequence,
-    eventId: EventId.makeUnsafe(`event-${input.sequence}`),
+    sequence,
+    eventId: EventId.makeUnsafe(`event-${sequence}`),
     type: input.type,
     aggregateKind,
     aggregateId:
@@ -124,7 +126,11 @@ function makeLoop(
     prompt?: string;
     iteration?: number;
     maxIterations?: number | null;
+    durationSeconds?: number | null;
+    endsAt?: string | null;
     consecutiveErrors?: number;
+    lastSettledIteration?: number;
+    unsettled?: ThreadLoop["unsettled"];
     lastStopReason?: ThreadLoop["lastStopReason"];
     activationId?: LoopActivationId;
     createdAt?: string;
@@ -136,9 +142,12 @@ function makeLoop(
     prompt: payload.prompt ?? "fix tests",
     iteration: payload.iteration ?? 0,
     maxIterations: payload.maxIterations ?? null,
-    endsAt: null,
+    endsAt: payload.endsAt ?? null,
+    durationSeconds: payload.durationSeconds ?? null,
     hardCap: 100,
     consecutiveErrors: payload.consecutiveErrors ?? 0,
+    lastSettledIteration: payload.lastSettledIteration ?? 0,
+    unsettled: payload.unsettled ?? [],
     lastStopReason: payload.lastStopReason ?? null,
     activationId: payload.activationId ?? LoopActivationId.makeUnsafe("test-activation"),
     createdAt: payload.createdAt ?? NOW,
@@ -372,7 +381,10 @@ async function projectAll(
 
 type DeciderCommand = Parameters<typeof decideOrchestrationCommand>[0]["command"];
 
-async function decide(readModel: Awaited<ReturnType<typeof makeReadModelWithThread>>, command: DeciderCommand) {
+async function decide(
+  readModel: Awaited<ReturnType<typeof makeReadModelWithThread>>,
+  command: DeciderCommand,
+) {
   const result = await Effect.runPromise(decideOrchestrationCommand({ command, readModel }));
   return Array.isArray(result) ? result : [result];
 }

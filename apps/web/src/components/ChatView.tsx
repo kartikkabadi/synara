@@ -11734,7 +11734,7 @@ export default function ChatView({
                                           ? "Sending"
                                           : isLoopSteerSend
                                             ? "Steer the loop"
-                                          : "Send message"
+                                            : "Send message"
                               }
                             >
                               {isConnecting || isSendBusy || isPreparingComposerImages ? (

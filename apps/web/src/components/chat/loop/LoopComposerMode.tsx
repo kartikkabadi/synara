@@ -74,8 +74,7 @@ export function LoopBudgetPicker(props: {
     } else if (entry.kind === "duration") {
       const value = Number(entry.raw);
       const seconds = Number.isFinite(value)
-        ? Math.trunc(value) *
-          (entry.unit === "hours" ? 3600 : entry.unit === "minutes" ? 60 : 1)
+        ? Math.trunc(value) * (entry.unit === "hours" ? 3600 : entry.unit === "minutes" ? 60 : 1)
         : 0;
       props.onChange({ kind: "duration", seconds });
     }
@@ -231,11 +230,7 @@ export function LoopBudgetPicker(props: {
                           kind: "duration",
                           raw: previous.kind === "duration" ? previous.raw : "",
                           unit:
-                            unit === "hours"
-                              ? "hours"
-                              : unit === "seconds"
-                                ? "seconds"
-                                : "minutes",
+                            unit === "hours" ? "hours" : unit === "seconds" ? "seconds" : "minutes",
                         };
                         commitCustom(next);
                         return next;
@@ -245,7 +240,7 @@ export function LoopBudgetPicker(props: {
                     <SelectTrigger aria-label="Duration unit" className="h-6 px-1.5 text-[11px]">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectPopup>
+                    <SelectPopup surface="composer">
                       <SelectItem value="seconds">seconds</SelectItem>
                       <SelectItem value="minutes">minutes</SelectItem>
                       <SelectItem value="hours">hours</SelectItem>

@@ -410,15 +410,15 @@ interface MessagesTimelineProps {
   workingLabel?: "Loading" | "Thinking" | undefined;
   activeTurnInProgress: boolean;
   activeTurnStartedAt: string | null;
-   /** Transient "New worktree" setup progress; rendered as an ephemeral step card at the tail. */
-   worktreeSetup?: WorktreeSetupSnapshot | null;
-   /** Action already chosen from the worktree setup card; disables its buttons while it applies. */
-   worktreeSetupPendingAction?: WorktreeSetupResolutionAction | null;
-   /** Resolve the in-flight worktree preparation (cancel the send or fall back to the local checkout). */
-   onResolveWorktreeSetup?: (action: WorktreeSetupResolutionAction) => void;
-   /** Thread `/loop` projection; drives the durable loop-end transcript record. */
-   loop?: ThreadLoop | null;
-   followLiveOutput?: boolean;
+  /** Transient "New worktree" setup progress; rendered as an ephemeral step card at the tail. */
+  worktreeSetup?: WorktreeSetupSnapshot | null;
+  /** Action already chosen from the worktree setup card; disables its buttons while it applies. */
+  worktreeSetupPendingAction?: WorktreeSetupResolutionAction | null;
+  /** Resolve the in-flight worktree preparation (cancel the send or fall back to the local checkout). */
+  onResolveWorktreeSetup?: (action: WorktreeSetupResolutionAction) => void;
+  /** Thread `/loop` projection; drives the durable loop-end transcript record. */
+  loop?: ThreadLoop | null;
+  followLiveOutput?: boolean;
   emptyStateContent?: ReactNode;
   listRef?: RefObject<LegendListRef | null>;
   /** Receives the scroll-to-message controller so the Environment panel can jump to a pin. */

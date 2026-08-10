@@ -68,7 +68,11 @@ import {
 import { formatLoopStopReasonShort } from "./presentation";
 
 function makeLoop(overrides: Partial<ThreadLoop>): ThreadLoop {
-  return makeLoopFixture({ activationId: "act-1", active: false, ...overrides });
+  return makeLoopFixture({
+    activationId: LoopActivationId.makeUnsafe("act-1"),
+    active: false,
+    ...overrides,
+  });
 }
 
 describe("shouldToastLoopStop", () => {

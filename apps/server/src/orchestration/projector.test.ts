@@ -1950,7 +1950,6 @@ describe("orchestration projector", () => {
     ]);
     expect(finalized.threads[0]?.messages[1]?.text).toBe("Hello, world!");
     expect(finalized.threads[0]?.messages[1]?.streaming).toBe(false);
-
   });
 
   it("clears hasPendingTurnStart on a terminal session that never reached running", async () => {
