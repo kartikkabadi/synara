@@ -24,6 +24,7 @@ import {
   ThreadId,
   type ProviderSession,
   type RuntimeMode,
+  type ThreadTurnPurpose,
   TurnId,
 } from "@synara/contracts";
 import {
@@ -109,6 +110,8 @@ import {
   listPriorTranscriptMessages,
 } from "../handoff.ts";
 import type { OrchestrationDispatchError } from "../Errors.ts";
+import { classifyLoopTurnAuthority } from "../loop/queuedTurnAuthority.ts";
+import type { OrchestrationCommandInvariantError } from "../Errors.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
@@ -857,7 +860,98 @@ const make = Effect.gen(function* () {
       messageId: event.payload.messageId,
       dispatchMode: event.payload.dispatchMode,
       createdAt: event.payload.createdAt,
+      ...(event.payload.purpose?.kind === "loop-iteration"
+        ? {
+            activationId: event.payload.purpose.activationId,
+            iteration: event.payload.purpose.iteration,
+          }
+        : {}),
     });
+
+  // Thin effectful wrapper over the pure classification: resolves the thread
+  // projection, then delegates. Pure check only — no side effects — so callers
+  // decide whether to retire promotions or retry.
+  const checkLoopTurnAuthority = Effect.fnUntraced(function* (input: {
+    readonly threadId: ThreadId;
+    readonly purpose: ThreadTurnPurpose;
+  }) {
+    const thread = yield* resolveThread(input.threadId);
+    return classifyLoopTurnAuthority({ thread, purpose: input.purpose });
+  });
+
+  // Side effect for a genuinely stale loop turn: retire the activation's
+  // queued promotion rows so they are not resurrected later. Persistence
+  // failures propagate so the durable source intent is retried rather than
+  // acknowledged with the poison rows still queued.
+  const retireLoopActivationPromotions = (input: {
+    readonly threadId: ThreadId;
+    readonly purpose: ThreadTurnPurpose;
+    readonly createdAt: string;
+  }) =>
+    queuedTurnPromotions.cancelByActivation({
+      threadId: input.threadId,
+      activationId: input.purpose.activationId,
+      updatedAt: input.createdAt,
+    });
+
+  // Durable settlement for a persisted start that will never reach the
+  // provider: the decider only materializes the cancellation when the exact
+  // message is still the thread's current pending start, so a newer pending
+  // start (manual or fresh activation) is never cleared — a mismatch is a
+  // proven exact no-op and the dispatch succeeds without emitting events.
+  // Admission rejections, dispatch timeouts, and persistence failures all
+  // propagate: acknowledging the source intent while the pending row survives
+  // would leak it permanently, so the durable delivery machinery must retry
+  // until the row is actually retired.
+  const settlePendingLoopStart = (input: {
+    readonly threadId: ThreadId;
+    readonly messageId: MessageId;
+    readonly purpose: ThreadTurnPurpose;
+    readonly createdAt: string;
+  }) =>
+    orchestrationEngine
+      .dispatch({
+        type: "thread.turn.cancel-start",
+        commandId: serverCommandId("cancel-pending-turn-start"),
+        threadId: input.threadId,
+        messageId: input.messageId,
+        purpose: input.purpose,
+        createdAt: input.createdAt,
+      })
+      .pipe(
+        // The decider emits no events exactly when this message is no longer
+        // the thread's current pending start (already retired or replaced) —
+        // the engine surfaces that as a "produced no events" invariant. That
+        // proven exact-message no-op is a successful settlement; every other
+        // failure still propagates so durable delivery retries the intent.
+        Effect.catchIf(
+          (error): error is OrchestrationCommandInvariantError =>
+            error._tag === "OrchestrationCommandInvariantError" &&
+            error.commandType === "thread.turn.cancel-start" &&
+            error.detail === "Command produced no events.",
+          () => Effect.void,
+        ),
+      );
+
+  const verifyLoopTurnAuthority = Effect.fnUntraced(function* (input: {
+    readonly threadId: ThreadId;
+    readonly messageId: MessageId;
+    readonly purpose: ThreadTurnPurpose;
+    readonly createdAt: string;
+  }) {
+    const authority = yield* checkLoopTurnAuthority(input);
+    if (authority === "authorized") {
+      return true;
+    }
+    if (authority === "stale_activation") {
+      yield* retireLoopActivationPromotions(input);
+    }
+    // Either rejection means this persisted start is dropped without a
+    // provider call, so its pending projection row must settle durably
+    // before the source intent may be acknowledged.
+    yield* settlePendingLoopStart(input);
+    return false;
+  });
 
   const hasQueuedTurnStart = (threadId: ThreadId, messageId: string) =>
     queuedTurnPromotions.hasPendingMessage({ threadId, messageId });
@@ -1354,6 +1448,11 @@ const make = Effect.gen(function* () {
     readonly runtimeMode?: RuntimeMode;
     readonly interactionMode?: "default" | "plan";
     readonly dispatchMode?: "queue" | "steer";
+    // Loop-owned turns carry their purpose so authority is re-verified
+    // immediately before the external provider call: authority can be lost
+    // between preflight and dispatch (off/toggle/reconfigure racing a slow
+    // session start). Losing authority aborts without starting a turn.
+    readonly purpose?: ThreadTurnPurpose;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
@@ -1776,6 +1875,17 @@ const make = Effect.gen(function* () {
           );
           return yield* sendQueuedProviderTurn(retryNormalizedInput);
         });
+      if (input.purpose?.kind === "loop-iteration") {
+        const authorized = yield* verifyLoopTurnAuthority({
+          threadId: input.threadId,
+          messageId: MessageId.makeUnsafe(input.messageId),
+          purpose: input.purpose,
+          createdAt: input.createdAt,
+        });
+        if (!authorized) {
+          return;
+        }
+      }
       const sentTurn = yield* sendQueuedProviderTurn(normalizedInput).pipe(
         Effect.catch((error) =>
           Effect.gen(function* () {
@@ -2192,6 +2302,22 @@ const make = Effect.gen(function* () {
         return;
       }
 
+      const purpose = event.payload.purpose;
+      if (purpose?.kind === "loop-iteration") {
+        const authorized = yield* verifyLoopTurnAuthority({
+          threadId: event.payload.threadId,
+          messageId: event.payload.messageId,
+          purpose,
+          createdAt: event.payload.createdAt,
+        });
+        if (!authorized) {
+          if (isPendingQueuedDispatch) {
+            yield* clearPendingQueuedDispatch;
+          }
+          return;
+        }
+      }
+
       const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
       if (!message || message.role !== "user") {
         yield* appendProviderFailureActivity({
@@ -2322,6 +2448,7 @@ const make = Effect.gen(function* () {
           : {}),
         interactionMode: event.payload.interactionMode,
         dispatchMode: immediateDispatchMode,
+        ...(purpose !== undefined ? { purpose } : {}),
         createdAt: event.payload.createdAt,
       }).pipe(
         Effect.catchCause((cause) =>
@@ -2432,6 +2559,41 @@ const make = Effect.gen(function* () {
           );
         }
         const nextQueuedTurn = sourceEvent.payload;
+        if (nextQueuedTurn.purpose?.kind === "loop-iteration") {
+          const authority = yield* checkLoopTurnAuthority({
+            threadId,
+            purpose: nextQueuedTurn.purpose,
+          });
+          if (authority === "stale_activation") {
+            const createdAt = new Date().toISOString();
+            yield* retireLoopActivationPromotions({
+              threadId,
+              purpose: nextQueuedTurn.purpose,
+              createdAt,
+            });
+            yield* settlePendingLoopStart({
+              threadId,
+              messageId: nextQueuedTurn.messageId,
+              purpose: nextQueuedTurn.purpose,
+              createdAt,
+            });
+            // The cancellation retired the promotion row; the claim must not
+            // be released back into the queue.
+            return;
+          }
+          if (authority === "iteration_mismatch") {
+            // Likely projection lag on a live activation: release the claim so
+            // a later drain retries once the loop projection catches up.
+            yield* queuedTurnPromotions
+              .releaseClaim({
+                queuedEventSequence: promotion.queuedEventSequence,
+                claimOwner: queuedTurnPromotionOwner,
+                updatedAt: new Date().toISOString(),
+              })
+              .pipe(Effect.ignore);
+            return;
+          }
+        }
         pendingQueuedDispatchBySessionThread.set(sessionThreadId, {
           queuedThreadId: threadId,
           messageId: nextQueuedTurn.messageId,
@@ -2464,6 +2626,7 @@ const make = Effect.gen(function* () {
           ...(nextQueuedTurn.sourceProposedPlan !== undefined
             ? { sourceProposedPlan: nextQueuedTurn.sourceProposedPlan }
             : {}),
+          ...(nextQueuedTurn.purpose !== undefined ? { purpose: nextQueuedTurn.purpose } : {}),
           createdAt: nextQueuedTurn.createdAt,
         });
         const promoted = yield* queuedTurnPromotions.markPromoted({
@@ -3448,6 +3611,15 @@ const make = Effect.gen(function* () {
         }
         case "thread.turn-queued":
           yield* processTurnQueued(event);
+          return;
+        case "thread.loop-off":
+          // Retire queued loop-owned turns for the stopped activation so they
+          // never promote into provider turns after the loop turned off.
+          yield* queuedTurnPromotions.cancelByActivation({
+            threadId: event.payload.threadId,
+            activationId: event.payload.loop.activationId,
+            updatedAt: event.occurredAt,
+          });
           return;
         case "thread.turn-start-requested":
           yield* processTurnStartRequested(event);

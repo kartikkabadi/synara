@@ -11,6 +11,8 @@ export interface QueuedTurnPromotion {
   readonly state: "queued" | "promoting" | "promoted" | "cancelled";
   readonly claimOwner: string | null;
   readonly attemptCount: number;
+  readonly activationId: string | null;
+  readonly iteration: number | null;
 }
 
 export interface QueuedTurnPromotionRepositoryShape {
@@ -23,6 +25,8 @@ export interface QueuedTurnPromotionRepositoryShape {
     readonly messageId: string;
     readonly dispatchMode: "queue" | "steer";
     readonly createdAt: string;
+    readonly activationId?: string | null;
+    readonly iteration?: number | null;
   }) => Effect.Effect<void, PersistenceSqlError>;
   readonly claimNext: (input: {
     readonly threadId: string;
@@ -53,6 +57,12 @@ export interface QueuedTurnPromotionRepositoryShape {
    */
   readonly cancelThread: (input: {
     readonly threadId: string;
+    readonly updatedAt: string;
+  }) => Effect.Effect<void, PersistenceSqlError>;
+  /** Cancel every pending row belonging to a retired loop activation. */
+  readonly cancelByActivation: (input: {
+    readonly threadId: string;
+    readonly activationId: string;
     readonly updatedAt: string;
   }) => Effect.Effect<void, PersistenceSqlError>;
   readonly hasPendingMessage: (input: {

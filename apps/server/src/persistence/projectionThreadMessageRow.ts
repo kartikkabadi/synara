@@ -4,6 +4,7 @@ import {
   NonNegativeInt,
   ProviderMentionReference,
   ProviderSkillReference,
+  ThreadTurnPurpose,
   TurnDispatchMode,
   type OrchestrationMessage,
 } from "@synara/contracts";
@@ -22,6 +23,7 @@ export const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFie
     mentions: Schema.NullOr(Schema.fromJsonString(Schema.Array(ProviderMentionReference))),
     dispatchMode: Schema.NullOr(TurnDispatchMode),
     dispatchOrigin: Schema.NullOr(MessageDispatchOrigin),
+    purpose: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadTurnPurpose))),
     sequence: Schema.NullOr(NonNegativeInt),
   }),
 );
@@ -49,6 +51,7 @@ export function projectionThreadMessageFromRow(
     ...(row.mentions !== null ? { mentions: row.mentions } : {}),
     ...(row.dispatchMode ? { dispatchMode: row.dispatchMode } : {}),
     ...(row.dispatchOrigin ? { dispatchOrigin: row.dispatchOrigin } : {}),
+    ...(row.purpose != null ? { purpose: row.purpose } : {}),
   };
 }
 
@@ -64,6 +67,7 @@ export function orchestrationMessageFromProjectionRow(
     ...(row.mentions !== null ? { mentions: row.mentions } : {}),
     ...(row.dispatchMode ? { dispatchMode: row.dispatchMode } : {}),
     ...(row.dispatchOrigin ? { dispatchOrigin: row.dispatchOrigin } : {}),
+    ...(row.purpose != null ? { purpose: row.purpose } : {}),
     turnId: row.turnId,
     streaming: row.isStreaming === 1,
     source: row.source,

@@ -23,6 +23,7 @@ import {
   GitForkIcon,
   InfoIcon,
   ListTodoIcon,
+  LoopIcon,
   type LucideIcon,
   MessageCircleIcon,
   Minimize2,
@@ -58,8 +59,9 @@ function humanizeProviderCommandName(command: string): string {
     .join(" ");
 }
 
-function commandMenuTitle(
+export function commandMenuTitle(
   item: Extract<ComposerCommandItem, { type: "slash-command" | "provider-native-command" }>,
+  isLoopActive: boolean,
 ): string {
   switch (item.command) {
     case "clear":
@@ -86,6 +88,10 @@ function commandMenuTitle(
       return "Subagents";
     case "feedback":
       return "Feedback Synara";
+    case "loop":
+      // Selecting the entry never unexpectedly stops a running loop: active
+      // selection opens Edit Loop mode instead of toggling.
+      return isLoopActive ? "Edit loop" : "Loop";
     default:
       return humanizeProviderCommandName(item.command);
   }
@@ -117,6 +123,10 @@ function commandMenuTrailingMeta(item: ComposerCommandItem): string | null {
   }
 
   if (item.type === "slash-command" || item.type === "provider-native-command") {
+    // Power-user syntax hint: /loop supports an inline budget and prompt.
+    if (item.command === "loop") {
+      return "/loop 10 <prompt> or /loop 30m <prompt>";
+    }
     return `/${item.command}`;
   }
 
@@ -318,6 +328,7 @@ export function ComposerCommandMenu(props: {
   items: ComposerCommandItem[];
   resolvedTheme: "light" | "dark";
   isLoading: boolean;
+  isLoopActive?: boolean;
   triggerKind: ComposerTriggerKind | null;
   groupSlashCommandSections?: boolean;
   emptyStateText?: string;
@@ -370,6 +381,7 @@ export function ComposerCommandMenu(props: {
                       key={item.id}
                       item={item}
                       resolvedTheme={props.resolvedTheme}
+                      isLoopActive={props.isLoopActive ?? false}
                       isActive={props.activeItemId === item.id}
                       itemRef={(node) => {
                         itemRefs.current[item.id] = node;
@@ -447,7 +459,7 @@ const COMPOSER_COMMAND_ITEM_GLYPH_CLASSNAME = "size-3.5";
 // Reuse the app's existing icon components for each concept so the command menu
 // stays coherent with how plan/fork/review/model/etc. appear everywhere else.
 // Don't introduce bespoke glyphs here — map to the shared `~/lib/icons` exports.
-const SLASH_COMMAND_ICONS: Record<string, LucideIcon> = {
+export const SLASH_COMMAND_ICONS: Record<string, LucideIcon> = {
   clear: EraserIcon,
   compact: Minimize2,
   model: BrainIcon,
@@ -461,6 +473,7 @@ const SLASH_COMMAND_ICONS: Record<string, LucideIcon> = {
   subagents: BotIcon,
   feedback: BugIcon,
   automation: ClockIcon,
+  loop: LoopIcon,
 };
 
 function commandMenuSlashGlyph(command: string, fallback: LucideIcon): ReactNode {
@@ -543,6 +556,7 @@ function ComposerCommandItemIcon(props: {
 const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem({
   item,
   resolvedTheme,
+  isLoopActive,
   isActive,
   itemRef,
   onHighlight,
@@ -550,6 +564,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem({
 }: {
   item: ComposerCommandItem;
   resolvedTheme: "light" | "dark";
+  isLoopActive: boolean;
   isActive: boolean;
   itemRef: (node: HTMLElement | null) => void;
   onHighlight: (itemId: string | null) => void;
@@ -581,7 +596,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem({
         <div className="min-w-0 flex flex-1 items-center gap-1.5 overflow-hidden">
           <span className="shrink-0 text-[11.5px] font-medium text-foreground/80">
             {item.type === "slash-command" || item.type === "provider-native-command"
-              ? commandMenuTitle(item)
+              ? commandMenuTitle(item, isLoopActive)
               : item.label}
           </span>
           {secondaryText ? (

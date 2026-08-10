@@ -115,7 +115,12 @@ const seedTwoThreadsWithActivity = Effect.gen(function* () {
         '{"provider":"codex","model":"gpt-5-codex","options":{"reasoningEffort":"high"}}',
         'full-access', 'default', 'local',
         '2026-06-13T09:00:00.000Z', '2026-06-13T09:00:00.000Z', NULL
-      )
+    )
+  `;
+
+  yield* sql`
+    INSERT INTO projection_thread_loop (thread_id, loop_json, updated_at)
+    VALUES ('thread-purge', '{}', '2026-06-14T10:00:00.000Z')
   `;
 
   yield* sql`
@@ -453,6 +458,7 @@ describe("ProfileStatsArchive", () => {
           readonly threads: number;
           readonly messages: number;
           readonly turns: number;
+          readonly loops: number;
         }>`
           SELECT
             (SELECT COUNT(*) FROM projection_threads WHERE thread_id = 'thread-purge') AS threads,
@@ -461,9 +467,10 @@ describe("ProfileStatsArchive", () => {
               FROM projection_thread_messages
               WHERE thread_id = 'thread-purge'
             ) AS messages,
-            (SELECT COUNT(*) FROM projection_turns WHERE thread_id = 'thread-purge') AS turns
+            (SELECT COUNT(*) FROM projection_turns WHERE thread_id = 'thread-purge') AS turns,
+            (SELECT COUNT(*) FROM projection_thread_loop WHERE thread_id = 'thread-purge') AS loops
         `;
-        expect(remaining[0]).toMatchObject({ threads: 0, messages: 0, turns: 0 });
+        expect(remaining[0]).toMatchObject({ threads: 0, messages: 0, turns: 0, loops: 0 });
         expect(
           yield* sql<{ readonly status: string; readonly activeClaims: number }>`
             SELECT

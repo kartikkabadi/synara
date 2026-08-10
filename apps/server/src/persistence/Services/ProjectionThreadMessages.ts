@@ -16,6 +16,7 @@ import {
   ProviderMentionReference,
   ProviderSkillReference,
   ThreadId,
+  ThreadTurnPurpose,
   TurnId,
   IsoDateTime,
   NonNegativeInt,
@@ -38,6 +39,7 @@ export const ProjectionThreadMessage = Schema.Struct({
   dispatchOrigin: Schema.optional(MessageDispatchOrigin),
   isStreaming: Schema.Boolean,
   source: OrchestrationMessageSource,
+  purpose: Schema.optional(ThreadTurnPurpose),
   /** Server-owned orchestration event sequence for causal ordering. */
   sequence: Schema.optional(NonNegativeInt),
   createdAt: IsoDateTime,

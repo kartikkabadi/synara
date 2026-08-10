@@ -37,6 +37,7 @@ import {
 } from "../../codexGeneratedImages.ts";
 import { copyAndAttributeStudioGeneratedImage } from "../../studioGeneratedImages.ts";
 import { parseCheckpointFilesFromUnifiedDiff } from "../../checkpointing/Diffs.ts";
+import { isAbortLikeProviderErrorMessage } from "../../provider/abortErrorClassification.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import {
   classifyTerminalTurnApplicability,
@@ -2067,7 +2068,14 @@ const make = Effect.gen(function* () {
         const status = (() => {
           switch (event.type) {
             case "session.state.changed":
-              return event.payload.state === "waiting" ? "running" : event.payload.state;
+              if (event.payload.state === "waiting") {
+                return "running";
+              }
+              // An abort-like "error" is an intentional stop, not a provider failure.
+              return event.payload.state === "error" &&
+                isAbortLikeProviderErrorMessage(event.payload.reason)
+                ? "interrupted"
+                : event.payload.state;
             case "turn.started":
               return "running";
             case "session.exited":
@@ -2408,6 +2416,9 @@ const make = Effect.gen(function* () {
       if (event.type === "runtime.error") {
         const runtimeErrorMessage =
           asString(runtimePayloadRecord(event)?.message) ?? "Provider runtime error";
+        // An abort-like runtime error follows an intentional stop; the turn is
+        // interrupted, not failed, and must not surface as a thread error.
+        const runtimeErrorIsAbortLike = isAbortLikeProviderErrorMessage(runtimeErrorMessage);
         const erroredTurnId = eventTurnId ?? activeTurnId ?? undefined;
 
         if (erroredTurnId) {
@@ -2439,11 +2450,11 @@ const make = Effect.gen(function* () {
             threadId: thread.id,
             session: {
               threadId: thread.id,
-              status: "error",
+              status: runtimeErrorIsAbortLike ? "interrupted" : "error",
               providerName: event.provider,
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
-              activeTurnId: eventTurnId ?? null,
-              lastError: runtimeErrorMessage,
+              activeTurnId: runtimeErrorIsAbortLike ? null : (eventTurnId ?? null),
+              lastError: runtimeErrorIsAbortLike ? null : runtimeErrorMessage,
               updatedAt: now,
             },
             createdAt: now,

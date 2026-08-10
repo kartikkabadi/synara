@@ -7,7 +7,9 @@ import {
   type MessageId,
   type ProviderMentionReference,
   ThreadId,
+  type ThreadLoop,
   type ThreadMarker,
+  type ThreadTurnPurpose,
   type TurnId,
 } from "@synara/contracts";
 import { pluralize } from "@synara/shared/text";
@@ -50,6 +52,7 @@ import {
   CircleCheckIcon,
   ClockIcon,
   LoaderIcon,
+  LoopIcon,
   type LucideIcon,
   NewThreadIcon,
   PinIcon,
@@ -58,9 +61,11 @@ import {
   WorktreeIcon,
 } from "~/lib/icons";
 import { pinActionLabel } from "~/lib/pin";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { composerOverlayScrollMaskImage } from "./composerOverlay";
 import { CrossTaskOriginLabel, type CrossTaskOrigin } from "./CrossTaskOriginLabel";
+import { LoopCompletionRecord } from "./loop/LoopCompletionRecord";
 import { SynaraThreadCreationCard } from "./SynaraThreadCreationCard";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
@@ -227,18 +232,21 @@ const USER_TURN_MARKER_PRESENTATION: Record<
   automation: { Icon: ClockIcon, label: "Sent via Automation" },
   agent: { Icon: BotIcon, label: "Sent by agent" },
   steer: { Icon: SteerIcon, label: "Steering conversation" },
+  "loop-steer": { Icon: SteerIcon, label: "Steering next iteration" },
 };
 
 function UserDispatchModeChip({
   dispatchMode,
   dispatchOrigin,
+  purpose,
   hasLeadingMedia,
 }: {
   dispatchMode: TimelineMessage["dispatchMode"];
   dispatchOrigin: TimelineMessage["dispatchOrigin"];
+  purpose: TimelineMessage["purpose"];
   hasLeadingMedia: boolean;
 }) {
-  const markerKind = resolveUserTurnMarker({ dispatchMode, dispatchOrigin });
+  const markerKind = resolveUserTurnMarker({ dispatchMode, dispatchOrigin, purpose });
   if (!markerKind) {
     return null;
   }
@@ -408,6 +416,8 @@ interface MessagesTimelineProps {
   worktreeSetupPendingAction?: WorktreeSetupResolutionAction | null;
   /** Resolve the in-flight worktree preparation (cancel the send or fall back to the local checkout). */
   onResolveWorktreeSetup?: (action: WorktreeSetupResolutionAction) => void;
+  /** Thread `/loop` projection; drives the durable loop-end transcript record. */
+  loop?: ThreadLoop | null;
   followLiveOutput?: boolean;
   emptyStateContent?: ReactNode;
   listRef?: RefObject<LegendListRef | null>;
@@ -461,6 +471,7 @@ interface MessagesTimelineProps {
    */
   editableUserMessageId?: MessageId | null;
   activeTurnId?: TurnId | null;
+  activeTurnPurpose?: ThreadTurnPurpose | null;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onIsAtEndChange?: (isAtEnd: boolean) => void;
@@ -506,6 +517,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   worktreeSetup: worktreeSetupProp,
   worktreeSetupPendingAction: worktreeSetupPendingActionProp,
   onResolveWorktreeSetup,
+  loop: loopProp,
   followLiveOutput: followLiveOutputProp,
   listRef,
   controllerRef,
@@ -533,6 +545,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onEditUserMessage,
   editableUserMessageId,
   activeTurnId,
+  activeTurnPurpose: activeTurnPurposeProp,
   isRevertingCheckpoint,
   onImageExpand,
   onIsAtEndChange,
@@ -564,6 +577,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const workingLabel = workingLabelProp ?? "Thinking";
   const worktreeSetup = worktreeSetupProp ?? null;
   const worktreeSetupPendingAction = worktreeSetupPendingActionProp ?? null;
+  const loop = loopProp ?? null;
+  const activeTurnPurpose = activeTurnPurposeProp ?? null;
   const followLiveOutput = followLiveOutputProp ?? false;
   const threadMarkers = threadMarkersProp ?? EMPTY_MESSAGE_MARKERS;
   const enteringUserMessageIds = enteringUserMessageIdsProp ?? EMPTY_MESSAGE_ID_SET;
@@ -748,6 +763,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         activeTurnStartedAt,
         turnDiffSummaryByAssistantMessageId,
         revertTurnCountByUserMessageId,
+        loop,
+        activeTurnPurpose,
       }),
     [
       timelineEntries,
@@ -755,9 +772,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       presentedWorktreeSetup,
       activeTurnInProgress,
       activeTurnId,
+      activeTurnPurpose,
       activeTurnStartedAt,
       turnDiffSummaryByAssistantMessageId,
       revertTurnCountByUserMessageId,
+      loop,
     ],
   );
   const rows = useStableRows(rawRows);
@@ -1371,10 +1390,20 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   {/* Keep user-message chrome outside the bubble so the message reads as one simple block. */}
                   {/* The cross-task origin label already attributes this turn to another Synara thread,
                       so suppress the dispatch chip here to avoid a duplicate "Sent by …" marker. */}
+                  {row.loopIteration != null ? (
+                    <div className="mb-0.5 flex items-center gap-1 self-end text-[11px] font-normal text-muted-foreground/70">
+                      <LoopIcon className="size-3" aria-hidden />
+                      <span>
+                        Loop prompt · {row.loopIteration}
+                        {row.loopMaxIterations != null ? `/${row.loopMaxIterations}` : ""}
+                      </span>
+                    </div>
+                  ) : null}
                   {showCrossTaskOrigin ? null : (
                     <UserDispatchModeChip
                       dispatchMode={row.message.dispatchMode}
                       dispatchOrigin={row.message.dispatchOrigin}
+                      purpose={row.message.purpose}
                       hasLeadingMedia={hasLeadingMedia}
                     />
                   )}
@@ -1624,13 +1653,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           // signal (see deriveTerminalAssistantMessageIds).
           const isTerminalAssistantMessage =
             row.showAssistantCopyButton && !row.assistantTurnInProgress;
-          const assistantMeta = [
-            isTerminalAssistantMessage
-              ? formatShortTimestamp(row.message.createdAt, timestampFormat)
-              : null,
-          ]
-            .filter((value): value is string => Boolean(value))
-            .join(" • ");
+          const assistantMeta = isTerminalAssistantMessage
+            ? formatShortTimestamp(row.message.createdAt, timestampFormat)
+            : "";
+          const assistantLoopMeta =
+            isTerminalAssistantMessage && row.loopIteration != null
+              ? `Loop · ${row.loopIteration}${row.loopMaxIterations != null ? `/${row.loopMaxIterations}` : ""}`
+              : "";
           const allTurnWorkEntries = [
             ...(row.leadingWorkEntries ?? []),
             ...(row.inlineWorkEntries ?? []),
@@ -1960,7 +1989,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                     ))}
                   </div>
                 )}
-                {(showPinToggle || assistantCopyState.visible || assistantMeta.length > 0) && (
+                {(showPinToggle ||
+                  assistantCopyState.visible ||
+                  assistantMeta.length > 0 ||
+                  assistantLoopMeta.length > 0) && (
                   <div
                     className="mt-0.5 flex items-center gap-2 font-system-ui font-normal text-muted-foreground/45"
                     style={chatMessageFooterStyle}
@@ -1989,6 +2021,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                         text={assistantCopyState.text ?? ""}
                         className={MESSAGE_HOVER_REVEAL_CLASS_NAME}
                       />
+                    ) : null}
+                    {assistantLoopMeta.length > 0 ? (
+                      <p className="flex items-center gap-1 text-muted-foreground/70 tabular-nums">
+                        <LoopIcon className="size-3" aria-hidden />
+                        {assistantLoopMeta}
+                      </p>
                     ) : null}
                     {assistantMeta.length > 0 ? (
                       <p className={cn("tabular-nums", MESSAGE_HOVER_REVEAL_CLASS_NAME)}>
@@ -2252,6 +2290,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           </div>
         </DisclosureRegion>
       )}
+
+      {row.kind === "loop-end" && <LoopCompletionRecord loop={row.loop} />}
     </div>
   );
 

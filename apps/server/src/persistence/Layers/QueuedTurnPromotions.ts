@@ -15,7 +15,9 @@ const columns = (sql: SqlClient.SqlClient) => sql`
   dispatch_mode AS "dispatchMode",
   state,
   claim_owner AS "claimOwner",
-  attempt_count AS "attemptCount"
+  attempt_count AS "attemptCount",
+  activation_id AS "activationId",
+  iteration
 `;
 
 const make = Effect.gen(function* () {
@@ -38,11 +40,12 @@ const make = Effect.gen(function* () {
       INSERT INTO queued_turn_promotions (
         queued_event_sequence, thread_id, message_id, dispatch_mode, state,
         claim_owner, claimed_at, claim_expires_at, attempt_count,
-        created_at, updated_at, promoted_at
+        created_at, updated_at, promoted_at, activation_id, iteration
       ) VALUES (
         ${input.queuedEventSequence}, ${input.threadId}, ${input.messageId},
         ${input.dispatchMode}, 'queued', NULL, NULL, NULL, 0,
-        ${input.createdAt}, ${input.createdAt}, NULL
+        ${input.createdAt}, ${input.createdAt}, NULL,
+        ${input.activationId ?? null}, ${input.iteration ?? null}
       )
       ON CONFLICT DO UPDATE SET
         queued_event_sequence = excluded.queued_event_sequence,
@@ -54,7 +57,9 @@ const make = Effect.gen(function* () {
         attempt_count = 0,
         created_at = excluded.created_at,
         updated_at = excluded.updated_at,
-        promoted_at = NULL
+        promoted_at = NULL,
+        activation_id = excluded.activation_id,
+        iteration = excluded.iteration
       WHERE queued_turn_promotions.state IN ('promoted', 'cancelled')
         AND excluded.queued_event_sequence > queued_turn_promotions.queued_event_sequence
     `.pipe(Effect.asVoid, Effect.mapError(toPersistenceSqlError("QueuedTurnPromotion.enqueue")));
@@ -156,6 +161,20 @@ const make = Effect.gen(function* () {
       Effect.mapError(toPersistenceSqlError("QueuedTurnPromotion.cancelThread")),
     );
 
+  const cancelByActivation: QueuedTurnPromotionRepositoryShape["cancelByActivation"] = (input) =>
+    // Same 'queued' + 'promoting' widening as cancelThread: a retired
+    // activation's claimed row must not be resurrected by a later releaseClaim.
+    sql`
+      UPDATE queued_turn_promotions
+      SET state = 'cancelled', claim_owner = NULL, claimed_at = NULL,
+          claim_expires_at = NULL, updated_at = ${input.updatedAt}
+      WHERE thread_id = ${input.threadId} AND activation_id = ${input.activationId}
+        AND state IN ('queued', 'promoting')
+    `.pipe(
+      Effect.asVoid,
+      Effect.mapError(toPersistenceSqlError("QueuedTurnPromotion.cancelByActivation")),
+    );
+
   const hasPendingMessage: QueuedTurnPromotionRepositoryShape["hasPendingMessage"] = (input) =>
     sql<{ readonly count: number }>`
       SELECT COUNT(*) AS count FROM queued_turn_promotions
@@ -184,6 +203,7 @@ const make = Effect.gen(function* () {
     releaseClaim,
     cancelMessage,
     cancelThread,
+    cancelByActivation,
     hasPendingMessage,
     listPendingThreadIds,
   } satisfies QueuedTurnPromotionRepositoryShape;

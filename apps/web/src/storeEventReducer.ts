@@ -296,11 +296,18 @@ function buildLatestTurn(params: {
   completedAt: string | null;
   assistantMessageId: NonNullable<Thread["latestTurn"]>["assistantMessageId"];
   sourceProposedPlan?: Thread["pendingSourceProposedPlan"];
+  purpose?: NonNullable<Thread["latestTurn"]>["purpose"];
 }): NonNullable<Thread["latestTurn"]> {
   const sourceProposedPlan =
     params.previous?.turnId === params.turnId
       ? (params.previous.sourceProposedPlan ?? params.sourceProposedPlan)
       : params.sourceProposedPlan;
+  // Same-turn updates keep the initiating message's purpose so loop-owned
+  // turns stay identifiable through streaming/settlement transitions.
+  const purpose =
+    params.previous?.turnId === params.turnId
+      ? (params.previous.purpose ?? params.purpose)
+      : params.purpose;
   return {
     turnId: params.turnId,
     state: params.state,
@@ -309,7 +316,23 @@ function buildLatestTurn(params: {
     completedAt: params.completedAt,
     assistantMessageId: params.assistantMessageId,
     ...(sourceProposedPlan ? { sourceProposedPlan } : {}),
+    ...(purpose !== undefined ? { purpose } : {}),
   };
+}
+
+// The turn's purpose lives on the initiating user message; look it up so
+// client-built latestTurn snapshots don't lose loop ownership.
+function findTurnPurpose(
+  messages: Thread["messages"],
+  turnId: NonNullable<Thread["latestTurn"]>["turnId"],
+): NonNullable<Thread["latestTurn"]>["purpose"] {
+  if (turnId == null) return undefined;
+  for (const message of messages) {
+    if (message.turnId === turnId && message.purpose !== undefined) {
+      return message.purpose;
+    }
+  }
+  return undefined;
 }
 
 function reconcileLatestTurnFromSession(
@@ -336,6 +359,7 @@ function reconcileLatestTurnFromSession(
           ? thread.latestTurn.assistantMessageId
           : null,
       sourceProposedPlan: thread.pendingSourceProposedPlan,
+      purpose: findTurnPurpose(thread.messages, session.activeTurnId),
     });
   }
 
@@ -629,6 +653,7 @@ function mergeStreamingMessage(
       ? incomingMessage.dispatchOrigin
       : existingMessage.dispatchOrigin;
   const nextSource = incomingMessage.source ?? existingMessage.source;
+  const nextPurpose = incomingMessage.purpose;
 
   if (
     existingMessage.text === nextText &&
@@ -640,7 +665,8 @@ function mergeStreamingMessage(
     existingMessage.turnId === nextTurnId &&
     existingMessage.dispatchMode === nextDispatchMode &&
     existingMessage.dispatchOrigin === nextDispatchOrigin &&
-    existingMessage.source === nextSource
+    existingMessage.source === nextSource &&
+    existingMessage.purpose === nextPurpose
   ) {
     return null;
   }
@@ -657,6 +683,7 @@ function mergeStreamingMessage(
     ...(nextDispatchOrigin !== undefined ? { dispatchOrigin: nextDispatchOrigin } : {}),
     ...(nextSource !== undefined ? { source: nextSource } : {}),
     ...(nextCompletedAt !== undefined ? { completedAt: nextCompletedAt } : {}),
+    purpose: nextPurpose,
   };
 }
 
@@ -674,6 +701,7 @@ function applyThreadMessageSentEvent(thread: Thread, event: ThreadMessageSentEve
       dispatchMode: payload.dispatchMode,
       dispatchOrigin: payload.dispatchOrigin,
       turnId: payload.turnId,
+      purpose: payload.purpose,
       attachments: payload.attachments ?? [],
       ...(payload.skills !== undefined ? { skills: payload.skills } : {}),
       ...(payload.mentions !== undefined ? { mentions: payload.mentions } : {}),
@@ -727,6 +755,7 @@ function applyThreadMessageSentEvent(thread: Thread, event: ThreadMessageSentEve
       completedAt: payload.streaming ? (previousTurn?.completedAt ?? null) : payload.updatedAt,
       assistantMessageId: payload.messageId,
       sourceProposedPlan: thread.pendingSourceProposedPlan,
+      purpose: findTurnPurpose(messages, payload.turnId),
     });
   }
 
@@ -1258,6 +1287,33 @@ function applyOrchestrationEvent(
         {
           ...options,
           updateSidebarSummary: true,
+        },
+      );
+
+    case "thread.loop-set":
+    case "thread.loop-off":
+    case "thread.loop-continued":
+    case "thread.loop-wait-noted":
+      return applyThreadUpdate(
+        state,
+        event.payload.threadId,
+        (thread) => {
+          const loop = event.payload.loop;
+          if (deepEqualJson(thread.loop ?? null, loop)) {
+            return thread;
+          }
+          return {
+            ...thread,
+            loop,
+            updatedAt:
+              (thread.updatedAt ?? thread.createdAt) > event.occurredAt
+                ? thread.updatedAt
+                : event.occurredAt,
+          };
+        },
+        {
+          ...options,
+          updateSidebarSummary: false,
         },
       );
 

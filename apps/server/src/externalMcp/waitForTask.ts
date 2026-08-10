@@ -24,13 +24,13 @@ export const requestedExternalMcpRunId = (
 
 export const latestExternalMcpWaitState = (thread: {
   readonly latestTurn: {
-    readonly turnId: string;
+    readonly turnId: string | null;
     readonly state: ExternalMcpWaitState;
   } | null;
   readonly session: { readonly status: string } | null;
 }): { readonly runId: string | null; readonly state: ExternalMcpWaitState } | null => {
   if (thread.latestTurn !== null && isLiveWaitState(thread.latestTurn.state)) {
-    return { runId: thread.latestTurn.turnId, state: thread.latestTurn.state };
+    return { runId: thread.latestTurn.turnId ?? null, state: thread.latestTurn.state };
   }
   if (thread.session?.status === "error") return { runId: null, state: "error" };
   if (thread.session?.status === "interrupted" || thread.session?.status === "stopped") {
@@ -38,13 +38,13 @@ export const latestExternalMcpWaitState = (thread: {
   }
   return thread.latestTurn === null
     ? null
-    : { runId: thread.latestTurn.turnId, state: thread.latestTurn.state };
+    : { runId: thread.latestTurn.turnId ?? null, state: thread.latestTurn.state };
 };
 
 export const terminalExternalMcpSessionStateForRun = (
   thread: {
     readonly latestTurn: {
-      readonly turnId: string;
+      readonly turnId: string | null;
       readonly state: ExternalMcpWaitState;
     } | null;
     readonly session: { readonly status: string } | null;

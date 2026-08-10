@@ -23,6 +23,7 @@ export * from "./externalMcp";
 export * from "./ws";
 export * from "./wsCompatibility";
 export * from "./keybindings";
+export * from "./loop";
 export * from "./server";
 export * from "./stats";
 export * from "./settings";

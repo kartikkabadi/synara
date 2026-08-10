@@ -50,7 +50,15 @@ function makeThread(threadId: string): OrchestrationThreadShell {
     updatedAt: NOW,
     archivedAt: null,
     handoff: null,
-    session: null,
+    session: {
+      threadId: ThreadId.makeUnsafe(threadId),
+      status: "running",
+      providerName: "codex",
+      runtimeMode: "full-access",
+      activeTurnId: TurnId.makeUnsafe(`turn-${threadId}`),
+      lastError: null,
+      updatedAt: NOW,
+    },
   };
 }
 
@@ -180,6 +188,13 @@ function makeTransport(input: {
           state: "running",
           completedAt: null,
         },
+        session:
+          thread.session != null
+            ? {
+                ...thread.session,
+                activeTurnId: TurnId.makeUnsafe(turnId),
+              }
+            : thread.session,
       });
     },
   });

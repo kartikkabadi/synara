@@ -73,6 +73,23 @@ describe("estimateTimelineMessageHeight", () => {
     ).toBe(117);
   });
 
+  it("adds marker-chip height for manual loop retargets but not automatic iterations", () => {
+    const base = estimateTimelineMessageHeight({ role: "user", text: "hello" });
+    const retarget = estimateTimelineMessageHeight({
+      role: "user",
+      text: "hello",
+      dispatchOrigin: "user",
+      purpose: { kind: "loop-iteration" },
+    });
+    const automatic = estimateTimelineMessageHeight({
+      role: "user",
+      text: "hello",
+      purpose: { kind: "loop-iteration" },
+    });
+    expect(retarget).toBeGreaterThan(base);
+    expect(automatic).toBe(base);
+  });
+
   it("adds one attachment row for one or two user attachments", () => {
     expect(
       estimateTimelineMessageHeight({

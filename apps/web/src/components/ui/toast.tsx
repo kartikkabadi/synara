@@ -69,7 +69,12 @@ function shouldUseCompactToast(toast: ToastObject<ThreadToastData>): boolean {
   if (toast.data?.compactContextual) {
     return true;
   }
-  return !toast.data?.copyText && !toast.actionProps && !toast.data?.secondaryActionProps;
+  return (
+    !toast.description &&
+    !toast.data?.copyText &&
+    !toast.actionProps &&
+    !toast.data?.secondaryActionProps
+  );
 }
 
 function isArchiveUndoToast(toast: ToastObject<ThreadToastData>): boolean {
@@ -372,7 +377,7 @@ function ArchiveUndoToastSurface({
       />
       <Toast.Content
         className={cn(
-          "pointer-events-auto relative flex items-center gap-2 overflow-hidden px-3.5 py-2 text-[length:var(--app-font-size-ui-sm,11px)] leading-normal transition-opacity duration-250 data-expanded:opacity-100",
+          "pointer-events-auto relative flex items-center gap-2 overflow-hidden px-3.5 py-2 text-[length:var(--app-font-size-ui-sm,11px)] leading-normal transition-opacity duration-250 motion-reduce:transition-none data-expanded:opacity-100",
           hideCollapsedContent &&
             "not-data-expanded:pointer-events-none not-data-expanded:opacity-0",
         )}
@@ -426,7 +431,7 @@ function ToastSurface({
   return (
     <Toast.Content
       className={cn(
-        "pointer-events-auto relative flex overflow-hidden transition-opacity duration-250 data-expanded:opacity-100",
+        "pointer-events-auto relative flex overflow-hidden transition-opacity duration-250 motion-reduce:transition-none data-expanded:opacity-100",
         compact
           ? cn(
               "gap-2 px-3 py-1.5 pr-1.5 text-[length:var(--app-font-size-ui-sm,11px)] leading-normal",
@@ -575,7 +580,7 @@ function Toasts({ position: positionProp }: { position: ToastPosition }) {
           return (
             <Toast.Root
               className={cn(
-                "absolute z-[calc(9999-var(--toast-index))] h-(--toast-calc-height) select-none [transition:transform_.5s_cubic-bezier(.22,1,.36,1),opacity_.5s,height_.15s]",
+                "absolute z-[calc(9999-var(--toast-index))] h-(--toast-calc-height) select-none [transition:transform_.5s_cubic-bezier(.22,1,.36,1),opacity_.5s,height_.15s] motion-reduce:transition-none",
                 archiveUndoToast
                   ? cn(
                       ARCHIVE_UNDO_TOAST_SURFACE_CLASS_NAME,
@@ -722,7 +727,7 @@ function AnchoredToasts() {
               >
                 <Toast.Root
                   className={cn(
-                    "relative text-balance transition-[scale,opacity] data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0",
+                    "relative text-balance transition-[scale,opacity] motion-reduce:transition-none data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0",
                     tooltipStyle
                       ? "rounded-lg border bg-popover text-popover-foreground text-xs shadow-md/5 [-webkit-app-region:no-drag] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]"
                       : notificationSurfaceClassName({ compact, tone: toastTone(toast.type) }),
