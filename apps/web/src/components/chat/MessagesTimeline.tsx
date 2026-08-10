@@ -545,7 +545,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onEditUserMessage,
   editableUserMessageId,
   activeTurnId,
-  activeTurnPurpose = null,
+  activeTurnPurpose: activeTurnPurposeProp,
   isRevertingCheckpoint,
   onImageExpand,
   onIsAtEndChange,
@@ -578,6 +578,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const worktreeSetup = worktreeSetupProp ?? null;
   const worktreeSetupPendingAction = worktreeSetupPendingActionProp ?? null;
   const loop = loopProp ?? null;
+  const activeTurnPurpose = activeTurnPurposeProp ?? null;
   const followLiveOutput = followLiveOutputProp ?? false;
   const threadMarkers = threadMarkersProp ?? EMPTY_MESSAGE_MARKERS;
   const enteringUserMessageIds = enteringUserMessageIdsProp ?? EMPTY_MESSAGE_ID_SET;
