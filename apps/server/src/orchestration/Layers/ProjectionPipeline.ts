@@ -601,6 +601,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
       default:
         return Effect.void;
     }
+  };
 
   const updateThreadProjection = Effect.fnUntraced(function* (
     threadId: ProjectionThread["threadId"],
@@ -2109,6 +2110,14 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
         event.type === "thread.loop-off" ||
         event.type === "thread.loop-continued" ||
         event.type === "thread.loop-wait-noted",
+      replayFilter: {
+        eventTypes: [
+          "thread.loop-set",
+          "thread.loop-off",
+          "thread.loop-continued",
+          "thread.loop-wait-noted",
+        ],
+      },
       apply: applyThreadLoopProjection,
     },
     {
