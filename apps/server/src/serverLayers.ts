@@ -42,8 +42,14 @@ import { ServerSettingsLive } from "./serverSettings";
 import { WorkspaceLayerLive } from "./workspace/runtimeLayer";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver";
 import { ExternalMcpRepositoryLive } from "./externalMcp/Layers/ExternalMcpRepository";
+import { AgentProfileRepositoryLive } from "./externalAgents/AgentProfileRepository";
+import { AgentProfileServiceLive } from "./externalAgents/AgentProfileService";
 import { ExternalMcpServiceLive } from "./externalMcp/Layers/ExternalMcpService";
 import { ExternalMcpGatewayLive } from "./externalMcp/Layers/ExternalMcpGateway";
+import { DiscoveryServiceLive } from "./discovery/DiscoveryService";
+import { BinaryRecipeResolverLive } from "./discovery/BinaryRecipeResolver";
+import { AcpRegistryClientLive } from "./discovery/AcpRegistryClient";
+import { capabilityEvidenceLayer } from "./capabilityEvidence/Layers/CapabilityEvidenceService";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment";
 import { AutomationRepositoryLive } from "./persistence/Layers/AutomationRepository";
 import { ProjectPullRequestPinsLive } from "./persistence/Layers/ProjectPullRequestPins";
@@ -174,6 +180,9 @@ export function makeServerRuntimeServicesLayer(
   const automationRunReactorLayer = AutomationRunReactorLive.pipe(
     Layer.provideMerge(automationServiceLayer),
   );
+  const externalAgentProfilesLayer = AgentProfileServiceLive.pipe(
+    Layer.provideMerge(AgentProfileRepositoryLive),
+  );
   const externalMcpServiceLayer = ExternalMcpServiceLive.pipe(
     Layer.provideMerge(ExternalMcpRepositoryLive),
     Layer.provideMerge(runtimeServicesLayer),
@@ -187,6 +196,11 @@ export function makeServerRuntimeServicesLayer(
     Layer.provideMerge(AgentGatewayOperationRepositoryLive),
     Layer.provideMerge(ServerSettingsLive),
     Layer.provideMerge(providerHealthLayer),
+  );
+  const capabilityEvidenceServiceLayer = capabilityEvidenceLayer;
+  const discoveryLayer = DiscoveryServiceLive.pipe(
+    Layer.provideMerge(BinaryRecipeResolverLive),
+    Layer.provideMerge(AcpRegistryClientLive),
   );
   const agentGatewayLayer = AgentGatewayLive.pipe(
     Layer.provideMerge(agentGatewayCredentialsLayer),
@@ -223,7 +237,11 @@ export function makeServerRuntimeServicesLayer(
     AgentGatewayOperationRepositoryLive,
     ExternalMcpRepositoryLive,
     externalMcpServiceLayer,
+    AgentProfileRepositoryLive,
+    externalAgentProfilesLayer,
     externalMcpGatewayLayer,
+    capabilityEvidenceServiceLayer,
+    discoveryLayer,
     providerHealthLayer,
     ProjectPullRequestPinsLive,
     pullRequestServiceLayer,

@@ -22,6 +22,14 @@ import {
   AutomationStreamEvent,
   AutomationUpdateInput,
 } from "./automation";
+import {
+  CapabilityEvidenceInvalidateInput,
+  CapabilityEvidenceInvalidateResult,
+  CapabilityEvidenceQuery,
+  CapabilityEvidenceQueryResult,
+  CapabilityEvidenceRecordInput,
+  CapabilityEvidenceRecordResult,
+} from "./capabilityEvidence";
 import { OpenInEditorInput } from "./editor";
 import {
   ExternalMcpCreateIntegrationInput,
@@ -63,6 +71,23 @@ import {
   DeviceTypeTextInput,
   ThreadDeviceState,
 } from "./device";
+import {
+  ExternalAgentProfileCreateInput,
+  ExternalAgentProfileCreateResult,
+  ExternalAgentProfileGetInput,
+  ExternalAgentProfileGetResult,
+  ExternalAgentProfileListResult,
+  ExternalAgentProfileTombstoneInput,
+  ExternalAgentProfileTombstoneResult,
+  ExternalAgentProfileUpdateInput,
+  ExternalAgentProfileUpdateResult,
+} from "./externalAgent";
+import {
+  ConnectionCandidateListInput,
+  ConnectionCandidateListResult,
+  ConnectionPlanResolveInput,
+  ConnectionPlanResolveResult,
+} from "./connectionPlan";
 import { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem";
 import {
   GitHubProjectProvisionInput,
@@ -960,6 +985,84 @@ export const WsServerRefreshExternalMcpPairingRpc = Rpc.make(
   },
 );
 
+export const WsCapabilityEvidenceRecordRpc = Rpc.make(WS_METHODS.capabilityEvidenceRecord, {
+  payload: CapabilityEvidenceRecordInput,
+  success: CapabilityEvidenceRecordResult,
+  error: WsRpcError,
+});
+
+export const WsCapabilityEvidenceQueryRpc = Rpc.make(WS_METHODS.capabilityEvidenceQuery, {
+  payload: CapabilityEvidenceQuery,
+  success: CapabilityEvidenceQueryResult,
+  error: WsRpcError,
+});
+
+export const WsCapabilityEvidenceInvalidateRpc = Rpc.make(WS_METHODS.capabilityEvidenceInvalidate, {
+  payload: CapabilityEvidenceInvalidateInput,
+  success: CapabilityEvidenceInvalidateResult,
+  error: WsRpcError,
+});
+
+export const WsServerListExternalAgentProfilesRpc = Rpc.make(
+  WS_METHODS.serverListExternalAgentProfiles,
+  {
+    payload: Schema.Struct({}),
+    success: ExternalAgentProfileListResult,
+    error: WsRpcError,
+  },
+);
+
+export const WsServerGetExternalAgentProfileRpc = Rpc.make(
+  WS_METHODS.serverGetExternalAgentProfile,
+  {
+    payload: ExternalAgentProfileGetInput,
+    success: ExternalAgentProfileGetResult,
+    error: WsRpcError,
+  },
+);
+
+export const WsServerCreateExternalAgentProfileRpc = Rpc.make(
+  WS_METHODS.serverCreateExternalAgentProfile,
+  {
+    payload: ExternalAgentProfileCreateInput,
+    success: ExternalAgentProfileCreateResult,
+    error: WsRpcError,
+  },
+);
+
+export const WsServerUpdateExternalAgentProfileRpc = Rpc.make(
+  WS_METHODS.serverUpdateExternalAgentProfile,
+  {
+    payload: ExternalAgentProfileUpdateInput,
+    success: ExternalAgentProfileUpdateResult,
+    error: WsRpcError,
+  },
+);
+
+export const WsServerTombstoneExternalAgentProfileRpc = Rpc.make(
+  WS_METHODS.serverTombstoneExternalAgentProfile,
+  {
+    payload: ExternalAgentProfileTombstoneInput,
+    success: ExternalAgentProfileTombstoneResult,
+    error: WsRpcError,
+  },
+);
+
+export const WsServerListConnectionCandidatesRpc = Rpc.make(
+  WS_METHODS.serverListConnectionCandidates,
+  {
+    payload: ConnectionCandidateListInput,
+    success: ConnectionCandidateListResult,
+    error: WsRpcError,
+  },
+);
+
+export const WsServerResolveConnectionPlanRpc = Rpc.make(WS_METHODS.serverResolveConnectionPlan, {
+  payload: ConnectionPlanResolveInput,
+  success: ConnectionPlanResolveResult,
+  error: WsRpcError,
+});
+
 export const WsServerListWorktreesRpc = Rpc.make(WS_METHODS.serverListWorktrees, {
   payload: Schema.Struct({}),
   success: ServerListWorktreesResult,
@@ -1284,6 +1387,16 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsServerCreateExternalMcpIntegrationRpc,
   WsServerRevokeExternalMcpIntegrationRpc,
   WsServerRefreshExternalMcpPairingRpc,
+  WsCapabilityEvidenceRecordRpc,
+  WsCapabilityEvidenceQueryRpc,
+  WsCapabilityEvidenceInvalidateRpc,
+  WsServerListExternalAgentProfilesRpc,
+  WsServerGetExternalAgentProfileRpc,
+  WsServerCreateExternalAgentProfileRpc,
+  WsServerUpdateExternalAgentProfileRpc,
+  WsServerTombstoneExternalAgentProfileRpc,
+  WsServerListConnectionCandidatesRpc,
+  WsServerResolveConnectionPlanRpc,
   WsServerListWorktreesRpc,
   WsServerListLocalServersRpc,
   WsServerStopLocalServerRpc,
