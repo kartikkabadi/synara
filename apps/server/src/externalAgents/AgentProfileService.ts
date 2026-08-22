@@ -62,11 +62,7 @@ export interface AgentProfileServiceShape {
   readonly resolveSessionLaunch: (input: {
     readonly profileId: string;
     readonly revisionId: string;
-  }) => Effect.Effect<
-    ExternalAgentSessionLaunch,
-    ExternalAgentProfileError,
-    ServerSecretStore
-  >;
+  }) => Effect.Effect<ExternalAgentSessionLaunch, ExternalAgentProfileError, ServerSecretStore>;
   /**
    * Creates the canonical legacy generic-ACP profile (idempotent) so persisted
    * provider:"acp" state always resolves to one deterministic external profile.

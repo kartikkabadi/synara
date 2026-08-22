@@ -932,7 +932,10 @@ export function useComposerSlashCommands(input: {
         const { targetProvider, prompt, unavailableProvider } = parseSideSlashCommandArgs(
           slashInvocation.args,
           {
-            currentProvider: selectedModelSelection.provider,
+            // `/side` hands off between built-in providers only (its targets come
+            // from DEFAULT_PROVIDER_ORDER, which excludes external), and the
+            // command is only offered for a built-in active provider.
+            currentProvider: selectedModelSelection.provider as ProviderKind,
             availableTargetProviders: sidechatTargetProviders,
           },
         );

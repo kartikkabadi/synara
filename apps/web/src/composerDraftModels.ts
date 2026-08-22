@@ -667,12 +667,13 @@ export function legacyToModelSelectionByProvider(
           modelSelection?.provider === provider ? modelSelection.model : getDefaultModel(provider);
         if (model) {
           // Provider is a built-in literal from COMPOSER_PROVIDER_KINDS, so the
-          // constructed selection is built-in by construction.
+          // constructed selection is built-in by construction; the generic
+          // overload cannot prove that to the type system.
           result[provider] = makeModelSelection(
             provider,
             model,
             provider === "grok" ? normalizeGrokModelOptions(model, modelOptions.grok) : options,
-          );
+          ) as BuiltInModelSelection;
         }
       }
     }
