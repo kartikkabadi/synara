@@ -46,7 +46,6 @@ import {
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import type * as Acp from "@agentclientprotocol/sdk";
 
-import { buildAcpSynaraMcpServers } from "../../agentGateway/mcpInjection.ts";
 import {
   type SynaraHarnessPolicyDeliveryState,
   takeSynaraHarnessPolicyTextPartForProviderSession,
@@ -79,6 +78,7 @@ import {
   selectAcpPermissionOptionId,
 } from "../acp/AcpAdapterSupport.ts";
 import {
+  buildAcpGatewayMcpServers,
   acceptAcpPlanUpdate,
   clearAcpActiveTurn,
   finalizeAcpActiveTurnCost,
@@ -1148,16 +1148,10 @@ export function makeGrokAdapter(
             // initialize.clientCapabilities. Re-send this on load/resume so a
             // reconnected session keeps the Plan-mode write gate.
             sessionMeta: GROK_SESSION_META,
-            ...(agentGatewayCredentials
-              ? {
-                  buildMcpServers: (initializeResult) =>
-                    buildAcpSynaraMcpServers({
-                      connection: gatewaySessionLease!.connection,
-                      initializeResult,
-                      stdioProxy: agentGatewayCredentials.stdioProxy,
-                    }),
-                }
-              : {}),
+            ...buildAcpGatewayMcpServers({
+              gatewaySessionLease,
+              agentGatewayCredentials,
+            }),
             ...acpRuntimeLoggers,
           }).pipe(
             Effect.provideService(Scope.Scope, sessionScope),
