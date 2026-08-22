@@ -1095,39 +1095,33 @@ const makeAcpSessionRuntime = (
         startupTimeouts.initializeMs,
         runLoggedRequest("initialize", initializePayload, acp.agent.initialize(initializePayload)),
       );
-      const advertisedAuthMethods = initializeResult.authMethods ?? [];
       const authMethodId =
         options.resolveAuthMethodId !== undefined
           ? yield* options.resolveAuthMethodId(initializeResult)
           : options.authMethodId;
 
-      // Agents that advertise no auth methods require no authenticate step;
-      // requiring one here would make any no-auth agent unstartable. The error
-      // is only for agents that advertise methods but none resolve.
-      if (advertisedAuthMethods.length > 0) {
-        if (!authMethodId) {
-          return yield* new AcpErrors.AcpRequestError({
-            code: -32602,
-            errorMessage: "ACP agent did not provide an authentication method.",
-            data: { authMethods: advertisedAuthMethods },
-          });
-        }
-
-        const authenticatePayload = {
-          methodId: authMethodId,
-          ...(options.authenticateMeta ? { _meta: options.authenticateMeta } : {}),
-        } satisfies Acp.AuthenticateRequest;
-
-        yield* withStartupTimeout(
-          "authenticate",
-          startupTimeouts.authenticateMs,
-          runLoggedRequest(
-            "authenticate",
-            authenticatePayload,
-            acp.agent.authenticate(authenticatePayload),
-          ),
-        );
+      if (!authMethodId) {
+        return yield* new AcpErrors.AcpRequestError({
+          code: -32602,
+          errorMessage: "ACP agent did not provide an authentication method.",
+          data: { authMethods: initializeResult.authMethods ?? [] },
+        });
       }
+
+      const authenticatePayload = {
+        methodId: authMethodId,
+        ...(options.authenticateMeta ? { _meta: options.authenticateMeta } : {}),
+      } satisfies Acp.AuthenticateRequest;
+
+      yield* withStartupTimeout(
+        "authenticate",
+        startupTimeouts.authenticateMs,
+        runLoggedRequest(
+          "authenticate",
+          authenticatePayload,
+          acp.agent.authenticate(authenticatePayload),
+        ),
+      );
 
       const mcpServers = options.buildMcpServers?.(initializeResult) ?? [];
       const sessionCwd = resolveAcpSessionCwd(options.cwd);
