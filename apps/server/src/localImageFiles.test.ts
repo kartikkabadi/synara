@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, it } from "vitest";
 
-import { resolveAllowedLocalPreviewFile } from "./localImageFiles.ts";
+import { createLocalPreviewGrant, resolveAllowedLocalPreviewFile } from "./localImageFiles.ts";
 
 const tempDirs: string[] = [];
 
@@ -199,5 +199,80 @@ describe("resolveAllowedLocalPreviewFile", () => {
     });
 
     assert.equal(result, null);
+  });
+});
+
+describe("createLocalPreviewGrant", () => {
+  it("grants files inside an allowed root", async () => {
+    const workspace = makeTempDir("synara-grant-workspace-");
+    const filePath = path.join(workspace, "Downloads", "report.txt");
+    mkdirSync(path.dirname(filePath), { recursive: true });
+    writeFileSync(filePath, "local file\n");
+
+    const grant = await createLocalPreviewGrant({
+      requestedPath: filePath,
+      allowedRoots: [workspace],
+    });
+
+    assert.ok(grant.grant.length > 0);
+  });
+
+  it("grants files inside a per-thread scratch workspace without allowed roots", async () => {
+    const scratchRoot = path.join(os.tmpdir(), "synara-codex-workspaces");
+    const threadDir = path.join(scratchRoot, `grant-thread-${process.pid}-${Date.now()}`);
+    const filePath = path.join(threadDir, "notes.txt");
+    mkdirSync(threadDir, { recursive: true });
+    writeFileSync(filePath, "scratch file\n");
+    try {
+      const grant = await createLocalPreviewGrant({
+        requestedPath: filePath,
+        allowedRoots: [],
+      });
+
+      assert.ok(grant.grant.length > 0);
+    } finally {
+      rmSync(threadDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects files outside every allowed root", async () => {
+    const workspace = makeTempDir("synara-grant-workspace-");
+    const outside = makeTempDir("synara-grant-outside-");
+    const secretPath = path.join(outside, "id_rsa");
+    writeFileSync(secretPath, "secret key material");
+
+    await assert.rejects(
+      createLocalPreviewGrant({ requestedPath: secretPath, allowedRoots: [workspace] }),
+      /outside the allowed workspace roots/,
+    );
+  });
+
+  it("rejects `..` traversal that lexically starts inside an allowed root", async () => {
+    const workspace = makeTempDir("synara-grant-workspace-");
+    const outside = makeTempDir("synara-grant-outside-");
+    const secretPath = path.join(outside, "id_rsa");
+    writeFileSync(secretPath, "secret key material");
+
+    await assert.rejects(
+      createLocalPreviewGrant({
+        requestedPath: path.join(workspace, "..", path.basename(outside), "id_rsa"),
+        allowedRoots: [workspace],
+      }),
+      /outside the allowed workspace roots/,
+    );
+  });
+
+  it("rejects symlinks inside an allowed root that point outside it", async () => {
+    const workspace = makeTempDir("synara-grant-workspace-");
+    const outside = makeTempDir("synara-grant-outside-");
+    const secretPath = path.join(outside, "id_rsa");
+    writeFileSync(secretPath, "secret key material");
+    const linkPath = path.join(workspace, "innocent.txt");
+    symlinkSync(secretPath, linkPath);
+
+    await assert.rejects(
+      createLocalPreviewGrant({ requestedPath: linkPath, allowedRoots: [workspace] }),
+      /outside the allowed workspace roots/,
+    );
   });
 });

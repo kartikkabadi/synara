@@ -204,6 +204,7 @@ export async function resolveAllowedLocalPreviewFile(input: {
 
 export async function createLocalPreviewGrant(input: {
   readonly requestedPath: string;
+  readonly allowedRoots: ReadonlyArray<string>;
 }): Promise<LocalPreviewGrantResult> {
   const requestedPath = input.requestedPath.trim();
   if (!requestedPath || requestedPath.includes("\0") || !path.isAbsolute(requestedPath)) {
@@ -217,6 +218,20 @@ export async function createLocalPreviewGrant(input: {
   const stat = await fs.stat(realFilePath).catch(() => null);
   if (!stat?.isFile()) {
     throw new Error("Preview path is not a file.");
+  }
+
+  // Containment is checked on canonical paths (realpath on both the file and
+  // every root), so symlinks and `..` traversal cannot escape the allowlist.
+  const tempRoots = await temporaryDirectoryRoots();
+  const scratchWorkspaceRoots = tempRoots.map((root) =>
+    path.join(root, SCRATCH_WORKSPACES_DIRNAME),
+  );
+  const realAllowedRoots = await Promise.all(input.allowedRoots.map(realpathOrNull)).then((roots) =>
+    roots.filter((root): root is string => root !== null),
+  );
+  const containingRoots = [...realAllowedRoots, ...scratchWorkspaceRoots];
+  if (!containingRoots.some((root) => isPathInside(realFilePath, root))) {
+    throw new Error("Preview path is outside the allowed workspace roots.");
   }
 
   const expiresAtMs = Date.now() + LOCAL_PREVIEW_GRANT_TTL_MS;
