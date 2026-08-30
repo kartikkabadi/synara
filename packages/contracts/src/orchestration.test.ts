@@ -6,6 +6,7 @@ import {
   ClientOrchestrationCommand,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  ExecutionProfile,
   ModelSelection,
   OrchestrationCommand,
   OrchestrationEvent,
@@ -69,6 +70,71 @@ const decodeClientOrchestrationCommand = Schema.decodeUnknownEffect(ClientOrches
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadPullRequest = Schema.decodeUnknownEffect(OrchestrationThreadPullRequest);
+const decodeExecutionProfile = Schema.decodeUnknownEffect(ExecutionProfile);
+const encodeExecutionProfile = Schema.encodeEffect(ExecutionProfile);
+
+it.effect("decodes a minimal execution profile without optional fields", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeExecutionProfile({
+      environmentId: "env-1",
+      providerKind: "codex",
+      remoteWorkspaceRoot: "/srv/repos/synara",
+    });
+    assert.strictEqual(parsed.environmentId, "env-1");
+    assert.strictEqual(parsed.providerKind, "codex");
+    assert.strictEqual(parsed.remoteWorkspaceRoot, "/srv/repos/synara");
+    assert.strictEqual(parsed.repositoryRevision, undefined);
+    assert.strictEqual(parsed.bootstrapImage, undefined);
+    assert.strictEqual(parsed.adapterProtocolVersion, undefined);
+  }),
+);
+
+it.effect("round-trips a fully specified execution profile", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeExecutionProfile({
+      environmentId: "env-2",
+      providerKind: "claudeAgent",
+      remoteWorkspaceRoot: "/srv/repos/synara",
+      repositoryRevision: "71bb1492",
+      bootstrapImage: "ubuntu-24.04-synara",
+      adapterProtocolVersion: "1",
+    });
+    const reparsed = yield* decodeExecutionProfile(yield* encodeExecutionProfile(parsed));
+    assert.deepStrictEqual(reparsed, parsed);
+  }),
+);
+
+it.effect("rejects execution profiles with missing or invalid fields", () =>
+  Effect.gen(function* () {
+    const invalid = [
+      { providerKind: "codex", remoteWorkspaceRoot: "/srv" },
+      { environmentId: "env-1", remoteWorkspaceRoot: "/srv" },
+      { environmentId: "env-1", providerKind: "codex" },
+      { environmentId: "env-1", providerKind: "not-a-provider", remoteWorkspaceRoot: "/srv" },
+      { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "   " },
+      { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "repo" },
+      { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "./repo" },
+      { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "../repo" },
+      { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "~/repo" },
+      { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "/" },
+      { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "/../" },
+      { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "/srv/repo/../other" },
+      { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "/srv/./repo" },
+      { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "/srv//repo" },
+      { environmentId: "env-1", providerKind: "codex", remoteWorkspaceRoot: "/srv/repo/" },
+      {
+        environmentId: "env-1",
+        providerKind: "codex",
+        remoteWorkspaceRoot: "/srv",
+        repositoryRevision: "  ",
+      },
+    ];
+    for (const input of invalid) {
+      const result = yield* Effect.exit(decodeExecutionProfile(input));
+      assert.strictEqual(result._tag, "Failure", JSON.stringify(input));
+    }
+  }),
+);
 
 it.effect("decodes last-known PRs persisted before draft/mergeability/diff fields existed", () =>
   Effect.gen(function* () {

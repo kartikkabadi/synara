@@ -12,9 +12,11 @@ import {
 import { ProviderMentionReference, ProviderSkillReference } from "./providerDiscovery";
 import { ProjectKind } from "./project";
 import {
+  AbsolutePosixPath,
   ApprovalRequestId,
   CheckpointRef,
   CommandId,
+  EnvironmentId,
   EventId,
   IsoDateTime,
   MessageId,
@@ -66,6 +68,19 @@ export const ProviderKind = Schema.Literals([
   "pi",
 ]);
 export type ProviderKind = typeof ProviderKind.Type;
+
+// Per-thread execution profile: binds a thread to an execution environment,
+// a provider, and the workspace scope it runs against. Environment descriptors
+// describe hosts; the profile scopes a single thread's run on one of them.
+export const ExecutionProfile = Schema.Struct({
+  environmentId: EnvironmentId,
+  providerKind: ProviderKind,
+  remoteWorkspaceRoot: AbsolutePosixPath,
+  repositoryRevision: Schema.optional(TrimmedNonEmptyString),
+  bootstrapImage: Schema.optional(TrimmedNonEmptyString),
+  adapterProtocolVersion: Schema.optional(TrimmedNonEmptyString),
+});
+export type ExecutionProfile = typeof ExecutionProfile.Type;
 export const ProviderApprovalPolicy = Schema.Literals([
   "untrusted",
   "on-failure",
