@@ -10,6 +10,7 @@ import path from "node:path";
 import type {
   ModelSelection,
   OrchestrationCommand,
+  ProviderKind,
   OrchestrationEvent,
   ProviderForkThreadResult,
   ProviderRuntimeEvent,
@@ -94,6 +95,11 @@ import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { resolveProviderAttachmentPath } from "../../provider/providerAttachmentPaths.ts";
 import { PROVIDER_DEBUG_MODE_PROMPT_PREFIX } from "../../provider/debugMode.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import {
+  AgentProfileService,
+  ExternalAgentProfileError,
+} from "../../externalAgents/AgentProfileService.ts";
+import type { AgentProfileServiceShape } from "../../externalAgents/AgentProfileService.ts";
 import { checkpointRefForThreadTurn } from "../../checkpointing/Utils.ts";
 import {
   CheckpointStore,
@@ -223,10 +229,14 @@ describe("ProviderCommandReactor", () => {
     const listSessions = vi.fn<ProviderServiceShape["listSessions"]>(() =>
       Effect.succeed(runtimeSessions),
     );
-    const modelSelection = input?.threadModelSelection ?? {
+    const modelSelection: ModelSelection = input?.threadModelSelection ?? {
       provider: "codex",
       model: "gpt-5-codex",
     };
+    // Test fixtures start built-in sessions only; external profiles have no
+    // adapter in this build, so a hypothetical external fixture falls back.
+    const builtInProviderOf = (selection: ModelSelection): ProviderKind =>
+      selection.provider === "external" ? "codex" : selection.provider;
     const startSession = vi.fn((_: unknown, input: unknown) => {
       const sessionIndex = nextSessionIndex++;
       const sessionModelSelection =
@@ -245,7 +255,7 @@ describe("ProviderCommandReactor", () => {
           ? ThreadId.makeUnsafe(input.threadId)
           : ThreadId.makeUnsafe(`thread-${sessionIndex}`);
       const session: ProviderSession = {
-        provider: sessionModelSelection.provider,
+        provider: builtInProviderOf(sessionModelSelection),
         status: "ready" as const,
         runtimeMode:
           typeof input === "object" &&
@@ -281,7 +291,7 @@ describe("ProviderCommandReactor", () => {
       const threadId = ThreadId.makeUnsafe(input.threadId);
       const index = runtimeSessions.findIndex((session) => session.threadId === threadId);
       const base: ProviderSession = runtimeSessions[index] ?? {
-        provider: modelSelection.provider,
+        provider: builtInProviderOf(modelSelection),
         status: "ready",
         runtimeMode: "full-access",
         threadId,
@@ -321,7 +331,7 @@ describe("ProviderCommandReactor", () => {
         const forkModelSelection = forkInput.modelSelection ?? modelSelection;
         if (result && !runtimeSessions.some((session) => session.threadId === forkInput.threadId)) {
           runtimeSessions.push({
-            provider: forkModelSelection.provider,
+            provider: builtInProviderOf(forkModelSelection),
             status: "ready",
             runtimeMode: forkInput.runtimeMode,
             ...(forkModelSelection.model !== undefined ? { model: forkModelSelection.model } : {}),
@@ -536,6 +546,20 @@ describe("ProviderCommandReactor", () => {
         ),
       ),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
+      Layer.provideMerge(
+        Layer.succeed(AgentProfileService, {
+          // The existing reactor tests never start external agent sessions;
+          // any accidental external selection fails with an attributable error.
+          resolveSessionLaunch: () =>
+            Effect.fail(
+              new ExternalAgentProfileError({
+                code: "profile-not-found",
+                message: "External agent profiles are not configured in this test.",
+                status: 404,
+              }),
+            ),
+        } as unknown as AgentProfileServiceShape),
+      ),
       Layer.provideMerge(NodeServices.layer),
       Layer.provideMerge(OrchestrationEventDeliveryRepositoryLive),
       Layer.provideMerge(AgentGatewayOperationRepositoryLive),
