@@ -1,1 +1,0 @@
-/Users/user/.codex/herdr-agent-state.sh

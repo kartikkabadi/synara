@@ -1,5 +1,0 @@
-#!/bin/sh
-# Managed claude wrapper injected by synara terminal sessions.
-printf '\033]0;%s\007' 'Claude Code'
-export SYNARA_TERMINAL_CLI_KIND='claude'
-exec '/Users/user/.local/bin/claude' --settings '/tmp/devin-combined-cross-model-proof/state/dev/logs/terminals/_managed-bin/claude-settings.json' "$@"
