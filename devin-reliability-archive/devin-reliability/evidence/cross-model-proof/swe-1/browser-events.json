@@ -1,0 +1,21 @@
+[
+  {
+    "capturedAt": "2026-09-01T16:15:42.581Z",
+    "event": {
+      "method": "Target.attachedToTarget",
+      "params": {
+        "sessionId": "4935DD2D277549B650A10AFDFE4C03FB",
+        "targetInfo": {
+          "targetId": "09E614EBF931D2F3011156FAEE308646",
+          "type": "page",
+          "title": "Synara (Dev)",
+          "url": "http://localhost:9450/1a6185a0-c540-4f62-b46b-3db97b5f5744",
+          "attached": true,
+          "canAccessOpener": false,
+          "browserContextId": "FDDF7BE7FA31142D30528145ED914B7E"
+        },
+        "waitingForDebugger": false
+      }
+    }
+  }
+]

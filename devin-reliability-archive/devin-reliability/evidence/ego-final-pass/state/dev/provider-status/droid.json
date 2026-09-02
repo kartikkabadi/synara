@@ -1,0 +1,19 @@
+{
+  "provider": "droid",
+  "status": "ready",
+  "available": true,
+  "authStatus": "unknown",
+  "version": "0.208.1",
+  "checkedAt": "2026-09-01T14:13:14.251Z",
+  "message": "Droid CLI is installed. Synara can use the CLI's cached device-pairing login; run `droid` to authenticate locally if needed, or set FACTORY_API_KEY.",
+  "versionAdvisory": {
+    "status": "behind_latest",
+    "currentVersion": "0.208.1",
+    "latestVersion": "0.209.0",
+    "latestVersionKnowable": true,
+    "updateCommand": "droid update",
+    "canUpdate": true,
+    "checkedAt": "2026-09-01T14:13:18.903Z",
+    "message": "Install the update now or review provider settings."
+  }
+}

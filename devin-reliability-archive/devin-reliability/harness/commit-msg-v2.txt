@@ -1,0 +1,20 @@
+fix(web): do not override newer routes after superseded project navigation
+
+Two review findings from the first pass:
+
+- A fresh project whose snapshot-backed draft navigation was superseded
+  fell through to a second handleNewThread attempt, which could replace
+  the user's newer route. The created path now surfaces the recoverable
+  superseded error instead of retrying; the snapshot-slow local flow is
+  unchanged.
+- The GitHub provision helper ignored openExistingProjectFromSnapshot's
+  result and always reported success. It now propagates the boolean, so a
+  superseded open reports failure through the existing recoverable path.
+
+Also drops one transport test that duplicated the normalizer unit tests
+assertions at the stream layer; the wiring proof and chunking branches
+keep their dedicated tests.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>

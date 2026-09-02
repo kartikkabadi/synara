@@ -1,0 +1,19 @@
+{
+  "provider": "pi",
+  "status": "ready",
+  "available": true,
+  "authStatus": "unknown",
+  "version": "0.84.4",
+  "checkedAt": "2026-09-01T13:13:22.302Z",
+  "message": "Pi CLI is installed. Configure provider credentials inside Pi as needed.",
+  "versionAdvisory": {
+    "status": "current",
+    "currentVersion": "0.84.4",
+    "latestVersion": "0.84.4",
+    "latestVersionKnowable": true,
+    "updateCommand": "pi update",
+    "canUpdate": true,
+    "checkedAt": "2026-09-01T13:13:30.048Z",
+    "message": null
+  }
+}

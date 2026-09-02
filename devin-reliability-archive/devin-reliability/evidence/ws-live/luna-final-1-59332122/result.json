@@ -1,0 +1,43 @@
+{
+  "runId": "59332122",
+  "label": "luna-final-1",
+  "modelUid": "gpt-5.6-luna",
+  "effort": "medium",
+  "mode": "quiet",
+  "phrase": "LUNA FINAL 1 COMPLETE",
+  "turnState": "completed",
+  "result": "PASS",
+  "modelSelectionMatch": true,
+  "createdSelection": {
+    "provider": "devin",
+    "model": "gpt-5.6-luna"
+  },
+  "requestedSelection": {
+    "provider": "devin",
+    "model": "gpt-5.6-luna",
+    "options": {
+      "reasoningEffort": "medium"
+    }
+  },
+  "toolStarted": true,
+  "toolCompleted": true,
+  "toolKinds": [
+    "tool.started",
+    "tool.updated",
+    "tool.started",
+    "tool.updated",
+    "tool.updated",
+    "tool.completed",
+    "tool.updated",
+    "tool.completed"
+  ],
+  "phraseSeen": true,
+  "activeSeconds": 39,
+  "serverTimeout": false,
+  "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+  "projectId": "679ab9da-6cf0-4dfc-8822-1a0a13a47941",
+  "checks": {
+    "threadCreated": true,
+    "turnRequested": true
+  }
+}

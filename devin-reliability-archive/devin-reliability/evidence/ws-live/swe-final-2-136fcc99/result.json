@@ -1,0 +1,43 @@
+{
+  "runId": "136fcc99",
+  "label": "swe-final-2",
+  "modelUid": "swe-1-7",
+  "effort": "max",
+  "mode": "quiet",
+  "phrase": "SWE FINAL 2 COMPLETE",
+  "turnState": "completed",
+  "result": "PASS",
+  "modelSelectionMatch": true,
+  "createdSelection": {
+    "provider": "devin",
+    "model": "swe-1-7"
+  },
+  "requestedSelection": {
+    "provider": "devin",
+    "model": "swe-1-7",
+    "options": {
+      "reasoningEffort": "max"
+    }
+  },
+  "toolStarted": true,
+  "toolCompleted": true,
+  "toolKinds": [
+    "tool.started",
+    "tool.updated",
+    "tool.started",
+    "tool.updated",
+    "tool.updated",
+    "tool.completed",
+    "tool.updated",
+    "tool.completed"
+  ],
+  "phraseSeen": true,
+  "activeSeconds": 47,
+  "serverTimeout": false,
+  "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+  "projectId": "c64a4502-cd61-4f13-b631-cf50882eb48f",
+  "checks": {
+    "threadCreated": true,
+    "turnRequested": true
+  }
+}

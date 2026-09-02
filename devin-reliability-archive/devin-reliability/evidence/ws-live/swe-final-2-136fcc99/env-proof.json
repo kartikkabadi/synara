@@ -1,0 +1,12 @@
+{
+  "turnIdleMs": 10000,
+  "toolIdleMs": 40000,
+  "port": 61948,
+  "offset": 4883,
+  "webPort": 10616,
+  "authTokenUnset": true,
+  "modelUid": "swe-1-7",
+  "effort": "max",
+  "label": "swe-final-2",
+  "mode": "quiet"
+}

@@ -1,0 +1,20 @@
+{
+  "result": "PASS",
+  "route": "http://localhost:10354/1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7",
+  "model": "swe-1-7",
+  "effort": "medium",
+  "rawProviderEvents": 55,
+  "uiCommandRows": 1,
+  "failedToolRows": 0,
+  "activeSecondsObserved": 49,
+  "terminalCompletion": true,
+  "exactFinalPhrase": "CALIBRATION COMPLETE",
+  "idleUi": true,
+  "continuousWebSocketFrames": 93,
+  "transientInitialSnapshotRaceErrors": 1,
+  "validPngs": [
+    "03-before-send.png",
+    "04-active-past-normal-timeout.png",
+    "05-completed.png"
+  ]
+}

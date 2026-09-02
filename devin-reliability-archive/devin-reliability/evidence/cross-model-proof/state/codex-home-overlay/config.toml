@@ -1,0 +1,778 @@
+model = "x-preview-f-free"
+model_reasoning_effort = "xhigh"
+service_tier = "default"
+sandbox_mode = "danger-full-access"
+
+
+notify = ["/Users/user/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient", "turn-ended"]
+
+# BEGIN opencode-go-proxy-managed
+openai_base_url = "http://127.0.0.1:8787/v1"
+model_catalog_json = "/Users/user/.codex/opencode-go-proxy/merged-models.json"
+experimental_realtime_webrtc_call_base_url = "https://chatgpt.com/backend-api/codex"
+experimental_realtime_ws_base_url = "https://api.openai.com/v1"
+
+[marketplaces.openai-primary-runtime]
+last_updated = "2026-08-19T22:45:18Z"
+source_type = "local"
+source = "/Users/user/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
+
+[marketplaces.openai-bundled]
+source_type = "local"
+source = "/Users/user/.codex/.tmp/bundled-marketplaces/openai-bundled"
+
+[features.multi_agent_v2]
+enabled = true
+
+[model_providers.opencode-go]
+name = "opencode-go"
+base_url = "http://127.0.0.1:8787/v1"
+wire_api = "responses"
+
+[model_providers.zen]
+name = "zen"
+base_url = "http://127.0.0.1:8787/v1"
+wire_api = "responses"
+
+[mcp_servers.node_repl]
+command = "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl"
+startup_timeout_sec = 120.0
+
+[mcp_servers.node_repl.env]
+BROWSER_USE_AVAILABLE_BACKENDS = "chrome,iab"
+BROWSER_USE_CODEX_APP_BUILD_FLAVOR = "prod"
+BROWSER_USE_CODEX_APP_VERSION = "26.820.60940"
+BROWSER_USE_TINYSKY_ENABLED = "0"
+CODEX_CLI_PATH = "/Applications/ChatGPT.app/Contents/Resources/codex"
+CODEX_HOME = "/Users/user/.codex"
+NODE_REPL_INSTRUCTIONS_USE_CASE_BROWSER = "Control the in-app browser in conjunction with the Browser Plugin."
+NODE_REPL_INSTRUCTIONS_USE_CASE_CHROME = "Control the Chrome browser in conjunction with the Chrome Plugin. Prefer this method of controlling Chrome over alternatives (such as Computer Use) unless the user explicitly mentions an alternative."
+NODE_REPL_INSTRUCTIONS_USE_CASE_COMPUTER_USE = "Control desktop apps on macOS through Computer Use."
+NODE_REPL_NATIVE_PIPE_CONNECT_TIMEOUT_MS = "1000"
+NODE_REPL_NODE_MODULE_DIRS = "/Applications/ChatGPT.app/Contents/Resources/cua_node/lib/node_modules"
+NODE_REPL_NODE_PATH = "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node"
+NODE_REPL_TRUSTED_CODE_PATHS = "/Users/user/.codex:/Applications/ChatGPT.app/Contents/Resources/cua_node/lib/node_modules"
+NODE_REPL_TRUSTED_SERVICES = '{"browser":"/Users/user/.codex/plugins/cache/openai-bundled/browser/26.820.60940/scripts/browser-service.mjs","sky":"@oai/sky/service"}'
+SKY_CUA_SERVICE_PATH = "/Users/user/.codex/computer-use/Codex Computer Use.app"
+
+[mcp_servers.computer-use]
+command = "./Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient"
+args = ["mcp"]
+cwd = "."
+enabled = false
+
+[mcp_servers.peekaboo]
+url = "http://127.0.0.1:7335/mcp"
+bearer_token_env_var = "PEEKABOO_MCP_TOKEN"
+
+[mcp_servers.openaiDeveloperDocs]
+url = "https://developers.openai.com/mcp"
+
+[mcp_servers.mind]
+command = "python3"
+args = ["/Users/user/.local/share/mind/mind.py", "mcp"]
+
+[mcp_servers.loora]
+command = "/Users/user/.local/share/loora-setup/run-mcp-stdio.sh"
+args = []
+
+[plugins."documents@openai-primary-runtime"]
+enabled = true
+
+[plugins."pdf@openai-primary-runtime"]
+enabled = true
+
+[plugins."spreadsheets@openai-primary-runtime"]
+enabled = true
+
+[plugins."presentations@openai-primary-runtime"]
+enabled = true
+
+[plugins."template-creator@openai-primary-runtime"]
+enabled = true
+
+[plugins."visualize@openai-bundled"]
+enabled = true
+
+[plugins."computer-use@openai-bundled"]
+enabled = false
+
+[plugins."chrome@openai-bundled"]
+enabled = false
+
+[plugins."browser@openai-bundled"]
+enabled = false
+
+[plugins."codex-app-tools@openai-bundled"]
+enabled = true
+
+[features]
+hooks = true
+js_repl = false
+memories = true
+
+[desktop]
+conversationDetailMode = "STEPS_COMMANDS"
+sansFontSize = 14
+codeFontSize = 13
+ambient-suggestions-enabled = true
+followUpQueueMode = "steer"
+dock-icon-preference = "app-default"
+appearanceLightCodeThemeId = "linear"
+appearanceDarkCodeThemeId = "linear"
+usePointerCursors = false
+enabled-reasoning-efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+show-context-window-usage = true
+hotkey-window-projectless-default-enabled = true
+
+[desktop.appearanceLightChromeTheme]
+accent = "#5e6ad2"
+contrast = 40
+ink = "#1b1b1b"
+opaqueWindows = true
+surface = "#fcfcfd"
+
+[desktop.appearanceLightChromeTheme.fonts]
+code = '"Geist Mono", ui-monospace, "SFMono-Regular"'
+ui = "Inter"
+
+[desktop.appearanceLightChromeTheme.semanticColors]
+diffAdded = "#52a450"
+diffRemoved = "#c94446"
+skill = "#8160d8"
+
+[desktop.appearanceDarkChromeTheme]
+accent = "#606acc"
+contrast = 50
+ink = "#e3e4e6"
+opaqueWindows = true
+surface = "#0f0f11"
+
+[desktop.appearanceDarkChromeTheme.fonts]
+code = '"Jetbrains Mono"'
+ui = "Inter"
+
+[desktop.appearanceDarkChromeTheme.semanticColors]
+diffAdded = "#69c967"
+diffRemoved = "#ff7e78"
+skill = "#c2a1ff"
+
+[projects."/Users/user/Documents/Codex/2026-07-09/h"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-10/he"]
+trust_level = "trusted"
+
+[projects."/Users/user/vex"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-10/ca"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-10/new-chat"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-10/please-build-my-product-for-me"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-10/h"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-10/new-chat-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Developer/synara"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-10/a"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-10/prospect-strategy-critique"]
+trust_level = "trusted"
+
+[projects."/Users/user/Developer/GlassDock"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Hearthline"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-11/r"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-11/va"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-11/system-automation-advice-chatgpt-conversation-6a518b8d"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-11/system-automation-advice-chatgpt-conversation-6a518b8d-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-11/system-automation-advice-chatgpt-conversation-6a518b8d-3"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-11/system-automation-advice-chatgpt-conversation-6a518b8d-4"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-11/system-automation-advice-chatgpt-conversation-6a518b8d-5"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-11/can"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-12/okay-i-want-your-help-to"]
+trust_level = "trusted"
+
+[projects."/Users/user/Developer/loop"]
+trust_level = "trusted"
+
+[projects."/Users/user/Projects/MyMenu"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-13/can-you-like-take-the-full"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-14/new-chat"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-14/set-yourself-a-goal-to-grow"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-14/new-chat-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-14/ca"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-14/he"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-14/an"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-16/can-you-check-my-full-hermes"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-16/can-you-check-my-full-hermes-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-18/what-i-found-the-remediation-path"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-18/skill-creator-users-user-codex-skills"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-19/https-github-com-kartikkabadi-synara-issues"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-19/https-github-com-kartikkabadi-synara-issues-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-22/th"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-24/realtime-voice-chat"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-24/realtime-voice-chat-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-24/realtime-voice-chat-3"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-26/i"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-26/c"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-27/realtime-voice-chat"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-27/realtime-voice-chat-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-29/go"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-30/i"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-30/new-chat"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-30/th"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-30/yo"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-30/wh"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-31/yo"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-31/yo-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-31/r44vc0rp-coastcap-https-github-com-r44vc0rp"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-31/ne"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-31/mak"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-31/hostinger-mail-plugin-app-6a323a8a890c819190480c9044395170-openai"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-31/h"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-31/wh"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-31/new-chat"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-31/ta"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-31/i"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-31/mattpocock-skills-https-github-com-mattpocock"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-31/new-chat-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-07-31/update-matt-pocock-skills-safely-thread"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-01/i-need-to-build-this-end"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-01/g"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-02/in"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-02/i"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-02/hey"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-02/i-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-02/hav"]
+trust_level = "trusted"
+
+[projects."/Users/user"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-04/openai-developers-plugin-openai-developers-openai"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-04/open-pr-7-and-execute-it"]
+trust_level = "trusted"
+
+[projects."/private/tmp/live-git-repo"]
+trust_level = "trusted"
+
+[projects."/Users/user/synara"]
+trust_level = "trusted"
+
+[projects."/Users/user/synara-liquid-glass"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/hi"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/hi-so-this-is-a-bit"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/overnight-dpcode-website-refresh"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/overnight-byoa-linear-monitor"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/do"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/h"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/h-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/hi-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/what"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/do-you-have-create-thread-and"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/what-tools-do-you-have-right"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/h-3"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/what-tools-do-you-have-right-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/wh"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/why-is-the-remote"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/why-is-the-remote-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/what-tools-do-you-have-right-3"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/make-a-new-box-and-give"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/hi-3"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/h-4"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/make-a-new-box-and-give-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/l"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/list-my-threads-and-projects"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/list-my-threads-and-projects-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/list-my-threads-and-projects-3"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/c"]
+trust_level = "trusted"
+
+[projects."/Users/user/Developer/codex-router"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/list-my-threads-and-projects-4"]
+trust_level = "trusted"
+
+[projects."/"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/list-my-threads-and-projects-5"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/hi-4"]
+trust_level = "trusted"
+
+[projects."/private/var/folders/7c/w626kwy50ds8pwsspgc457tc0000gp/T/grok-goal-4cf8670464c7/implementer"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/ca"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/hi-5"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/c-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/open-the-in-app-browser-to"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/use-computer-use-to-open-safari"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/create-a-thread-named-x-and"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/say-hi"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-09/wha"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/first-read-the-codex-app-threads"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/c"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/report-ready-when-you-start"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/ca"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/testing"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/hi"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/ins"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/re"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/i"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/go"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/the-instructions-in-the-file-may"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/the-instructions-in-the-file-may-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/the-instructions-in-the-file-may-3"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/the-instructions-in-the-file-may-4"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/the-instructions-in-the-file-may-5"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/goal-overnight-lane-owner-dpcode-website"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/goal-overnight-lane-owner-pr-branch"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/new-chat"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/new-chat-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/019fea87-f02c-78f2-aa22-68862e549f74"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/w"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/new-chat-3"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/link-research-users-user-agents-skills"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/w-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/apply-omp-config-fixes-and-run"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/wha"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/new-chat-4"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/hi-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/https-x-com-gumclaw-https-x"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/hi-3"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/h"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/https-github-com-openai-skills-blob"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/hi-4"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/hi-5"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/new-chat-5"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/new-chat-6"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/jus"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-10/new-chat-7"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-11/d"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-11/l"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-11/link-research-users-user-agents-skills"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-11/new-chat"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-11/link-research-users-user-agents-skills-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-11/link-research-users-user-agents-skills-3"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-11/new-chat-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-11/let-s-set-up-a-scheduled"]
+trust_level = "trusted"
+
+[projects."/Users/user/opencode-go-proxy"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-11/https-signals-forwardfuture-com-loop-library"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-11/h"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-11/https-github-com-dietrichgebert-ponytail-https"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-11/new-chat-3"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-12/h"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-12/i"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-12/i-need-your-help-to-structure"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/ChatGPT/Synara Ideas"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-14/hi"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-14/hi-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-14/hi-3"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-14/run-a-daily-local-only-morning"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-14/h"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-14/hi-4"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-14/hi-5"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-14/hi-6"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-14/h-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-14/h-3"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-14/hi-7"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/ChatGPT/Marketing"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-15/run-a-daily-local-only-morning"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-16/run-a-daily-local-only-morning"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-17/run-a-daily-local-only-morning"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-17/hi"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-19/run-a-daily-local-only-morning"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-19/hi"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-20/run-a-daily-local-only-morning"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-20/run-a-daily-local-only-morning-2"]
+trust_level = "trusted"
+
+[projects."/Users/user/Library/Application Support/Atat/AgentWorkspace"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-22/run-a-daily-local-only-morning"]
+trust_level = "trusted"
+
+[projects."/private/tmp"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-24/run-a-daily-local-only-morning"]
+trust_level = "trusted"
+
+[projects."/Users/user/Library/Application Support/com.conductor.app/bin"]
+trust_level = "trusted"
+
+[projects."/Users/user/Documents/Codex/2026-08-27/run-a-daily-local-only-morning"]
+trust_level = "trusted"
+
+[projects."/Users/user/Projects/synara"]
+trust_level = "trusted"
+
+[memories]
+generate_memories = true
+use_memories = true
+
+[shell_environment_policy.set]
+NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S = "9230e2bd8b24b7ac7a0ba6774c64bf0d78ecdabbdd91d0ed627b02a587bae2df"
+
+
+[tui]
+resume_cwd = "session"
+
+# >>> synara managed config >>>
+[mcp_servers.synara]
+url = "http://127.0.0.1:61731/mcp"
+bearer_token_env_var = "SYNARA_AGENT_GATEWAY_TOKEN"
+
+[shell_environment_policy]
+exclude = ["SYNARA_AGENT_GATEWAY_TOKEN"]
+# <<< synara managed config <<<

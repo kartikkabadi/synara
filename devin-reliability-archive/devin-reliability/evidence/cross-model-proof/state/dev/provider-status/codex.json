@@ -1,0 +1,20 @@
+{
+  "provider": "codex",
+  "status": "ready",
+  "available": true,
+  "authStatus": "authenticated",
+  "version": "0.147.0",
+  "supportsAutoRuntimeMode": true,
+  "checkedAt": "2026-09-01T16:28:37.099Z",
+  "autoRuntimeModeBinaryPath": "codex",
+  "versionAdvisory": {
+    "status": "behind_latest",
+    "currentVersion": "0.147.0",
+    "latestVersion": "0.152.0",
+    "latestVersionKnowable": true,
+    "updateCommand": null,
+    "canUpdate": false,
+    "checkedAt": "2026-09-01T16:28:45.122Z",
+    "message": "Install the update now or review provider settings."
+  }
+}

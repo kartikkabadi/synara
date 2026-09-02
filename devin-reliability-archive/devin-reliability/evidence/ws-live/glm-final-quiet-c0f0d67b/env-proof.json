@@ -1,0 +1,12 @@
+{
+  "turnIdleMs": 10000,
+  "toolIdleMs": 40000,
+  "port": 61897,
+  "offset": 4895,
+  "webPort": 10628,
+  "authTokenUnset": true,
+  "modelUid": "glm-5.3-flash",
+  "effort": "max",
+  "label": "glm-final-quiet",
+  "mode": "quiet"
+}

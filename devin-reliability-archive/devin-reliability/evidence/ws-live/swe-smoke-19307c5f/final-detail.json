@@ -1,0 +1,417 @@
+{
+  "snapshotSequence": 25,
+  "thread": {
+    "id": "f8ba7335-5999-4975-8846-3f48b31f71b2",
+    "projectId": "31c9accc-c781-49db-9c0f-e2083966bfe1",
+    "title": "ws swe-smoke swe-1-7",
+    "modelSelection": {
+      "provider": "devin",
+      "model": "swe-1-7",
+      "options": {
+        "reasoningEffort": "max"
+      }
+    },
+    "runtimeMode": "full-access",
+    "interactionMode": "default",
+    "envMode": "local",
+    "branch": null,
+    "worktreePath": null,
+    "workingDirectory": null,
+    "associatedWorktreePath": null,
+    "associatedWorktreeBranch": null,
+    "associatedWorktreeRef": null,
+    "createBranchFlowCompleted": false,
+    "isPinned": false,
+    "parentThreadId": null,
+    "creationSource": null,
+    "sourceThreadId": null,
+    "sourceTurnId": null,
+    "gatewayOperationId": null,
+    "gatewayOperationIndex": null,
+    "subagentAgentId": null,
+    "subagentNickname": null,
+    "subagentRole": null,
+    "forkSourceThreadId": null,
+    "sidechatSourceThreadId": null,
+    "sidechatLastActivityAt": null,
+    "sidechatExpiredAt": null,
+    "lastKnownPr": null,
+    "latestTurn": {
+      "turnId": "626e58bb-4806-49f3-870a-eb733d1443f1",
+      "state": "completed",
+      "requestedAt": "2026-09-01T19:44:48.283Z",
+      "startedAt": "2026-09-01T19:44:51.362Z",
+      "completedAt": "2026-09-01T19:45:34.516Z",
+      "assistantMessageId": "assistant:devin:626e58bb-4806-49f3-870a-eb733d1443f1:assistant:battle-terrier:b1be1d06:segment:0"
+    },
+    "latestUserMessageAt": "2026-09-01T19:44:48.283Z",
+    "hasPendingApprovals": false,
+    "hasPendingUserInput": false,
+    "hasActionableProposedPlan": false,
+    "createdAt": "2026-09-01T19:44:48.272Z",
+    "updatedAt": "2026-09-01T19:45:34.516Z",
+    "archivedAt": null,
+    "settledAt": null,
+    "deletedAt": null,
+    "handoff": null,
+    "messages": [
+      {
+        "id": "1fe952a9-e7b2-49b9-bf0d-9440d45f0d97",
+        "role": "user",
+        "text": "Use exactly one shell exec tool call. Start this exact bounded local command in the background: sleep 24 && git status --short. Then use get_output with timeout 25000 milliseconds to wait for it to finish. Do not use any other tool before or after it. Do not edit or create files. Do not access the network or any external service. Do not perform external writes. After the command finishes, reply with exactly: SWE WS 2 COMPLETE",
+        "attachments": [],
+        "dispatchMode": "queue",
+        "dispatchOrigin": "user",
+        "turnId": null,
+        "streaming": false,
+        "source": "native",
+        "createdAt": "2026-09-01T19:44:48.283Z",
+        "updatedAt": "2026-09-01T19:44:48.283Z"
+      },
+      {
+        "id": "assistant:devin:626e58bb-4806-49f3-870a-eb733d1443f1:assistant:battle-terrier:b1be1d06:segment:0",
+        "role": "assistant",
+        "text": "SWE WS 2 COMPLETE",
+        "turnId": "626e58bb-4806-49f3-870a-eb733d1443f1",
+        "streaming": false,
+        "source": "native",
+        "createdAt": "2026-09-01T19:45:34.405Z",
+        "updatedAt": "2026-09-01T19:45:34.489Z"
+      }
+    ],
+    "proposedPlans": [],
+    "activities": [
+      {
+        "id": "df31f5df-2def-4dbd-afe7-150d43f91573",
+        "tone": "info",
+        "kind": "context-window.updated",
+        "summary": "Context window updated",
+        "payload": {
+          "usedTokens": 80420,
+          "usedPercent": 30.694656488549622,
+          "maxTokens": 262000,
+          "compactsAutomatically": true,
+          "provider": "devin"
+        },
+        "turnId": "626e58bb-4806-49f3-870a-eb733d1443f1",
+        "sequence": 312,
+        "createdAt": "2026-09-01T19:45:08.051Z"
+      },
+      {
+        "id": "875387d7-dbb7-49b3-b79d-af8f2fa7f54d",
+        "tone": "tool",
+        "kind": "tool.started",
+        "summary": "Ran sleep, git started",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran sleep, git",
+          "detail": "sleep 24 && git status --short",
+          "data": {
+            "toolCallId": "functions.exec:0",
+            "kind": "execute",
+            "command": "sleep 24 && git status --short",
+            "rawInput": {
+              "command": "sleep 24 && git status --short",
+              "timeout": 0
+            },
+            "content": [
+              {
+                "content": {
+                  "resource": {
+                    "mimeType": "text/x-shellscript",
+                    "text": "sleep 24 && git status --short",
+                    "uri": "tool://preview"
+                  },
+                  "_meta": {
+                    "cognition.ai/preview_is_shell_command": true
+                  },
+                  "type": "resource"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "functions.exec:0"
+          }
+        },
+        "turnId": "626e58bb-4806-49f3-870a-eb733d1443f1",
+        "sequence": 313,
+        "createdAt": "2026-09-01T19:45:08.090Z"
+      },
+      {
+        "id": "b76f2d9b-7307-4587-bd7f-3337cd254f15",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran sleep, git",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran sleep, git",
+          "detail": "sleep 24 && git status --short",
+          "data": {
+            "toolCallId": "functions.exec:0",
+            "kind": "execute",
+            "command": "sleep 24 && git status --short",
+            "rawInput": {
+              "command": "sleep 24 && git status --short",
+              "timeout": 0
+            },
+            "content": [
+              {
+                "content": {
+                  "resource": {
+                    "mimeType": "text/x-shellscript",
+                    "text": "sleep 24 && git status --short",
+                    "uri": "tool://preview"
+                  },
+                  "_meta": {
+                    "cognition.ai/preview_is_shell_command": true
+                  },
+                  "type": "resource"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "functions.exec:0"
+          }
+        },
+        "turnId": "626e58bb-4806-49f3-870a-eb733d1443f1",
+        "sequence": 314,
+        "createdAt": "2026-09-01T19:45:08.090Z"
+      },
+      {
+        "id": "c7ed0d99-9f41-49dd-b501-a37795cf8d5f",
+        "tone": "info",
+        "kind": "context-window.updated",
+        "summary": "Context window updated",
+        "payload": {
+          "usedTokens": 80492,
+          "usedPercent": 30.722137404580153,
+          "maxTokens": 262000,
+          "compactsAutomatically": true,
+          "provider": "devin"
+        },
+        "turnId": "626e58bb-4806-49f3-870a-eb733d1443f1",
+        "sequence": 317,
+        "createdAt": "2026-09-01T19:45:10.368Z"
+      },
+      {
+        "id": "311f5959-035d-4931-a76d-871f17c7a517",
+        "tone": "tool",
+        "kind": "tool.started",
+        "summary": "Read shell started",
+        "payload": {
+          "itemType": "dynamic_tool_call",
+          "status": "inProgress",
+          "title": "Read shell",
+          "detail": "Read shell",
+          "data": {
+            "toolCallId": "functions.get_output:1",
+            "rawInput": {
+              "shell_id": "c14e9d",
+              "timeout": 25000
+            },
+            "providerToolCallId": "functions.get_output:1"
+          }
+        },
+        "turnId": "626e58bb-4806-49f3-870a-eb733d1443f1",
+        "sequence": 318,
+        "createdAt": "2026-09-01T19:45:10.373Z"
+      },
+      {
+        "id": "c189bf67-0bc9-49f9-9dd7-813bc57bd30b",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Read shell",
+        "payload": {
+          "itemType": "dynamic_tool_call",
+          "status": "inProgress",
+          "title": "Read shell",
+          "detail": "Read shell",
+          "data": {
+            "toolCallId": "functions.get_output:1",
+            "rawInput": {
+              "shell_id": "c14e9d",
+              "timeout": 25000
+            },
+            "providerToolCallId": "functions.get_output:1"
+          }
+        },
+        "turnId": "626e58bb-4806-49f3-870a-eb733d1443f1",
+        "sequence": 319,
+        "createdAt": "2026-09-01T19:45:10.373Z"
+      },
+      {
+        "id": "4f7bd135-79c5-4313-991f-f9cd59cdb759",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src...",
+          "data": {
+            "toolCallId": "functions.exec:0",
+            "kind": "execute",
+            "command": "sleep 24 && git status --short",
+            "rawInput": {
+              "command": "sleep 24 && git status --short",
+              "timeout": 0
+            },
+            "content": [
+              {
+                "content": {
+                  "text": " M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src/provider/acp/DevinAcpSupport.test.ts\n M apps/server/src/provider/acp/DevinAcpSupport.ts\n M apps/web/src/components/ChatView.browser.tsx\n M apps/web/src/components/Sidebar.tsx",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "functions.exec:0"
+          }
+        },
+        "turnId": "626e58bb-4806-49f3-870a-eb733d1443f1",
+        "sequence": 320,
+        "createdAt": "2026-09-01T19:45:32.192Z"
+      },
+      {
+        "id": "47b7f91d-e75d-418b-a307-d78ff9d94dd7",
+        "tone": "tool",
+        "kind": "tool.completed",
+        "summary": "Read shell",
+        "payload": {
+          "itemType": "dynamic_tool_call",
+          "status": "completed",
+          "title": "Read shell",
+          "detail": "Read shell",
+          "data": {
+            "toolCallId": "functions.get_output:1",
+            "rawInput": {
+              "shell_id": "c14e9d",
+              "timeout": 25000
+            },
+            "providerToolCallId": "functions.get_output:1"
+          }
+        },
+        "turnId": "626e58bb-4806-49f3-870a-eb733d1443f1",
+        "sequence": 321,
+        "createdAt": "2026-09-01T19:45:32.196Z"
+      },
+      {
+        "id": "cb3f6d87-17f7-4bbf-a37b-e97f395f41d5",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src...",
+          "data": {
+            "toolCallId": "functions.exec:0",
+            "kind": "execute",
+            "command": "sleep 24 && git status --short",
+            "rawInput": {
+              "command": "sleep 24 && git status --short",
+              "timeout": 0
+            },
+            "content": [
+              {
+                "content": {
+                  "text": " M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src/provider/acp/DevinAcpSupport.test.ts\n M apps/server/src/provider/acp/DevinAcpSupport.ts\n M apps/web/src/components/ChatView.browser.tsx\n M apps/web/src/components/Sidebar.tsx\n",
+                  "type": "text"
+                },
+                "type": "content"
+              },
+              {
+                "content": {
+                  "text": "\nExit code: 0",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "functions.exec:0"
+          }
+        },
+        "turnId": "626e58bb-4806-49f3-870a-eb733d1443f1",
+        "sequence": 322,
+        "createdAt": "2026-09-01T19:45:32.196Z"
+      },
+      {
+        "id": "dda5bfe1-eb43-4fab-bbf7-7d4dd711bd9d",
+        "tone": "tool",
+        "kind": "tool.completed",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "completed",
+          "title": "Ran command",
+          "detail": "M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src...",
+          "data": {
+            "toolCallId": "functions.exec:0",
+            "kind": "execute",
+            "command": "sleep 24 && git status --short",
+            "rawInput": {
+              "command": "sleep 24 && git status --short",
+              "timeout": 0
+            },
+            "content": [
+              {
+                "content": {
+                  "text": " M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src/provider/acp/DevinAcpSupport.test.ts\n M apps/server/src/provider/acp/DevinAcpSupport.ts\n M apps/web/src/components/ChatView.browser.tsx\n M apps/web/src/components/Sidebar.tsx",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "functions.exec:0"
+          }
+        },
+        "turnId": "626e58bb-4806-49f3-870a-eb733d1443f1",
+        "sequence": 323,
+        "createdAt": "2026-09-01T19:45:32.209Z"
+      },
+      {
+        "id": "e54f5d73-8dcd-4f57-8bd1-d3edd3f3c5d1",
+        "tone": "info",
+        "kind": "context-window.updated",
+        "summary": "Context window updated",
+        "payload": {
+          "usedTokens": 80622,
+          "usedPercent": 30.771755725190843,
+          "maxTokens": 262000,
+          "compactsAutomatically": true,
+          "provider": "devin"
+        },
+        "turnId": "626e58bb-4806-49f3-870a-eb733d1443f1",
+        "sequence": 329,
+        "createdAt": "2026-09-01T19:45:34.429Z"
+      },
+      {
+        "id": "6fcdd94f-a92b-47e5-9523-39237b5b9773",
+        "tone": "info",
+        "kind": "turn.completed",
+        "summary": "Turn completed",
+        "payload": {
+          "state": "completed"
+        },
+        "turnId": "626e58bb-4806-49f3-870a-eb733d1443f1",
+        "sequence": 331,
+        "createdAt": "2026-09-01T19:45:34.516Z"
+      }
+    ],
+    "pendingInteractions": [],
+    "checkpoints": [],
+    "session": {
+      "threadId": "f8ba7335-5999-4975-8846-3f48b31f71b2",
+      "status": "ready",
+      "providerName": "devin",
+      "runtimeMode": "full-access",
+      "activeTurnId": null,
+      "lastError": null,
+      "updatedAt": "2026-09-01T19:45:34.516Z"
+    }
+  }
+}

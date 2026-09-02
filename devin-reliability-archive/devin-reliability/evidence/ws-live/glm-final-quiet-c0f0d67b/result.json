@@ -1,0 +1,43 @@
+{
+  "runId": "c0f0d67b",
+  "label": "glm-final-quiet",
+  "modelUid": "glm-5.3-flash",
+  "effort": "max",
+  "mode": "quiet",
+  "phrase": "GLM FINAL 1 COMPLETE",
+  "turnState": "completed",
+  "result": "PASS",
+  "modelSelectionMatch": true,
+  "createdSelection": {
+    "provider": "devin",
+    "model": "glm-5.3-flash"
+  },
+  "requestedSelection": {
+    "provider": "devin",
+    "model": "glm-5.3-flash",
+    "options": {
+      "reasoningEffort": "max"
+    }
+  },
+  "toolStarted": true,
+  "toolCompleted": true,
+  "toolKinds": [
+    "tool.started",
+    "tool.updated",
+    "tool.started",
+    "tool.updated",
+    "tool.updated",
+    "tool.completed",
+    "tool.updated",
+    "tool.completed"
+  ],
+  "phraseSeen": true,
+  "activeSeconds": 49,
+  "serverTimeout": false,
+  "threadId": "10bf9cdf-2e11-44bf-9cee-796eede0b58c",
+  "projectId": "f13f7861-865a-4c2f-bb19-4f1a954ca4f5",
+  "checks": {
+    "threadCreated": true,
+    "turnRequested": true
+  }
+}

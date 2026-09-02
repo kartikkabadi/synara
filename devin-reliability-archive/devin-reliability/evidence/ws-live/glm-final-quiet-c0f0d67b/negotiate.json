@@ -1,0 +1,14 @@
+{
+  "protocolEpoch": 1,
+  "negotiatedRevision": 1,
+  "serverBuild": "0.8.0",
+  "serverInstanceId": "21a41d80-80aa-4e0b-9a97-5c6b116820f6",
+  "capabilities": [
+    "orchestration.cursor-safe-streams",
+    "orchestration.thread-detail-snapshot",
+    "rpc.typed-errors",
+    "git.worktree-setup-progress",
+    "projects.github-provisioning",
+    "transport.http-negotiate"
+  ]
+}

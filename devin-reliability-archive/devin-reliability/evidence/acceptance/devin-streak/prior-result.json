@@ -1,0 +1,29 @@
+{
+  "session": 1,
+  "result": "FAIL",
+  "streak": 0,
+  "stopReason": "Console error tied to the thread flow: WebSocket RPC stream failed because the thread detail snapshot was not found for the created thread.",
+  "threadId": "873745c5-9eb4-4237-8834-315bf7a0cc8e",
+  "turnId": "4c6cbe24-af20-479d-8985-015004a0f3c7",
+  "toolId": "functions.exec:0",
+  "activeSecondsObserved": 25,
+  "normalIdleMs": 10000,
+  "toolIdleMs": 40000,
+  "watchdogCadenceMs": 5000,
+  "crossedNormalIdle": true,
+  "toolTerminalState": "completed in live UI/provider log; final terminal projection row absent from SQLite capture",
+  "finalPhrase": "SESSION 1 COMPLETE",
+  "uiRoute": "http://localhost:10134/873745c5-9eb4-4237-8834-315bf7a0cc8e",
+  "uiState": "idle composer; one user message; one assistant message; no stale Thinking",
+  "errorState": "FAIL: WsRpcError thread detail snapshot not found; unrelated font 403 also observed",
+  "cleanup": "ports 61401 and 10134 free; PIDs 96294, 96369, 96370 absent; browser space closed",
+  "evidence": [
+    "session-1/browser-events.json:133-165",
+    "session-1/ui-direct-final.png",
+    "session-1/ui-samples.json",
+    "session-1/orchestration-events.json",
+    "session-1/server.log",
+    "session-1/runtime.log"
+  ],
+  "activeDurationBasis": "continuous one-second UI samples of the same tool row; maximum displayed elapsed time"
+}

@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "sectionHeaders": [
+    "[plugins.\"browser@openai-bundled\"]",
+    "[plugins.\"chrome@openai-bundled\"]",
+    "[plugins.\"computer-use@openai-bundled\"]"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "turnIdleMs": 10000,
+  "toolIdleMs": 40000,
+  "port": 61922,
+  "offset": 4869,
+  "webPort": 10602,
+  "authTokenUnset": true,
+  "modelUid": "gpt-5.6-luna",
+  "effort": "medium",
+  "label": "luna-quiet-2",
+  "mode": "quiet"
+}

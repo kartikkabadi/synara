@@ -1,0 +1,43 @@
+{
+  "runId": "0011f4ee",
+  "label": "luna-quiet-2",
+  "modelUid": "gpt-5.6-luna",
+  "effort": "medium",
+  "mode": "quiet",
+  "phrase": "LUNA WS 2 COMPLETE",
+  "turnState": "completed",
+  "result": "PASS",
+  "modelSelectionMatch": true,
+  "createdSelection": {
+    "provider": "devin",
+    "model": "gpt-5.6-luna"
+  },
+  "requestedSelection": {
+    "provider": "devin",
+    "model": "gpt-5.6-luna",
+    "options": {
+      "reasoningEffort": "medium"
+    }
+  },
+  "toolStarted": true,
+  "toolCompleted": true,
+  "toolKinds": [
+    "tool.started",
+    "tool.updated",
+    "tool.started",
+    "tool.updated",
+    "tool.updated",
+    "tool.completed",
+    "tool.updated",
+    "tool.completed"
+  ],
+  "phraseSeen": true,
+  "activeSeconds": 38,
+  "serverTimeout": false,
+  "threadId": "1abde97f-dc5f-4710-8ad3-247ac6680cec",
+  "projectId": "d44dcb70-1054-41a6-aaed-2ae4e7437277",
+  "checks": {
+    "threadCreated": true,
+    "turnRequested": true
+  }
+}

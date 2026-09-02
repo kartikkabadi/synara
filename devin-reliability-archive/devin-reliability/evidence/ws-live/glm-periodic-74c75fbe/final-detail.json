@@ -1,0 +1,484 @@
+{
+  "snapshotSequence": 26,
+  "thread": {
+    "id": "7311e81c-c95f-4dde-9e8e-4656745ca7ac",
+    "projectId": "48901ee3-b886-46ed-a474-a421aba4e255",
+    "title": "ws glm-periodic glm-5.3-flash",
+    "modelSelection": {
+      "provider": "devin",
+      "model": "glm-5.3-flash",
+      "options": {
+        "reasoningEffort": "max"
+      }
+    },
+    "runtimeMode": "full-access",
+    "interactionMode": "default",
+    "envMode": "local",
+    "branch": null,
+    "worktreePath": null,
+    "workingDirectory": null,
+    "associatedWorktreePath": null,
+    "associatedWorktreeBranch": null,
+    "associatedWorktreeRef": null,
+    "createBranchFlowCompleted": false,
+    "isPinned": false,
+    "parentThreadId": null,
+    "creationSource": null,
+    "sourceThreadId": null,
+    "sourceTurnId": null,
+    "gatewayOperationId": null,
+    "gatewayOperationIndex": null,
+    "subagentAgentId": null,
+    "subagentNickname": null,
+    "subagentRole": null,
+    "forkSourceThreadId": null,
+    "sidechatSourceThreadId": null,
+    "sidechatLastActivityAt": null,
+    "sidechatExpiredAt": null,
+    "lastKnownPr": null,
+    "latestTurn": {
+      "turnId": "71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899",
+      "state": "completed",
+      "requestedAt": "2026-09-01T19:47:14.414Z",
+      "startedAt": "2026-09-01T19:47:17.923Z",
+      "completedAt": "2026-09-01T19:47:53.368Z",
+      "assistantMessageId": "assistant:devin:71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899:assistant:animated-period:e356d1d3:segment:0"
+    },
+    "latestUserMessageAt": "2026-09-01T19:47:14.414Z",
+    "hasPendingApprovals": false,
+    "hasPendingUserInput": false,
+    "hasActionableProposedPlan": false,
+    "createdAt": "2026-09-01T19:47:14.402Z",
+    "updatedAt": "2026-09-01T19:47:53.368Z",
+    "archivedAt": null,
+    "settledAt": null,
+    "deletedAt": null,
+    "handoff": null,
+    "messages": [
+      {
+        "id": "f4347164-4bf3-489b-80f8-244a0403fa8f",
+        "role": "user",
+        "text": "Use exactly one shell exec tool call. Run this exact bounded local command as one foreground command and wait for it to finish: for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done. Do not use any other tool before or after it. Do not edit or create files. Do not access the network or any external service. Do not perform external writes. After the command finishes, reply with exactly: GLM WS 2 COMPLETE",
+        "attachments": [],
+        "dispatchMode": "queue",
+        "dispatchOrigin": "user",
+        "turnId": null,
+        "streaming": false,
+        "source": "native",
+        "createdAt": "2026-09-01T19:47:14.414Z",
+        "updatedAt": "2026-09-01T19:47:14.414Z"
+      },
+      {
+        "id": "assistant:devin:71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899:assistant:animated-period:e356d1d3:segment:0",
+        "role": "assistant",
+        "text": "GLM WS 2 COMPLETE",
+        "turnId": "71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899",
+        "streaming": false,
+        "source": "native",
+        "createdAt": "2026-09-01T19:47:53.226Z",
+        "updatedAt": "2026-09-01T19:47:53.340Z"
+      }
+    ],
+    "proposedPlans": [],
+    "activities": [
+      {
+        "id": "958819a4-2884-4272-b09d-2a0a9425188c",
+        "tone": "info",
+        "kind": "checkpoint.captured",
+        "summary": "Checkpoint captured",
+        "payload": {
+          "turnCount": 1,
+          "status": "ready"
+        },
+        "turnId": "71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899",
+        "sequence": 26,
+        "createdAt": "2026-09-01T19:47:53.368Z"
+      },
+      {
+        "id": "7f5d277d-dd21-4f3d-ad3d-73e9b1553929",
+        "tone": "info",
+        "kind": "context-window.updated",
+        "summary": "Context window updated",
+        "payload": {
+          "usedTokens": 81300,
+          "usedPercent": 8.129999999999999,
+          "maxTokens": 1000000,
+          "compactsAutomatically": true,
+          "provider": "devin"
+        },
+        "turnId": "71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899",
+        "sequence": 65,
+        "createdAt": "2026-09-01T19:47:27.322Z"
+      },
+      {
+        "id": "f34b6119-a381-47c7-ad67-e7c333f35591",
+        "tone": "tool",
+        "kind": "tool.started",
+        "summary": "Ran echo, sleep started",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran echo, sleep",
+          "detail": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+          "data": {
+            "toolCallId": "call_3f74937aa7c24a7b8bf3c57e",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "resource": {
+                    "mimeType": "text/x-shellscript",
+                    "text": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+                    "uri": "tool://preview"
+                  },
+                  "_meta": {
+                    "cognition.ai/preview_is_shell_command": true
+                  },
+                  "type": "resource"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_3f74937aa7c24a7b8bf3c57e"
+          }
+        },
+        "turnId": "71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899",
+        "sequence": 66,
+        "createdAt": "2026-09-01T19:47:27.549Z"
+      },
+      {
+        "id": "f3a349a1-672b-4bc1-a5a3-fbd9b77d9163",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran echo, sleep",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran echo, sleep",
+          "detail": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+          "data": {
+            "toolCallId": "call_3f74937aa7c24a7b8bf3c57e",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "resource": {
+                    "mimeType": "text/x-shellscript",
+                    "text": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+                    "uri": "tool://preview"
+                  },
+                  "_meta": {
+                    "cognition.ai/preview_is_shell_command": true
+                  },
+                  "type": "resource"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_3f74937aa7c24a7b8bf3c57e"
+          }
+        },
+        "turnId": "71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899",
+        "sequence": 67,
+        "createdAt": "2026-09-01T19:47:27.551Z"
+      },
+      {
+        "id": "41cbc971-87c9-41bb-97d1-5b69e51bb3cd",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "tick 1",
+          "data": {
+            "toolCallId": "call_3f74937aa7c24a7b8bf3c57e",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "text": "tick 1",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_3f74937aa7c24a7b8bf3c57e"
+          }
+        },
+        "turnId": "71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899",
+        "sequence": 68,
+        "createdAt": "2026-09-01T19:47:27.571Z"
+      },
+      {
+        "id": "3529ed23-e993-4361-8bb7-3be541ede7bf",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "tick 1\ntick 2",
+          "data": {
+            "toolCallId": "call_3f74937aa7c24a7b8bf3c57e",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "text": "tick 1\ntick 2",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_3f74937aa7c24a7b8bf3c57e"
+          }
+        },
+        "turnId": "71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899",
+        "sequence": 69,
+        "createdAt": "2026-09-01T19:47:31.622Z"
+      },
+      {
+        "id": "1ddff9d1-e3f3-416d-9b75-697d472b47a1",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "tick 1\ntick 2\ntick 3",
+          "data": {
+            "toolCallId": "call_3f74937aa7c24a7b8bf3c57e",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "text": "tick 1\ntick 2\ntick 3",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_3f74937aa7c24a7b8bf3c57e"
+          }
+        },
+        "turnId": "71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899",
+        "sequence": 70,
+        "createdAt": "2026-09-01T19:47:35.639Z"
+      },
+      {
+        "id": "f921e94f-2d1f-4d93-bd9d-7f8105ef8327",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "tick 1\ntick 2\ntick 3\ntick 4",
+          "data": {
+            "toolCallId": "call_3f74937aa7c24a7b8bf3c57e",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "text": "tick 1\ntick 2\ntick 3\ntick 4",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_3f74937aa7c24a7b8bf3c57e"
+          }
+        },
+        "turnId": "71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899",
+        "sequence": 71,
+        "createdAt": "2026-09-01T19:47:39.688Z"
+      },
+      {
+        "id": "495743ab-f37b-4797-a5fb-1b0f0de77ded",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "tick 1\ntick 2\ntick 3\ntick 4\ntick 5",
+          "data": {
+            "toolCallId": "call_3f74937aa7c24a7b8bf3c57e",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "text": "tick 1\ntick 2\ntick 3\ntick 4\ntick 5",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_3f74937aa7c24a7b8bf3c57e"
+          }
+        },
+        "turnId": "71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899",
+        "sequence": 72,
+        "createdAt": "2026-09-01T19:47:43.776Z"
+      },
+      {
+        "id": "ede99b69-c723-4bdd-b5f5-d99ff1a9e14f",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "tick 1\ntick 2\ntick 3\ntick 4\ntick 5\ntick 6",
+          "data": {
+            "toolCallId": "call_3f74937aa7c24a7b8bf3c57e",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "text": "tick 1\ntick 2\ntick 3\ntick 4\ntick 5\ntick 6",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_3f74937aa7c24a7b8bf3c57e"
+          }
+        },
+        "turnId": "71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899",
+        "sequence": 73,
+        "createdAt": "2026-09-01T19:47:47.891Z"
+      },
+      {
+        "id": "05d9a5df-2dfb-4f65-bf79-5d11e9dbf549",
+        "tone": "tool",
+        "kind": "tool.completed",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "completed",
+          "title": "Ran command",
+          "detail": "tick 1\ntick 2\ntick 3\ntick 4\ntick 5\ntick 6",
+          "data": {
+            "toolCallId": "call_3f74937aa7c24a7b8bf3c57e",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "text": "tick 1\ntick 2\ntick 3\ntick 4\ntick 5\ntick 6",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_3f74937aa7c24a7b8bf3c57e"
+          }
+        },
+        "turnId": "71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899",
+        "sequence": 74,
+        "createdAt": "2026-09-01T19:47:51.881Z"
+      },
+      {
+        "id": "3d5b2f1b-b993-4dc5-bb7f-8323dba3376d",
+        "tone": "info",
+        "kind": "context-window.updated",
+        "summary": "Context window updated",
+        "payload": {
+          "usedTokens": 81351,
+          "usedPercent": 8.135100000000001,
+          "maxTokens": 1000000,
+          "compactsAutomatically": true,
+          "provider": "devin"
+        },
+        "turnId": "71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899",
+        "sequence": 76,
+        "createdAt": "2026-09-01T19:47:53.250Z"
+      },
+      {
+        "id": "b11fc543-4d6f-438b-a95d-35ff11cf4b15",
+        "tone": "info",
+        "kind": "turn.completed",
+        "summary": "Turn completed",
+        "payload": {
+          "state": "completed"
+        },
+        "turnId": "71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899",
+        "sequence": 78,
+        "createdAt": "2026-09-01T19:47:53.368Z"
+      }
+    ],
+    "pendingInteractions": [],
+    "checkpoints": [
+      {
+        "turnId": "71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899",
+        "checkpointTurnCount": 1,
+        "checkpointRef": "refs/synara/checkpoints/NzMxMWU4MWMtYzk1Zi00ZGRlLTllOGUtNDY1Njc0NWNhN2Fj/turn/1",
+        "status": "ready",
+        "files": [],
+        "assistantMessageId": "assistant:devin:71a9f3c4-1fc0-4d2c-923f-8ad64ffbe899:assistant:animated-period:e356d1d3:segment:0",
+        "completedAt": "2026-09-01T19:47:53.368Z"
+      }
+    ],
+    "session": {
+      "threadId": "7311e81c-c95f-4dde-9e8e-4656745ca7ac",
+      "status": "ready",
+      "providerName": "devin",
+      "runtimeMode": "full-access",
+      "activeTurnId": null,
+      "lastError": null,
+      "updatedAt": "2026-09-01T19:47:53.368Z"
+    }
+  }
+}

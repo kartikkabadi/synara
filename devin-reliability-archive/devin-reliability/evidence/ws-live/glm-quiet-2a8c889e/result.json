@@ -1,0 +1,43 @@
+{
+  "runId": "2a8c889e",
+  "label": "glm-quiet",
+  "modelUid": "glm-5.3-flash",
+  "effort": "max",
+  "mode": "quiet",
+  "phrase": "GLM WS 1 COMPLETE",
+  "turnState": "completed",
+  "result": "PASS",
+  "modelSelectionMatch": true,
+  "createdSelection": {
+    "provider": "devin",
+    "model": "glm-5.3-flash"
+  },
+  "requestedSelection": {
+    "provider": "devin",
+    "model": "glm-5.3-flash",
+    "options": {
+      "reasoningEffort": "max"
+    }
+  },
+  "toolStarted": true,
+  "toolCompleted": true,
+  "toolKinds": [
+    "tool.started",
+    "tool.updated",
+    "tool.started",
+    "tool.updated",
+    "tool.updated",
+    "tool.completed",
+    "tool.updated",
+    "tool.completed"
+  ],
+  "phraseSeen": true,
+  "activeSeconds": 38,
+  "serverTimeout": false,
+  "threadId": "76ad9b12-6a75-4d4c-89e5-4f216c8d067c",
+  "projectId": "2ca1270a-adee-4f97-a394-5fdb31add9a5",
+  "checks": {
+    "threadCreated": true,
+    "turnRequested": true
+  }
+}

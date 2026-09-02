@@ -1,0 +1,19 @@
+{
+  "provider": "antigravity",
+  "status": "warning",
+  "available": true,
+  "authStatus": "unknown",
+  "version": "1.1.23",
+  "checkedAt": "2026-09-01T16:28:37.110Z",
+  "message": "Antigravity CLI is installed, but Synara could not verify login by listing models.",
+  "versionAdvisory": {
+    "status": "unknown",
+    "currentVersion": "1.1.23",
+    "latestVersion": null,
+    "latestVersionKnowable": false,
+    "updateCommand": "agy update",
+    "canUpdate": true,
+    "checkedAt": "2026-09-01T16:28:45.122Z",
+    "message": null
+  }
+}

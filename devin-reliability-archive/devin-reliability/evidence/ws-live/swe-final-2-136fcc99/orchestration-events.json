@@ -1,0 +1,709 @@
+[
+  {
+    "sequence": 1,
+    "event_type": "project.created",
+    "occurred_at": "2026-09-01T20:17:53.444Z",
+    "payload": {
+      "projectId": "c64a4502-cd61-4f13-b631-cf50882eb48f",
+      "kind": "project",
+      "title": "ws-swe-final-2",
+      "workspaceRoot": "/Users/user/.synara/worktrees/devin-combined-live-proof",
+      "defaultModelSelection": null,
+      "scripts": [],
+      "isPinned": false,
+      "spaceId": null,
+      "createdAt": "2026-09-01T20:17:53.444Z",
+      "updatedAt": "2026-09-01T20:17:53.444Z"
+    }
+  },
+  {
+    "sequence": 2,
+    "event_type": "thread.created",
+    "occurred_at": "2026-09-01T20:17:53.475Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "projectId": "c64a4502-cd61-4f13-b631-cf50882eb48f",
+      "title": "ws swe-final-2 swe-1-7",
+      "modelSelection": {
+        "provider": "devin",
+        "model": "swe-1-7"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "envMode": "local",
+      "branch": null,
+      "worktreePath": null,
+      "workingDirectory": null,
+      "associatedWorktreePath": null,
+      "associatedWorktreeBranch": null,
+      "associatedWorktreeRef": null,
+      "createBranchFlowCompleted": false,
+      "isPinned": false,
+      "parentThreadId": null,
+      "subagentAgentId": null,
+      "subagentNickname": null,
+      "subagentRole": null,
+      "forkSourceThreadId": null,
+      "lastKnownPr": null,
+      "handoff": null,
+      "createdAt": "2026-09-01T20:17:53.475Z",
+      "updatedAt": "2026-09-01T20:17:53.475Z"
+    }
+  },
+  {
+    "sequence": 3,
+    "event_type": "thread.message-sent",
+    "occurred_at": "2026-09-01T20:17:53.484Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "messageId": "4c47dcf4-e6ed-4425-9bad-ef30cee9bfb2",
+      "role": "user",
+      "text": "Use exactly one shell exec tool call. Start this exact bounded local command in the background: sleep 24 && git status --short. Then use get_output with timeout 25000 milliseconds to wait for it to finish. Do not use any other tool before or after it. Do not edit or create files. Do not access the network or any external service. Do not perform external writes. After the command finishes, reply with exactly: SWE FINAL 2 COMPLETE",
+      "attachments": [],
+      "dispatchMode": "queue",
+      "dispatchOrigin": "user",
+      "turnId": null,
+      "streaming": false,
+      "source": "native",
+      "createdAt": "2026-09-01T20:17:53.484Z",
+      "updatedAt": "2026-09-01T20:17:53.484Z"
+    }
+  },
+  {
+    "sequence": 4,
+    "event_type": "thread.turn-start-requested",
+    "occurred_at": "2026-09-01T20:17:53.484Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "messageId": "4c47dcf4-e6ed-4425-9bad-ef30cee9bfb2",
+      "modelSelection": {
+        "provider": "devin",
+        "model": "swe-1-7",
+        "options": {
+          "reasoningEffort": "max"
+        }
+      },
+      "assistantDeliveryMode": "streaming",
+      "dispatchMode": "queue",
+      "dispatchOrigin": "user",
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "createdAt": "2026-09-01T20:17:53.484Z"
+    }
+  },
+  {
+    "sequence": 5,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:17:53.484Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "session": {
+        "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+        "status": "ready",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": null,
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:17:56.162Z"
+      }
+    }
+  },
+  {
+    "sequence": 6,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:17:56.172Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "session": {
+        "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+        "status": "ready",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": null,
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:17:56.172Z"
+      }
+    }
+  },
+  {
+    "sequence": 7,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:17:56.178Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "session": {
+        "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+        "status": "ready",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": null,
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:17:56.178Z"
+      }
+    }
+  },
+  {
+    "sequence": 8,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:17:56.179Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "session": {
+        "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+        "status": "ready",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": null,
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:17:56.179Z"
+      }
+    }
+  },
+  {
+    "sequence": 9,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:17:56.259Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "session": {
+        "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+        "status": "running",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:17:56.259Z"
+      }
+    }
+  },
+  {
+    "sequence": 10,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:18:05.747Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "activity": {
+        "id": "c34b4147-315f-4f05-9dc3-b1bbb567c589",
+        "createdAt": "2026-09-01T20:18:05.747Z",
+        "tone": "info",
+        "kind": "context-window.updated",
+        "summary": "Context window updated",
+        "payload": {
+          "usedTokens": 79396,
+          "usedPercent": 30.30381679389313,
+          "maxTokens": 262000,
+          "compactsAutomatically": true,
+          "provider": "devin"
+        },
+        "turnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+        "sequence": 25
+      }
+    }
+  },
+  {
+    "sequence": 11,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:18:05.768Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "activity": {
+        "id": "9f35fb59-6137-43c5-9d87-4ffb8d6fef6f",
+        "createdAt": "2026-09-01T20:18:05.768Z",
+        "tone": "tool",
+        "kind": "tool.started",
+        "summary": "Ran sleep, git started",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran sleep, git",
+          "detail": "sleep 24 && git status --short",
+          "data": {
+            "toolCallId": "functions.exec:0",
+            "kind": "execute",
+            "command": "sleep 24 && git status --short",
+            "rawInput": {
+              "command": "sleep 24 && git status --short",
+              "timeout": 0,
+              "shell_id": "swe-final-2"
+            },
+            "content": [
+              {
+                "content": {
+                  "resource": {
+                    "mimeType": "text/x-shellscript",
+                    "text": "sleep 24 && git status --short",
+                    "uri": "tool://preview"
+                  },
+                  "_meta": {
+                    "cognition.ai/preview_is_shell_command": true
+                  },
+                  "type": "resource"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "functions.exec:0"
+          }
+        },
+        "turnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+        "sequence": 26
+      }
+    }
+  },
+  {
+    "sequence": 12,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:18:05.779Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "activity": {
+        "id": "0bb33b83-455f-4731-852d-3d7785594b17",
+        "createdAt": "2026-09-01T20:18:05.779Z",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran sleep, git",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran sleep, git",
+          "detail": "sleep 24 && git status --short",
+          "data": {
+            "toolCallId": "functions.exec:0",
+            "kind": "execute",
+            "command": "sleep 24 && git status --short",
+            "rawInput": {
+              "command": "sleep 24 && git status --short",
+              "timeout": 0,
+              "shell_id": "swe-final-2"
+            },
+            "content": [
+              {
+                "content": {
+                  "resource": {
+                    "mimeType": "text/x-shellscript",
+                    "text": "sleep 24 && git status --short",
+                    "uri": "tool://preview"
+                  },
+                  "_meta": {
+                    "cognition.ai/preview_is_shell_command": true
+                  },
+                  "type": "resource"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "functions.exec:0"
+          }
+        },
+        "turnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+        "sequence": 27
+      }
+    }
+  },
+  {
+    "sequence": 13,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:18:07.894Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "activity": {
+        "id": "4b9b0745-bff9-4d23-8177-2ddb7b0795e7",
+        "createdAt": "2026-09-01T20:18:07.894Z",
+        "tone": "info",
+        "kind": "context-window.updated",
+        "summary": "Context window updated",
+        "payload": {
+          "usedTokens": 79473,
+          "usedPercent": 30.333206106870232,
+          "maxTokens": 262000,
+          "compactsAutomatically": true,
+          "provider": "devin"
+        },
+        "turnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+        "sequence": 34
+      }
+    }
+  },
+  {
+    "sequence": 14,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:18:07.896Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "activity": {
+        "id": "ad05f925-eb11-4385-8ddb-0f8549fb1d63",
+        "createdAt": "2026-09-01T20:18:07.896Z",
+        "tone": "tool",
+        "kind": "tool.started",
+        "summary": "Read shell started",
+        "payload": {
+          "itemType": "dynamic_tool_call",
+          "status": "inProgress",
+          "title": "Read shell",
+          "detail": "Read shell",
+          "data": {
+            "toolCallId": "functions.get_output:1",
+            "rawInput": {
+              "shell_id": "swe-final-2",
+              "timeout": 25000
+            },
+            "providerToolCallId": "functions.get_output:1"
+          }
+        },
+        "turnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+        "sequence": 35
+      }
+    }
+  },
+  {
+    "sequence": 15,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:18:07.897Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "activity": {
+        "id": "83efd375-0df7-416f-afa1-b5c3c719ddbb",
+        "createdAt": "2026-09-01T20:18:07.897Z",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Read shell",
+        "payload": {
+          "itemType": "dynamic_tool_call",
+          "status": "inProgress",
+          "title": "Read shell",
+          "detail": "Read shell",
+          "data": {
+            "toolCallId": "functions.get_output:1",
+            "rawInput": {
+              "shell_id": "swe-final-2",
+              "timeout": 25000
+            },
+            "providerToolCallId": "functions.get_output:1"
+          }
+        },
+        "turnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+        "sequence": 36
+      }
+    }
+  },
+  {
+    "sequence": 16,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:18:30.328Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "activity": {
+        "id": "05ef3737-5d6f-4965-9b7d-c1b9e3833f95",
+        "createdAt": "2026-09-01T20:18:30.328Z",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src...",
+          "data": {
+            "toolCallId": "functions.exec:0",
+            "kind": "execute",
+            "command": "sleep 24 && git status --short",
+            "rawInput": {
+              "command": "sleep 24 && git status --short",
+              "timeout": 0,
+              "shell_id": "swe-final-2"
+            },
+            "content": [
+              {
+                "content": {
+                  "text": " M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src/provider/acp/DevinAcpSupport.test.ts\n M apps/server/src/provider/acp/DevinAcpSupport.ts\n M apps/web/src/components/ChatView.browser.tsx\n M apps/web/src/components/Sidebar.tsx",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "functions.exec:0"
+          }
+        },
+        "turnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+        "sequence": 37
+      }
+    }
+  },
+  {
+    "sequence": 17,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:18:30.345Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "activity": {
+        "id": "418f477d-015d-4d17-9fff-39556781c987",
+        "createdAt": "2026-09-01T20:18:30.345Z",
+        "tone": "tool",
+        "kind": "tool.completed",
+        "summary": "Read shell",
+        "payload": {
+          "itemType": "dynamic_tool_call",
+          "status": "completed",
+          "title": "Read shell",
+          "detail": "Read shell",
+          "data": {
+            "toolCallId": "functions.get_output:1",
+            "rawInput": {
+              "shell_id": "swe-final-2",
+              "timeout": 25000
+            },
+            "providerToolCallId": "functions.get_output:1"
+          }
+        },
+        "turnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+        "sequence": 38
+      }
+    }
+  },
+  {
+    "sequence": 18,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:18:30.347Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "activity": {
+        "id": "4d4947e5-cbbb-4baf-bf93-870779e9d9ef",
+        "createdAt": "2026-09-01T20:18:30.347Z",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src...",
+          "data": {
+            "toolCallId": "functions.exec:0",
+            "kind": "execute",
+            "command": "sleep 24 && git status --short",
+            "rawInput": {
+              "command": "sleep 24 && git status --short",
+              "timeout": 0,
+              "shell_id": "swe-final-2"
+            },
+            "content": [
+              {
+                "content": {
+                  "text": " M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src/provider/acp/DevinAcpSupport.test.ts\n M apps/server/src/provider/acp/DevinAcpSupport.ts\n M apps/web/src/components/ChatView.browser.tsx\n M apps/web/src/components/Sidebar.tsx\n",
+                  "type": "text"
+                },
+                "type": "content"
+              },
+              {
+                "content": {
+                  "text": "\nExit code: 0",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "functions.exec:0"
+          }
+        },
+        "turnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+        "sequence": 39
+      }
+    }
+  },
+  {
+    "sequence": 19,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:18:30.348Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "activity": {
+        "id": "fb81fd7d-4daf-4f99-bd65-55ab57e3e997",
+        "createdAt": "2026-09-01T20:18:30.348Z",
+        "tone": "tool",
+        "kind": "tool.completed",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "completed",
+          "title": "Ran command",
+          "detail": "M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src...",
+          "data": {
+            "toolCallId": "functions.exec:0",
+            "kind": "execute",
+            "command": "sleep 24 && git status --short",
+            "rawInput": {
+              "command": "sleep 24 && git status --short",
+              "timeout": 0,
+              "shell_id": "swe-final-2"
+            },
+            "content": [
+              {
+                "content": {
+                  "text": " M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src/provider/acp/DevinAcpSupport.test.ts\n M apps/server/src/provider/acp/DevinAcpSupport.ts\n M apps/web/src/components/ChatView.browser.tsx\n M apps/web/src/components/Sidebar.tsx",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "functions.exec:0"
+          }
+        },
+        "turnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+        "sequence": 40
+      }
+    }
+  },
+  {
+    "sequence": 20,
+    "event_type": "thread.message-sent",
+    "occurred_at": "2026-09-01T20:18:39.354Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "messageId": "assistant:devin:090d845e-32fa-48cc-b9a0-795ce6c4e957:assistant:ethereal-cirrus:08393e68:segment:0",
+      "role": "assistant",
+      "text": "SWE FINAL 2 COMP",
+      "segmentStartedAt": "2026-09-01T20:18:39.354Z",
+      "segmentSequence": 49,
+      "turnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+      "streaming": true,
+      "createdAt": "2026-09-01T20:18:39.354Z",
+      "updatedAt": "2026-09-01T20:18:39.354Z"
+    }
+  },
+  {
+    "sequence": 21,
+    "event_type": "thread.message-sent",
+    "occurred_at": "2026-09-01T20:18:39.369Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "messageId": "assistant:devin:090d845e-32fa-48cc-b9a0-795ce6c4e957:assistant:ethereal-cirrus:08393e68:segment:0",
+      "role": "assistant",
+      "text": "LETE",
+      "turnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+      "streaming": true,
+      "createdAt": "2026-09-01T20:18:39.369Z",
+      "updatedAt": "2026-09-01T20:18:39.369Z"
+    }
+  },
+  {
+    "sequence": 22,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:18:39.419Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "activity": {
+        "id": "852b4525-75cb-4def-8165-1571599b958d",
+        "createdAt": "2026-09-01T20:18:39.419Z",
+        "tone": "info",
+        "kind": "context-window.updated",
+        "summary": "Context window updated",
+        "payload": {
+          "usedTokens": 79618,
+          "usedPercent": 30.38854961832061,
+          "maxTokens": 262000,
+          "compactsAutomatically": true,
+          "provider": "devin"
+        },
+        "turnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+        "sequence": 51
+      }
+    }
+  },
+  {
+    "sequence": 23,
+    "event_type": "thread.message-sent",
+    "occurred_at": "2026-09-01T20:18:39.522Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "messageId": "assistant:devin:090d845e-32fa-48cc-b9a0-795ce6c4e957:assistant:ethereal-cirrus:08393e68:segment:0",
+      "role": "assistant",
+      "text": "SWE FINAL 2 COMPLETE",
+      "turnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+      "streaming": false,
+      "createdAt": "2026-09-01T20:18:39.522Z",
+      "updatedAt": "2026-09-01T20:18:39.522Z"
+    }
+  },
+  {
+    "sequence": 24,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:18:39.549Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "session": {
+        "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+        "status": "ready",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": null,
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:18:39.549Z"
+      }
+    }
+  },
+  {
+    "sequence": 25,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:18:39.549Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "activity": {
+        "id": "913d114d-3b1d-4d99-930d-8b5987174d91",
+        "createdAt": "2026-09-01T20:18:39.549Z",
+        "tone": "info",
+        "kind": "turn.completed",
+        "summary": "Turn completed",
+        "payload": {
+          "state": "completed"
+        },
+        "turnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+        "sequence": 53
+      }
+    }
+  },
+  {
+    "sequence": 26,
+    "event_type": "thread.turn-diff-completed",
+    "occurred_at": "2026-09-01T20:18:39.549Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "turnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+      "checkpointTurnCount": 1,
+      "checkpointRef": "refs/synara/checkpoints/YzI1ZjliZjktMzAxYy00ODQ2LThlMTYtMWY3NDNhYzQ4ODMz/turn/1",
+      "status": "ready",
+      "files": [],
+      "assistantMessageId": "assistant:devin:090d845e-32fa-48cc-b9a0-795ce6c4e957:assistant:ethereal-cirrus:08393e68:segment:0",
+      "completedAt": "2026-09-01T20:18:39.549Z"
+    }
+  },
+  {
+    "sequence": 27,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:18:39.549Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "activity": {
+        "id": "efbb6fe4-c938-4aaf-a980-e9ace4d3dd91",
+        "tone": "info",
+        "kind": "checkpoint.captured",
+        "summary": "Checkpoint captured",
+        "payload": {
+          "turnCount": 1,
+          "status": "ready"
+        },
+        "turnId": "090d845e-32fa-48cc-b9a0-795ce6c4e957",
+        "createdAt": "2026-09-01T20:18:39.549Z"
+      }
+    }
+  },
+  {
+    "sequence": 28,
+    "event_type": "thread.meta-updated",
+    "occurred_at": "2026-09-01T20:18:41.872Z",
+    "payload": {
+      "threadId": "c25f9bf9-301c-4846-8e16-1f743ac48833",
+      "branch": "agent/devin-combined-live-proof",
+      "updatedAt": "2026-09-01T20:18:41.872Z"
+    }
+  }
+]

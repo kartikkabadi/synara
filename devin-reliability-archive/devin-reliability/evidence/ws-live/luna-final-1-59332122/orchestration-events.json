@@ -1,0 +1,769 @@
+[
+  {
+    "sequence": 1,
+    "event_type": "project.created",
+    "occurred_at": "2026-09-01T20:21:27.594Z",
+    "payload": {
+      "projectId": "679ab9da-6cf0-4dfc-8822-1a0a13a47941",
+      "kind": "project",
+      "title": "ws-luna-final-1",
+      "workspaceRoot": "/Users/user/.synara/worktrees/devin-combined-live-proof",
+      "defaultModelSelection": null,
+      "scripts": [],
+      "isPinned": false,
+      "spaceId": null,
+      "createdAt": "2026-09-01T20:21:27.594Z",
+      "updatedAt": "2026-09-01T20:21:27.594Z"
+    }
+  },
+  {
+    "sequence": 2,
+    "event_type": "thread.created",
+    "occurred_at": "2026-09-01T20:21:27.633Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "projectId": "679ab9da-6cf0-4dfc-8822-1a0a13a47941",
+      "title": "ws luna-final-1 gpt-5.6-luna",
+      "modelSelection": {
+        "provider": "devin",
+        "model": "gpt-5.6-luna"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "envMode": "local",
+      "branch": null,
+      "worktreePath": null,
+      "workingDirectory": null,
+      "associatedWorktreePath": null,
+      "associatedWorktreeBranch": null,
+      "associatedWorktreeRef": null,
+      "createBranchFlowCompleted": false,
+      "isPinned": false,
+      "parentThreadId": null,
+      "subagentAgentId": null,
+      "subagentNickname": null,
+      "subagentRole": null,
+      "forkSourceThreadId": null,
+      "lastKnownPr": null,
+      "handoff": null,
+      "createdAt": "2026-09-01T20:21:27.633Z",
+      "updatedAt": "2026-09-01T20:21:27.633Z"
+    }
+  },
+  {
+    "sequence": 3,
+    "event_type": "thread.message-sent",
+    "occurred_at": "2026-09-01T20:21:27.646Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "messageId": "1105eb7e-a860-4079-9339-3dbbbaee5223",
+      "role": "user",
+      "text": "Use exactly one shell exec tool call. Start this exact bounded local command in the background: sleep 24 && git status --short. Then use get_output with timeout 25000 milliseconds to wait for it to finish. Do not use any other tool before or after it. Do not edit or create files. Do not access the network or any external service. Do not perform external writes. After the command finishes, reply with exactly: LUNA FINAL 1 COMPLETE",
+      "attachments": [],
+      "dispatchMode": "queue",
+      "dispatchOrigin": "user",
+      "turnId": null,
+      "streaming": false,
+      "source": "native",
+      "createdAt": "2026-09-01T20:21:27.646Z",
+      "updatedAt": "2026-09-01T20:21:27.646Z"
+    }
+  },
+  {
+    "sequence": 4,
+    "event_type": "thread.turn-start-requested",
+    "occurred_at": "2026-09-01T20:21:27.646Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "messageId": "1105eb7e-a860-4079-9339-3dbbbaee5223",
+      "modelSelection": {
+        "provider": "devin",
+        "model": "gpt-5.6-luna",
+        "options": {
+          "reasoningEffort": "medium"
+        }
+      },
+      "assistantDeliveryMode": "streaming",
+      "dispatchMode": "queue",
+      "dispatchOrigin": "user",
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "createdAt": "2026-09-01T20:21:27.646Z"
+    }
+  },
+  {
+    "sequence": 5,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:21:27.646Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "session": {
+        "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+        "status": "ready",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": null,
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:21:30.725Z"
+      }
+    }
+  },
+  {
+    "sequence": 6,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:21:30.737Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "session": {
+        "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+        "status": "ready",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": null,
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:21:30.737Z"
+      }
+    }
+  },
+  {
+    "sequence": 7,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:21:30.744Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "session": {
+        "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+        "status": "ready",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": null,
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:21:30.744Z"
+      }
+    }
+  },
+  {
+    "sequence": 8,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:21:30.745Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "session": {
+        "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+        "status": "ready",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": null,
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:21:30.745Z"
+      }
+    }
+  },
+  {
+    "sequence": 9,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:21:30.849Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "session": {
+        "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+        "status": "running",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:21:30.849Z"
+      }
+    }
+  },
+  {
+    "sequence": 10,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:21:38.573Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "activity": {
+        "id": "2d7df321-1135-4799-b99b-8313a725390d",
+        "createdAt": "2026-09-01T20:21:38.573Z",
+        "tone": "info",
+        "kind": "context-window.updated",
+        "summary": "Context window updated",
+        "payload": {
+          "usedTokens": 80226,
+          "usedPercent": 8.0226,
+          "maxTokens": 1000000,
+          "compactsAutomatically": true,
+          "provider": "devin"
+        },
+        "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+        "sequence": 5
+      }
+    }
+  },
+  {
+    "sequence": 11,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:21:38.672Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "activity": {
+        "id": "1d29bb7b-1b23-4fb9-b789-5b9555c7f3d7",
+        "createdAt": "2026-09-01T20:21:38.672Z",
+        "tone": "tool",
+        "kind": "tool.started",
+        "summary": "Ran sleep, git started",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran sleep, git",
+          "detail": "sleep 24 && git status --short",
+          "data": {
+            "toolCallId": "call_QL3S6ESrFXWZvDYYycQDEcLr",
+            "kind": "execute",
+            "command": "sleep 24 && git status --short",
+            "rawInput": {
+              "command": "sleep 24 && git status --short",
+              "workdir": "/Users/user/.synara/worktrees/devin-combined-live-proof",
+              "timeout": 0
+            },
+            "content": [
+              {
+                "content": {
+                  "resource": {
+                    "mimeType": "text/x-shellscript",
+                    "text": "sleep 24 && git status --short",
+                    "uri": "tool://preview"
+                  },
+                  "_meta": {
+                    "cognition.ai/preview_is_shell_command": true
+                  },
+                  "type": "resource"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_QL3S6ESrFXWZvDYYycQDEcLr"
+          }
+        },
+        "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+        "sequence": 6
+      }
+    }
+  },
+  {
+    "sequence": 12,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:21:38.677Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "activity": {
+        "id": "37fd01d1-07d9-4537-9191-f31b7dc18d3d",
+        "createdAt": "2026-09-01T20:21:38.677Z",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran sleep, git",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran sleep, git",
+          "detail": "sleep 24 && git status --short",
+          "data": {
+            "toolCallId": "call_QL3S6ESrFXWZvDYYycQDEcLr",
+            "kind": "execute",
+            "command": "sleep 24 && git status --short",
+            "rawInput": {
+              "command": "sleep 24 && git status --short",
+              "workdir": "/Users/user/.synara/worktrees/devin-combined-live-proof",
+              "timeout": 0
+            },
+            "content": [
+              {
+                "content": {
+                  "resource": {
+                    "mimeType": "text/x-shellscript",
+                    "text": "sleep 24 && git status --short",
+                    "uri": "tool://preview"
+                  },
+                  "_meta": {
+                    "cognition.ai/preview_is_shell_command": true
+                  },
+                  "type": "resource"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_QL3S6ESrFXWZvDYYycQDEcLr"
+          }
+        },
+        "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+        "sequence": 7
+      }
+    }
+  },
+  {
+    "sequence": 13,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:21:41.256Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "activity": {
+        "id": "858d65cb-ab39-417d-9d53-6d3d95d9e703",
+        "createdAt": "2026-09-01T20:21:41.256Z",
+        "tone": "info",
+        "kind": "context-window.updated",
+        "summary": "Context window updated",
+        "payload": {
+          "usedTokens": 80274,
+          "usedPercent": 8.0274,
+          "maxTokens": 1000000,
+          "compactsAutomatically": true,
+          "provider": "devin"
+        },
+        "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+        "sequence": 8
+      }
+    }
+  },
+  {
+    "sequence": 14,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:21:41.259Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "activity": {
+        "id": "b929b9ad-dd81-4bf7-8f05-611f1fffaf8b",
+        "createdAt": "2026-09-01T20:21:41.259Z",
+        "tone": "tool",
+        "kind": "tool.started",
+        "summary": "Read shell started",
+        "payload": {
+          "itemType": "dynamic_tool_call",
+          "status": "inProgress",
+          "title": "Read shell",
+          "detail": "Read shell",
+          "data": {
+            "toolCallId": "call_Yt0OLoLtcQS6zmXIK3X0JnbA",
+            "rawInput": {
+              "shell_id": "d5c566",
+              "timeout": 25000
+            },
+            "providerToolCallId": "call_Yt0OLoLtcQS6zmXIK3X0JnbA"
+          }
+        },
+        "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+        "sequence": 9
+      }
+    }
+  },
+  {
+    "sequence": 15,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:21:41.261Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "activity": {
+        "id": "e5d7ff3b-fbeb-49a1-af85-c92d395f4b83",
+        "createdAt": "2026-09-01T20:21:41.261Z",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Read shell",
+        "payload": {
+          "itemType": "dynamic_tool_call",
+          "status": "inProgress",
+          "title": "Read shell",
+          "detail": "Read shell",
+          "data": {
+            "toolCallId": "call_Yt0OLoLtcQS6zmXIK3X0JnbA",
+            "rawInput": {
+              "shell_id": "d5c566",
+              "timeout": 25000
+            },
+            "providerToolCallId": "call_Yt0OLoLtcQS6zmXIK3X0JnbA"
+          }
+        },
+        "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+        "sequence": 10
+      }
+    }
+  },
+  {
+    "sequence": 16,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:22:02.736Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "activity": {
+        "id": "2d7f8d6b-1f6b-4793-b951-451bf349b1d9",
+        "createdAt": "2026-09-01T20:22:02.736Z",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src...",
+          "data": {
+            "toolCallId": "call_QL3S6ESrFXWZvDYYycQDEcLr",
+            "kind": "execute",
+            "command": "sleep 24 && git status --short",
+            "rawInput": {
+              "command": "sleep 24 && git status --short",
+              "workdir": "/Users/user/.synara/worktrees/devin-combined-live-proof",
+              "timeout": 0
+            },
+            "content": [
+              {
+                "content": {
+                  "text": " M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src/provider/acp/DevinAcpSupport.test.ts\n M apps/server/src/provider/acp/DevinAcpSupport.ts\n M apps/web/src/components/ChatView.browser.tsx\n M apps/web/src/components/Sidebar.tsx",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_QL3S6ESrFXWZvDYYycQDEcLr"
+          }
+        },
+        "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+        "sequence": 11
+      }
+    }
+  },
+  {
+    "sequence": 17,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:22:02.746Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "activity": {
+        "id": "ff69436f-5f09-493f-9fe7-3bdd7b876785",
+        "createdAt": "2026-09-01T20:22:02.746Z",
+        "tone": "tool",
+        "kind": "tool.completed",
+        "summary": "Read shell",
+        "payload": {
+          "itemType": "dynamic_tool_call",
+          "status": "completed",
+          "title": "Read shell",
+          "detail": "Read shell",
+          "data": {
+            "toolCallId": "call_Yt0OLoLtcQS6zmXIK3X0JnbA",
+            "rawInput": {
+              "shell_id": "d5c566",
+              "timeout": 25000
+            },
+            "providerToolCallId": "call_Yt0OLoLtcQS6zmXIK3X0JnbA"
+          }
+        },
+        "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+        "sequence": 12
+      }
+    }
+  },
+  {
+    "sequence": 18,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:22:02.747Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "activity": {
+        "id": "bf713117-bfc9-41db-89cb-a565e5c7b3e9",
+        "createdAt": "2026-09-01T20:22:02.747Z",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src...",
+          "data": {
+            "toolCallId": "call_QL3S6ESrFXWZvDYYycQDEcLr",
+            "kind": "execute",
+            "command": "sleep 24 && git status --short",
+            "rawInput": {
+              "command": "sleep 24 && git status --short",
+              "workdir": "/Users/user/.synara/worktrees/devin-combined-live-proof",
+              "timeout": 0
+            },
+            "content": [
+              {
+                "content": {
+                  "text": " M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src/provider/acp/DevinAcpSupport.test.ts\n M apps/server/src/provider/acp/DevinAcpSupport.ts\n M apps/web/src/components/ChatView.browser.tsx\n M apps/web/src/components/Sidebar.tsx\n",
+                  "type": "text"
+                },
+                "type": "content"
+              },
+              {
+                "content": {
+                  "text": "\nExit code: 0",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_QL3S6ESrFXWZvDYYycQDEcLr"
+          }
+        },
+        "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+        "sequence": 13
+      }
+    }
+  },
+  {
+    "sequence": 19,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:22:02.758Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "activity": {
+        "id": "bb77b975-af5f-418d-9b79-5b09c1f5a925",
+        "createdAt": "2026-09-01T20:22:02.758Z",
+        "tone": "tool",
+        "kind": "tool.completed",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "completed",
+          "title": "Ran command",
+          "detail": "M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src...",
+          "data": {
+            "toolCallId": "call_QL3S6ESrFXWZvDYYycQDEcLr",
+            "kind": "execute",
+            "command": "sleep 24 && git status --short",
+            "rawInput": {
+              "command": "sleep 24 && git status --short",
+              "workdir": "/Users/user/.synara/worktrees/devin-combined-live-proof",
+              "timeout": 0
+            },
+            "content": [
+              {
+                "content": {
+                  "text": " M apps/server/src/provider/Layers/DevinAdapter.test.ts\n M apps/server/src/provider/Layers/DevinAdapter.ts\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\n M apps/server/src/provider/acp/DevinAcpSupport.test.ts\n M apps/server/src/provider/acp/DevinAcpSupport.ts\n M apps/web/src/components/ChatView.browser.tsx\n M apps/web/src/components/Sidebar.tsx",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_QL3S6ESrFXWZvDYYycQDEcLr"
+          }
+        },
+        "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+        "sequence": 14
+      }
+    }
+  },
+  {
+    "sequence": 20,
+    "event_type": "thread.message-sent",
+    "occurred_at": "2026-09-01T20:22:05.118Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "messageId": "assistant:devin:793de62e-e765-4f4d-9520-669649adbd1b:assistant:hallowed-pink:1337199c:segment:0",
+      "role": "assistant",
+      "text": "L",
+      "segmentStartedAt": "2026-09-01T20:22:05.118Z",
+      "segmentSequence": 15,
+      "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+      "streaming": true,
+      "createdAt": "2026-09-01T20:22:05.118Z",
+      "updatedAt": "2026-09-01T20:22:05.118Z"
+    }
+  },
+  {
+    "sequence": 21,
+    "event_type": "thread.message-sent",
+    "occurred_at": "2026-09-01T20:22:05.123Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "messageId": "assistant:devin:793de62e-e765-4f4d-9520-669649adbd1b:assistant:hallowed-pink:1337199c:segment:0",
+      "role": "assistant",
+      "text": "UNA",
+      "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+      "streaming": true,
+      "createdAt": "2026-09-01T20:22:05.123Z",
+      "updatedAt": "2026-09-01T20:22:05.123Z"
+    }
+  },
+  {
+    "sequence": 22,
+    "event_type": "thread.message-sent",
+    "occurred_at": "2026-09-01T20:22:05.174Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "messageId": "assistant:devin:793de62e-e765-4f4d-9520-669649adbd1b:assistant:hallowed-pink:1337199c:segment:0",
+      "role": "assistant",
+      "text": " FINAL",
+      "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+      "streaming": true,
+      "createdAt": "2026-09-01T20:22:05.174Z",
+      "updatedAt": "2026-09-01T20:22:05.174Z"
+    }
+  },
+  {
+    "sequence": 23,
+    "event_type": "thread.message-sent",
+    "occurred_at": "2026-09-01T20:22:05.181Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "messageId": "assistant:devin:793de62e-e765-4f4d-9520-669649adbd1b:assistant:hallowed-pink:1337199c:segment:0",
+      "role": "assistant",
+      "text": " ",
+      "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+      "streaming": true,
+      "createdAt": "2026-09-01T20:22:05.181Z",
+      "updatedAt": "2026-09-01T20:22:05.181Z"
+    }
+  },
+  {
+    "sequence": 24,
+    "event_type": "thread.message-sent",
+    "occurred_at": "2026-09-01T20:22:05.182Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "messageId": "assistant:devin:793de62e-e765-4f4d-9520-669649adbd1b:assistant:hallowed-pink:1337199c:segment:0",
+      "role": "assistant",
+      "text": "1",
+      "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+      "streaming": true,
+      "createdAt": "2026-09-01T20:22:05.182Z",
+      "updatedAt": "2026-09-01T20:22:05.182Z"
+    }
+  },
+  {
+    "sequence": 25,
+    "event_type": "thread.message-sent",
+    "occurred_at": "2026-09-01T20:22:05.186Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "messageId": "assistant:devin:793de62e-e765-4f4d-9520-669649adbd1b:assistant:hallowed-pink:1337199c:segment:0",
+      "role": "assistant",
+      "text": " COMPLETE",
+      "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+      "streaming": true,
+      "createdAt": "2026-09-01T20:22:05.186Z",
+      "updatedAt": "2026-09-01T20:22:05.186Z"
+    }
+  },
+  {
+    "sequence": 26,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:22:05.469Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "activity": {
+        "id": "f949e765-b539-47c7-8fb1-e3392dd15d17",
+        "createdAt": "2026-09-01T20:22:05.469Z",
+        "tone": "info",
+        "kind": "context-window.updated",
+        "summary": "Context window updated",
+        "payload": {
+          "usedTokens": 80393,
+          "usedPercent": 8.0393,
+          "maxTokens": 1000000,
+          "compactsAutomatically": true,
+          "provider": "devin"
+        },
+        "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+        "sequence": 21
+      }
+    }
+  },
+  {
+    "sequence": 27,
+    "event_type": "thread.message-sent",
+    "occurred_at": "2026-09-01T20:22:05.510Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "messageId": "assistant:devin:793de62e-e765-4f4d-9520-669649adbd1b:assistant:hallowed-pink:1337199c:segment:0",
+      "role": "assistant",
+      "text": "LUNA FINAL 1 COMPLETE",
+      "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+      "streaming": false,
+      "createdAt": "2026-09-01T20:22:05.510Z",
+      "updatedAt": "2026-09-01T20:22:05.510Z"
+    }
+  },
+  {
+    "sequence": 28,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:22:05.536Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "session": {
+        "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+        "status": "ready",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": null,
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:22:05.536Z"
+      }
+    }
+  },
+  {
+    "sequence": 29,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:22:05.536Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "activity": {
+        "id": "a72569bd-8b21-4b0f-8157-13e5230741e5",
+        "createdAt": "2026-09-01T20:22:05.536Z",
+        "tone": "info",
+        "kind": "turn.completed",
+        "summary": "Turn completed",
+        "payload": {
+          "state": "completed"
+        },
+        "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+        "sequence": 23
+      }
+    }
+  },
+  {
+    "sequence": 30,
+    "event_type": "thread.turn-diff-completed",
+    "occurred_at": "2026-09-01T20:22:05.536Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+      "checkpointTurnCount": 1,
+      "checkpointRef": "refs/synara/checkpoints/ZDVlN2Y5MmItZmVhZC00OWRkLTlhZjctNjIxOWRiNjRmYjcx/turn/1",
+      "status": "ready",
+      "files": [],
+      "assistantMessageId": "assistant:devin:793de62e-e765-4f4d-9520-669649adbd1b:assistant:hallowed-pink:1337199c:segment:0",
+      "completedAt": "2026-09-01T20:22:05.536Z"
+    }
+  },
+  {
+    "sequence": 31,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:22:05.536Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "activity": {
+        "id": "cf62bd74-6154-44c4-ba3d-14d366568b6c",
+        "tone": "info",
+        "kind": "checkpoint.captured",
+        "summary": "Checkpoint captured",
+        "payload": {
+          "turnCount": 1,
+          "status": "ready"
+        },
+        "turnId": "793de62e-e765-4f4d-9520-669649adbd1b",
+        "createdAt": "2026-09-01T20:22:05.536Z"
+      }
+    }
+  },
+  {
+    "sequence": 32,
+    "event_type": "thread.meta-updated",
+    "occurred_at": "2026-09-01T20:22:06.750Z",
+    "payload": {
+      "threadId": "d5e7f92b-fead-49dd-9af7-6219db64fb71",
+      "branch": "agent/devin-combined-live-proof",
+      "updatedAt": "2026-09-01T20:22:06.750Z"
+    }
+  }
+]

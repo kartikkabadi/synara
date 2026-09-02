@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/tmp/devin-combined-cross-model-proof/state/dev/logs/terminals/_managed-bin/notify-hook.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/tmp/devin-combined-cross-model-proof/state/dev/logs/terminals/_managed-bin/notify-hook.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

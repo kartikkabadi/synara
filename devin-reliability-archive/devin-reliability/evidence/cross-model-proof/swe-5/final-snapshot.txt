@@ -1,0 +1,231 @@
+root
+  container
+    container
+      button "Toggle thread sidebar" [ref=63, loc=css:button[aria-label="Toggle thread sidebar"]]
+        svg_root
+        text "Toggle Sidebar"
+      container [ref=135, loc=unstable]
+        container
+          button "Switch sidebar surface" [ref=74, loc=css:button[aria-label="Switch sidebar surface"]]
+            text "Synara"
+            svg_root
+          container
+            button "Search" [ref=72, loc=css:button[aria-label="Search"]]
+            button "Switch to activity view" [ref=73, loc=css:button[aria-label="Switch to activity view"]]
+        container
+          unordered_list
+            list_item
+              button [ref=79, loc=unstable]
+                container
+                text "New thread"
+            list_item
+              button [ref=83, loc=unstable]
+                container
+                text "Kanban"
+            list_item
+              button [ref=88, loc=unstable]
+                svg_root
+                text "Pull requests"
+            list_item
+              button [ref=92, loc=unstable]
+                container
+                text "Automations"
+          container
+            container
+              text "Projects"
+              button "Expand all projects" [ref=602, loc=css:button[aria-label="Expand all projects"]]
+              button "Sort projects" [ref=101, loc=css:button[aria-label="Sort projects"]]
+              button "Add project" [ref=102, loc=css:button[aria-label="Add project"]]
+            unordered_list
+              list_item
+                container
+                  button [ref=594, loc=unstable]
+                    container
+                    text "devin-combined-live-proof"
+                    container
+                  button "Pin devin-combined-live-proof" [ref=595, loc=css:button[aria-label="Pin devin-combined-live-proof"]]
+                  button "View pull requests for devin-combined-live-proof" [ref=591, loc=css:button[aria-label="View pull requests for devin-combined-live-proof"]]
+                    svg_root
+                  button "Create new terminal thread in devin-combined-live-proof" [ref=592, loc=css:button[aria-label="Create new terminal thread in devin-combined-live-proof"]]
+                  button "Create new thread in devin-combined-live-proof" [ref=593, loc=css:button[aria-label="Create new thread in devin-combined-live-proof"]]
+                unordered_list
+                  list_item
+                    svg_root
+                    text "Use exactly one shell exec tool"
+                    button "Pin thread" [ref=32893, loc=css:button[aria-label="Pin thread"]]
+                    button "Archive thread" [ref=32894, loc=css:button[aria-label="Archive thread"]]
+                      svg_root
+            status
+        container
+          container
+            button [ref=123, loc=unstable]
+              text "Chats"
+              svg_root
+            button "Sort chats" [ref=121, loc=css:button[aria-label="Sort chats"]]
+            button "Open new chat home" [ref=122, loc=css:button[aria-label="Open new chat home"]]
+          unordered_list
+            text "No chats yet"
+      unordered_list
+        list_item
+          button [ref=140, loc=unstable]
+            container
+            text "Settings"
+          button "Help" [ref=141, loc=css:button[aria-label="Help"]]
+    container
+      button "Resize Sidebar" [ref=157, loc=css:button[aria-label="Resize Sidebar"]]
+      container
+        container
+          container
+            container
+              svg_root
+              heading
+                text "Use exactly one shell exec tool"
+            container
+              button "Hand off thread" [ref=32705, loc=css:button[aria-label="Hand off thread"]]
+                container
+                text "Hand off"
+              button "Add action" [ref=32706, loc=css:button[aria-label="Add action"]]
+                svg_root
+                text "Add action"
+              button "Toggle environment panel" [ref=31888, loc=css:button[aria-label="Toggle environment panel"]]
+              button "Toggle right sidebar" [ref=31889, loc=css:button[aria-label="Toggle right sidebar"]]
+          search
+            textbox "Find in thread" [ref=31897, loc=css:input[placeholder="Search chat..."]]
+              text "Search chat..."
+              container
+            button "Close find (Esc)" [ref=31899, loc=css:button[aria-label="Close find (Esc)"]]
+              svg_root
+            button "Previous match (Shift+Enter)" [ref=31908, loc=css:button[aria-label="Previous match (Shift+Enter)"]]
+              svg_root
+            button "Next match (Enter)" [ref=31909, loc=css:button[aria-label="Next match (Enter)"]]
+              svg_root
+          container
+            container
+              container
+                container
+                  container
+                    container
+                      paragraph
+                        text "Use exactly one shell exec tool call. Start this exact bounded local command in the background: sleep 24 && git status --short. Then use get_output with timeout 25000 milliseconds to wait for it to fi..."
+                      container
+                        paragraph
+                          text "21:57"
+                        container
+                          button "Copy message" [ref=32761, loc=ambiguous]
+                          button "Edit message" [ref=34724, loc=css:button[aria-label="Edit message"]]
+                          button "Revert to this message" [ref=38176, loc=css:button[aria-label="Revert to this message"]]
+                            svg_root
+                    container
+                      container
+                        button [ref=38124, loc=unstable]
+                          text "Worked for 42s"
+                          svg_root
+                        container
+                      container
+                        paragraph
+                          text "SWE SESSION 5 COMPLETE"
+                        container
+                          button "Copy message" [ref=38130, loc=ambiguous]
+                          button "Fork thread from this turn" [ref=38131, loc=css:button[aria-label="Fork thread from this turn"]]
+                          button "Pin message" [ref=38132, loc=css:button[aria-label="Pin message"]]
+                          paragraph
+                            text "21:57"
+                  container
+                  container
+                button "Scroll to bottom" [ref=32638, loc=css:button[aria-label="Scroll to bottom"]]
+                  svg_root
+                container "Message navigation"
+                  button "Message 1: Use exactly one shell exec tool call. Start this exact bound" [ref=32639, loc=css:button[aria-label="Message 1: Use exactly one shell exec tool call. Start this exact bound"]]
+              container
+                form
+                  container
+                    textfield [ref=32796, loc=css:input[placeholder="Ask anything, @tag files/folders, or use / to show available commands"]]
+                      paragraph
+                        text
+                    text "Ask anything, @tag files/folders, or use / to show available commands"
+                  container
+                    container
+                      textbox [ref=32812, loc=unstable]
+                        button [ref=32800, loc=unstable]
+                          text "Choose files"
+                        text "No file chosen"
+                      button "Composer extras" [ref=32813, loc=css:button[aria-label="Composer extras"]]
+                        svg_root
+                      button [ref=32811, loc=unstable]
+                        container
+                        text "Full access"
+                        svg_root
+                    container
+                      button "Context window 30% used" [ref=34697, loc=css:button[aria-label="Context window 30% used"]]
+                        svg_root
+                      button "Change model and reasoning" [ref=32933, loc=css:button[aria-label="Change model and reasoning"]]
+                        svg_root
+                        text "SWE 1.7"
+                        text "Max"
+                        svg_root
+                      button "Record voice note" [ref=38091, loc=css:button[aria-label="Record voice note"]]
+                      button "Send message" [ref=38092, loc=css:button[aria-label="Send message"]]
+                container
+            container
+              paragraph
+                text "Environment"
+              button "Panel sections" [ref=32014, loc=css:button[aria-label="Panel sections"]]
+              button [ref=32069, loc=unstable]
+                text "Changes"
+                text "+"
+                text "850"
+                text "−"
+                text "44"
+              button [ref=32035, loc=unstable]
+                text "Local"
+                svg_root
+              comboboxgrouping [ref=32036, loc=unstable]
+                text "agent/devin-combined-live-proof"
+                svg_root
+              textbox [ref=32037, loc=unstable]
+                text "agent/devin-combined-live-proof"
+              button "Commit & push" [ref=32044, loc=css:button[aria-label="Commit & push"]]
+                text "Commit & push"
+              button "Git action options" [ref=32045, loc=css:button[aria-label="Git action options"]]
+                svg_root
+              button [ref=32072, loc=unstable]
+                text "Local Servers"
+                text "27"
+                svg_root
+              paragraph
+                text "Usage"
+              button "Devin usage: Weekly 29% remaining" [ref=32930, loc=css:button[aria-label="Devin usage: Weekly 29% remaining"]]
+                svg_root
+                text "Devin"
+                text "Weekly"
+                text "29%"
+                svg_root
+              paragraph
+                text "Editor"
+              button [ref=32066, loc=unstable]
+                text "Editor view"
+              button [ref=32067, loc=unstable]
+                svg_root
+                text "Open in Cursor"
+                svg_root
+        container
+          container
+          button "Collapse panel" [ref=237, loc=css:button[aria-label="Collapse panel"]]
+          container "Open a panel"
+            button "Open Review" [ref=1155, loc=css:button[aria-label="Open Review"]]
+              text "Review"
+            button "Open Terminal" [ref=246, loc=css:button[aria-label="Open Terminal"]]
+              text "Terminal"
+            button "Open Browser" [ref=247, loc=css:button[aria-label="Open Browser"]]
+              text "Browser"
+            button "Open Files" [ref=248, loc=css:button[aria-label="Open Files"]]
+              text "Files"
+            button "Open Side chats" [ref=249, loc=css:button[aria-label="Open Side chats"]]
+              text "Side chats"
+            button "Open iOS Simulator" [ref=265, loc=css:button[aria-label="Open iOS Simulator"]]
+              text "iOS Simulator"
+            button "Open Source control" [ref=893, loc=css:button[aria-label="Open Source control"]]
+              text "Source control"
+          button "Toggle Sidebar" [ref=255, loc=css:button[aria-label="Toggle Sidebar"]]
+  region "Notifications" [ref=168, loc=ambiguous]
+  region "Notifications" [ref=169, loc=ambiguous]

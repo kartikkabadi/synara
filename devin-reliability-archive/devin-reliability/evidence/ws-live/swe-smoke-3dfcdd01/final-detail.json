@@ -1,0 +1,86 @@
+{
+  "snapshotSequence": 9,
+  "thread": {
+    "id": "4c3d6cbb-69f4-4b73-aa4d-8b8afaf4240f",
+    "projectId": "37919916-ae7b-411d-b3a7-6f6c7601e67c",
+    "title": "ws swe-smoke swe-1-7",
+    "modelSelection": {
+      "provider": "devin",
+      "model": "swe-1-7",
+      "options": {
+        "reasoningEffort": "max"
+      }
+    },
+    "runtimeMode": "full-access",
+    "interactionMode": "default",
+    "envMode": "local",
+    "branch": null,
+    "worktreePath": null,
+    "workingDirectory": null,
+    "associatedWorktreePath": null,
+    "associatedWorktreeBranch": null,
+    "associatedWorktreeRef": null,
+    "createBranchFlowCompleted": false,
+    "isPinned": false,
+    "parentThreadId": null,
+    "creationSource": null,
+    "sourceThreadId": null,
+    "sourceTurnId": null,
+    "gatewayOperationId": null,
+    "gatewayOperationIndex": null,
+    "subagentAgentId": null,
+    "subagentNickname": null,
+    "subagentRole": null,
+    "forkSourceThreadId": null,
+    "sidechatSourceThreadId": null,
+    "sidechatLastActivityAt": null,
+    "sidechatExpiredAt": null,
+    "lastKnownPr": null,
+    "latestTurn": {
+      "turnId": "6026258b-1bcc-4f96-b0a8-64d3c7ea341e",
+      "state": "running",
+      "requestedAt": "2026-09-01T19:39:21.022Z",
+      "startedAt": "2026-09-01T19:39:24.421Z",
+      "completedAt": null,
+      "assistantMessageId": null
+    },
+    "latestUserMessageAt": "2026-09-01T19:39:21.022Z",
+    "hasPendingApprovals": false,
+    "hasPendingUserInput": false,
+    "hasActionableProposedPlan": false,
+    "createdAt": "2026-09-01T19:39:20.944Z",
+    "updatedAt": "2026-09-01T19:39:24.421Z",
+    "archivedAt": null,
+    "settledAt": null,
+    "deletedAt": null,
+    "handoff": null,
+    "messages": [
+      {
+        "id": "0174c711-8210-4ba2-8a63-45b520a51f2f",
+        "role": "user",
+        "text": "Use exactly one shell exec tool call. Start this exact bounded local command in the background: sleep 24 && git status --short. Then use get_output with timeout 25000 milliseconds to wait for it to finish. Do not use any other tool before or after it. Do not edit or create files. Do not access the network or any external service. Do not perform external writes. After the command finishes, reply with exactly: SWE WS 1 COMPLETE",
+        "attachments": [],
+        "dispatchMode": "queue",
+        "dispatchOrigin": "user",
+        "turnId": null,
+        "streaming": false,
+        "source": "native",
+        "createdAt": "2026-09-01T19:39:21.022Z",
+        "updatedAt": "2026-09-01T19:39:21.022Z"
+      }
+    ],
+    "proposedPlans": [],
+    "activities": [],
+    "pendingInteractions": [],
+    "checkpoints": [],
+    "session": {
+      "threadId": "4c3d6cbb-69f4-4b73-aa4d-8b8afaf4240f",
+      "status": "running",
+      "providerName": "devin",
+      "runtimeMode": "full-access",
+      "activeTurnId": "6026258b-1bcc-4f96-b0a8-64d3c7ea341e",
+      "lastError": null,
+      "updatedAt": "2026-09-01T19:39:24.421Z"
+    }
+  }
+}

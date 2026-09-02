@@ -1,0 +1,4 @@
+COMMAND   PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+bun     57625 user    9u  IPv4 0x3bfbf253ee67087f      0t0  TCP 127.0.0.1:61501 (LISTEN)
+COMMAND   PID USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+node    57624 user   18u  IPv6 0xec3cb964a1f29f89      0t0  TCP [::1]:10234 (LISTEN)

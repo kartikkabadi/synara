@@ -1,0 +1,733 @@
+[
+  {
+    "sequence": 1,
+    "event_type": "project.created",
+    "occurred_at": "2026-09-01T20:20:24.214Z",
+    "payload": {
+      "projectId": "7afe4932-333c-41bb-9838-32bfa07e5937",
+      "kind": "project",
+      "title": "ws-glm-final-periodic",
+      "workspaceRoot": "/Users/user/.synara/worktrees/devin-combined-live-proof",
+      "defaultModelSelection": null,
+      "scripts": [],
+      "isPinned": false,
+      "spaceId": null,
+      "createdAt": "2026-09-01T20:20:24.214Z",
+      "updatedAt": "2026-09-01T20:20:24.214Z"
+    }
+  },
+  {
+    "sequence": 2,
+    "event_type": "thread.created",
+    "occurred_at": "2026-09-01T20:20:24.259Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "projectId": "7afe4932-333c-41bb-9838-32bfa07e5937",
+      "title": "ws glm-final-periodic glm-5.3-flash",
+      "modelSelection": {
+        "provider": "devin",
+        "model": "glm-5.3-flash"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "envMode": "local",
+      "branch": null,
+      "worktreePath": null,
+      "workingDirectory": null,
+      "associatedWorktreePath": null,
+      "associatedWorktreeBranch": null,
+      "associatedWorktreeRef": null,
+      "createBranchFlowCompleted": false,
+      "isPinned": false,
+      "parentThreadId": null,
+      "subagentAgentId": null,
+      "subagentNickname": null,
+      "subagentRole": null,
+      "forkSourceThreadId": null,
+      "lastKnownPr": null,
+      "handoff": null,
+      "createdAt": "2026-09-01T20:20:24.259Z",
+      "updatedAt": "2026-09-01T20:20:24.259Z"
+    }
+  },
+  {
+    "sequence": 3,
+    "event_type": "thread.message-sent",
+    "occurred_at": "2026-09-01T20:20:24.272Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "messageId": "83e9dd05-d2d4-4264-bc91-606f326e6a3f",
+      "role": "user",
+      "text": "Use exactly one shell exec tool call. Run this exact bounded local command as one foreground command and wait for it to finish: for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done. Do not use any other tool before or after it. Do not edit or create files. Do not access the network or any external service. Do not perform external writes. After the command finishes, reply with exactly: GLM FINAL 2 COMPLETE",
+      "attachments": [],
+      "dispatchMode": "queue",
+      "dispatchOrigin": "user",
+      "turnId": null,
+      "streaming": false,
+      "source": "native",
+      "createdAt": "2026-09-01T20:20:24.272Z",
+      "updatedAt": "2026-09-01T20:20:24.272Z"
+    }
+  },
+  {
+    "sequence": 4,
+    "event_type": "thread.turn-start-requested",
+    "occurred_at": "2026-09-01T20:20:24.272Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "messageId": "83e9dd05-d2d4-4264-bc91-606f326e6a3f",
+      "modelSelection": {
+        "provider": "devin",
+        "model": "glm-5.3-flash",
+        "options": {
+          "reasoningEffort": "max"
+        }
+      },
+      "assistantDeliveryMode": "streaming",
+      "dispatchMode": "queue",
+      "dispatchOrigin": "user",
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "createdAt": "2026-09-01T20:20:24.272Z"
+    }
+  },
+  {
+    "sequence": 5,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:20:24.272Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "session": {
+        "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+        "status": "ready",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": null,
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:20:26.928Z"
+      }
+    }
+  },
+  {
+    "sequence": 6,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:20:26.937Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "session": {
+        "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+        "status": "ready",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": null,
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:20:26.937Z"
+      }
+    }
+  },
+  {
+    "sequence": 7,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:20:26.943Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "session": {
+        "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+        "status": "ready",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": null,
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:20:26.943Z"
+      }
+    }
+  },
+  {
+    "sequence": 8,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:20:26.944Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "session": {
+        "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+        "status": "ready",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": null,
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:20:26.944Z"
+      }
+    }
+  },
+  {
+    "sequence": 9,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:20:27.025Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "session": {
+        "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+        "status": "running",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": "4740651d-c92c-443f-8fe8-e65348e73fc4",
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:20:27.025Z"
+      }
+    }
+  },
+  {
+    "sequence": 10,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:20:36.131Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "activity": {
+        "id": "ef33a37b-2bd9-45f9-8f49-e507b31f3d73",
+        "createdAt": "2026-09-01T20:20:36.131Z",
+        "tone": "info",
+        "kind": "context-window.updated",
+        "summary": "Context window updated",
+        "payload": {
+          "usedTokens": 81422,
+          "usedPercent": 8.142199999999999,
+          "maxTokens": 1000000,
+          "compactsAutomatically": true,
+          "provider": "devin"
+        },
+        "turnId": "4740651d-c92c-443f-8fe8-e65348e73fc4",
+        "sequence": 60
+      }
+    }
+  },
+  {
+    "sequence": 11,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:20:36.141Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "activity": {
+        "id": "336b5b83-67d7-4bfd-a3bb-4767e98b0dff",
+        "createdAt": "2026-09-01T20:20:36.141Z",
+        "tone": "tool",
+        "kind": "tool.started",
+        "summary": "Ran echo, sleep started",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran echo, sleep",
+          "detail": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+          "data": {
+            "toolCallId": "call_70326dfcb80d4ea293b5866c",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "resource": {
+                    "mimeType": "text/x-shellscript",
+                    "text": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+                    "uri": "tool://preview"
+                  },
+                  "_meta": {
+                    "cognition.ai/preview_is_shell_command": true
+                  },
+                  "type": "resource"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_70326dfcb80d4ea293b5866c"
+          }
+        },
+        "turnId": "4740651d-c92c-443f-8fe8-e65348e73fc4",
+        "sequence": 61
+      }
+    }
+  },
+  {
+    "sequence": 12,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:20:36.142Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "activity": {
+        "id": "570559e9-db61-47a7-ab75-fdb78f897f17",
+        "createdAt": "2026-09-01T20:20:36.142Z",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran echo, sleep",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran echo, sleep",
+          "detail": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+          "data": {
+            "toolCallId": "call_70326dfcb80d4ea293b5866c",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "resource": {
+                    "mimeType": "text/x-shellscript",
+                    "text": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+                    "uri": "tool://preview"
+                  },
+                  "_meta": {
+                    "cognition.ai/preview_is_shell_command": true
+                  },
+                  "type": "resource"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_70326dfcb80d4ea293b5866c"
+          }
+        },
+        "turnId": "4740651d-c92c-443f-8fe8-e65348e73fc4",
+        "sequence": 62
+      }
+    }
+  },
+  {
+    "sequence": 13,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:20:36.163Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "activity": {
+        "id": "051771a5-372f-459d-a19f-f3476ddf27f7",
+        "createdAt": "2026-09-01T20:20:36.163Z",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "tick 1",
+          "data": {
+            "toolCallId": "call_70326dfcb80d4ea293b5866c",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "text": "tick 1",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_70326dfcb80d4ea293b5866c"
+          }
+        },
+        "turnId": "4740651d-c92c-443f-8fe8-e65348e73fc4",
+        "sequence": 63
+      }
+    }
+  },
+  {
+    "sequence": 14,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:20:40.207Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "activity": {
+        "id": "03999f8f-5991-4975-bb89-638b2d837b6d",
+        "createdAt": "2026-09-01T20:20:40.207Z",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "tick 1\ntick 2",
+          "data": {
+            "toolCallId": "call_70326dfcb80d4ea293b5866c",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "text": "tick 1\ntick 2",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_70326dfcb80d4ea293b5866c"
+          }
+        },
+        "turnId": "4740651d-c92c-443f-8fe8-e65348e73fc4",
+        "sequence": 64
+      }
+    }
+  },
+  {
+    "sequence": 15,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:20:44.260Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "activity": {
+        "id": "73e54dc3-d9eb-4935-bd05-25034b57c53f",
+        "createdAt": "2026-09-01T20:20:44.260Z",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "tick 1\ntick 2\ntick 3",
+          "data": {
+            "toolCallId": "call_70326dfcb80d4ea293b5866c",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "text": "tick 1\ntick 2\ntick 3",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_70326dfcb80d4ea293b5866c"
+          }
+        },
+        "turnId": "4740651d-c92c-443f-8fe8-e65348e73fc4",
+        "sequence": 65
+      }
+    }
+  },
+  {
+    "sequence": 16,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:20:48.330Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "activity": {
+        "id": "fdcb9329-a109-4b79-a3b7-3da7af991369",
+        "createdAt": "2026-09-01T20:20:48.330Z",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "tick 1\ntick 2\ntick 3\ntick 4",
+          "data": {
+            "toolCallId": "call_70326dfcb80d4ea293b5866c",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "text": "tick 1\ntick 2\ntick 3\ntick 4",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_70326dfcb80d4ea293b5866c"
+          }
+        },
+        "turnId": "4740651d-c92c-443f-8fe8-e65348e73fc4",
+        "sequence": 66
+      }
+    }
+  },
+  {
+    "sequence": 17,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:20:52.357Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "activity": {
+        "id": "f74be75d-bd7f-4719-a19b-a3113595db4f",
+        "createdAt": "2026-09-01T20:20:52.357Z",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "tick 1\ntick 2\ntick 3\ntick 4\ntick 5",
+          "data": {
+            "toolCallId": "call_70326dfcb80d4ea293b5866c",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "text": "tick 1\ntick 2\ntick 3\ntick 4\ntick 5",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_70326dfcb80d4ea293b5866c"
+          }
+        },
+        "turnId": "4740651d-c92c-443f-8fe8-e65348e73fc4",
+        "sequence": 67
+      }
+    }
+  },
+  {
+    "sequence": 18,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:20:56.433Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "activity": {
+        "id": "0ba34f6b-57c1-4b75-8fcb-89c53f0fb95f",
+        "createdAt": "2026-09-01T20:20:56.433Z",
+        "tone": "tool",
+        "kind": "tool.updated",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "inProgress",
+          "title": "Ran command",
+          "detail": "tick 1\ntick 2\ntick 3\ntick 4\ntick 5\ntick 6",
+          "data": {
+            "toolCallId": "call_70326dfcb80d4ea293b5866c",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "text": "tick 1\ntick 2\ntick 3\ntick 4\ntick 5\ntick 6",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_70326dfcb80d4ea293b5866c"
+          }
+        },
+        "turnId": "4740651d-c92c-443f-8fe8-e65348e73fc4",
+        "sequence": 68
+      }
+    }
+  },
+  {
+    "sequence": 19,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:21:00.524Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "activity": {
+        "id": "0d0b3d79-8deb-4991-abdf-33395591c799",
+        "createdAt": "2026-09-01T20:21:00.524Z",
+        "tone": "tool",
+        "kind": "tool.completed",
+        "summary": "Ran command",
+        "payload": {
+          "itemType": "command_execution",
+          "status": "completed",
+          "title": "Ran command",
+          "detail": "tick 1\ntick 2\ntick 3\ntick 4\ntick 5\ntick 6",
+          "data": {
+            "toolCallId": "call_70326dfcb80d4ea293b5866c",
+            "kind": "execute",
+            "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+            "rawInput": {
+              "command": "for i in 1 2 3 4 5 6; do echo tick $i; sleep 4; done",
+              "timeout": 60000
+            },
+            "content": [
+              {
+                "content": {
+                  "text": "tick 1\ntick 2\ntick 3\ntick 4\ntick 5\ntick 6",
+                  "type": "text"
+                },
+                "type": "content"
+              }
+            ],
+            "providerToolCallId": "call_70326dfcb80d4ea293b5866c"
+          }
+        },
+        "turnId": "4740651d-c92c-443f-8fe8-e65348e73fc4",
+        "sequence": 69
+      }
+    }
+  },
+  {
+    "sequence": 20,
+    "event_type": "thread.message-sent",
+    "occurred_at": "2026-09-01T20:21:02.817Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "messageId": "assistant:devin:4740651d-c92c-443f-8fe8-e65348e73fc4:assistant:linen-stick:8aaff5b2:segment:0",
+      "role": "assistant",
+      "text": "GLM FINAL 2 COMPLETE",
+      "segmentStartedAt": "2026-09-01T20:21:02.817Z",
+      "segmentSequence": 70,
+      "turnId": "4740651d-c92c-443f-8fe8-e65348e73fc4",
+      "streaming": true,
+      "createdAt": "2026-09-01T20:21:02.817Z",
+      "updatedAt": "2026-09-01T20:21:02.817Z"
+    }
+  },
+  {
+    "sequence": 21,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:21:02.849Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "activity": {
+        "id": "b59d1d0b-8539-414b-8547-f7ff45576f3b",
+        "createdAt": "2026-09-01T20:21:02.849Z",
+        "tone": "info",
+        "kind": "context-window.updated",
+        "summary": "Context window updated",
+        "payload": {
+          "usedTokens": 81473,
+          "usedPercent": 8.1473,
+          "maxTokens": 1000000,
+          "compactsAutomatically": true,
+          "provider": "devin"
+        },
+        "turnId": "4740651d-c92c-443f-8fe8-e65348e73fc4",
+        "sequence": 71
+      }
+    }
+  },
+  {
+    "sequence": 22,
+    "event_type": "thread.message-sent",
+    "occurred_at": "2026-09-01T20:21:02.877Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "messageId": "assistant:devin:4740651d-c92c-443f-8fe8-e65348e73fc4:assistant:linen-stick:8aaff5b2:segment:0",
+      "role": "assistant",
+      "text": "GLM FINAL 2 COMPLETE",
+      "turnId": "4740651d-c92c-443f-8fe8-e65348e73fc4",
+      "streaming": false,
+      "createdAt": "2026-09-01T20:21:02.877Z",
+      "updatedAt": "2026-09-01T20:21:02.877Z"
+    }
+  },
+  {
+    "sequence": 23,
+    "event_type": "thread.session-set",
+    "occurred_at": "2026-09-01T20:21:02.904Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "session": {
+        "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+        "status": "ready",
+        "providerName": "devin",
+        "runtimeMode": "full-access",
+        "activeTurnId": null,
+        "lastError": null,
+        "updatedAt": "2026-09-01T20:21:02.904Z"
+      }
+    }
+  },
+  {
+    "sequence": 24,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:21:02.904Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "activity": {
+        "id": "dfa98b51-d55b-493f-89ed-11b1e541657d",
+        "createdAt": "2026-09-01T20:21:02.904Z",
+        "tone": "info",
+        "kind": "turn.completed",
+        "summary": "Turn completed",
+        "payload": {
+          "state": "completed"
+        },
+        "turnId": "4740651d-c92c-443f-8fe8-e65348e73fc4",
+        "sequence": 73
+      }
+    }
+  },
+  {
+    "sequence": 25,
+    "event_type": "thread.turn-diff-completed",
+    "occurred_at": "2026-09-01T20:21:02.904Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "turnId": "4740651d-c92c-443f-8fe8-e65348e73fc4",
+      "checkpointTurnCount": 1,
+      "checkpointRef": "refs/synara/checkpoints/OGQzN2U0MjctYjg5Yy00OGMzLWI0NDctMmI4ZjUzYmU1ZTI2/turn/1",
+      "status": "ready",
+      "files": [],
+      "assistantMessageId": "assistant:devin:4740651d-c92c-443f-8fe8-e65348e73fc4:assistant:linen-stick:8aaff5b2:segment:0",
+      "completedAt": "2026-09-01T20:21:02.904Z"
+    }
+  },
+  {
+    "sequence": 26,
+    "event_type": "thread.activity-appended",
+    "occurred_at": "2026-09-01T20:21:02.904Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "activity": {
+        "id": "c7d25586-b53c-4fe5-960d-6963d81f4ec9",
+        "tone": "info",
+        "kind": "checkpoint.captured",
+        "summary": "Checkpoint captured",
+        "payload": {
+          "turnCount": 1,
+          "status": "ready"
+        },
+        "turnId": "4740651d-c92c-443f-8fe8-e65348e73fc4",
+        "createdAt": "2026-09-01T20:21:02.904Z"
+      }
+    }
+  },
+  {
+    "sequence": 27,
+    "event_type": "thread.meta-updated",
+    "occurred_at": "2026-09-01T20:21:04.018Z",
+    "payload": {
+      "threadId": "8d37e427-b89c-48c3-b447-2b8f53be5e26",
+      "branch": "agent/devin-combined-live-proof",
+      "updatedAt": "2026-09-01T20:21:04.018Z"
+    }
+  }
+]

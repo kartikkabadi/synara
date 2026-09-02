@@ -1,0 +1,19 @@
+{
+  "result": "BROWSER_INFRASTRUCTURE_FAILURE",
+  "sessionsCounted": 0,
+  "streak": "0/5",
+  "productFailure": false,
+  "suppliedViewId": "52fdfe",
+  "lockAttempt": "failed: No browser tab available",
+  "staleRecoveryTabs": "called once; no open tabs",
+  "isolatedRuntimeUrl": "http://localhost:10234/",
+  "runtimeHealthy": true,
+  "actualUrlAttempt": "browser_navigate newTab called once; failed: No browser tab available",
+  "unlockAttempt": "failed: No browser tab available",
+  "cleanupPorts": [
+    61601,
+    10234
+  ],
+  "staticChecks": "not run by instruction",
+  "trackedEditsMade": false
+}

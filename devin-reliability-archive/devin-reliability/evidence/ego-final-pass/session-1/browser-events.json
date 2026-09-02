@@ -1,0 +1,40 @@
+[
+  {
+    "capturedAt": "2026-09-01T14:17:21.164Z",
+    "event": {
+      "method": "Target.attachedToTarget",
+      "params": {
+        "sessionId": "DB390D0809939216C84C61ADAC1D66DA",
+        "targetInfo": {
+          "targetId": "30148DDFCDF36C513FAEB07547D3A2D8",
+          "type": "page",
+          "title": "Synara (Dev)",
+          "url": "http://localhost:10354/5f402c8d-6caa-4f72-bc5f-36f3b55da6e3",
+          "attached": true,
+          "canAccessOpener": false,
+          "browserContextId": "FDDF7BE7FA31142D30528145ED914B7E"
+        },
+        "waitingForDebugger": false
+      }
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T14:17:41.759Z",
+    "event": {
+      "method": "Target.attachedToTarget",
+      "params": {
+        "sessionId": "85C22896B4A329C377F6EC824E0B138C",
+        "targetInfo": {
+          "targetId": "30148DDFCDF36C513FAEB07547D3A2D8",
+          "type": "page",
+          "title": "Synara (Dev)",
+          "url": "http://localhost:10354/5f402c8d-6caa-4f72-bc5f-36f3b55da6e3",
+          "attached": true,
+          "canAccessOpener": false,
+          "browserContextId": "FDDF7BE7FA31142D30528145ED914B7E"
+        },
+        "waitingForDebugger": false
+      }
+    }
+  }
+]

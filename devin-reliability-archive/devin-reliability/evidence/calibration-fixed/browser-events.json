@@ -1,0 +1,1898 @@
+[
+  {
+    "capturedAt": "2026-09-01T15:05:21.777Z",
+    "event": {
+      "method": "Target.attachedToTarget",
+      "params": {
+        "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F",
+        "targetInfo": {
+          "targetId": "FC2F82B0A0F73CBED23FB7743F68D900",
+          "type": "page",
+          "title": "Synara (Dev)",
+          "url": "http://localhost:10354/1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7",
+          "attached": true,
+          "canAccessOpener": false,
+          "browserContextId": "FDDF7BE7FA31142D30528145ED914B7E"
+        },
+        "waitingForDebugger": false
+      }
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:21.777Z",
+    "event": {
+      "method": "Runtime.executionContextCreated",
+      "params": {
+        "context": {
+          "id": 2,
+          "origin": "http://localhost:10354",
+          "name": "",
+          "uniqueId": "6607491915695072014.-5451062334445159519",
+          "auxData": {
+            "isDefault": true,
+            "type": "default",
+            "frameId": "FC2F82B0A0F73CBED23FB7743F68D900"
+          }
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:21.777Z",
+    "event": {
+      "method": "Runtime.consoleAPICalled",
+      "params": {
+        "type": "debug",
+        "args": [
+          {
+            "type": "string",
+            "value": "[vite] connecting..."
+          }
+        ],
+        "executionContextId": 2,
+        "timestamp": 1788274978180.122,
+        "stackTrace": {
+          "callFrames": [
+            {
+              "functionName": "",
+              "scriptId": "6",
+              "url": "http://localhost:10354/@vite/client",
+              "lineNumber": 850,
+              "columnNumber": 8
+            }
+          ]
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:21.777Z",
+    "event": {
+      "method": "Runtime.consoleAPICalled",
+      "params": {
+        "type": "debug",
+        "args": [
+          {
+            "type": "string",
+            "value": "[vite] connected."
+          }
+        ],
+        "executionContextId": 2,
+        "timestamp": 1788274978313.341,
+        "stackTrace": {
+          "callFrames": [
+            {
+              "functionName": "handleMessage",
+              "scriptId": "6",
+              "url": "http://localhost:10354/@vite/client",
+              "lineNumber": 954,
+              "columnNumber": 11
+            }
+          ]
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:21.777Z",
+    "event": {
+      "method": "Runtime.consoleAPICalled",
+      "params": {
+        "type": "info",
+        "args": [
+          {
+            "type": "string",
+            "value": "%cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools"
+          },
+          {
+            "type": "string",
+            "value": "font-weight:bold"
+          }
+        ],
+        "executionContextId": 2,
+        "timestamp": 1788274978651.723,
+        "stackTrace": {
+          "callFrames": [
+            {
+              "functionName": "",
+              "scriptId": "16",
+              "url": "http://localhost:10354/node_modules/.vite/deps/react-dom_client.js?v=1556ae44",
+              "lineNumber": 14335,
+              "columnNumber": 48
+            }
+          ]
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:21.777Z",
+    "event": {
+      "method": "Runtime.consoleAPICalled",
+      "params": {
+        "type": "warning",
+        "args": [
+          {
+            "type": "string",
+            "value": "WebSocket RPC stream failed"
+          },
+          {
+            "type": "object",
+            "subtype": "error",
+            "className": "WsRpcError",
+            "description": "WsRpcError: Thread detail snapshot not found for thread 1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7.\n    at http://localhost:10354/node_modules/.vite/deps/Schema-C3ZOpCii.js?v=1556ae44:34472:51\n    at http://localhost:10354/node_modules/.vite/deps/Record-l7S2JEw7.js?v=1556ae44:4342:79\n    at http://localhost:10354/node_modules/.vite/deps/Equal-CYO7uWzv.js?v=1556ae44:189:12\n    at Getter.run (http://localhost:10354/node_modules/.vite/deps/Schema-C3ZOpCii.js?v=1556ae44:5771:38)\n    at http://localhost:10354/node_modules/.vite/deps/Schema-C3ZOpCii.js?v=1556ae44:16073:47\n    at http://localhost:10354/node_modules/.vite/deps/Effect-DWk2SZrf.js?v=1556ae44:10166:59\n    at http://localhost:10354/node_modules/.vite/deps/Equal-CYO7uWzv.js?v=1556ae44:187:38\n    at http://localhost:10354/node_modules/.vite/deps/Schema-C3ZOpCii.js?v=1556ae44:16073:13\n    at http://localhost:10354/node_modules/.vite/deps/Schema-C3ZOpCii.js?v=1556ae44:9708:33\n    at next (<anonymous>)",
+            "objectId": "8628099363033325410.2.1"
+          }
+        ],
+        "executionContextId": 2,
+        "timestamp": 1788275071403.993,
+        "stackTrace": {
+          "callFrames": [
+            {
+              "functionName": "onExit",
+              "scriptId": "274",
+              "url": "http://localhost:10354/src/wsTransport.ts",
+              "lineNumber": 1247,
+              "columnNumber": 12
+            }
+          ]
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:21.777Z",
+    "event": {
+      "method": "Log.entryAdded",
+      "params": {
+        "entry": {
+          "source": "network",
+          "level": "error",
+          "text": "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+          "timestamp": 1788274995581.139,
+          "url": "http://localhost:10354/@fs/Users/user/synara/node_modules/.bun/@fontsource-variable+jetbrains-mono@5.2.8/node_modules/@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2",
+          "networkRequestId": "39750.1466"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:21.777Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55098.108939,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"582\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":16,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"db222375001797f02f1f49fa18598270\",\"spanId\":\"4318c6d0ac0629e1\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:21.777Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55098.109075,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"583\",\"tag\":\"orchestration.getThreadDetailSnapshot\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"ae8fb7d634be2060bf50f063695bf3f1\",\"spanId\":\"7bc2d3d1a1d99a7a\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:21.777Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55098.110402,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"582\",\"exit\":{\"_tag\":\"Success\",\"value\":[]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:21.777Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55098.112376,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"583\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"snapshotSequence\":16,\"thread\":{\"id\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"projectId\":\"57c0a863-efc1-47e6-9fb8-3d781e78218a\",\"title\":\"Use exactly one shell exec tool\",\"modelSelection\":{\"provider\":\"devin\",\"model\":\"swe-1-7\",\"options\":{\"reasoningEffort\":\"medium\",\"modelVariant\":\"swe-1-7-medium\"}},\"runtimeMode\":\"full-access\",\"interactionMode\":\"default\",\"envMode\":\"local\",\"branch\":\"agent/devin-tool-idle-budget-clean\",\"worktreePath\":null,\"workingDirectory\":null,\"associatedWorktreePath\":null,\"associatedWorktreeBranch\":null,\"associatedWorktreeRef\":null,\"createBranchFlowCompleted\":false,\"isPinned\":false,\"parentThreadId\":null,\"creationSource\":null,\"sourceThreadId\":null,\"sourceTurnId\":null,\"gatewayOperationId\":null,\"gatewayOperationIndex\":null,\"subagentAgentId\":null,\"subagentNickname\":null,\"subagentRole\":null,\"forkSourceThreadId\":null,\"sidechatSourceThreadId\":null,\"sidechatLastActivityAt\":null,\"sidechatExpiredAt\":null,\"lastKnownPr\":null,\"latestTurn\":{\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"state\":\"running\",\"requestedAt\":\"2026-09-01T15:05:08.712Z\",\"startedAt\":\"2026-09-01T15:05:13.259Z\",\"completedAt\":null,\"assistantMessageId\":null},\"latestUserMessageAt\":\"2026-09-01T15:05:08.712Z\",\"hasPendingApprovals\":false,\"hasPendingUserInput\":false,\"hasActionableProposedPlan\":false,\"createdAt\":\"2026-09-01T15:03:17.064Z\",\"updatedAt\":\"2026-09-01T15:05:13.259Z\",\"archivedAt\":null,\"settledAt\":null,\"deletedAt\":null,\"handoff\":null,\"messages\":[{\"id\":\"58361ef3-8ec4-41fb-b1f6-cb09e29cdf3a\",\"role\":\"user\",\"text\":\"Use exactly one shell exec tool call. Start this exact bounded local command in the background: sleep 24 && git status --short. Then use get_output with timeout 25000 milliseconds to wait for it to finish. Do not use any other tool before or after it. Do not edit or create files. Do not access the network or any external service. Do not perform external writes. After the command finishes, reply with exactly: CALIBRATION COMPLETE\",\"attachments\":[],\"dispatchMode\":\"queue\",\"dispatchOrigin\":\"user\",\"turnId\":null,\"streaming\":false,\"source\":\"native\",\"createdAt\":\"2026-09-01T15:05:08.712Z\",\"updatedAt\":\"2026-09-01T15:05:08.712Z\"}],\"proposedPlans\":[],\"activities\":[],\"pendingInteractions\":[],\"checkpoints\":[],\"session\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"status\":\"running\",\"providerName\":\"devin\",\"runtimeMode\":\"full-access\",\"activeTurnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"lastError\":null,\"updatedAt\":\"2026-09-01T15:05:13.259Z\"}}}}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:22.929Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55098.704686,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"584\",\"tag\":\"git.workingTreeDiffStats\",\"payload\":{\"cwd\":\"/Users/user/.synara/worktrees/devin-tool-idle-budget-clean\",\"scope\":\"workingTree\"},\"traceId\":\"6fa5fe2d0a8ab912e89d656afa4ec83a\",\"spanId\":\"b3e93ac7be06bfaa\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:22.929Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55098.875856,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"584\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"additions\":722,\"deletions\":32,\"fileCount\":9}}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:23.934Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55099.609297,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"585\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":16,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"9ec6ab685cfc3f87d8039da4e9fc771e\",\"spanId\":\"7ca8dd75c9832611\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:23.934Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55099.61051,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"585\",\"exit\":{\"_tag\":\"Success\",\"value\":[]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:24.938Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55100.829802,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"586\",\"tag\":\"server.listProviderUsage\",\"payload\":{},\"traceId\":\"6b50e36244d5cfc2ce56f10a9deac8c6\",\"spanId\":\"d7ed2c53faa8a5d9\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:24.938Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55100.903932,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"586\",\"exit\":{\"_tag\":\"Success\",\"value\":[{\"provider\":\"codex\",\"updatedAt\":\"2026-09-01T15:04:43.826Z\",\"limits\":[],\"usageLines\":[],\"source\":\"codex-wham-usage\",\"status\":\"error\",\"detail\":\"Could not reach the Codex usage endpoint.\"},{\"provider\":\"claudeAgent\",\"updatedAt\":\"2026-09-01T15:04:43.826Z\",\"limits\":[],\"usageLines\":[],\"source\":\"claude-oauth-usage\",\"status\":\"needs-auth\",\"detail\":\"Sign in with `claude` to see usage.\"},{\"provider\":\"cursor\",\"updatedAt\":\"2026-09-01T15:02:41.669Z\",\"limits\":[{\"window\":\"Current\",\"usedPercent\":100,\"resetsAt\":\"2026-09-14T14:06:30.000Z\"}],\"usageLines\":[],\"source\":\"cursor-dashboard\",\"status\":\"ok\",\"planName\":\"Pro\"},{\"provider\":\"antigravity\",\"updatedAt\":\"2026-09-01T15:04:43.826Z\",\"limits\":[],\"usageLines\":[],\"source\":\"antigravity-cloudcode\",\"status\":\"error\",\"detail\":\"Could not reach Google Code Assist usage.\"},{\"provider\":\"grok\",\"updatedAt\":\"2026-09-01T15:02:41.669Z\",\"limits\":[],\"usageLines\":[{\"label\":\"Account\",\"value\":\"1kartikkabadi1@gmail.com\"},{\"label\":\"Credits\",\"value\":\"Could not reach Grok billing.\"}],\"source\":\"grok-xai\",\"status\":\"ok\",\"planName\":\"SuperGrok\"},{\"provider\":\"droid\",\"updatedAt\":\"2026-09-01T15:04:43.826Z\",\"limits\":[],\"usageLines\":[],\"source\":\"droid-local\",\"status\":\"needs-auth\",\"detail\":\"Sign in with `droid` to see usage.\"},{\"provider\":\"opencode\",\"updatedAt\":\"2026-09-01T15:04:43.826Z\",\"limits\":[],\"usageLines\":[],\"source\":\"opencode-go-usage\",\"status\":\"error\",\"detail\":\"Could not reach the OpenCode usage API.\"},{\"provider\":\"pi\",\"updatedAt\":\"2026-09-01T15:02:41.669Z\",\"limits\":[],\"usageLines\":[{\"label\":\"Limits\",\"value\":\"Pi is signed in locally. Remaining limits stay with each configured model provider; Pi has no single quota API.\"}],\"source\":\"pi-local\",\"status\":\"ok\"},{\"provider\":\"devin\",\"updatedAt\":\"2026-09-01T15:02:41.669Z\",\"limits\":[{\"window\":\"Weekly\",\"usedPercent\":68,\"resetsAt\":\"2026-09-06T08:00:00.000Z\",\"windowDurationMins\":10080}],\"usageLines\":[],\"source\":\"devin-get-user-status\",\"status\":\"ok\",\"planName\":\"Max\"}]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:24.938Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55101.110957,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"587\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":16,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"45e47ca028a5c3004e112cfb8b3a60f8\",\"spanId\":\"920b81ee9444e8f5\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:24.938Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55101.11294,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"587\",\"exit\":{\"_tag\":\"Success\",\"value\":[]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:25.942Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55101.983641,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Ping\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:25.942Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55101.984427,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Pong\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:25.942Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55102.608836,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"588\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":16,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"2287cb63bcbd570cfed2d686b30ed0fb\",\"spanId\":\"3b1c1dbdf6d8be65\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:27.116Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55102.610492,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"588\",\"exit\":{\"_tag\":\"Success\",\"value\":[{\"sequence\":17,\"eventId\":\"2530f0cf-5c6e-4da1-a418-1d4a4f071fde\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:25.857Z\",\"commandId\":\"provider:3585e55d-a9e9-457b-830d-ed99952b3dfd:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:context-window.updated:3585e55d-a9e9-457b-830d-ed99952b3dfd\",\"causationEventId\":null,\"correlationId\":\"provider:3585e55d-a9e9-457b-830d-ed99952b3dfd:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:context-window.updated:3585e55d-a9e9-457b-830d-ed99952b3dfd\",\"metadata\":{},\"type\":\"thread.activity-appended\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"activity\":{\"id\":\"3585e55d-a9e9-457b-830d-ed99952b3dfd\",\"tone\":\"info\",\"kind\":\"context-window.updated\",\"summary\":\"Context window updated\",\"payload\":{\"usedTokens\":81000,\"usedPercent\":30.916030534351147,\"maxTokens\":262000,\"compactsAutomatically\":true,\"provider\":\"devin\"},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":102,\"createdAt\":\"2026-09-01T15:05:25.857Z\"}}},{\"sequence\":18,\"eventId\":\"eae65204-0f72-464a-af38-2a31378e4e1b\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:25.877Z\",\"commandId\":\"provider:4d6f1b8b-e335-49cb-8fc5-f93fff1f275f:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:tool.started:4d6f1b8b-e335-49cb-8fc5-f93fff1f275f\",\"causationEventId\":null,\"correlationId\":\"provider:4d6f1b8b-e335-49cb-8fc5-f93fff1f275f:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:tool.started:4d6f1b8b-e335-49cb-8fc5-f93fff1f275f\",\"metadata\":{},\"type\":\"thread.activity-appended\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"activity\":{\"id\":\"4d6f1b8b-e335-49cb-8fc5-f93fff1f275f\",\"tone\":\"tool\",\"kind\":\"tool.started\",\"summary\":\"Ran sleep, git started\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"inProgress\",\"title\":\"Ran sleep, git\",\"detail\":\"sleep 24 && git status --short\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"resource\":{\"mimeType\":\"text/x-shellscript\",\"text\":\"sleep 24 && git status --short\",\"uri\":\"tool://preview\"},\"_meta\":{\"cognition.ai/preview_is_shell_command\":true},\"type\":\"resource\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":103,\"createdAt\":\"2026-09-01T15:05:25.877Z\"}}},{\"sequence\":19,\"eventId\":\"6c15002d-060a-4346-b70f-a75921809a02\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:25.882Z\",\"commandId\":\"provider:8ba7e7af-c153-47b1-8dd1-b303a5db1171:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:tool.updated:8ba7e7af-c153-47b1-8dd1-b303a5db1171\",\"causationEventId\":null,\"correlationId\":\"provider:8ba7e7af-c153-47b1-8dd1-b303a5db1171:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:tool.updated:8ba7e7af-c153-47b1-8dd1-b303a5db1171\",\"metadata\":{},\"type\":\"thread.activity-appended\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"activity\":{\"id\":\"8ba7e7af-c153-47b1-8dd1-b303a5db1171\",\"tone\":\"tool\",\"kind\":\"tool.updated\",\"summary\":\"Ran sleep, git\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"inProgress\",\"title\":\"Ran sleep, git\",\"detail\":\"sleep 24 && git status --short\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"resource\":{\"mimeType\":\"text/x-shellscript\",\"text\":\"sleep 24 && git status --short\",\"uri\":\"tool://preview\"},\"_meta\":{\"cognition.ai/preview_is_shell_command\":true},\"type\":\"resource\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":104,\"createdAt\":\"2026-09-01T15:05:25.882Z\"}}}]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:27.116Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55102.877896,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"589\",\"tag\":\"git.workingTreeDiffStats\",\"payload\":{\"cwd\":\"/Users/user/.synara/worktrees/devin-tool-idle-budget-clean\",\"scope\":\"workingTree\"},\"traceId\":\"ce2071dae6fbae0e67e6203d2bdd171d\",\"spanId\":\"1fcb38175d7ae667\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:27.116Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55103.010493,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"589\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"additions\":722,\"deletions\":32,\"fileCount\":9}}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:28.121Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55104.109154,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"590\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":19,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"fdf8c0b3d6654fb91fdaecd5d50bc6f9\",\"spanId\":\"e60d0dfd827053d7\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:28.121Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55104.109345,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"591\",\"tag\":\"orchestration.getThreadDetailSnapshot\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"8bac32a87f492732d560b13eb7adc459\",\"spanId\":\"473ec49cab31844d\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:28.121Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55104.112657,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"590\",\"exit\":{\"_tag\":\"Success\",\"value\":[]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:28.121Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55104.114606,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"591\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"snapshotSequence\":19,\"thread\":{\"id\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"projectId\":\"57c0a863-efc1-47e6-9fb8-3d781e78218a\",\"title\":\"Use exactly one shell exec tool\",\"modelSelection\":{\"provider\":\"devin\",\"model\":\"swe-1-7\",\"options\":{\"reasoningEffort\":\"medium\",\"modelVariant\":\"swe-1-7-medium\"}},\"runtimeMode\":\"full-access\",\"interactionMode\":\"default\",\"envMode\":\"local\",\"branch\":\"agent/devin-tool-idle-budget-clean\",\"worktreePath\":null,\"workingDirectory\":null,\"associatedWorktreePath\":null,\"associatedWorktreeBranch\":null,\"associatedWorktreeRef\":null,\"createBranchFlowCompleted\":false,\"isPinned\":false,\"parentThreadId\":null,\"creationSource\":null,\"sourceThreadId\":null,\"sourceTurnId\":null,\"gatewayOperationId\":null,\"gatewayOperationIndex\":null,\"subagentAgentId\":null,\"subagentNickname\":null,\"subagentRole\":null,\"forkSourceThreadId\":null,\"sidechatSourceThreadId\":null,\"sidechatLastActivityAt\":null,\"sidechatExpiredAt\":null,\"lastKnownPr\":null,\"latestTurn\":{\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"state\":\"running\",\"requestedAt\":\"2026-09-01T15:05:08.712Z\",\"startedAt\":\"2026-09-01T15:05:13.259Z\",\"completedAt\":null,\"assistantMessageId\":null},\"latestUserMessageAt\":\"2026-09-01T15:05:08.712Z\",\"hasPendingApprovals\":false,\"hasPendingUserInput\":false,\"hasActionableProposedPlan\":false,\"createdAt\":\"2026-09-01T15:03:17.064Z\",\"updatedAt\":\"2026-09-01T15:05:13.259Z\",\"archivedAt\":null,\"settledAt\":null,\"deletedAt\":null,\"handoff\":null,\"messages\":[{\"id\":\"58361ef3-8ec4-41fb-b1f6-cb09e29cdf3a\",\"role\":\"user\",\"text\":\"Use exactly one shell exec tool call. Start this exact bounded local command in the background: sleep 24 && git status --short. Then use get_output with timeout 25000 milliseconds to wait for it to finish. Do not use any other tool before or after it. Do not edit or create files. Do not access the network or any external service. Do not perform external writes. After the command finishes, reply with exactly: CALIBRATION COMPLETE\",\"attachments\":[],\"dispatchMode\":\"queue\",\"dispatchOrigin\":\"user\",\"turnId\":null,\"streaming\":false,\"source\":\"native\",\"createdAt\":\"2026-09-01T15:05:08.712Z\",\"updatedAt\":\"2026-09-01T15:05:08.712Z\"}],\"proposedPlans\":[],\"activities\":[{\"id\":\"3585e55d-a9e9-457b-830d-ed99952b3dfd\",\"tone\":\"info\",\"kind\":\"context-window.updated\",\"summary\":\"Context window updated\",\"payload\":{\"usedTokens\":81000,\"usedPercent\":30.916030534351147,\"maxTokens\":262000,\"compactsAutomatically\":true,\"provider\":\"devin\"},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":102,\"createdAt\":\"2026-09-01T15:05:25.857Z\"},{\"id\":\"4d6f1b8b-e335-49cb-8fc5-f93fff1f275f\",\"tone\":\"tool\",\"kind\":\"tool.started\",\"summary\":\"Ran sleep, git started\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"inProgress\",\"title\":\"Ran sleep, git\",\"detail\":\"sleep 24 && git status --short\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"resource\":{\"mimeType\":\"text/x-shellscript\",\"text\":\"sleep 24 && git status --short\",\"uri\":\"tool://preview\"},\"_meta\":{\"cognition.ai/preview_is_shell_command\":true},\"type\":\"resource\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":103,\"createdAt\":\"2026-09-01T15:05:25.877Z\"},{\"id\":\"8ba7e7af-c153-47b1-8dd1-b303a5db1171\",\"tone\":\"tool\",\"kind\":\"tool.updated\",\"summary\":\"Ran sleep, git\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"inProgress\",\"title\":\"Ran sleep, git\",\"detail\":\"sleep 24 && git status --short\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"resource\":{\"mimeType\":\"text/x-shellscript\",\"text\":\"sleep 24 && git status --short\",\"uri\":\"tool://preview\"},\"_meta\":{\"cognition.ai/preview_is_shell_command\":true},\"type\":\"resource\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":104,\"createdAt\":\"2026-09-01T15:05:25.882Z\"}],\"pendingInteractions\":[],\"checkpoints\":[],\"session\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"status\":\"running\",\"providerName\":\"devin\",\"runtimeMode\":\"full-access\",\"activeTurnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"lastError\":null,\"updatedAt\":\"2026-09-01T15:05:13.259Z\"}}}}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:29.124Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1051",
+        "timestamp": 55104.980531,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"type\":\"ping\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:29.124Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55105.608943,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"592\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":19,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"9ad0b7798a47c2725accfc4bdf6804c8\",\"spanId\":\"7aae7512644b6c0c\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:29.124Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55105.610274,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"592\",\"exit\":{\"_tag\":\"Success\",\"value\":[]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:31.132Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55106.99112,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Ping\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:31.132Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55106.992427,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Pong\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:31.132Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55107.011756,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"593\",\"tag\":\"git.workingTreeDiffStats\",\"payload\":{\"cwd\":\"/Users/user/.synara/worktrees/devin-tool-idle-budget-clean\",\"scope\":\"workingTree\"},\"traceId\":\"6f6bcaf0085a7823945fa5536759a21b\",\"spanId\":\"a5f01fed4236f2da\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:31.132Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55107.107903,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"594\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":19,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"1c5fd24ee6333127f47bb3a5eeadb2aa\",\"spanId\":\"f52b7ee86b2291ef\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:31.132Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55107.10913,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"594\",\"exit\":{\"_tag\":\"Success\",\"value\":[]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:31.132Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55107.163734,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"593\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"additions\":722,\"deletions\":32,\"fileCount\":9}}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:32.138Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55108.608801,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"595\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":19,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"8e97e6bac6b2aef35b23fa6f0b8a44ed\",\"spanId\":\"408427111578a4aa\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:32.138Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55108.610752,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"595\",\"exit\":{\"_tag\":\"Success\",\"value\":[]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:34.150Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55110.109835,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"596\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":19,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"0ba47d7ed9dc73b28359db78fdae9654\",\"spanId\":\"32b8329a7a1746d5\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:34.150Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55110.110008,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"597\",\"tag\":\"orchestration.getThreadDetailSnapshot\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"6866c8109307735d01b53a587be8d104\",\"spanId\":\"394263a32d25935c\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:34.150Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55110.116832,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"596\",\"exit\":{\"_tag\":\"Success\",\"value\":[]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:34.150Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55110.12123,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"597\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"snapshotSequence\":19,\"thread\":{\"id\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"projectId\":\"57c0a863-efc1-47e6-9fb8-3d781e78218a\",\"title\":\"Use exactly one shell exec tool\",\"modelSelection\":{\"provider\":\"devin\",\"model\":\"swe-1-7\",\"options\":{\"reasoningEffort\":\"medium\",\"modelVariant\":\"swe-1-7-medium\"}},\"runtimeMode\":\"full-access\",\"interactionMode\":\"default\",\"envMode\":\"local\",\"branch\":\"agent/devin-tool-idle-budget-clean\",\"worktreePath\":null,\"workingDirectory\":null,\"associatedWorktreePath\":null,\"associatedWorktreeBranch\":null,\"associatedWorktreeRef\":null,\"createBranchFlowCompleted\":false,\"isPinned\":false,\"parentThreadId\":null,\"creationSource\":null,\"sourceThreadId\":null,\"sourceTurnId\":null,\"gatewayOperationId\":null,\"gatewayOperationIndex\":null,\"subagentAgentId\":null,\"subagentNickname\":null,\"subagentRole\":null,\"forkSourceThreadId\":null,\"sidechatSourceThreadId\":null,\"sidechatLastActivityAt\":null,\"sidechatExpiredAt\":null,\"lastKnownPr\":null,\"latestTurn\":{\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"state\":\"running\",\"requestedAt\":\"2026-09-01T15:05:08.712Z\",\"startedAt\":\"2026-09-01T15:05:13.259Z\",\"completedAt\":null,\"assistantMessageId\":null},\"latestUserMessageAt\":\"2026-09-01T15:05:08.712Z\",\"hasPendingApprovals\":false,\"hasPendingUserInput\":false,\"hasActionableProposedPlan\":false,\"createdAt\":\"2026-09-01T15:03:17.064Z\",\"updatedAt\":\"2026-09-01T15:05:13.259Z\",\"archivedAt\":null,\"settledAt\":null,\"deletedAt\":null,\"handoff\":null,\"messages\":[{\"id\":\"58361ef3-8ec4-41fb-b1f6-cb09e29cdf3a\",\"role\":\"user\",\"text\":\"Use exactly one shell exec tool call. Start this exact bounded local command in the background: sleep 24 && git status --short. Then use get_output with timeout 25000 milliseconds to wait for it to finish. Do not use any other tool before or after it. Do not edit or create files. Do not access the network or any external service. Do not perform external writes. After the command finishes, reply with exactly: CALIBRATION COMPLETE\",\"attachments\":[],\"dispatchMode\":\"queue\",\"dispatchOrigin\":\"user\",\"turnId\":null,\"streaming\":false,\"source\":\"native\",\"createdAt\":\"2026-09-01T15:05:08.712Z\",\"updatedAt\":\"2026-09-01T15:05:08.712Z\"}],\"proposedPlans\":[],\"activities\":[{\"id\":\"3585e55d-a9e9-457b-830d-ed99952b3dfd\",\"tone\":\"info\",\"kind\":\"context-window.updated\",\"summary\":\"Context window updated\",\"payload\":{\"usedTokens\":81000,\"usedPercent\":30.916030534351147,\"maxTokens\":262000,\"compactsAutomatically\":true,\"provider\":\"devin\"},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":102,\"createdAt\":\"2026-09-01T15:05:25.857Z\"},{\"id\":\"4d6f1b8b-e335-49cb-8fc5-f93fff1f275f\",\"tone\":\"tool\",\"kind\":\"tool.started\",\"summary\":\"Ran sleep, git started\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"inProgress\",\"title\":\"Ran sleep, git\",\"detail\":\"sleep 24 && git status --short\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"resource\":{\"mimeType\":\"text/x-shellscript\",\"text\":\"sleep 24 && git status --short\",\"uri\":\"tool://preview\"},\"_meta\":{\"cognition.ai/preview_is_shell_command\":true},\"type\":\"resource\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":103,\"createdAt\":\"2026-09-01T15:05:25.877Z\"},{\"id\":\"8ba7e7af-c153-47b1-8dd1-b303a5db1171\",\"tone\":\"tool\",\"kind\":\"tool.updated\",\"summary\":\"Ran sleep, git\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"inProgress\",\"title\":\"Ran sleep, git\",\"detail\":\"sleep 24 && git status --short\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"resource\":{\"mimeType\":\"text/x-shellscript\",\"text\":\"sleep 24 && git status --short\",\"uri\":\"tool://preview\"},\"_meta\":{\"cognition.ai/preview_is_shell_command\":true},\"type\":\"resource\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":104,\"createdAt\":\"2026-09-01T15:05:25.882Z\"}],\"pendingInteractions\":[],\"checkpoints\":[],\"session\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"status\":\"running\",\"providerName\":\"devin\",\"runtimeMode\":\"full-access\",\"activeTurnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"lastError\":null,\"updatedAt\":\"2026-09-01T15:05:13.259Z\"}}}}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:35.153Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55111.165339,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"598\",\"tag\":\"git.workingTreeDiffStats\",\"payload\":{\"cwd\":\"/Users/user/.synara/worktrees/devin-tool-idle-budget-clean\",\"scope\":\"workingTree\"},\"traceId\":\"2007138f6b07286daea732d2fcd44bed\",\"spanId\":\"bfa9ea2883e15915\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:35.153Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55111.290013,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"598\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"additions\":722,\"deletions\":32,\"fileCount\":9}}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:35.153Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55111.608496,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"599\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":19,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"a4fd8bacfdc48a9768a751dddc0b23ea\",\"spanId\":\"7beb9c67b9758a7b\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:35.153Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55111.610239,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"599\",\"exit\":{\"_tag\":\"Success\",\"value\":[]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:36.168Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55112.003516,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Ping\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:36.168Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55112.004118,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Pong\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:37.175Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55113.10962,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"600\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":19,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"c07a30919c0964a535425eb00ebf2e5a\",\"spanId\":\"b8950c5073fc0554\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:37.175Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55113.111141,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"600\",\"exit\":{\"_tag\":\"Success\",\"value\":[]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:38.179Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55114.608105,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"601\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":19,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"bb3c5119f868a35764bbf62bc143c9c2\",\"spanId\":\"8be90425416321c4\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:38.179Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55114.6121,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"601\",\"exit\":{\"_tag\":\"Success\",\"value\":[{\"sequence\":20,\"eventId\":\"bb2cca75-93fd-452a-bad4-8175ad54232d\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:36.929Z\",\"commandId\":\"provider:6f8b7f45-aff5-41bf-87cf-abd19f297735:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:context-window.updated:6f8b7f45-aff5-41bf-87cf-abd19f297735\",\"causationEventId\":null,\"correlationId\":\"provider:6f8b7f45-aff5-41bf-87cf-abd19f297735:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:context-window.updated:6f8b7f45-aff5-41bf-87cf-abd19f297735\",\"metadata\":{},\"type\":\"thread.activity-appended\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"activity\":{\"id\":\"6f8b7f45-aff5-41bf-87cf-abd19f297735\",\"tone\":\"info\",\"kind\":\"context-window.updated\",\"summary\":\"Context window updated\",\"payload\":{\"usedTokens\":81085,\"usedPercent\":30.948473282442745,\"maxTokens\":262000,\"compactsAutomatically\":true,\"provider\":\"devin\"},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":111,\"createdAt\":\"2026-09-01T15:05:36.929Z\"}}},{\"sequence\":21,\"eventId\":\"1749b8c7-4e93-4b96-ae16-15507d978d3d\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:36.935Z\",\"commandId\":\"provider:a9eb13ef-6999-495b-b7df-bff7a997ab01:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:tool.started:a9eb13ef-6999-495b-b7df-bff7a997ab01\",\"causationEventId\":null,\"correlationId\":\"provider:a9eb13ef-6999-495b-b7df-bff7a997ab01:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:tool.started:a9eb13ef-6999-495b-b7df-bff7a997ab01\",\"metadata\":{},\"type\":\"thread.activity-appended\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"activity\":{\"id\":\"a9eb13ef-6999-495b-b7df-bff7a997ab01\",\"tone\":\"tool\",\"kind\":\"tool.started\",\"summary\":\"Read shell started\",\"payload\":{\"itemType\":\"dynamic_tool_call\",\"status\":\"inProgress\",\"title\":\"Read shell\",\"detail\":\"Read shell\",\"data\":{\"toolCallId\":\"functions.get_output:1\",\"rawInput\":{\"shell_id\":\"eddedc\",\"timeout\":25000},\"providerToolCallId\":\"functions.get_output:1\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":112,\"createdAt\":\"2026-09-01T15:05:36.935Z\"}}},{\"sequence\":22,\"eventId\":\"58fb8f42-82ca-4cb2-976d-c0919a68fff8\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:36.936Z\",\"commandId\":\"provider:511d091d-7339-4f51-a50b-890905bf7dcf:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:tool.updated:511d091d-7339-4f51-a50b-890905bf7dcf\",\"causationEventId\":null,\"correlationId\":\"provider:511d091d-7339-4f51-a50b-890905bf7dcf:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:tool.updated:511d091d-7339-4f51-a50b-890905bf7dcf\",\"metadata\":{},\"type\":\"thread.activity-appended\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"activity\":{\"id\":\"511d091d-7339-4f51-a50b-890905bf7dcf\",\"tone\":\"tool\",\"kind\":\"tool.updated\",\"summary\":\"Read shell\",\"payload\":{\"itemType\":\"dynamic_tool_call\",\"status\":\"inProgress\",\"title\":\"Read shell\",\"detail\":\"Read shell\",\"data\":{\"toolCallId\":\"functions.get_output:1\",\"rawInput\":{\"shell_id\":\"eddedc\",\"timeout\":25000},\"providerToolCallId\":\"functions.get_output:1\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":113,\"createdAt\":\"2026-09-01T15:05:36.936Z\"}}}]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:38.179Z",
+    "event": {
+      "method": "Network.requestWillBeSentExtraInfo",
+      "params": {
+        "requestId": "39750.2102",
+        "associatedCookies": [
+          {
+            "cookie": {
+              "name": "dispatch_session",
+              "value": "jpfEdSoYZ_JsKBqJAhB5JinivERpoF1S4NYGoxomNPs",
+              "domain": "localhost",
+              "path": "/",
+              "expires": 1788791803.193008,
+              "size": 59,
+              "httpOnly": true,
+              "secure": true,
+              "session": false,
+              "sameSite": "Lax",
+              "priority": "Medium",
+              "sourceScheme": "Secure",
+              "sourcePort": 5173
+            },
+            "blockedReasons": [],
+            "exemptionReason": "None"
+          }
+        ],
+        "headers": {
+          "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+          "Accept-Encoding": "gzip, deflate, br, zstd",
+          "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
+          "Connection": "keep-alive",
+          "Cookie": "dispatch_session=jpfEdSoYZ_JsKBqJAhB5JinivERpoF1S4NYGoxomNPs",
+          "Host": "localhost:10354",
+          "If-Modified-Since": "Tue, 01 Sep 2026 10:56:23 GMT",
+          "If-None-Match": "W/\"788-1788260183764\"",
+          "Origin": "http://localhost:10354",
+          "Referer": "http://localhost:10354/1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7",
+          "Sec-Fetch-Dest": "image",
+          "Sec-Fetch-Mode": "cors",
+          "Sec-Fetch-Site": "same-origin",
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+          "sec-ch-ua": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\"",
+          "sec-ch-ua-mobile": "?0",
+          "sec-ch-ua-platform": "\"macOS\""
+        },
+        "connectTiming": {
+          "requestTime": 55114.75696
+        },
+        "clientSecurityState": {
+          "initiatorIsSecureContext": true,
+          "initiatorIPAddressSpace": "Loopback",
+          "localNetworkAccessRequestPolicy": "PermissionBlock"
+        },
+        "siteHasCookieInOtherPartition": false
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:38.179Z",
+    "event": {
+      "method": "Network.responseReceivedExtraInfo",
+      "params": {
+        "requestId": "39750.2102",
+        "blockedCookies": [],
+        "headers": {
+          "Access-Control-Allow-Origin": "http://localhost:10354",
+          "Connection": "keep-alive",
+          "Date": "Tue, 01 Sep 2026 15:05:38 GMT",
+          "Keep-Alive": "timeout=5",
+          "Vary": "Origin"
+        },
+        "resourceIPAddressSpace": "Loopback",
+        "statusCode": 304,
+        "headersText": "HTTP/1.1 304 Not Modified\r\nAccess-Control-Allow-Origin: http://localhost:10354\r\nVary: Origin\r\nDate: Tue, 01 Sep 2026 15:05:38 GMT\r\nConnection: keep-alive\r\nKeep-Alive: timeout=5\r\n\r\n",
+        "cookiePartitionKey": {
+          "topLevelSite": "http://localhost",
+          "hasCrossSiteAncestor": false
+        },
+        "cookiePartitionKeyOpaque": false,
+        "exemptedCookies": []
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:38.179Z",
+    "event": {
+      "method": "Network.requestWillBeSent",
+      "params": {
+        "requestId": "39750.2102",
+        "loaderId": "335B17C8C927E3D528050B5D12657C51",
+        "documentURL": "http://localhost:10354/1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7",
+        "request": {
+          "url": "http://localhost:10354/central-icons-reversed/hammer.svg",
+          "method": "GET",
+          "headers": {
+            "Origin": "http://localhost:10354",
+            "sec-ch-ua-platform": "\"macOS\"",
+            "Referer": "http://localhost:10354/1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
+            "sec-ch-ua": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\"",
+            "sec-ch-ua-mobile": "?0"
+          },
+          "mixedContentType": "none",
+          "initialPriority": "Low",
+          "referrerPolicy": "strict-origin-when-cross-origin",
+          "isSameSite": true
+        },
+        "timestamp": 55114.756339,
+        "wallTime": 1788275138.086047,
+        "initiator": {
+          "type": "other"
+        },
+        "redirectHasExtraInfo": false,
+        "type": "Image",
+        "frameId": "FC2F82B0A0F73CBED23FB7743F68D900",
+        "hasUserGesture": false
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:38.179Z",
+    "event": {
+      "method": "Network.resourceChangedPriority",
+      "params": {
+        "requestId": "39750.2102",
+        "newPriority": "High",
+        "timestamp": 55114.761502
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:38.179Z",
+    "event": {
+      "method": "Network.responseReceived",
+      "params": {
+        "requestId": "39750.2102",
+        "loaderId": "335B17C8C927E3D528050B5D12657C51",
+        "timestamp": 55114.766246,
+        "type": "Image",
+        "response": {
+          "url": "http://localhost:10354/central-icons-reversed/hammer.svg",
+          "status": 200,
+          "statusText": "OK",
+          "headers": {
+            "Cache-Control": "no-cache",
+            "ETag": "W/\"788-1788260183764\"",
+            "Access-Control-Allow-Origin": "http://localhost:10354",
+            "Content-Length": "788",
+            "Date": "Tue, 01 Sep 2026 15:05:38 GMT",
+            "Content-Type": "image/svg+xml",
+            "Vary": "Origin",
+            "Last-Modified": "Tue, 01 Sep 2026 10:56:23 GMT"
+          },
+          "mimeType": "image/svg+xml",
+          "charset": "",
+          "connectionReused": false,
+          "connectionId": 40627,
+          "remoteIPAddress": "[::1]",
+          "remotePort": 10354,
+          "fromDiskCache": false,
+          "fromServiceWorker": false,
+          "fromPrefetchCache": false,
+          "encodedDataLength": 180,
+          "timing": {
+            "requestTime": 55114.75696,
+            "proxyStart": -1,
+            "proxyEnd": -1,
+            "dnsStart": 2.284,
+            "dnsEnd": 2.422,
+            "connectStart": 2.422,
+            "connectEnd": 2.616,
+            "sslStart": -1,
+            "sslEnd": -1,
+            "workerStart": -1,
+            "workerReady": -1,
+            "workerFetchStart": -1,
+            "workerRespondWithSettled": -1,
+            "sendStart": 2.677,
+            "sendEnd": 2.739,
+            "pushStart": 0,
+            "pushEnd": 0,
+            "receiveHeadersStart": 7.068,
+            "receiveHeadersEnd": 7.152
+          },
+          "responseTime": 1788275138093.706,
+          "protocol": "http/1.1",
+          "alternateProtocolUsage": "unspecifiedReason",
+          "securityState": "secure"
+        },
+        "hasExtraInfo": true,
+        "frameId": "FC2F82B0A0F73CBED23FB7743F68D900"
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:38.179Z",
+    "event": {
+      "method": "Network.dataReceived",
+      "params": {
+        "requestId": "39750.2102",
+        "timestamp": 55114.76628,
+        "dataLength": 788,
+        "encodedDataLength": 0
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:38.179Z",
+    "event": {
+      "method": "Network.loadingFinished",
+      "params": {
+        "requestId": "39750.2102",
+        "timestamp": 55114.764499,
+        "encodedDataLength": 180
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:39.183Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55115.306129,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"602\",\"tag\":\"git.workingTreeDiffStats\",\"payload\":{\"cwd\":\"/Users/user/.synara/worktrees/devin-tool-idle-budget-clean\",\"scope\":\"workingTree\"},\"traceId\":\"d0ca83a3c5922efa21c3222493ac3331\",\"spanId\":\"8614258c79058dd5\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:39.183Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55115.597232,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"602\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"additions\":722,\"deletions\":32,\"fileCount\":9}}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:40.188Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55116.109953,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"603\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":22,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"051dd1d2c1fa5fb1d8b2dc237cc643b8\",\"spanId\":\"efeff2dacfa160b7\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:40.188Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55116.110072,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"604\",\"tag\":\"orchestration.getThreadDetailSnapshot\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"2046e88bcd9160664fac32900bfe95a8\",\"spanId\":\"c4d65689a8ff88a1\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:40.188Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55116.119314,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"603\",\"exit\":{\"_tag\":\"Success\",\"value\":[]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:40.188Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55116.119815,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"604\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"snapshotSequence\":22,\"thread\":{\"id\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"projectId\":\"57c0a863-efc1-47e6-9fb8-3d781e78218a\",\"title\":\"Use exactly one shell exec tool\",\"modelSelection\":{\"provider\":\"devin\",\"model\":\"swe-1-7\",\"options\":{\"reasoningEffort\":\"medium\",\"modelVariant\":\"swe-1-7-medium\"}},\"runtimeMode\":\"full-access\",\"interactionMode\":\"default\",\"envMode\":\"local\",\"branch\":\"agent/devin-tool-idle-budget-clean\",\"worktreePath\":null,\"workingDirectory\":null,\"associatedWorktreePath\":null,\"associatedWorktreeBranch\":null,\"associatedWorktreeRef\":null,\"createBranchFlowCompleted\":false,\"isPinned\":false,\"parentThreadId\":null,\"creationSource\":null,\"sourceThreadId\":null,\"sourceTurnId\":null,\"gatewayOperationId\":null,\"gatewayOperationIndex\":null,\"subagentAgentId\":null,\"subagentNickname\":null,\"subagentRole\":null,\"forkSourceThreadId\":null,\"sidechatSourceThreadId\":null,\"sidechatLastActivityAt\":null,\"sidechatExpiredAt\":null,\"lastKnownPr\":null,\"latestTurn\":{\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"state\":\"running\",\"requestedAt\":\"2026-09-01T15:05:08.712Z\",\"startedAt\":\"2026-09-01T15:05:13.259Z\",\"completedAt\":null,\"assistantMessageId\":null},\"latestUserMessageAt\":\"2026-09-01T15:05:08.712Z\",\"hasPendingApprovals\":false,\"hasPendingUserInput\":false,\"hasActionableProposedPlan\":false,\"createdAt\":\"2026-09-01T15:03:17.064Z\",\"updatedAt\":\"2026-09-01T15:05:13.259Z\",\"archivedAt\":null,\"settledAt\":null,\"deletedAt\":null,\"handoff\":null,\"messages\":[{\"id\":\"58361ef3-8ec4-41fb-b1f6-cb09e29cdf3a\",\"role\":\"user\",\"text\":\"Use exactly one shell exec tool call. Start this exact bounded local command in the background: sleep 24 && git status --short. Then use get_output with timeout 25000 milliseconds to wait for it to finish. Do not use any other tool before or after it. Do not edit or create files. Do not access the network or any external service. Do not perform external writes. After the command finishes, reply with exactly: CALIBRATION COMPLETE\",\"attachments\":[],\"dispatchMode\":\"queue\",\"dispatchOrigin\":\"user\",\"turnId\":null,\"streaming\":false,\"source\":\"native\",\"createdAt\":\"2026-09-01T15:05:08.712Z\",\"updatedAt\":\"2026-09-01T15:05:08.712Z\"}],\"proposedPlans\":[],\"activities\":[{\"id\":\"3585e55d-a9e9-457b-830d-ed99952b3dfd\",\"tone\":\"info\",\"kind\":\"context-window.updated\",\"summary\":\"Context window updated\",\"payload\":{\"usedTokens\":81000,\"usedPercent\":30.916030534351147,\"maxTokens\":262000,\"compactsAutomatically\":true,\"provider\":\"devin\"},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":102,\"createdAt\":\"2026-09-01T15:05:25.857Z\"},{\"id\":\"4d6f1b8b-e335-49cb-8fc5-f93fff1f275f\",\"tone\":\"tool\",\"kind\":\"tool.started\",\"summary\":\"Ran sleep, git started\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"inProgress\",\"title\":\"Ran sleep, git\",\"detail\":\"sleep 24 && git status --short\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"resource\":{\"mimeType\":\"text/x-shellscript\",\"text\":\"sleep 24 && git status --short\",\"uri\":\"tool://preview\"},\"_meta\":{\"cognition.ai/preview_is_shell_command\":true},\"type\":\"resource\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":103,\"createdAt\":\"2026-09-01T15:05:25.877Z\"},{\"id\":\"8ba7e7af-c153-47b1-8dd1-b303a5db1171\",\"tone\":\"tool\",\"kind\":\"tool.updated\",\"summary\":\"Ran sleep, git\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"inProgress\",\"title\":\"Ran sleep, git\",\"detail\":\"sleep 24 && git status --short\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"resource\":{\"mimeType\":\"text/x-shellscript\",\"text\":\"sleep 24 && git status --short\",\"uri\":\"tool://preview\"},\"_meta\":{\"cognition.ai/preview_is_shell_command\":true},\"type\":\"resource\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":104,\"createdAt\":\"2026-09-01T15:05:25.882Z\"},{\"id\":\"6f8b7f45-aff5-41bf-87cf-abd19f297735\",\"tone\":\"info\",\"kind\":\"context-window.updated\",\"summary\":\"Context window updated\",\"payload\":{\"usedTokens\":81085,\"usedPercent\":30.948473282442745,\"maxTokens\":262000,\"compactsAutomatically\":true,\"provider\":\"devin\"},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":111,\"createdAt\":\"2026-09-01T15:05:36.929Z\"},{\"id\":\"a9eb13ef-6999-495b-b7df-bff7a997ab01\",\"tone\":\"tool\",\"kind\":\"tool.started\",\"summary\":\"Read shell started\",\"payload\":{\"itemType\":\"dynamic_tool_call\",\"status\":\"inProgress\",\"title\":\"Read shell\",\"detail\":\"Read shell\",\"data\":{\"toolCallId\":\"functions.get_output:1\",\"rawInput\":{\"shell_id\":\"eddedc\",\"timeout\":25000},\"providerToolCallId\":\"functions.get_output:1\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":112,\"createdAt\":\"2026-09-01T15:05:36.935Z\"},{\"id\":\"511d091d-7339-4f51-a50b-890905bf7dcf\",\"tone\":\"tool\",\"kind\":\"tool.updated\",\"summary\":\"Read shell\",\"payload\":{\"itemType\":\"dynamic_tool_call\",\"status\":\"inProgress\",\"title\":\"Read shell\",\"detail\":\"Read shell\",\"data\":{\"toolCallId\":\"functions.get_output:1\",\"rawInput\":{\"shell_id\":\"eddedc\",\"timeout\":25000},\"providerToolCallId\":\"functions.get_output:1\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":113,\"createdAt\":\"2026-09-01T15:05:36.936Z\"}],\"pendingInteractions\":[],\"checkpoints\":[],\"session\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"status\":\"running\",\"providerName\":\"devin\",\"runtimeMode\":\"full-access\",\"activeTurnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"lastError\":null,\"updatedAt\":\"2026-09-01T15:05:13.259Z\"}}}}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:41.194Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55117.010543,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Ping\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:41.194Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55117.011825,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Pong\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:41.194Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55117.537265,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"605\",\"tag\":\"server.getProviderUsageSnapshot\",\"payload\":{\"provider\":\"devin\"},\"traceId\":\"9f65d381d5db13f9b5cfa101560957bd\",\"spanId\":\"843917926a2eb4e5\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:41.194Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55117.539138,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"605\",\"exit\":{\"_tag\":\"Success\",\"value\":null}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:43.205Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55119.600034,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"606\",\"tag\":\"git.workingTreeDiffStats\",\"payload\":{\"cwd\":\"/Users/user/.synara/worktrees/devin-tool-idle-budget-clean\",\"scope\":\"workingTree\"},\"traceId\":\"752e31df03e9a3480e8ece1b91cf4388\",\"spanId\":\"06865efa121d48ba\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:43.205Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55119.724978,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"606\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"additions\":722,\"deletions\":32,\"fileCount\":9}}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:44.243Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55120.608921,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"607\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":22,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"c5507b4386ae4525749c7d10581ba565\",\"spanId\":\"2d2d8b93c7e2e662\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:44.246Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55120.611737,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"607\",\"exit\":{\"_tag\":\"Success\",\"value\":[]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:46.251Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55122.016281,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Ping\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:46.251Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55122.016781,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Pong\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:46.251Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55122.109132,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"608\",\"tag\":\"orchestration.getThreadDetailSnapshot\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"14535be38d1a407c12b860e32f6e2dcd\",\"spanId\":\"80771ab8febbeede\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:46.251Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55122.113749,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"608\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"snapshotSequence\":22,\"thread\":{\"id\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"projectId\":\"57c0a863-efc1-47e6-9fb8-3d781e78218a\",\"title\":\"Use exactly one shell exec tool\",\"modelSelection\":{\"provider\":\"devin\",\"model\":\"swe-1-7\",\"options\":{\"reasoningEffort\":\"medium\",\"modelVariant\":\"swe-1-7-medium\"}},\"runtimeMode\":\"full-access\",\"interactionMode\":\"default\",\"envMode\":\"local\",\"branch\":\"agent/devin-tool-idle-budget-clean\",\"worktreePath\":null,\"workingDirectory\":null,\"associatedWorktreePath\":null,\"associatedWorktreeBranch\":null,\"associatedWorktreeRef\":null,\"createBranchFlowCompleted\":false,\"isPinned\":false,\"parentThreadId\":null,\"creationSource\":null,\"sourceThreadId\":null,\"sourceTurnId\":null,\"gatewayOperationId\":null,\"gatewayOperationIndex\":null,\"subagentAgentId\":null,\"subagentNickname\":null,\"subagentRole\":null,\"forkSourceThreadId\":null,\"sidechatSourceThreadId\":null,\"sidechatLastActivityAt\":null,\"sidechatExpiredAt\":null,\"lastKnownPr\":null,\"latestTurn\":{\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"state\":\"running\",\"requestedAt\":\"2026-09-01T15:05:08.712Z\",\"startedAt\":\"2026-09-01T15:05:13.259Z\",\"completedAt\":null,\"assistantMessageId\":null},\"latestUserMessageAt\":\"2026-09-01T15:05:08.712Z\",\"hasPendingApprovals\":false,\"hasPendingUserInput\":false,\"hasActionableProposedPlan\":false,\"createdAt\":\"2026-09-01T15:03:17.064Z\",\"updatedAt\":\"2026-09-01T15:05:13.259Z\",\"archivedAt\":null,\"settledAt\":null,\"deletedAt\":null,\"handoff\":null,\"messages\":[{\"id\":\"58361ef3-8ec4-41fb-b1f6-cb09e29cdf3a\",\"role\":\"user\",\"text\":\"Use exactly one shell exec tool call. Start this exact bounded local command in the background: sleep 24 && git status --short. Then use get_output with timeout 25000 milliseconds to wait for it to finish. Do not use any other tool before or after it. Do not edit or create files. Do not access the network or any external service. Do not perform external writes. After the command finishes, reply with exactly: CALIBRATION COMPLETE\",\"attachments\":[],\"dispatchMode\":\"queue\",\"dispatchOrigin\":\"user\",\"turnId\":null,\"streaming\":false,\"source\":\"native\",\"createdAt\":\"2026-09-01T15:05:08.712Z\",\"updatedAt\":\"2026-09-01T15:05:08.712Z\"}],\"proposedPlans\":[],\"activities\":[{\"id\":\"3585e55d-a9e9-457b-830d-ed99952b3dfd\",\"tone\":\"info\",\"kind\":\"context-window.updated\",\"summary\":\"Context window updated\",\"payload\":{\"usedTokens\":81000,\"usedPercent\":30.916030534351147,\"maxTokens\":262000,\"compactsAutomatically\":true,\"provider\":\"devin\"},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":102,\"createdAt\":\"2026-09-01T15:05:25.857Z\"},{\"id\":\"4d6f1b8b-e335-49cb-8fc5-f93fff1f275f\",\"tone\":\"tool\",\"kind\":\"tool.started\",\"summary\":\"Ran sleep, git started\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"inProgress\",\"title\":\"Ran sleep, git\",\"detail\":\"sleep 24 && git status --short\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"resource\":{\"mimeType\":\"text/x-shellscript\",\"text\":\"sleep 24 && git status --short\",\"uri\":\"tool://preview\"},\"_meta\":{\"cognition.ai/preview_is_shell_command\":true},\"type\":\"resource\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":103,\"createdAt\":\"2026-09-01T15:05:25.877Z\"},{\"id\":\"8ba7e7af-c153-47b1-8dd1-b303a5db1171\",\"tone\":\"tool\",\"kind\":\"tool.updated\",\"summary\":\"Ran sleep, git\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"inProgress\",\"title\":\"Ran sleep, git\",\"detail\":\"sleep 24 && git status --short\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"resource\":{\"mimeType\":\"text/x-shellscript\",\"text\":\"sleep 24 && git status --short\",\"uri\":\"tool://preview\"},\"_meta\":{\"cognition.ai/preview_is_shell_command\":true},\"type\":\"resource\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":104,\"createdAt\":\"2026-09-01T15:05:25.882Z\"},{\"id\":\"6f8b7f45-aff5-41bf-87cf-abd19f297735\",\"tone\":\"info\",\"kind\":\"context-window.updated\",\"summary\":\"Context window updated\",\"payload\":{\"usedTokens\":81085,\"usedPercent\":30.948473282442745,\"maxTokens\":262000,\"compactsAutomatically\":true,\"provider\":\"devin\"},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":111,\"createdAt\":\"2026-09-01T15:05:36.929Z\"},{\"id\":\"a9eb13ef-6999-495b-b7df-bff7a997ab01\",\"tone\":\"tool\",\"kind\":\"tool.started\",\"summary\":\"Read shell started\",\"payload\":{\"itemType\":\"dynamic_tool_call\",\"status\":\"inProgress\",\"title\":\"Read shell\",\"detail\":\"Read shell\",\"data\":{\"toolCallId\":\"functions.get_output:1\",\"rawInput\":{\"shell_id\":\"eddedc\",\"timeout\":25000},\"providerToolCallId\":\"functions.get_output:1\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":112,\"createdAt\":\"2026-09-01T15:05:36.935Z\"},{\"id\":\"511d091d-7339-4f51-a50b-890905bf7dcf\",\"tone\":\"tool\",\"kind\":\"tool.updated\",\"summary\":\"Read shell\",\"payload\":{\"itemType\":\"dynamic_tool_call\",\"status\":\"inProgress\",\"title\":\"Read shell\",\"detail\":\"Read shell\",\"data\":{\"toolCallId\":\"functions.get_output:1\",\"rawInput\":{\"shell_id\":\"eddedc\",\"timeout\":25000},\"providerToolCallId\":\"functions.get_output:1\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":113,\"createdAt\":\"2026-09-01T15:05:36.936Z\"}],\"pendingInteractions\":[],\"checkpoints\":[],\"session\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"status\":\"running\",\"providerName\":\"devin\",\"runtimeMode\":\"full-access\",\"activeTurnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"lastError\":null,\"updatedAt\":\"2026-09-01T15:05:13.259Z\"}}}}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:47.255Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55123.726572,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"609\",\"tag\":\"git.workingTreeDiffStats\",\"payload\":{\"cwd\":\"/Users/user/.synara/worktrees/devin-tool-idle-budget-clean\",\"scope\":\"workingTree\"},\"traceId\":\"a81330c44f9a832478b08cd8cd692230\",\"spanId\":\"ed0635df9db0c285\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:47.255Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55123.846988,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"609\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"additions\":722,\"deletions\":32,\"fileCount\":9}}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:51.271Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55127.02659,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Ping\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:51.271Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55127.027539,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Pong\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:51.271Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55127.848422,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"610\",\"tag\":\"git.workingTreeDiffStats\",\"payload\":{\"cwd\":\"/Users/user/.synara/worktrees/devin-tool-idle-budget-clean\",\"scope\":\"workingTree\"},\"traceId\":\"714474af8a2081ec2a6d4ea5b514a394\",\"spanId\":\"a1e6b78e8830e347\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:52.279Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55127.96742,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"610\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"additions\":722,\"deletions\":32,\"fileCount\":9}}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:52.279Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55128.109156,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"611\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":22,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"371c9abf1de4a0a96f6976fa061fc697\",\"spanId\":\"cde0762aa8c06eb9\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:52.279Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55128.111741,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"611\",\"exit\":{\"_tag\":\"Success\",\"value\":[{\"sequence\":23,\"eventId\":\"f2fdefce-8b49-4ddb-b85f-69f044be7afa\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:49.974Z\",\"commandId\":\"provider:072fc933-5395-4f65-8dc5-2dade9ff5917:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:tool.updated:072fc933-5395-4f65-8dc5-2dade9ff5917\",\"causationEventId\":null,\"correlationId\":\"provider:072fc933-5395-4f65-8dc5-2dade9ff5917:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:tool.updated:072fc933-5395-4f65-8dc5-2dade9ff5917\",\"metadata\":{},\"type\":\"thread.activity-appended\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"activity\":{\"id\":\"072fc933-5395-4f65-8dc5-2dade9ff5917\",\"tone\":\"tool\",\"kind\":\"tool.updated\",\"summary\":\"Ran command\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"inProgress\",\"title\":\"Ran command\",\"detail\":\"M apps/server/src/provider/Layers/DevinAdapter.test.ts\\n M apps/server/src/provider/Layers/DevinAdapter.ts\\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\\n M apps/server/src...\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"text\":\" M apps/server/src/provider/Layers/DevinAdapter.test.ts\\n M apps/server/src/provider/Layers/DevinAdapter.ts\\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\\n M apps/server/src/provider/acp/DevinAcpSupport.test.ts\\n M apps/server/src/provider/acp/DevinAcpSupport.ts\\n?? .acceptance/\",\"type\":\"text\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":114,\"createdAt\":\"2026-09-01T15:05:49.974Z\"}}},{\"sequence\":24,\"eventId\":\"bedc6a35-51c8-40f2-85b8-9e6bf8223ea2\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:49.976Z\",\"commandId\":\"provider:3b0955a7-01a3-4f4f-a16d-4d9f99e51dcb:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:tool.completed:3b0955a7-01a3-4f4f-a16d-4d9f99e51dcb\",\"causationEventId\":null,\"correlationId\":\"provider:3b0955a7-01a3-4f4f-a16d-4d9f99e51dcb:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:tool.completed:3b0955a7-01a3-4f4f-a16d-4d9f99e51dcb\",\"metadata\":{},\"type\":\"thread.activity-appended\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"activity\":{\"id\":\"3b0955a7-01a3-4f4f-a16d-4d9f99e51dcb\",\"tone\":\"tool\",\"kind\":\"tool.completed\",\"summary\":\"Read shell\",\"payload\":{\"itemType\":\"dynamic_tool_call\",\"status\":\"completed\",\"title\":\"Read shell\",\"detail\":\"Read shell\",\"data\":{\"toolCallId\":\"functions.get_output:1\",\"rawInput\":{\"shell_id\":\"eddedc\",\"timeout\":25000},\"providerToolCallId\":\"functions.get_output:1\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":115,\"createdAt\":\"2026-09-01T15:05:49.976Z\"}}},{\"sequence\":25,\"eventId\":\"76c22449-d400-420c-93b9-08c05ab98749\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:49.979Z\",\"commandId\":\"provider:c9ab9d7d-35a9-4bd3-b991-9335b7e15d45:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:tool.updated:c9ab9d7d-35a9-4bd3-b991-9335b7e15d45\",\"causationEventId\":null,\"correlationId\":\"provider:c9ab9d7d-35a9-4bd3-b991-9335b7e15d45:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:tool.updated:c9ab9d7d-35a9-4bd3-b991-9335b7e15d45\",\"metadata\":{},\"type\":\"thread.activity-appended\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"activity\":{\"id\":\"c9ab9d7d-35a9-4bd3-b991-9335b7e15d45\",\"tone\":\"tool\",\"kind\":\"tool.updated\",\"summary\":\"Ran command\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"inProgress\",\"title\":\"Ran command\",\"detail\":\"M apps/server/src/provider/Layers/DevinAdapter.test.ts\\n M apps/server/src/provider/Layers/DevinAdapter.ts\\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\\n M apps/server/src...\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"text\":\" M apps/server/src/provider/Layers/DevinAdapter.test.ts\\n M apps/server/src/provider/Layers/DevinAdapter.ts\\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\\n M apps/server/src/provider/acp/DevinAcpSupport.test.ts\\n M apps/server/src/provider/acp/DevinAcpSupport.ts\\n?? .acceptance/\\n\",\"type\":\"text\"},\"type\":\"content\"},{\"content\":{\"text\":\"\\nExit code: 0\",\"type\":\"text\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":116,\"createdAt\":\"2026-09-01T15:05:49.979Z\"}}},{\"sequence\":26,\"eventId\":\"31e8e172-dccf-4cd4-95f9-6d925c57acef\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:49.983Z\",\"commandId\":\"provider:87d761f9-59c9-45af-8349-19294b071f8b:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:tool.completed:87d761f9-59c9-45af-8349-19294b071f8b\",\"causationEventId\":null,\"correlationId\":\"provider:87d761f9-59c9-45af-8349-19294b071f8b:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:tool.completed:87d761f9-59c9-45af-8349-19294b071f8b\",\"metadata\":{},\"type\":\"thread.activity-appended\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"activity\":{\"id\":\"87d761f9-59c9-45af-8349-19294b071f8b\",\"tone\":\"tool\",\"kind\":\"tool.completed\",\"summary\":\"Ran command\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"completed\",\"title\":\"Ran command\",\"detail\":\"M apps/server/src/provider/Layers/DevinAdapter.test.ts\\n M apps/server/src/provider/Layers/DevinAdapter.ts\\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\\n M apps/server/src...\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"text\":\" M apps/server/src/provider/Layers/DevinAdapter.test.ts\\n M apps/server/src/provider/Layers/DevinAdapter.ts\\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\\n M apps/server/src/provider/acp/DevinAcpSupport.test.ts\\n M apps/server/src/provider/acp/DevinAcpSupport.ts\\n?? .acceptance/\",\"type\":\"text\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":117,\"createdAt\":\"2026-09-01T15:05:49.983Z\"}}}]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:53.285Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55129.609732,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"612\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":26,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"c733ad56a002d6fa95b7f4bf0ded5ce4\",\"spanId\":\"1838ef3fd98d2edc\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:53.285Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55129.611424,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"612\",\"exit\":{\"_tag\":\"Success\",\"value\":[]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:56.299Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55131.969593,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"613\",\"tag\":\"git.workingTreeDiffStats\",\"payload\":{\"cwd\":\"/Users/user/.synara/worktrees/devin-tool-idle-budget-clean\",\"scope\":\"workingTree\"},\"traceId\":\"469de7f35f852f255f0ae7c2182946c4\",\"spanId\":\"99a23907ec30b798\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:56.299Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55132.033881,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Ping\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:56.299Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55132.034433,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Pong\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:56.299Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55132.125614,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"613\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"additions\":722,\"deletions\":32,\"fileCount\":9}}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:56.299Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55132.608993,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"614\",\"tag\":\"orchestration.getThreadDetailSnapshot\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"f2048236cc1c3a1ad4e04f87e3b93e4c\",\"spanId\":\"b9ec77b488ee01a9\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:56.299Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55132.616931,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"614\",\"exit\":{\"_tag\":\"Success\",\"value\":{\"snapshotSequence\":26,\"thread\":{\"id\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"projectId\":\"57c0a863-efc1-47e6-9fb8-3d781e78218a\",\"title\":\"Use exactly one shell exec tool\",\"modelSelection\":{\"provider\":\"devin\",\"model\":\"swe-1-7\",\"options\":{\"reasoningEffort\":\"medium\",\"modelVariant\":\"swe-1-7-medium\"}},\"runtimeMode\":\"full-access\",\"interactionMode\":\"default\",\"envMode\":\"local\",\"branch\":\"agent/devin-tool-idle-budget-clean\",\"worktreePath\":null,\"workingDirectory\":null,\"associatedWorktreePath\":null,\"associatedWorktreeBranch\":null,\"associatedWorktreeRef\":null,\"createBranchFlowCompleted\":false,\"isPinned\":false,\"parentThreadId\":null,\"creationSource\":null,\"sourceThreadId\":null,\"sourceTurnId\":null,\"gatewayOperationId\":null,\"gatewayOperationIndex\":null,\"subagentAgentId\":null,\"subagentNickname\":null,\"subagentRole\":null,\"forkSourceThreadId\":null,\"sidechatSourceThreadId\":null,\"sidechatLastActivityAt\":null,\"sidechatExpiredAt\":null,\"lastKnownPr\":null,\"latestTurn\":{\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"state\":\"running\",\"requestedAt\":\"2026-09-01T15:05:08.712Z\",\"startedAt\":\"2026-09-01T15:05:13.259Z\",\"completedAt\":null,\"assistantMessageId\":null},\"latestUserMessageAt\":\"2026-09-01T15:05:08.712Z\",\"hasPendingApprovals\":false,\"hasPendingUserInput\":false,\"hasActionableProposedPlan\":false,\"createdAt\":\"2026-09-01T15:03:17.064Z\",\"updatedAt\":\"2026-09-01T15:05:13.259Z\",\"archivedAt\":null,\"settledAt\":null,\"deletedAt\":null,\"handoff\":null,\"messages\":[{\"id\":\"58361ef3-8ec4-41fb-b1f6-cb09e29cdf3a\",\"role\":\"user\",\"text\":\"Use exactly one shell exec tool call. Start this exact bounded local command in the background: sleep 24 && git status --short. Then use get_output with timeout 25000 milliseconds to wait for it to finish. Do not use any other tool before or after it. Do not edit or create files. Do not access the network or any external service. Do not perform external writes. After the command finishes, reply with exactly: CALIBRATION COMPLETE\",\"attachments\":[],\"dispatchMode\":\"queue\",\"dispatchOrigin\":\"user\",\"turnId\":null,\"streaming\":false,\"source\":\"native\",\"createdAt\":\"2026-09-01T15:05:08.712Z\",\"updatedAt\":\"2026-09-01T15:05:08.712Z\"}],\"proposedPlans\":[],\"activities\":[{\"id\":\"3585e55d-a9e9-457b-830d-ed99952b3dfd\",\"tone\":\"info\",\"kind\":\"context-window.updated\",\"summary\":\"Context window updated\",\"payload\":{\"usedTokens\":81000,\"usedPercent\":30.916030534351147,\"maxTokens\":262000,\"compactsAutomatically\":true,\"provider\":\"devin\"},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":102,\"createdAt\":\"2026-09-01T15:05:25.857Z\"},{\"id\":\"4d6f1b8b-e335-49cb-8fc5-f93fff1f275f\",\"tone\":\"tool\",\"kind\":\"tool.started\",\"summary\":\"Ran sleep, git started\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"inProgress\",\"title\":\"Ran sleep, git\",\"detail\":\"sleep 24 && git status --short\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"resource\":{\"mimeType\":\"text/x-shellscript\",\"text\":\"sleep 24 && git status --short\",\"uri\":\"tool://preview\"},\"_meta\":{\"cognition.ai/preview_is_shell_command\":true},\"type\":\"resource\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":103,\"createdAt\":\"2026-09-01T15:05:25.877Z\"},{\"id\":\"8ba7e7af-c153-47b1-8dd1-b303a5db1171\",\"tone\":\"tool\",\"kind\":\"tool.updated\",\"summary\":\"Ran sleep, git\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"inProgress\",\"title\":\"Ran sleep, git\",\"detail\":\"sleep 24 && git status --short\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"resource\":{\"mimeType\":\"text/x-shellscript\",\"text\":\"sleep 24 && git status --short\",\"uri\":\"tool://preview\"},\"_meta\":{\"cognition.ai/preview_is_shell_command\":true},\"type\":\"resource\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":104,\"createdAt\":\"2026-09-01T15:05:25.882Z\"},{\"id\":\"6f8b7f45-aff5-41bf-87cf-abd19f297735\",\"tone\":\"info\",\"kind\":\"context-window.updated\",\"summary\":\"Context window updated\",\"payload\":{\"usedTokens\":81085,\"usedPercent\":30.948473282442745,\"maxTokens\":262000,\"compactsAutomatically\":true,\"provider\":\"devin\"},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":111,\"createdAt\":\"2026-09-01T15:05:36.929Z\"},{\"id\":\"a9eb13ef-6999-495b-b7df-bff7a997ab01\",\"tone\":\"tool\",\"kind\":\"tool.started\",\"summary\":\"Read shell started\",\"payload\":{\"itemType\":\"dynamic_tool_call\",\"status\":\"inProgress\",\"title\":\"Read shell\",\"detail\":\"Read shell\",\"data\":{\"toolCallId\":\"functions.get_output:1\",\"rawInput\":{\"shell_id\":\"eddedc\",\"timeout\":25000},\"providerToolCallId\":\"functions.get_output:1\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":112,\"createdAt\":\"2026-09-01T15:05:36.935Z\"},{\"id\":\"511d091d-7339-4f51-a50b-890905bf7dcf\",\"tone\":\"tool\",\"kind\":\"tool.updated\",\"summary\":\"Read shell\",\"payload\":{\"itemType\":\"dynamic_tool_call\",\"status\":\"inProgress\",\"title\":\"Read shell\",\"detail\":\"Read shell\",\"data\":{\"toolCallId\":\"functions.get_output:1\",\"rawInput\":{\"shell_id\":\"eddedc\",\"timeout\":25000},\"providerToolCallId\":\"functions.get_output:1\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":113,\"createdAt\":\"2026-09-01T15:05:36.936Z\"},{\"id\":\"072fc933-5395-4f65-8dc5-2dade9ff5917\",\"tone\":\"tool\",\"kind\":\"tool.updated\",\"summary\":\"Ran command\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"inProgress\",\"title\":\"Ran command\",\"detail\":\"M apps/server/src/provider/Layers/DevinAdapter.test.ts\\n M apps/server/src/provider/Layers/DevinAdapter.ts\\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\\n M apps/server/src...\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"text\":\" M apps/server/src/provider/Layers/DevinAdapter.test.ts\\n M apps/server/src/provider/Layers/DevinAdapter.ts\\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\\n M apps/server/src/provider/acp/DevinAcpSupport.test.ts\\n M apps/server/src/provider/acp/DevinAcpSupport.ts\\n?? .acceptance/\",\"type\":\"text\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":114,\"createdAt\":\"2026-09-01T15:05:49.974Z\"},{\"id\":\"3b0955a7-01a3-4f4f-a16d-4d9f99e51dcb\",\"tone\":\"tool\",\"kind\":\"tool.completed\",\"summary\":\"Read shell\",\"payload\":{\"itemType\":\"dynamic_tool_call\",\"status\":\"completed\",\"title\":\"Read shell\",\"detail\":\"Read shell\",\"data\":{\"toolCallId\":\"functions.get_output:1\",\"rawInput\":{\"shell_id\":\"eddedc\",\"timeout\":25000},\"providerToolCallId\":\"functions.get_output:1\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":115,\"createdAt\":\"2026-09-01T15:05:49.976Z\"},{\"id\":\"c9ab9d7d-35a9-4bd3-b991-9335b7e15d45\",\"tone\":\"tool\",\"kind\":\"tool.updated\",\"summary\":\"Ran command\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"inProgress\",\"title\":\"Ran command\",\"detail\":\"M apps/server/src/provider/Layers/DevinAdapter.test.ts\\n M apps/server/src/provider/Layers/DevinAdapter.ts\\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\\n M apps/server/src...\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"text\":\" M apps/server/src/provider/Layers/DevinAdapter.test.ts\\n M apps/server/src/provider/Layers/DevinAdapter.ts\\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\\n M apps/server/src/provider/acp/DevinAcpSupport.test.ts\\n M apps/server/src/provider/acp/DevinAcpSupport.ts\\n?? .acceptance/\\n\",\"type\":\"text\"},\"type\":\"content\"},{\"content\":{\"text\":\"\\nExit code: 0\",\"type\":\"text\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":116,\"createdAt\":\"2026-09-01T15:05:49.979Z\"},{\"id\":\"87d761f9-59c9-45af-8349-19294b071f8b\",\"tone\":\"tool\",\"kind\":\"tool.completed\",\"summary\":\"Ran command\",\"payload\":{\"itemType\":\"command_execution\",\"status\":\"completed\",\"title\":\"Ran command\",\"detail\":\"M apps/server/src/provider/Layers/DevinAdapter.test.ts\\n M apps/server/src/provider/Layers/DevinAdapter.ts\\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\\n M apps/server/src...\",\"data\":{\"toolCallId\":\"functions.exec:0\",\"kind\":\"execute\",\"command\":\"sleep 24 && git status --short\",\"rawInput\":{\"command\":\"sleep 24 && git status --short\",\"timeout\":0},\"content\":[{\"content\":{\"text\":\" M apps/server/src/provider/Layers/DevinAdapter.test.ts\\n M apps/server/src/provider/Layers/DevinAdapter.ts\\n M apps/server/src/provider/acp/AcpSessionRuntime.ts\\n M apps/server/src/provider/acp/DevinAcpSupport.test.ts\\n M apps/server/src/provider/acp/DevinAcpSupport.ts\\n?? .acceptance/\",\"type\":\"text\"},\"type\":\"content\"}],\"providerToolCallId\":\"functions.exec:0\"}},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":117,\"createdAt\":\"2026-09-01T15:05:49.983Z\"}],\"pendingInteractions\":[],\"checkpoints\":[],\"session\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"status\":\"running\",\"providerName\":\"devin\",\"runtimeMode\":\"full-access\",\"activeTurnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"lastError\":null,\"updatedAt\":\"2026-09-01T15:05:13.259Z\"}}}}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:58.307Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55134.10972,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"615\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":26,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"3d87085e698043832ee89f8f563ef336\",\"spanId\":\"cac449f6059c7c38\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:58.307Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55134.117623,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"615\",\"exit\":{\"_tag\":\"Success\",\"value\":[{\"sequence\":27,\"eventId\":\"e6984a1d-2177-4a5f-81b3-fcecd3600123\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:57.307Z\",\"commandId\":\"provider:07654583-91ff-453d-8903-b9fd39433fc9:assistant-delta:assistant:devin:31ef65a4-560b-459e-91f3-87e6c6f22b9f:assistant:mulberry-nautilus:2239ea22:segment:0\",\"causationEventId\":null,\"correlationId\":\"provider:07654583-91ff-453d-8903-b9fd39433fc9:assistant-delta:assistant:devin:31ef65a4-560b-459e-91f3-87e6c6f22b9f:assistant:mulberry-nautilus:2239ea22:segment:0\",\"metadata\":{},\"type\":\"thread.message-sent\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"messageId\":\"assistant:devin:31ef65a4-560b-459e-91f3-87e6c6f22b9f:assistant:mulberry-nautilus:2239ea22:segment:0\",\"role\":\"assistant\",\"text\":\"CAL\",\"segmentStartedAt\":\"2026-09-01T15:05:57.307Z\",\"segmentSequence\":128,\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"streaming\":true,\"source\":\"native\",\"createdAt\":\"2026-09-01T15:05:57.307Z\",\"updatedAt\":\"2026-09-01T15:05:57.307Z\"}},{\"sequence\":28,\"eventId\":\"cf0cbeef-f2f6-461d-88b6-bace6f6d07a3\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:57.309Z\",\"commandId\":\"provider:cdc1f3b7-35ff-4127-afd7-e5056d3fb133:assistant-delta:assistant:devin:31ef65a4-560b-459e-91f3-87e6c6f22b9f:assistant:mulberry-nautilus:2239ea22:segment:0\",\"causationEventId\":null,\"correlationId\":\"provider:cdc1f3b7-35ff-4127-afd7-e5056d3fb133:assistant-delta:assistant:devin:31ef65a4-560b-459e-91f3-87e6c6f22b9f:assistant:mulberry-nautilus:2239ea22:segment:0\",\"metadata\":{},\"type\":\"thread.message-sent\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"messageId\":\"assistant:devin:31ef65a4-560b-459e-91f3-87e6c6f22b9f:assistant:mulberry-nautilus:2239ea22:segment:0\",\"role\":\"assistant\",\"text\":\"IBRATION\",\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"streaming\":true,\"source\":\"native\",\"createdAt\":\"2026-09-01T15:05:57.309Z\",\"updatedAt\":\"2026-09-01T15:05:57.309Z\"}},{\"sequence\":29,\"eventId\":\"79f6eb58-dfb1-4323-9d6f-504ecdbe7b7e\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:57.309Z\",\"commandId\":\"provider:a107a381-5b59-453f-a1c1-f1051d17e373:assistant-delta:assistant:devin:31ef65a4-560b-459e-91f3-87e6c6f22b9f:assistant:mulberry-nautilus:2239ea22:segment:0\",\"causationEventId\":null,\"correlationId\":\"provider:a107a381-5b59-453f-a1c1-f1051d17e373:assistant-delta:assistant:devin:31ef65a4-560b-459e-91f3-87e6c6f22b9f:assistant:mulberry-nautilus:2239ea22:segment:0\",\"metadata\":{},\"type\":\"thread.message-sent\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"messageId\":\"assistant:devin:31ef65a4-560b-459e-91f3-87e6c6f22b9f:assistant:mulberry-nautilus:2239ea22:segment:0\",\"role\":\"assistant\",\"text\":\" COMPLETE\",\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"streaming\":true,\"source\":\"native\",\"createdAt\":\"2026-09-01T15:05:57.309Z\",\"updatedAt\":\"2026-09-01T15:05:57.309Z\"}},{\"sequence\":30,\"eventId\":\"92454dd1-8e25-41e1-b917-906491e7c514\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:57.340Z\",\"commandId\":\"provider:df01cd39-07ff-4da3-8723-b993a115cdad:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:context-window.updated:df01cd39-07ff-4da3-8723-b993a115cdad\",\"causationEventId\":null,\"correlationId\":\"provider:df01cd39-07ff-4da3-8723-b993a115cdad:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:context-window.updated:df01cd39-07ff-4da3-8723-b993a115cdad\",\"metadata\":{},\"type\":\"thread.activity-appended\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"activity\":{\"id\":\"df01cd39-07ff-4da3-8723-b993a115cdad\",\"tone\":\"info\",\"kind\":\"context-window.updated\",\"summary\":\"Context window updated\",\"payload\":{\"usedTokens\":81221,\"usedPercent\":31.00038167938931,\"maxTokens\":262000,\"compactsAutomatically\":true,\"provider\":\"devin\"},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":131,\"createdAt\":\"2026-09-01T15:05:57.340Z\"}}},{\"sequence\":31,\"eventId\":\"d071e5a5-60d5-4ab9-8f47-54a57213c386\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:57.419Z\",\"commandId\":\"provider:43497387-9551-4bcd-b381-d7f703992f51:assistant-complete:assistant:devin:31ef65a4-560b-459e-91f3-87e6c6f22b9f:assistant:mulberry-nautilus:2239ea22:segment:0\",\"causationEventId\":null,\"correlationId\":\"provider:43497387-9551-4bcd-b381-d7f703992f51:assistant-complete:assistant:devin:31ef65a4-560b-459e-91f3-87e6c6f22b9f:assistant:mulberry-nautilus:2239ea22:segment:0\",\"metadata\":{},\"type\":\"thread.message-sent\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"messageId\":\"assistant:devin:31ef65a4-560b-459e-91f3-87e6c6f22b9f:assistant:mulberry-nautilus:2239ea22:segment:0\",\"role\":\"assistant\",\"text\":\"CALIBRATION COMPLETE\",\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"streaming\":false,\"source\":\"native\",\"createdAt\":\"2026-09-01T15:05:57.419Z\",\"updatedAt\":\"2026-09-01T15:05:57.419Z\"}}]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:58.307Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55134.40532,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Chunk\",\"requestId\":\"9\",\"values\":[{\"kind\":\"thread-upserted\",\"sequence\":31,\"thread\":{\"id\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"projectId\":\"57c0a863-efc1-47e6-9fb8-3d781e78218a\",\"title\":\"Use exactly one shell exec tool\",\"modelSelection\":{\"provider\":\"devin\",\"model\":\"swe-1-7\",\"options\":{\"reasoningEffort\":\"medium\",\"modelVariant\":\"swe-1-7-medium\"}},\"runtimeMode\":\"full-access\",\"interactionMode\":\"default\",\"envMode\":\"local\",\"branch\":\"agent/devin-tool-idle-budget-clean\",\"worktreePath\":null,\"workingDirectory\":null,\"associatedWorktreePath\":null,\"associatedWorktreeBranch\":null,\"associatedWorktreeRef\":null,\"createBranchFlowCompleted\":false,\"isPinned\":false,\"parentThreadId\":null,\"creationSource\":null,\"sourceThreadId\":null,\"sourceTurnId\":null,\"gatewayOperationId\":null,\"gatewayOperationIndex\":null,\"subagentAgentId\":null,\"subagentNickname\":null,\"subagentRole\":null,\"forkSourceThreadId\":null,\"sidechatSourceThreadId\":null,\"sidechatLastActivityAt\":null,\"sidechatExpiredAt\":null,\"lastKnownPr\":null,\"latestTurn\":{\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"state\":\"completed\",\"requestedAt\":\"2026-09-01T15:05:08.712Z\",\"startedAt\":\"2026-09-01T15:05:13.259Z\",\"completedAt\":\"2026-09-01T15:05:57.444Z\",\"assistantMessageId\":\"assistant:devin:31ef65a4-560b-459e-91f3-87e6c6f22b9f:assistant:mulberry-nautilus:2239ea22:segment:0\"},\"latestUserMessageAt\":\"2026-09-01T15:05:08.712Z\",\"hasPendingApprovals\":false,\"hasPendingUserInput\":false,\"hasActionableProposedPlan\":false,\"createdAt\":\"2026-09-01T15:03:17.064Z\",\"updatedAt\":\"2026-09-01T15:05:57.444Z\",\"archivedAt\":null,\"settledAt\":null,\"handoff\":null,\"goal\":\"\",\"goalStartedAt\":null,\"goalPausedAt\":null,\"session\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"status\":\"ready\",\"providerName\":\"devin\",\"runtimeMode\":\"full-access\",\"activeTurnId\":null,\"lastError\":null,\"updatedAt\":\"2026-09-01T15:05:57.444Z\"}}}]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:58.307Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55134.405778,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Ack\",\"requestId\":\"9\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:58.307Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55134.697149,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Chunk\",\"requestId\":\"9\",\"values\":[{\"kind\":\"thread-upserted\",\"sequence\":32,\"thread\":{\"id\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"projectId\":\"57c0a863-efc1-47e6-9fb8-3d781e78218a\",\"title\":\"Use exactly one shell exec tool\",\"modelSelection\":{\"provider\":\"devin\",\"model\":\"swe-1-7\",\"options\":{\"reasoningEffort\":\"medium\",\"modelVariant\":\"swe-1-7-medium\"}},\"runtimeMode\":\"full-access\",\"interactionMode\":\"default\",\"envMode\":\"local\",\"branch\":\"agent/devin-tool-idle-budget-clean\",\"worktreePath\":null,\"workingDirectory\":null,\"associatedWorktreePath\":null,\"associatedWorktreeBranch\":null,\"associatedWorktreeRef\":null,\"createBranchFlowCompleted\":false,\"isPinned\":false,\"parentThreadId\":null,\"creationSource\":null,\"sourceThreadId\":null,\"sourceTurnId\":null,\"gatewayOperationId\":null,\"gatewayOperationIndex\":null,\"subagentAgentId\":null,\"subagentNickname\":null,\"subagentRole\":null,\"forkSourceThreadId\":null,\"sidechatSourceThreadId\":null,\"sidechatLastActivityAt\":null,\"sidechatExpiredAt\":null,\"lastKnownPr\":null,\"latestTurn\":{\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"state\":\"completed\",\"requestedAt\":\"2026-09-01T15:05:08.712Z\",\"startedAt\":\"2026-09-01T15:05:13.259Z\",\"completedAt\":\"2026-09-01T15:05:57.444Z\",\"assistantMessageId\":\"assistant:devin:31ef65a4-560b-459e-91f3-87e6c6f22b9f:assistant:mulberry-nautilus:2239ea22:segment:0\"},\"latestUserMessageAt\":\"2026-09-01T15:05:08.712Z\",\"hasPendingApprovals\":false,\"hasPendingUserInput\":false,\"hasActionableProposedPlan\":false,\"createdAt\":\"2026-09-01T15:03:17.064Z\",\"updatedAt\":\"2026-09-01T15:05:57.444Z\",\"archivedAt\":null,\"settledAt\":null,\"handoff\":null,\"goal\":\"\",\"goalStartedAt\":null,\"goalPausedAt\":null,\"session\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"status\":\"ready\",\"providerName\":\"devin\",\"runtimeMode\":\"full-access\",\"activeTurnId\":null,\"lastError\":null,\"updatedAt\":\"2026-09-01T15:05:57.444Z\"}}}]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:58.307Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55134.698122,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Ack\",\"requestId\":\"9\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:58.307Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55134.717581,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"616\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":31,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"34fdbfef06b8f3ee2d0b1b9ff51c9827\",\"spanId\":\"9b214f37a227b47a\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:58.307Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55134.858789,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"616\",\"exit\":{\"_tag\":\"Success\",\"value\":[{\"sequence\":32,\"eventId\":\"31df3c71-cf8d-49a8-bcbb-21a3e1dc273a\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:57.444Z\",\"commandId\":\"provider:2b79ed4b-351d-47c7-bd5f-8f37e919358b:thread-session-set:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"causationEventId\":null,\"correlationId\":\"provider:2b79ed4b-351d-47c7-bd5f-8f37e919358b:thread-session-set:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"metadata\":{},\"type\":\"thread.session-set\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"session\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"status\":\"ready\",\"providerName\":\"devin\",\"runtimeMode\":\"full-access\",\"activeTurnId\":null,\"lastError\":null,\"updatedAt\":\"2026-09-01T15:05:57.444Z\"}}},{\"sequence\":33,\"eventId\":\"6367ec82-69fe-4431-8700-da62e4c74758\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:57.444Z\",\"commandId\":\"provider:2b79ed4b-351d-47c7-bd5f-8f37e919358b:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:turn.completed:2b79ed4b-351d-47c7-bd5f-8f37e919358b\",\"causationEventId\":null,\"correlationId\":\"provider:2b79ed4b-351d-47c7-bd5f-8f37e919358b:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:turn.completed:2b79ed4b-351d-47c7-bd5f-8f37e919358b\",\"metadata\":{},\"type\":\"thread.activity-appended\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"activity\":{\"id\":\"2b79ed4b-351d-47c7-bd5f-8f37e919358b\",\"tone\":\"info\",\"kind\":\"turn.completed\",\"summary\":\"Turn completed\",\"payload\":{\"state\":\"completed\"},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":133,\"createdAt\":\"2026-09-01T15:05:57.444Z\"}}}]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:58.307Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55134.94225,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Chunk\",\"requestId\":\"9\",\"values\":[{\"kind\":\"thread-upserted\",\"sequence\":34,\"thread\":{\"id\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"projectId\":\"57c0a863-efc1-47e6-9fb8-3d781e78218a\",\"title\":\"Use exactly one shell exec tool\",\"modelSelection\":{\"provider\":\"devin\",\"model\":\"swe-1-7\",\"options\":{\"reasoningEffort\":\"medium\",\"modelVariant\":\"swe-1-7-medium\"}},\"runtimeMode\":\"full-access\",\"interactionMode\":\"default\",\"envMode\":\"local\",\"branch\":\"agent/devin-tool-idle-budget-clean\",\"worktreePath\":null,\"workingDirectory\":null,\"associatedWorktreePath\":null,\"associatedWorktreeBranch\":null,\"associatedWorktreeRef\":null,\"createBranchFlowCompleted\":false,\"isPinned\":false,\"parentThreadId\":null,\"creationSource\":null,\"sourceThreadId\":null,\"sourceTurnId\":null,\"gatewayOperationId\":null,\"gatewayOperationIndex\":null,\"subagentAgentId\":null,\"subagentNickname\":null,\"subagentRole\":null,\"forkSourceThreadId\":null,\"sidechatSourceThreadId\":null,\"sidechatLastActivityAt\":null,\"sidechatExpiredAt\":null,\"lastKnownPr\":null,\"latestTurn\":{\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"state\":\"completed\",\"requestedAt\":\"2026-09-01T15:05:08.712Z\",\"startedAt\":\"2026-09-01T15:05:13.259Z\",\"completedAt\":\"2026-09-01T15:05:57.444Z\",\"assistantMessageId\":\"assistant:devin:31ef65a4-560b-459e-91f3-87e6c6f22b9f:assistant:mulberry-nautilus:2239ea22:segment:0\"},\"latestUserMessageAt\":\"2026-09-01T15:05:08.712Z\",\"hasPendingApprovals\":false,\"hasPendingUserInput\":false,\"hasActionableProposedPlan\":false,\"createdAt\":\"2026-09-01T15:03:17.064Z\",\"updatedAt\":\"2026-09-01T15:05:57.444Z\",\"archivedAt\":null,\"settledAt\":null,\"handoff\":null,\"goal\":\"\",\"goalStartedAt\":null,\"goalPausedAt\":null,\"session\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"status\":\"ready\",\"providerName\":\"devin\",\"runtimeMode\":\"full-access\",\"activeTurnId\":null,\"lastError\":null,\"updatedAt\":\"2026-09-01T15:05:57.444Z\"}}}]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:58.307Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55134.942798,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Ack\",\"requestId\":\"9\"}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:58.307Z",
+    "event": {
+      "method": "Network.webSocketFrameSent",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55134.943122,
+        "response": {
+          "opcode": 1,
+          "mask": true,
+          "payloadData": "{\"_tag\":\"Request\",\"id\":\"617\",\"tag\":\"orchestration.replayEvents\",\"payload\":{\"fromSequenceExclusive\":32,\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\"},\"traceId\":\"f64e247555ed5b78e4b67a7fdfdb50e0\",\"spanId\":\"8a45a156e14a23be\",\"sampled\":true,\"headers\":[]}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  },
+  {
+    "capturedAt": "2026-09-01T15:05:58.307Z",
+    "event": {
+      "method": "Network.webSocketFrameReceived",
+      "params": {
+        "requestId": "39750.1646",
+        "timestamp": 55134.945142,
+        "response": {
+          "opcode": 1,
+          "mask": false,
+          "payloadData": "{\"_tag\":\"Exit\",\"requestId\":\"617\",\"exit\":{\"_tag\":\"Success\",\"value\":[{\"sequence\":33,\"eventId\":\"6367ec82-69fe-4431-8700-da62e4c74758\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:57.444Z\",\"commandId\":\"provider:2b79ed4b-351d-47c7-bd5f-8f37e919358b:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:turn.completed:2b79ed4b-351d-47c7-bd5f-8f37e919358b\",\"causationEventId\":null,\"correlationId\":\"provider:2b79ed4b-351d-47c7-bd5f-8f37e919358b:thread-activity-append:1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7:turn.completed:2b79ed4b-351d-47c7-bd5f-8f37e919358b\",\"metadata\":{},\"type\":\"thread.activity-appended\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"activity\":{\"id\":\"2b79ed4b-351d-47c7-bd5f-8f37e919358b\",\"tone\":\"info\",\"kind\":\"turn.completed\",\"summary\":\"Turn completed\",\"payload\":{\"state\":\"completed\"},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"sequence\":133,\"createdAt\":\"2026-09-01T15:05:57.444Z\"}}},{\"sequence\":34,\"eventId\":\"29bd48f6-0416-4897-b382-17099a555200\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:57.444Z\",\"commandId\":\"server:checkpoint-turn-diff-complete:da9c82aa-692e-4939-bb9e-e80cb4474a1d\",\"causationEventId\":null,\"correlationId\":\"server:checkpoint-turn-diff-complete:da9c82aa-692e-4939-bb9e-e80cb4474a1d\",\"metadata\":{},\"type\":\"thread.turn-diff-completed\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"checkpointTurnCount\":1,\"checkpointRef\":\"refs/synara/checkpoints/MWFiM2NiODYtNjllZi00M2EzLWJlNGUtZDNkNGNiNDRiZmE3/turn/1\",\"status\":\"ready\",\"files\":[],\"assistantMessageId\":\"assistant:devin:31ef65a4-560b-459e-91f3-87e6c6f22b9f:assistant:mulberry-nautilus:2239ea22:segment:0\",\"completedAt\":\"2026-09-01T15:05:57.444Z\"}},{\"sequence\":35,\"eventId\":\"acdacb63-9296-4774-ad62-b3cf4809a947\",\"aggregateKind\":\"thread\",\"aggregateId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"occurredAt\":\"2026-09-01T15:05:57.444Z\",\"commandId\":\"server:checkpoint-captured-activity:6148f811-f168-4b25-8bc5-8799cf70ab74\",\"causationEventId\":null,\"correlationId\":\"server:checkpoint-captured-activity:6148f811-f168-4b25-8bc5-8799cf70ab74\",\"metadata\":{},\"type\":\"thread.activity-appended\",\"payload\":{\"threadId\":\"1ab3cb86-69ef-43a3-be4e-d3d4cb44bfa7\",\"activity\":{\"id\":\"06142b9b-2309-4cb6-986a-4b969f984158\",\"tone\":\"info\",\"kind\":\"checkpoint.captured\",\"summary\":\"Checkpoint captured\",\"payload\":{\"turnCount\":1,\"status\":\"ready\"},\"turnId\":\"31ef65a4-560b-459e-91f3-87e6c6f22b9f\",\"createdAt\":\"2026-09-01T15:05:57.444Z\"}}}]}}"
+        }
+      },
+      "sessionId": "DD0BFFC571F6A60E64B40D574B693E9F"
+    }
+  }
+]

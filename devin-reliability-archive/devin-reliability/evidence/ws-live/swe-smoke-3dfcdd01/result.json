@@ -1,0 +1,22 @@
+{
+  "runId": "3dfcdd01",
+  "label": "swe-smoke",
+  "modelUid": "swe-1-7",
+  "effort": "max",
+  "mode": "quiet",
+  "phrase": "SWE WS 1 COMPLETE",
+  "result": "FAIL",
+  "modelSelectionMatch": false,
+  "toolStarted": false,
+  "toolCompleted": false,
+  "toolKinds": [],
+  "phraseSeen": true,
+  "activeSeconds": 4,
+  "serverTimeout": false,
+  "threadId": "4c3d6cbb-69f4-4b73-aa4d-8b8afaf4240f",
+  "projectId": "37919916-ae7b-411d-b3a7-6f6c7601e67c",
+  "checks": {
+    "threadCreated": false,
+    "turnRequested": false
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "runId": "74c75fbe",
+  "label": "glm-periodic",
+  "modelUid": "glm-5.3-flash",
+  "effort": "max",
+  "mode": "periodic",
+  "phrase": "GLM WS 2 COMPLETE",
+  "turnState": "completed",
+  "result": "PASS",
+  "modelSelectionMatch": true,
+  "createdSelection": {
+    "provider": "devin",
+    "model": "glm-5.3-flash"
+  },
+  "requestedSelection": {
+    "provider": "devin",
+    "model": "glm-5.3-flash",
+    "options": {
+      "reasoningEffort": "max"
+    }
+  },
+  "toolStarted": true,
+  "toolCompleted": true,
+  "toolKinds": [
+    "tool.started",
+    "tool.updated",
+    "tool.updated",
+    "tool.updated",
+    "tool.updated",
+    "tool.updated",
+    "tool.updated",
+    "tool.updated",
+    "tool.completed"
+  ],
+  "phraseSeen": true,
+  "activeSeconds": 41,
+  "serverTimeout": false,
+  "threadId": "7311e81c-c95f-4dde-9e8e-4656745ca7ac",
+  "projectId": "48901ee3-b886-46ed-a474-a421aba4e255",
+  "checks": {
+    "threadCreated": true,
+    "turnRequested": true
+  }
+}

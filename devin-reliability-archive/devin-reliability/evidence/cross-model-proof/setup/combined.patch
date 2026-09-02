@@ -1,0 +1,1205 @@
+diff --git a/apps/server/src/provider/Layers/DevinAdapter.test.ts b/apps/server/src/provider/Layers/DevinAdapter.test.ts
+index ac58a95a7..8f7d192c0 100644
+--- a/apps/server/src/provider/Layers/DevinAdapter.test.ts
++++ b/apps/server/src/provider/Layers/DevinAdapter.test.ts
+@@ -6,11 +6,12 @@
+ import * as NodeServices from "@effect/platform-node/NodeServices";
+ import type * as Acp from "@agentclientprotocol/sdk";
+ import { ThreadId, TurnId } from "@synara/contracts";
+-import { Deferred, Effect, Exit, Layer, Scope, Semaphore, Stream } from "effect";
+-import { describe, expect, it } from "vitest";
++import { Deferred, Effect, Exit, Layer, Queue, Scope, Semaphore, Stream } from "effect";
++import { afterEach, describe, expect, it, vi } from "vitest";
+ 
+ import { ServerConfig } from "../../config.ts";
+ import type { AcpSessionRuntimeShape } from "../acp/AcpSessionRuntime.ts";
++import type { AcpParsedSessionEvent } from "../acp/AcpRuntimeModel.ts";
+ import { DevinAdapter } from "../Services/DevinAdapter.ts";
+ import {
+   applyDevinSessionConfiguration,
+@@ -22,6 +23,7 @@ import {
+   makeDevinAdapterLive,
+   parseDevinCliModelList,
+   pruneDevinToolCallTurnIds,
++  resolveDevinAdapterTimeouts,
+   resolveDevinEffectiveModel,
+   resolveDevinStartModel,
+   resolveDevinToolCallUpdatedTurnId,
+@@ -113,11 +115,71 @@ function makeLifecycleAcpRuntime(
+   } as AcpSessionRuntimeShape;
+ }
+ 
+-function makeDevinAdapterTestLayer(runtime: AcpSessionRuntimeShape) {
++function makeEventAcpRuntime(prompt: AcpSessionRuntimeShape["prompt"]) {
++  type EventEnvelope = {
++    readonly event: AcpParsedSessionEvent;
++    readonly processed: Deferred.Deferred<void>;
++  };
++  const events = Effect.runSync(Queue.unbounded<EventEnvelope>());
++  const pendingCompletions: Array<Deferred.Deferred<void>> = [];
++  const runtime = makeLifecycleAcpRuntime(prompt);
++  const emit = (event: AcpParsedSessionEvent) =>
++    Effect.gen(function* () {
++      const processed = yield* Deferred.make<void>();
++      yield* Queue.offer(events, { event, processed });
++      yield* flushTimers();
++      yield* Deferred.await(processed);
++    });
++  return {
++    runtime: {
++      ...runtime,
++      getEvents: () =>
++        Stream.fromQueue(events).pipe(
++          Stream.map(({ event, processed }) => {
++            pendingCompletions.push(processed);
++            return event;
++          }),
++        ),
++    } as AcpSessionRuntimeShape,
++    emitToolCall: (toolCallId: string, status: "pending" | "inProgress" | "completed" | "failed") =>
++      emit({
++        _tag: "ToolCallUpdated",
++        toolCall: { toolCallId, status, data: {} },
++        rawPayload: { toolCallId, status },
++      }),
++    emitProgress: (text = "progress") =>
++      emit({
++        _tag: "ContentDelta",
++        text,
++        rawPayload: { text },
++      }),
++    completeProcessedEvent: () => {
++      const processed = pendingCompletions.shift();
++      if (processed !== undefined) {
++        Effect.runSync(Deferred.succeed(processed, undefined));
++      }
++    },
++  };
++}
++
++function advanceTimers(ms: number): Effect.Effect<void> {
++  return Effect.promise(() => vi.advanceTimersByTimeAsync(ms));
++}
++
++function flushTimers(): Effect.Effect<void> {
++  return advanceTimers(0);
++}
++
++function makeDevinAdapterTestLayer(
++  runtime: AcpSessionRuntimeShape,
++  onSessionUpdateProcessed?: () => void,
++) {
+   return makeDevinAdapterLive(
+     {},
+     {
+       makeAcpRuntime: () => Effect.succeed(runtime),
++      timeouts: { turnIdleMs: 30, toolIdleMs: 60 },
++      ...(onSessionUpdateProcessed ? { onSessionUpdateProcessed } : {}),
+     },
+   ).pipe(
+     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "devin-adapter-test-" })),
+@@ -125,7 +187,29 @@ function makeDevinAdapterTestLayer(runtime: AcpSessionRuntimeShape) {
+   );
+ }
+ 
++describe("resolveDevinAdapterTimeouts", () => {
++  it("uses the production defaults when overrides are absent", () => {
++    expect(resolveDevinAdapterTimeouts({})).toEqual({
++      turnIdleMs: 30 * 60 * 1000,
++      toolIdleMs: 60 * 60 * 1000,
++    });
++  });
++
++  it("uses valid environment overrides", () => {
++    expect(
++      resolveDevinAdapterTimeouts({
++        SYNARA_DEVIN_TURN_IDLE_TIMEOUT_MS: "1234",
++        SYNARA_DEVIN_TOOL_IDLE_TIMEOUT_MS: "5678",
++      }),
++    ).toEqual({ turnIdleMs: 1234, toolIdleMs: 5678 });
++  });
++});
++
+ describe("Devin adapter lifecycle", () => {
++  afterEach(() => {
++    vi.useRealTimers();
++  });
++
+   it("rejects an overlapping send without replacing the active turn", async () => {
+     const promptStarted = await Effect.runPromise(Deferred.make<void>());
+     const runtime = makeLifecycleAcpRuntime(() =>
+@@ -142,14 +226,8 @@ describe("Devin adapter lifecycle", () => {
+           runtimeMode: "full-access",
+           cwd: process.cwd(),
+         });
+-
+-        const firstTurn = yield* adapter.sendTurn({
+-          threadId,
+-          input: "first",
+-          attachments: [],
+-        });
++        const firstTurn = yield* adapter.sendTurn({ threadId, input: "first", attachments: [] });
+         yield* Deferred.await(promptStarted);
+-
+         const duplicateError = yield* adapter
+           .sendTurn({ threadId, input: "second", attachments: [] })
+           .pipe(Effect.match({ onFailure: (error) => error, onSuccess: () => undefined }));
+@@ -157,22 +235,172 @@ describe("Devin adapter lifecycle", () => {
+           _tag: "ProviderAdapterValidationError",
+           operation: "sendTurn",
+         });
+-
+-        const runningSession = (yield* adapter.listSessions()).find(
+-          (session) => session.threadId === threadId,
+-        );
+-        expect(runningSession?.activeTurnId).toBe(firstTurn.turnId);
+-
++        expect(
++          (yield* adapter.listSessions()).find((session) => session.threadId === threadId),
++        ).toMatchObject({ status: "running", activeTurnId: firstTurn.turnId });
+         yield* adapter.interruptTurn(threadId, firstTurn.turnId);
+-        const readySession = (yield* adapter.listSessions()).find(
+-          (session) => session.threadId === threadId,
+-        );
+-        expect(readySession?.activeTurnId).toBeUndefined();
+-        expect(readySession?.status).toBe("ready");
+         yield* adapter.stopSession(threadId);
+       }).pipe(Effect.provide(makeDevinAdapterTestLayer(runtime))),
+     );
+   });
++
++  it("keeps tool budget for every active tool and ignores terminal regressions", async () => {
++    vi.useFakeTimers();
++    vi.setSystemTime(1_000);
++    const { runtime, emitToolCall, completeProcessedEvent } = makeEventAcpRuntime(
++      () => Effect.never,
++    );
++    await Effect.runPromise(
++      Effect.gen(function* () {
++        const adapter = yield* DevinAdapter;
++        const threadId = ThreadId.makeUnsafe("thread-devin-tool-budget");
++        yield* adapter.startSession({
++          provider: "devin",
++          threadId,
++          runtimeMode: "full-access",
++          cwd: process.cwd(),
++        });
++        const turn = yield* adapter.sendTurn({ threadId, input: "run tools", attachments: [] });
++        for (const [toolCallId, status] of [
++          ["tool-a", "pending"],
++          ["tool-b", "inProgress"],
++          ["tool-a", "completed"],
++          ["tool-a", "pending"],
++        ] as const) {
++          yield* emitToolCall(toolCallId, status);
++        }
++        yield* advanceTimers(30);
++        expect(
++          (yield* adapter.listSessions()).find((session) => session.threadId === threadId),
++        ).toMatchObject({ status: "running", activeTurnId: turn.turnId });
++        yield* emitToolCall("tool-b", "failed");
++        yield* advanceTimers(30);
++        expect(
++          (yield* adapter.listSessions()).find((session) => session.threadId === threadId),
++        ).toMatchObject({ status: "error" });
++        yield* adapter.stopSession(threadId);
++      }).pipe(Effect.provide(makeDevinAdapterTestLayer(runtime, completeProcessedEvent))),
++    );
++  });
++
++  it("does not let stale prior-turn tool updates refresh or extend the current turn", async () => {
++    vi.useFakeTimers();
++    vi.setSystemTime(1_000);
++    const firstPrompt = Effect.runSync(Deferred.make<Acp.PromptResponse>());
++    const prompts = [
++      Deferred.await(firstPrompt),
++      Effect.never as Effect.Effect<Acp.PromptResponse>,
++    ];
++    const { runtime, emitToolCall, completeProcessedEvent } = makeEventAcpRuntime(
++      () => prompts.shift() ?? Effect.never,
++    );
++    await Effect.runPromise(
++      Effect.gen(function* () {
++        const adapter = yield* DevinAdapter;
++        const threadId = ThreadId.makeUnsafe("thread-devin-stale-tool");
++        yield* adapter.startSession({
++          provider: "devin",
++          threadId,
++          runtimeMode: "full-access",
++          cwd: process.cwd(),
++        });
++        yield* adapter.sendTurn({ threadId, input: "first", attachments: [] });
++        yield* emitToolCall("old-tool", "pending");
++        yield* Deferred.succeed(firstPrompt, { stopReason: "end_turn" } as Acp.PromptResponse);
++        yield* advanceTimers(1);
++        const second = yield* adapter.sendTurn({ threadId, input: "second", attachments: [] });
++        yield* emitToolCall("old-tool", "completed");
++        yield* advanceTimers(15);
++        yield* emitToolCall("old-tool", "inProgress");
++        yield* advanceTimers(40);
++        expect(
++          (yield* adapter.listSessions()).find((session) => session.threadId === threadId),
++        ).toMatchObject({ status: "error" });
++        expect(second.turnId).toBeDefined();
++        yield* adapter.stopSession(threadId);
++      }).pipe(Effect.provide(makeDevinAdapterTestLayer(runtime, completeProcessedEvent))),
++    );
++  });
++
++  it("resets the ordinary clock for other valid progress events", async () => {
++    vi.useFakeTimers();
++    vi.setSystemTime(1_000);
++    const { runtime, emitProgress, completeProcessedEvent } = makeEventAcpRuntime(
++      () => Effect.never,
++    );
++    await Effect.runPromise(
++      Effect.gen(function* () {
++        const adapter = yield* DevinAdapter;
++        const threadId = ThreadId.makeUnsafe("thread-devin-progress-clock");
++        yield* adapter.startSession({
++          provider: "devin",
++          threadId,
++          runtimeMode: "full-access",
++          cwd: process.cwd(),
++        });
++        const turn = yield* adapter.sendTurn({ threadId, input: "progress", attachments: [] });
++        yield* advanceTimers(15);
++        yield* emitProgress();
++        yield* advanceTimers(15);
++        expect(
++          (yield* adapter.listSessions()).find((session) => session.threadId === threadId),
++        ).toMatchObject({ status: "running", activeTurnId: turn.turnId });
++        yield* advanceTimers(30);
++        expect(
++          (yield* adapter.listSessions()).find((session) => session.threadId === threadId),
++        ).toMatchObject({ status: "error" });
++        yield* adapter.stopSession(threadId);
++      }).pipe(Effect.provide(makeDevinAdapterTestLayer(runtime, completeProcessedEvent))),
++    );
++  });
++
++  it("clears active tool budget on normal settlement, interrupt, timeout, and teardown", async () => {
++    const outcomes = ["settle", "interrupt", "timeout", "teardown"] as const;
++    for (const outcome of outcomes) {
++      vi.useFakeTimers();
++      vi.setSystemTime(1_000);
++      const promptResult = Effect.runSync(Deferred.make<Acp.PromptResponse>());
++      const { runtime, emitToolCall, completeProcessedEvent } = makeEventAcpRuntime(() =>
++        Deferred.await(promptResult),
++      );
++      await Effect.runPromise(
++        Effect.gen(function* () {
++          const adapter = yield* DevinAdapter;
++          const threadId = ThreadId.makeUnsafe(`thread-devin-clear-${outcome}`);
++          yield* adapter.startSession({
++            provider: "devin",
++            threadId,
++            runtimeMode: "full-access",
++            cwd: process.cwd(),
++          });
++          const turn = yield* adapter.sendTurn({ threadId, input: outcome, attachments: [] });
++          yield* emitToolCall("tool", "pending");
++          if (outcome === "settle") {
++            yield* Deferred.succeed(promptResult, { stopReason: "end_turn" } as Acp.PromptResponse);
++            yield* advanceTimers(1);
++            expect(
++              (yield* adapter.listSessions()).find((session) => session.threadId === threadId)
++                ?.status,
++            ).toBe("ready");
++          } else if (outcome === "interrupt") {
++            yield* adapter.interruptTurn(threadId, turn.turnId);
++          } else if (outcome === "timeout") {
++            yield* emitToolCall("tool", "completed");
++            yield* advanceTimers(40);
++            expect(
++              (yield* adapter.listSessions()).find((session) => session.threadId === threadId)
++                ?.status,
++            ).toBe("error");
++          }
++          yield* adapter.stopSession(threadId);
++          expect(
++            (yield* adapter.listSessions()).find((session) => session.threadId === threadId),
++          ).toBeUndefined();
++        }).pipe(Effect.provide(makeDevinAdapterTestLayer(runtime, completeProcessedEvent))),
++      );
++      vi.useRealTimers();
++    }
++  });
+ });
+ 
+ describe("applyDevinSessionConfiguration", () => {
+diff --git a/apps/server/src/provider/Layers/DevinAdapter.ts b/apps/server/src/provider/Layers/DevinAdapter.ts
+index 937964024..7f2e94e83 100644
+--- a/apps/server/src/provider/Layers/DevinAdapter.ts
++++ b/apps/server/src/provider/Layers/DevinAdapter.ts
+@@ -157,9 +157,12 @@ const DEVIN_RESUME_VERSION = 1 as const;
+ 
+ const DEVIN_TURN_IDLE_TIMEOUT_MS = resolveAcpTurnIdleTimeoutMs({
+   envVar: "SYNARA_DEVIN_TURN_IDLE_TIMEOUT_MS",
+-  defaultMs: 10 * 60 * 1000,
++  defaultMs: 30 * 60 * 1000,
++});
++const DEVIN_TOOL_IDLE_TIMEOUT_MS = resolveAcpTurnIdleTimeoutMs({
++  envVar: "SYNARA_DEVIN_TOOL_IDLE_TIMEOUT_MS",
++  defaultMs: 60 * 60 * 1000,
+ });
+-const DEVIN_TURN_WATCHDOG_INTERVAL_MS = 5_000;
+ const DEVIN_MODEL_DISCOVERY_TIMEOUT_MS = 15_000;
+ const DEVIN_MODEL_DISCOVERY_CACHE_MS = 5 * 60_000;
+ const DEVIN_COMMAND_DISCOVERY_TIMEOUT_MS = 15_000;
+@@ -211,10 +214,34 @@ const DEVIN_PLAN_MODE_PROMPT_PREFIX = [
+   "When ready, create the final implementation plan.",
+ ].join("\n");
+ 
++export interface DevinAdapterTimeouts {
++  readonly turnIdleMs: number;
++  readonly toolIdleMs: number;
++}
++
++export function resolveDevinAdapterTimeouts(
++  env: NodeJS.ProcessEnv = process.env,
++): DevinAdapterTimeouts {
++  return {
++    turnIdleMs: resolveAcpTurnIdleTimeoutMs({
++      envVar: "SYNARA_DEVIN_TURN_IDLE_TIMEOUT_MS",
++      defaultMs: 30 * 60 * 1000,
++      env,
++    }),
++    toolIdleMs: resolveAcpTurnIdleTimeoutMs({
++      envVar: "SYNARA_DEVIN_TOOL_IDLE_TIMEOUT_MS",
++      defaultMs: 60 * 60 * 1000,
++      env,
++    }),
++  };
++}
++
+ interface DevinAdapterLiveOptions {
+   readonly nativeEventLogPath?: string;
+   readonly nativeEventLogger?: EventNdjsonLogger;
+   readonly makeAcpRuntime?: typeof makeDevinAcpRuntime;
++  readonly onSessionUpdateProcessed?: () => void;
++  readonly timeouts?: DevinAdapterTimeouts;
+ }
+ 
+ interface PendingApproval {
+@@ -266,6 +293,7 @@ interface DevinSessionContext extends SynaraHarnessPolicyDeliveryState {
+   // turn. Pruned to the just-settled turn on each dispatch (a straggler can
+   // lag by at most one turn on the FIFO session/update stream).
+   readonly turnToolCallIds: Map<string, TurnId>;
++  readonly devinToolCallLifecycleById: Map<string, "active" | "terminal">;
+   // Compared against acp.sessionUpdatesEnqueuedCount to detect when queued
+   // session updates have been fully handled by the notification consumer.
+   sessionUpdatesProcessed: number;
+@@ -1124,9 +1152,43 @@ function settleDevinActiveTurn(ctx: DevinSessionContext, turnId: TurnId): boolea
+     return false;
+   }
+   ctx.lastSettledTurnId = turnId;
++  clearDevinActiveToolCallIdleState(ctx);
+   return true;
+ }
+ 
++function resolveDevinCurrentIdleTimeoutMs(
++  ctx: Pick<DevinSessionContext, "devinToolCallLifecycleById">,
++  timeouts: DevinAdapterTimeouts,
++): number {
++  for (const lifecycle of ctx.devinToolCallLifecycleById.values()) {
++    if (lifecycle === "active") {
++      return timeouts.toolIdleMs;
++    }
++  }
++  return timeouts.turnIdleMs;
++}
++
++function updateDevinToolCallIdleState(
++  ctx: Pick<DevinSessionContext, "devinToolCallLifecycleById">,
++  toolCall: AcpToolCallState,
++): void {
++  const { toolCallId, status } = toolCall;
++  if (status === "completed" || status === "failed") {
++    ctx.devinToolCallLifecycleById.set(toolCallId, "terminal");
++    return;
++  }
++  if (
++    (status === "pending" || status === "inProgress") &&
++    ctx.devinToolCallLifecycleById.get(toolCallId) !== "terminal"
++  ) {
++    ctx.devinToolCallLifecycleById.set(toolCallId, "active");
++  }
++}
++
++function clearDevinActiveToolCallIdleState(ctx: DevinSessionContext): void {
++  ctx.devinToolCallLifecycleById.clear();
++}
++
+ export function closeDevinSessionResources(input: {
+   readonly scope: Scope.Closeable;
+   readonly config: Pick<DevinSessionConfig, "cleanup"> | undefined;
+@@ -1145,6 +1207,9 @@ export function makeDevinAdapter(
+   devinSettings: DevinAcpRuntimeSettings = {},
+   options?: DevinAdapterLiveOptions,
+ ) {
++  const timeouts = options?.timeouts ?? resolveDevinAdapterTimeouts();
++  const watchdogIntervalMs = Math.min(5_000, timeouts.turnIdleMs, timeouts.toolIdleMs);
++
+   return Effect.gen(function* () {
+     const fileSystem = yield* FileSystem.FileSystem;
+     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+@@ -1343,6 +1408,7 @@ export function makeDevinAdapter(
+       Effect.gen(function* () {
+         if (ctx.stopped) return;
+         ctx.stopped = true;
++        clearDevinActiveToolCallIdleState(ctx);
+         yield* cancelAgentGatewayTurn(ctx.gatewaySessionLease, ctx.activeTurnId);
+         ctx.gatewaySessionLease?.release();
+         yield* settleAcpPendingApprovalsAsCancelled(ctx.pendingApprovals);
+@@ -1866,6 +1932,7 @@ export function makeDevinAdapter(
+             lastPlanFingerprint: undefined,
+             lastTurnActivityAt: undefined,
+             turnToolCallIds: new Map(),
++            devinToolCallLifecycleById: new Map(),
+             sessionUpdatesProcessed: 0,
+             sessionConfigReady,
+             resumeReplayReady,
+@@ -1887,7 +1954,7 @@ export function makeDevinAdapter(
+               Effect.gen(function* () {
+                 // Only genuine turn-progress events keep the idle watchdog at
+                 // bay; mode/config/usage heartbeats must not mask a hung turn.
+-                if (isAcpTurnProgressEventTag(event._tag)) {
++                if (event._tag !== "ToolCallUpdated" && isAcpTurnProgressEventTag(event._tag)) {
+                   ctx.lastTurnActivityAt = Date.now();
+                 }
+                 switch (event._tag) {
+@@ -1993,6 +2060,8 @@ export function makeDevinAdapter(
+                       if (activeTurnId === undefined) {
+                         return;
+                       }
++                      ctx.lastTurnActivityAt = Date.now();
++                      updateDevinToolCallIdleState(ctx, event.toolCall);
+                       ctx.turnToolCallIds.set(event.toolCall.toolCallId, activeTurnId);
+                       yield* logNative(ctx.threadId, "session/update", event.rawPayload);
+                       const failedToolDetail = readAcpFailedToolDetail(event.toolCall);
+@@ -2075,6 +2144,7 @@ export function makeDevinAdapter(
+                 Effect.ensuring(
+                   Effect.sync(() => {
+                     ctx.sessionUpdatesProcessed += 1;
++                    options?.onSessionUpdateProcessed?.();
+                   }),
+                 ),
+               ),
+@@ -2330,6 +2400,7 @@ export function makeDevinAdapter(
+         const keptTurnId = ctx.lastSettledTurnId;
+         ctx.lastSettledTurnId = undefined;
+         ctx.activeTurnId = turnId;
++        clearDevinActiveToolCallIdleState(ctx);
+         ctx.activeTurnHadAssistantContent = false;
+         ctx.activeAssistantItemsWithContent.clear();
+         ctx.activeTurnFailedToolDetail = undefined;
+@@ -2508,8 +2579,9 @@ export function makeDevinAdapter(
+         yield* forkAcpAdapterTurnIdleWatchdog({
+           context: ctx,
+           turnId,
+-          idleTimeoutMs: DEVIN_TURN_IDLE_TIMEOUT_MS,
+-          checkIntervalMs: DEVIN_TURN_WATCHDOG_INTERVAL_MS,
++          idleTimeoutMs: timeouts.turnIdleMs,
++          currentIdleTimeoutMs: () => resolveDevinCurrentIdleTimeoutMs(ctx, timeouts),
++          checkIntervalMs: watchdogIntervalMs,
+           onIdleTimeout: (idleMs) => failDevinTurnAsTimedOut(ctx, turnId, idleMs),
+         });
+ 
+diff --git a/apps/server/src/provider/acp/AcpSessionRuntime.ts b/apps/server/src/provider/acp/AcpSessionRuntime.ts
+index d7af20f00..b183d450a 100644
+--- a/apps/server/src/provider/acp/AcpSessionRuntime.ts
++++ b/apps/server/src/provider/acp/AcpSessionRuntime.ts
+@@ -167,6 +167,48 @@ type AcpIncomingFrame =
+   | { readonly _tag: "error"; readonly error: unknown }
+   | { readonly _tag: "end" };
+ 
++export function normalizeAcpIncomingJsonMessages(
++  input: ReadableStream<Uint8Array>,
++  normalize: (message: unknown) => unknown,
++): ReadableStream<Uint8Array> {
++  const decoder = new TextDecoder();
++  const encoder = new TextEncoder();
++  let pending = "";
++  return input.pipeThrough(
++    new TransformStream<Uint8Array, Uint8Array>({
++      transform(chunk, controller) {
++        pending += decoder.decode(chunk, { stream: true });
++        const lines = pending.split("\n");
++        pending = lines.pop() ?? "";
++        for (const line of lines) {
++          const trimmed = line.trim();
++          if (!trimmed) {
++            controller.enqueue(encoder.encode("\n"));
++            continue;
++          }
++          try {
++            controller.enqueue(
++              encoder.encode(`${JSON.stringify(normalize(JSON.parse(trimmed)))}\n`),
++            );
++          } catch {
++            controller.enqueue(encoder.encode(`${line}\n`));
++          }
++        }
++      },
++      flush(controller) {
++        pending += decoder.decode();
++        if (!pending) return;
++        const trimmed = pending.trim();
++        try {
++          controller.enqueue(encoder.encode(JSON.stringify(normalize(JSON.parse(trimmed)))));
++        } catch {
++          controller.enqueue(encoder.encode(pending));
++        }
++      },
++    }),
++  );
++}
++
+ export type SessionEpoch = { generation: number; activeSessionId: Option.Option<string> };
+ const isActiveSessionId = (sessionId: string, epoch: SessionEpoch): boolean =>
+   Option.isSome(epoch.activeSessionId) && epoch.activeSessionId.value === sessionId;
+@@ -328,6 +370,7 @@ export interface AcpSessionRuntimeOptions {
+     readonly hardTimeoutMs?: number;
+   };
+   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
++  readonly normalizeIncomingMessage?: (message: unknown) => unknown;
+   readonly protocolLogging?: {
+     readonly logIncoming?: boolean;
+     readonly logOutgoing?: boolean;
+@@ -520,7 +563,7 @@ function officialSdkError(acpSdk: AcpSdkModule, error: unknown): AcpErrors.AcpEr
+ const makeOfficialSdkClient = Effect.fnUntraced(function* (
+   child: ChildProcessSpawner.ChildProcessHandle,
+   runtimeScope: Scope.Scope,
+-  protocolLogging?: AcpSessionRuntimeOptions["protocolLogging"],
++  options: Pick<AcpSessionRuntimeOptions, "normalizeIncomingMessage" | "protocolLogging">,
+ ) {
+   // The ACP SDK is only needed once a provider process is actually spawned, so
+   // it is imported here instead of at module scope (see AcpSdk.ts).
+@@ -556,12 +599,12 @@ const makeOfficialSdkClient = Effect.fnUntraced(function* (
+     payload: unknown,
+   ) => {
+     if (
+-      (direction === "incoming" && protocolLogging?.logIncoming !== true) ||
+-      (direction === "outgoing" && protocolLogging?.logOutgoing !== true)
++      (direction === "incoming" && options.protocolLogging?.logIncoming !== true) ||
++      (direction === "outgoing" && options.protocolLogging?.logOutgoing !== true)
+     ) {
+       return Effect.void;
+     }
+-    const logger = protocolLogging?.logger;
++    const logger = options.protocolLogging?.logger;
+     return logger?.({ direction, stage, payload }) ?? Effect.void;
+   };
+   let sessionUpdateTail = Promise.resolve();
+@@ -630,7 +673,7 @@ const makeOfficialSdkClient = Effect.fnUntraced(function* (
+     Effect.forkIn(runtimeScope),
+   );
+   yield* Scope.addFinalizer(runtimeScope, Queue.shutdown(incoming));
+-  const input = new ReadableStream<Uint8Array>({
++  const rawInput = new ReadableStream<Uint8Array>({
+     pull(controller) {
+       return Effect.runPromise(Queue.take(incoming)).then((frame) => {
+         switch (frame._tag) {
+@@ -655,6 +698,10 @@ const makeOfficialSdkClient = Effect.fnUntraced(function* (
+     },
+   });
+ 
++  const input = options.normalizeIncomingMessage
++    ? normalizeAcpIncomingJsonMessages(rawInput, options.normalizeIncomingMessage)
++    : rawInput;
++
+   const clientApp = acpSdk
+     .client({ name: "synara" })
+     .onRequest(acpSdk.methods.client.session.requestPermission, ({ params }) =>
+@@ -1375,7 +1422,7 @@ const makeAcpSessionRuntime = (
+     // prompt/fork waiter before waiting for the child process to exit.
+     yield* Effect.addFinalizer(() => loadReplayGate?.release ?? Effect.void);
+ 
+-    const acp = yield* makeOfficialSdkClient(child, runtimeScope, options.protocolLogging);
++    const acp = yield* makeOfficialSdkClient(child, runtimeScope, options);
+ 
+     const resolveConfigOptionUpdateWaiters = (
+       configOptions: ReadonlyArray<Acp.SessionConfigOption>,
+diff --git a/apps/server/src/provider/acp/DevinAcpSupport.test.ts b/apps/server/src/provider/acp/DevinAcpSupport.test.ts
+index 3df6de7ac..66ffeb231 100644
+--- a/apps/server/src/provider/acp/DevinAcpSupport.test.ts
++++ b/apps/server/src/provider/acp/DevinAcpSupport.test.ts
+@@ -1,11 +1,13 @@
+ import { Effect, Layer } from "effect";
+ import * as AcpErrors from "./AcpErrors.ts";
++import * as OfficialAcp from "@agentclientprotocol/sdk";
+ import type * as Acp from "@agentclientprotocol/sdk";
+ import { ChildProcessSpawner } from "effect/unstable/process";
+ import { afterEach, describe, expect, it, vi } from "vitest";
+ 
+ import {
+   AcpSessionRuntime,
++  normalizeAcpIncomingJsonMessages,
+   type AcpSessionRuntimeOptions,
+   type AcpSessionRuntimeShape,
+ } from "./AcpSessionRuntime.ts";
+@@ -14,6 +16,7 @@ import {
+   buildDevinAcpSpawnInput,
+   makeDevinAcpRuntime,
+   mapDevinAcpCommands,
++  normalizeDevinGetOutputToolCall,
+   parseDevinCredentialsToml,
+   resolveDevinAcpAuthMethodId,
+   resolveDevinCredentialsPath,
+@@ -21,6 +24,356 @@ import {
+   validateDevinApiServerUrl,
+ } from "./DevinAcpSupport.ts";
+ 
++const textEncoder = new TextEncoder();
++
++type GetOutputArguments = {
++  readonly shell_id: string;
++  readonly timeout: number;
++  readonly incremental: boolean;
++};
++
++function parseDevinGetOutputParams(value: unknown): { readonly arguments: GetOutputArguments } {
++  if (typeof value !== "object" || value === null || Array.isArray(value)) {
++    throw OfficialAcp.RequestError.invalidParams();
++  }
++  const params = value as Record<string, unknown>;
++  const argumentsValue = params.arguments;
++  if (
++    Object.keys(params).some((key) => key !== "arguments") ||
++    typeof argumentsValue !== "object" ||
++    argumentsValue === null ||
++    Array.isArray(argumentsValue)
++  ) {
++    throw OfficialAcp.RequestError.invalidParams();
++  }
++  const args = argumentsValue as Record<string, unknown>;
++  if (
++    Object.keys(args).some(
++      (key) => key !== "shell_id" && key !== "timeout" && key !== "incremental",
++    ) ||
++    typeof args.shell_id !== "string" ||
++    typeof args.timeout !== "number" ||
++    typeof args.incremental !== "boolean"
++  ) {
++    throw OfficialAcp.RequestError.invalidParams();
++  }
++  return {
++    arguments: {
++      shell_id: args.shell_id,
++      timeout: args.timeout,
++      incremental: args.incremental,
++    },
++  };
++}
++
++async function normalizeTransportChunks(
++  chunks: ReadonlyArray<Uint8Array>,
++): Promise<ReadonlyArray<Record<string, unknown>>> {
++  let controller!: ReadableStreamDefaultController<Uint8Array>;
++  const input = new ReadableStream<Uint8Array>({
++    start(next) {
++      controller = next;
++    },
++  });
++  const stream = normalizeAcpIncomingJsonMessages(input, normalizeDevinGetOutputToolCall);
++  const messagesPromise = (async () => {
++    const messages: Record<string, unknown>[] = [];
++    const reader = stream.getReader();
++    const decoder = new TextDecoder();
++    let pending = "";
++    while (true) {
++      const { value, done } = await reader.read();
++      if (done) break;
++      pending += decoder.decode(value, { stream: true });
++      const lines = pending.split("\n");
++      pending = lines.pop() ?? "";
++      for (const line of lines) {
++        if (line.trim()) messages.push(JSON.parse(line) as Record<string, unknown>);
++      }
++    }
++    pending += decoder.decode();
++    if (pending.trim()) messages.push(JSON.parse(pending) as Record<string, unknown>);
++    return messages;
++  })();
++  for (const chunk of chunks) controller.enqueue(chunk);
++  controller.close();
++  return messagesPromise;
++}
++
++function getOutputRequest(
++  id: number,
++  argumentsValue: Record<string, unknown>,
++  extraParams: Record<string, unknown> = {},
++): string {
++  return JSON.stringify({
++    jsonrpc: "2.0",
++    id,
++    method: "get_output",
++    params: { arguments: argumentsValue, ...extraParams },
++  });
++}
++
++function requestArguments(message: Record<string, unknown>): Record<string, unknown> {
++  return ((message.params as Record<string, unknown>).arguments ?? {}) as Record<string, unknown>;
++}
++
++describe("AcpSessionRuntime Devin incoming byte transport normalization", () => {
++  it("normalizes one get_output request split across byte chunks", async () => {
++    const request = `${getOutputRequest(1, {
++      shell_id: "split-shell",
++      block: true,
++      timeout: 25_000,
++      incremental: true,
++    })}\n`;
++    const splitAt = Math.floor(request.length / 2);
++    const [message] = await normalizeTransportChunks([
++      textEncoder.encode(request.slice(0, splitAt)),
++      textEncoder.encode(request.slice(splitAt)),
++    ]);
++    expect(requestArguments(message!)).toEqual({
++      shell_id: "split-shell",
++      timeout: 25_000,
++      incremental: true,
++    });
++  });
++
++  it("normalizes multiple JSON lines in one chunk in order", async () => {
++    const messages = await normalizeTransportChunks([
++      textEncoder.encode(
++        [
++          getOutputRequest(1, {
++            shell_id: "first-shell",
++            block: false,
++            timeout: 1,
++            incremental: false,
++          }),
++          getOutputRequest(2, {
++            shell_id: "second-shell",
++            block: true,
++            timeout: 2,
++            incremental: true,
++          }),
++        ].join("\n") + "\n",
++      ),
++    ]);
++    expect(messages.map(requestArguments)).toEqual([
++      { shell_id: "first-shell", timeout: 1, incremental: false },
++      { shell_id: "second-shell", timeout: 2, incremental: true },
++    ]);
++  });
++
++  it("preserves multibyte UTF-8 split across chunks", async () => {
++    const bytes = textEncoder.encode(
++      `${getOutputRequest(1, {
++        shell_id: "shell-雪",
++        block: true,
++        timeout: 3,
++        incremental: true,
++      })}\n`,
++    );
++    const multibyteStart = bytes.indexOf(0xe9);
++    expect(multibyteStart).toBeGreaterThan(0);
++    const [message] = await normalizeTransportChunks([
++      bytes.subarray(0, multibyteStart + 1),
++      bytes.subarray(multibyteStart + 1),
++    ]);
++    expect(requestArguments(message!)).toEqual({
++      shell_id: "shell-雪",
++      timeout: 3,
++      incremental: true,
++    });
++  });
++
++  it("flushes final valid input without a trailing newline at EOF", async () => {
++    const [message] = await normalizeTransportChunks([
++      textEncoder.encode(
++        getOutputRequest(1, {
++          shell_id: "eof-shell",
++          block: true,
++          timeout: 4,
++          incremental: true,
++        }),
++      ),
++    ]);
++    expect(requestArguments(message!)).toEqual({
++      shell_id: "eof-shell",
++      timeout: 4,
++      incremental: true,
++    });
++  });
++
++  it("lets the SDK skip an invalid line and handle the following normalized request", async () => {
++    let controller!: ReadableStreamDefaultController<Uint8Array>;
++    const input = new ReadableStream<Uint8Array>({
++      start(next) {
++        controller = next;
++      },
++    });
++    const handled: GetOutputArguments[] = [];
++    const responses: Array<{ readonly id?: number; readonly result?: unknown }> = [];
++    const output = new WritableStream<Uint8Array>({
++      write(chunk) {
++        responses.push(
++          JSON.parse(new TextDecoder().decode(chunk).trim()) as {
++            readonly id?: number;
++            readonly result?: unknown;
++          },
++        );
++      },
++    });
++    const connection = OfficialAcp.client({ name: "transport-recovery-test" })
++      .onRequest("get_output", parseDevinGetOutputParams, ({ params }) => {
++        handled.push(params.arguments);
++        return { output: params.arguments.shell_id };
++      })
++      .connect(
++        OfficialAcp.ndJsonStream(
++          output,
++          normalizeAcpIncomingJsonMessages(input, normalizeDevinGetOutputToolCall),
++        ),
++      );
++    controller.enqueue(
++      textEncoder.encode(
++        `not-json\n${getOutputRequest(1, {
++          shell_id: "recovered-shell",
++          block: true,
++          timeout: 5,
++          incremental: true,
++        })}\n`,
++      ),
++    );
++    controller.close();
++    await new Promise<void>((resolve) => setTimeout(resolve, 0));
++    expect(handled).toEqual([{ shell_id: "recovered-shell", timeout: 5, incremental: true }]);
++    expect(responses).toEqual([{ jsonrpc: "2.0", id: 1, result: { output: "recovered-shell" } }]);
++    connection.close();
++  });
++
++  it("preserves an invalid line while normalizing the following valid JSON line", async () => {
++    let controller!: ReadableStreamDefaultController<Uint8Array>;
++    const input = new ReadableStream<Uint8Array>({
++      start(next) {
++        controller = next;
++      },
++    });
++    const reader = normalizeAcpIncomingJsonMessages(
++      input,
++      normalizeDevinGetOutputToolCall,
++    ).getReader();
++    controller.enqueue(
++      textEncoder.encode(
++        `not-json\n${getOutputRequest(1, {
++          shell_id: "recovered-shell",
++          block: true,
++          timeout: 5,
++          incremental: true,
++        })}\n`,
++      ),
++    );
++    controller.close();
++    const decoded: string[] = [];
++    while (true) {
++      const { value, done } = await reader.read();
++      if (done) break;
++      decoded.push(new TextDecoder().decode(value));
++    }
++    expect(decoded[0]).toBe("not-json\n");
++    expect(requestArguments(JSON.parse(decoded[1]!) as Record<string, unknown>)).toEqual({
++      shell_id: "recovered-shell",
++      timeout: 5,
++      incremental: true,
++    });
++  });
++
++  it("removes exactly boolean block and preserves shell_id, timeout, and incremental", async () => {
++    const [message] = await normalizeTransportChunks([
++      textEncoder.encode(
++        `${getOutputRequest(1, {
++          shell_id: "exact-shell",
++          block: true,
++          timeout: 6,
++          incremental: false,
++        })}\n`,
++      ),
++    ]);
++    expect(requestArguments(message!)).toEqual({
++      shell_id: "exact-shell",
++      timeout: 6,
++      incremental: false,
++    });
++  });
++
++  it("keeps unknown fields and nonboolean block visible to strict validation", async () => {
++    const messages = await normalizeTransportChunks([
++      textEncoder.encode(
++        [
++          getOutputRequest(1, {
++            shell_id: "unknown-shell",
++            block: true,
++            timeout: 7,
++            incremental: true,
++            unknown: "rejected",
++          }),
++          getOutputRequest(2, {
++            shell_id: "nonboolean-shell",
++            block: "true",
++            timeout: 8,
++            incremental: true,
++          }),
++        ].join("\n") + "\n",
++      ),
++    ]);
++    expect(() => parseDevinGetOutputParams(messages[0]!.params)).toThrow();
++    expect(() => parseDevinGetOutputParams(messages[1]!.params)).toThrow();
++  });
++});
++
++describe("normalizeDevinGetOutputToolCall", () => {
++  it("removes only a boolean block from Devin get_output arguments", () => {
++    expect(
++      normalizeDevinGetOutputToolCall({
++        jsonrpc: "2.0",
++        id: 1,
++        method: "get_output",
++        params: {
++          arguments: {
++            shell_id: "ed1fa1",
++            block: true,
++            timeout: 25000,
++            incremental: true,
++          },
++        },
++      }),
++    ).toEqual({
++      jsonrpc: "2.0",
++      id: 1,
++      method: "get_output",
++      params: {
++        arguments: { shell_id: "ed1fa1", timeout: 25000, incremental: true },
++      },
++    });
++  });
++
++  it("preserves unrelated unknown fields for strict validation", () => {
++    const message = {
++      method: "get_output",
++      params: { arguments: { shell_id: "ed1fa1", block: true, timeout: 25000, extra: true } },
++    };
++    expect(normalizeDevinGetOutputToolCall(message)).toEqual({
++      method: "get_output",
++      params: { arguments: { shell_id: "ed1fa1", timeout: 25000, extra: true } },
++    });
++  });
++
++  it("keeps non-boolean block values for strict validation", () => {
++    const message = {
++      method: "get_output",
++      params: { arguments: { shell_id: "ed1fa1", block: "true", timeout: 25000 } },
++    };
++    expect(normalizeDevinGetOutputToolCall(message)).toBe(message);
++  });
++});
++
+ describe("mapDevinAcpCommands", () => {
+   it("maps Devin ACP command descriptors for the composer", () => {
+     expect(
+@@ -128,6 +481,7 @@ describe("makeDevinAcpRuntime", () => {
+       expect(runtime).toBe(fakeRuntime);
+       expect(capturedOptions?.authPolicy).toBe("on-demand");
+       expect(capturedOptions?.validateInitializeResult).toBeTypeOf("function");
++      expect(capturedOptions?.normalizeIncomingMessage).toBe(normalizeDevinGetOutputToolCall);
+ 
+       await expect(
+         Effect.runPromise(
+diff --git a/apps/server/src/provider/acp/DevinAcpSupport.ts b/apps/server/src/provider/acp/DevinAcpSupport.ts
+index 11306f5d5..026aeffa6 100644
+--- a/apps/server/src/provider/acp/DevinAcpSupport.ts
++++ b/apps/server/src/provider/acp/DevinAcpSupport.ts
+@@ -61,6 +61,34 @@ const DEVIN_API_SERVER_URL_ENV_KEYS = ["WINDSURF_API_SERVER_URL", "DEVIN_API_SER
+ const DEVIN_COMPACT_COMMAND_NAME = "compact";
+ const DEVIN_COMPACT_PROMPT = "/compact";
+ 
++export function normalizeDevinGetOutputToolCall(message: unknown): unknown {
++  if (typeof message !== "object" || message === null || Array.isArray(message)) return message;
++  const request = message as Record<string, unknown>;
++  const params = request.params;
++  if (
++    request.method !== "get_output" ||
++    typeof params !== "object" ||
++    params === null ||
++    Array.isArray(params)
++  ) {
++    return message;
++  }
++  const argumentsValue = (params as Record<string, unknown>).arguments;
++  if (
++    typeof argumentsValue !== "object" ||
++    argumentsValue === null ||
++    Array.isArray(argumentsValue) ||
++    typeof (argumentsValue as Record<string, unknown>).block !== "boolean"
++  ) {
++    return message;
++  }
++  const { block: _block, ...argumentsWithoutBlock } = argumentsValue as Record<string, unknown>;
++  return {
++    ...request,
++    params: { ...params, arguments: argumentsWithoutBlock },
++  };
++}
++
+ export interface DevinAcpCredentials {
+   readonly apiKey?: string;
+   readonly apiServerUrl?: string;
+@@ -402,6 +430,7 @@ export const makeDevinAcpRuntime = (
+             Effect.asVoid,
+           ),
+         authenticateMeta,
++        normalizeIncomingMessage: normalizeDevinGetOutputToolCall,
+       }).pipe(
+         Layer.provide(
+           Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, input.childProcessSpawner),
+diff --git a/apps/web/src/components/ChatView.browser.tsx b/apps/web/src/components/ChatView.browser.tsx
+index 212803621..c5156cf68 100644
+--- a/apps/web/src/components/ChatView.browser.tsx
++++ b/apps/web/src/components/ChatView.browser.tsx
+@@ -6498,15 +6498,86 @@ describe("ChatView timeline estimator parity (full app)", () => {
+         { timeout: 8_000, interval: 16 },
+       );
+ 
+-      // The dialog closes on success and the sidebar picks the project up from
+-      // the refreshed shell snapshot.
++      // The dialog closes only after the new project's draft route commits.
+       await expect
+         .element(page.getByRole("heading", { name: "Create project" }))
+         .not.toBeInTheDocument();
+       await expect
+         .element(page.getByText("new-project", { exact: true }).first())
+         .toBeInTheDocument();
++      const draftPath = await waitForURL(
++        mounted.router,
++        (path) => UUID_ROUTE_RE.test(path),
++        "Project creation should land on a draft thread route.",
++      );
++      expect(
++        useComposerDraftStore.getState().getDraftThread(ThreadId.makeUnsafe(draftPath.slice(1))),
++      ).toMatchObject({
++        projectId: expect.any(String),
++      });
++      await expect.element(page.getByTestId("composer-editor")).toBeInTheDocument();
++    } finally {
++      await mounted.cleanup();
++    }
++  });
++
++  it("keeps the prior route and exposes an error when project draft navigation is superseded", async () => {
++    const mounted = await mountChatView({
++      viewport: DEFAULT_VIEWPORT,
++      snapshot: createSnapshotForTargetUser({
++        targetMessageId: "msg-user-create-project-superseded" as MessageId,
++        targetText: "create project superseded navigation",
++      }),
++    });
++    const previousPath = mounted.router.state.location.pathname;
++    const previousNativeApi = window.nativeApi;
++    const wsNativeApi = readNativeApi();
++    expect(wsNativeApi).toBeDefined();
++    Object.defineProperty(window, "nativeApi", {
++      configurable: true,
++      value: {
++        ...wsNativeApi,
++        orchestration: {
++          ...wsNativeApi?.orchestration,
++          dispatchCommand: vi.fn(async (command: unknown) => {
++            if (recordProjectCreateCommand(command)) {
++              return { sequence: fixture.snapshot.snapshotSequence };
++            }
++            return { sequence: fixture.snapshot.snapshotSequence + 1 };
++          }),
++          getShellSnapshot: vi.fn(async () => createShellSnapshotFromReadModel(fixture.snapshot)),
++        },
++      },
++    });
++    const navigateSpy = vi.spyOn(mounted.router, "navigate").mockImplementation(async (options) => {
++      const targetThreadId =
++        typeof options === "object" && options && "params" in options
++          ? (options.params as { threadId?: string } | undefined)?.threadId
++          : undefined;
++      if (targetThreadId) return;
++      return undefined;
++    });
++
++    try {
++      await page.getByRole("button", { name: "Add project", exact: true }).click();
++      await page.getByLabelText("Project folder path").fill("/repo/superseded-project");
++      await page.getByRole("button", { name: "Create project", exact: true }).click();
++
++      await expect
++        .element(page.getByRole("alert"))
++        .toHaveTextContent("Project creation was superseded before its chat opened.");
++      expect(mounted.router.state.location.pathname).toBe(previousPath);
++      await expect.element(page.getByTestId("composer-editor")).toBeInTheDocument();
+     } finally {
++      navigateSpy.mockRestore();
++      if (previousNativeApi) {
++        Object.defineProperty(window, "nativeApi", {
++          configurable: true,
++          value: previousNativeApi,
++        });
++      } else {
++        Reflect.deleteProperty(window, "nativeApi");
++      }
+       await mounted.cleanup();
+     }
+   });
+diff --git a/apps/web/src/components/Sidebar.tsx b/apps/web/src/components/Sidebar.tsx
+index 683f45adb..e6481fa22 100644
+--- a/apps/web/src/components/Sidebar.tsx
++++ b/apps/web/src/components/Sidebar.tsx
+@@ -2144,10 +2144,11 @@ export default function Sidebar() {
+         return true;
+       }
+ 
+-      void handleNewThread(projectId, {
+-        envMode: appSettings.defaultThreadEnvMode,
+-      }).catch(() => undefined);
+-      return true;
++      return (
++        (await handleNewThread(projectId, {
++          envMode: appSettings.defaultThreadEnvMode,
++        })) !== null
++      );
+     },
+     [
+       appSettings.defaultThreadEnvMode,
+@@ -2187,10 +2188,11 @@ export default function Sidebar() {
+       }
+ 
+       setProjectExpanded(projectId, true);
+-      void handleNewThread(projectId, {
+-        envMode: appSettings.defaultThreadEnvMode,
+-      }).catch(() => undefined);
+-      return true;
++      return (
++        (await handleNewThread(projectId, {
++          envMode: appSettings.defaultThreadEnvMode,
++        })) !== null
++      );
+     },
+     [
+       appSettings.defaultThreadEnvMode,
+@@ -2625,9 +2627,12 @@ export default function Sidebar() {
+         // snapshot is just slow to catch up, continue with the local new-thread flow
+         // instead of surfacing a false-negative sidebar sync error.
+         setProjectExpanded(creationResult.projectId, true);
+-        void handleNewThread(creationResult.projectId, {
++        const threadId = await handleNewThread(creationResult.projectId, {
+           envMode: appSettings.defaultThreadEnvMode,
+-        }).catch(() => undefined);
++        });
++        if (!threadId) {
++          throw new Error("Project creation was superseded before its chat opened.");
++        }
+       };
+ 
+       await runExclusiveProjectAddition(projectAdditionLockRef, runAddProject);

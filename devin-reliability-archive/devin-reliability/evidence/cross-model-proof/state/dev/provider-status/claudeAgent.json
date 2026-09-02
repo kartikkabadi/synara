@@ -1,0 +1,20 @@
+{
+  "provider": "claudeAgent",
+  "status": "ready",
+  "available": true,
+  "authStatus": "authenticated",
+  "version": "2.1.251",
+  "supportsAutoRuntimeMode": true,
+  "checkedAt": "2026-09-01T16:28:37.099Z",
+  "autoRuntimeModeBinaryPath": "claude",
+  "versionAdvisory": {
+    "status": "unknown",
+    "currentVersion": "2.1.251",
+    "latestVersion": null,
+    "latestVersionKnowable": false,
+    "updateCommand": "claude update",
+    "canUpdate": true,
+    "checkedAt": "2026-09-01T16:28:45.122Z",
+    "message": null
+  }
+}

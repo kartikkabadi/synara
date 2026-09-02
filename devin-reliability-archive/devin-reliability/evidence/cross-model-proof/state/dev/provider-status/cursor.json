@@ -1,0 +1,18 @@
+{
+  "provider": "cursor",
+  "status": "ready",
+  "available": true,
+  "authStatus": "authenticated",
+  "version": "2026.08.11-e8db854",
+  "checkedAt": "2026-09-01T16:28:37.108Z",
+  "versionAdvisory": {
+    "status": "unknown",
+    "currentVersion": "2026.08.11-e8db854",
+    "latestVersion": null,
+    "latestVersionKnowable": false,
+    "updateCommand": "cursor-agent update",
+    "canUpdate": true,
+    "checkedAt": "2026-09-01T16:28:45.120Z",
+    "message": null
+  }
+}

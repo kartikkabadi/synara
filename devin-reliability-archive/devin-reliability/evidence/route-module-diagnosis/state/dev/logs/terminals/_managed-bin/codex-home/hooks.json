@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/tmp/devin-route-module-diagnosis/state/dev/logs/terminals/_managed-bin/notify-hook.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/tmp/devin-route-module-diagnosis/state/dev/logs/terminals/_managed-bin/notify-hook.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
