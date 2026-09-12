@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added Oh My Pi (OMP) as an ACP provider, with model discovery via `omp models --json`, per-model reasoning efforts (including `max`), eager catalog pre-warming at startup, and OMP thread/session normalization.
+
+### Fixed
+
+- Fixed OMP threads being mislabeled as Codex when the session-provider normalizer fell through to the Codex default instead of preserving the OMP provider.
+
 ## 0.8.3 - 2026-09-06
 
 Hotfix for the missing packaged dependency reported immediately after 0.8.2.
@@ -632,7 +642,6 @@ These are recorded before/after experiments for the merged changes, not a new v0
 - Added a compensating checkpoint-revert saga that captures the pre-revert worktree in a managed rescue ref and restores it if provider conversation rollback fails.
 - Added deterministic, retryable revert completion and user-visible failure activities that identify retained rescue refs when manual recovery may be needed.
 - Added bounded provider-command attempts and urgent lifecycle control so one unresponsive adapter or per-thread lock cannot stall every task.
-- Added Oh My Pi (OMP) as an ACP provider, with model discovery via `omp models --json`, per-model reasoning efforts (including `max`), eager catalog pre-warming at startup, and OMP thread/session normalization.
 
 ### Changed
 
@@ -657,7 +666,6 @@ These are recorded before/after experiments for the merged changes, not a new v0
 - Fixed failed stop controls producing no visible explanation in the composer or keyboard shortcut path.
 - Fixed visible thread details being evicted or losing a refresh race and temporarily rendering as an empty conversation.
 - Fixed profile-stat cleanup purging soft-deleted threads without evidence of a manual delete, and retention sweeping archived or newly created fork and handoff threads because of inherited message timestamps.
-- Fixed OMP threads being mislabeled as Codex when the session-provider normalizer fell through to the Codex default instead of preserving the OMP provider.
 
 ### Verification
 
