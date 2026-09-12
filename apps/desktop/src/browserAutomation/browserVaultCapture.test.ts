@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { BrowserVaultSnapshot } from "@synara/contracts";
-import type { CaptureContext } from "betterwright/capture";
+import type { CaptureContextShim } from "./browserVaultCapture";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserAutomationVisibleRuntime } from "../browserManager";
 import type { BrowserVault } from "./browserVault";
@@ -61,7 +61,7 @@ describe("native credential capture lifecycle", () => {
     const f = fixture();
     f.update({ settings: { offerSave: true, autosave: false, agentUse: true } });
     await vi.waitFor(() => expect(mocks.install).toHaveBeenCalled());
-    const context = mocks.install.mock.calls[0]![0] as CaptureContext;
+    const context = mocks.install.mock.calls[0]![0] as CaptureContextShim;
     const debuggerApi = Object.assign(new EventEmitter(), {
       isAttached: () => true,
       sendCommand: vi.fn(async (method: string) =>

@@ -11,14 +11,33 @@ const mocks = vi.hoisted(() => ({
   closeBrowser: vi.fn(),
   closeConnection: vi.fn(),
   connect: vi.fn(),
+  constructedOptions: { current: undefined as unknown },
 }));
 vi.mock("betterwright", () => ({
   listCookieSourceBrowsers: mocks.sources,
   listCookieSourceProfiles: mocks.profiles,
   NetworkPolicy: class {},
   BetterWright: class {
-    syncCookies = mocks.sync;
-    close = mocks.closeBrowser;
+    conn: { close(): Promise<void> } | undefined;
+    closing: Promise<void> | undefined;
+    constructor(
+      public options: {
+        hostTarget: { connect(arg: unknown): Promise<{ close(): Promise<void> }> };
+      },
+    ) {
+      mocks.constructedOptions.current = options;
+    }
+    syncCookies = async (syncOptions?: unknown) => {
+      this.conn ??= await this.options.hostTarget.connect({
+        proxyUrl: "socks5://127.0.0.1:1",
+      });
+      return mocks.sync(syncOptions);
+    };
+    close = () =>
+      (this.closing ??= (async () => {
+        await this.conn?.close();
+        await mocks.closeBrowser();
+      })());
   },
 }));
 vi.mock("./betterwrightConnection", () => ({ openBetterwrightConnection: mocks.connect }));
@@ -49,9 +68,16 @@ beforeEach(() => {
   });
   mocks.closeBrowser.mockResolvedValue(undefined);
   mocks.closeConnection.mockResolvedValue(undefined);
-  mocks.connect.mockResolvedValue({
-    provider: { cdpUrl: "ws://127.0.0.1:1234/browser" },
-    close: mocks.closeConnection,
+  mocks.constructedOptions.current = undefined;
+  mocks.connect.mockImplementation(async () => {
+    let closing: Promise<void> | undefined;
+    return {
+      provider: { cdpUrl: "ws://127.0.0.1:1234/browser" },
+      get closed() {
+        return closing !== undefined;
+      },
+      close: (cancel = true) => (closing ??= Promise.resolve(mocks.closeConnection(cancel))),
+    };
   });
 });
 
@@ -96,8 +122,12 @@ describe("human-only cookie import", () => {
       domains: ["example.test"],
       windowsAppBound: "disabled",
       timeoutMs: 30_000,
-      cloudConsent: "cdp:127.0.0.1:1234",
     });
+    const options = mocks.constructedOptions.current as Record<string, unknown>;
+    expect(options.hostTarget).toEqual(expect.objectContaining({ connect: expect.any(Function) }));
+    expect(options).toMatchObject({ downloadPolicy: "deny", credentialCapture: false });
+    expect(options).not.toHaveProperty("provider");
+    expect(options).not.toHaveProperty("hostOwnedTarget");
     expect(mocks.closeConnection).toHaveBeenCalledWith(false);
     expect(mocks.closeBrowser).toHaveBeenCalled();
     expect(contents.listenerCount("did-start-navigation")).toBe(0);
@@ -231,7 +261,6 @@ describe("human-only cookie import", () => {
       source: { browser: "chrome", profile: "Default" },
       windowsAppBound: "disabled",
       timeoutMs: 30_000,
-      cloudConsent: "cdp:127.0.0.1:1234",
     });
     expect(mocks.sync.mock.calls[0]![0]).not.toHaveProperty("domains");
     expect(rememberSessionImport).toHaveBeenCalledWith(["example.test"]);
