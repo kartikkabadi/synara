@@ -1890,6 +1890,7 @@ export default function ChatView({
     providerOptionsForDispatch,
     gitCwd,
     piAgentDir: settings.piAgentDir,
+    ompAgentDir: settings.ompAgentDir,
   });
   const activeRootBranch = useMemo(
     () =>
