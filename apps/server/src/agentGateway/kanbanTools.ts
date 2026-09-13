@@ -1,5 +1,6 @@
 import {
   THREAD_GOAL_MAX_CHARS,
+  THREAD_NOTES_MAX_CHARS,
   type OrchestrationThreadShell,
   type TurnDispatchMode,
   SynaraCreateThreadsInput,
@@ -105,6 +106,12 @@ const MAX_CARDS_PER_BOARD = 500;
 /** Card titles stay one-liners; prompts/descriptions share the goal cap. */
 const MAX_KANBAN_TITLE_CHARS = 256;
 const MAX_KANBAN_TEXT_CHARS = THREAD_GOAL_MAX_CHARS;
+/**
+ * A draft/update `description` persists as thread notes, so its real bound is
+ * the notes schema cap — validating it against the larger prompt cap would
+ * pass the arg check then fail inside the meta update (a partial draft).
+ */
+const MAX_KANBAN_NOTES_CHARS = THREAD_NOTES_MAX_CHARS;
 
 function deriveCard(
   thread: OrchestrationThreadShell,
@@ -388,12 +395,46 @@ export function makeAgentGatewayKanbanTools(input: KanbanToolsInput): ReadonlyAr
       yield* assertCallerMayDriveThread(caller, card).pipe(
         Effect.mapError((error) => new ToolInputError(errorText(error))),
       );
+      // The board only renders ordinary projects — writes must honor the same
+      // membership or a container project (managed chat/Studio rows) ends up
+      // holding cards nothing can see or drive.
+      yield* requireOrdinaryKanbanProject(
+        card.projectId,
+        `Thread "${threadId}" is in a container project with no Kanban board.`,
+      );
       if ((card.archivedAt ?? null) !== null) {
         return yield* Effect.fail(
           new ToolInputError(`Thread "${threadId}" is archived and has no board card.`),
         );
       }
       return card;
+    });
+
+  /**
+   * Rejects when the project is not an ordinary (board-visible) project —
+   * managed chat, Studio, and legacy home-chat containers have no board cards.
+   * Callers pass the project they are about to write into.
+   */
+  const requireOrdinaryKanbanProject = (
+    projectId: OrchestrationThreadShell["projectId"],
+    deniedMessage: string,
+  ): Effect.Effect<void, ToolInputError> =>
+    Effect.gen(function* () {
+      const snapshot = yield* snapshotQuery
+        .getShellSnapshot()
+        .pipe(Effect.mapError((error) => new ToolInputError(errorText(error))));
+      const project = snapshot.projects.find((candidate) => candidate.id === projectId);
+      if (
+        project === undefined ||
+        !isOrdinaryProjectRow({
+          projectKind: project.kind,
+          projectTitle: project.title,
+          projectWorkspaceRoot: project.workspaceRoot,
+          workspacePaths,
+        })
+      ) {
+        return yield* Effect.fail(new ToolInputError(deniedMessage));
+      }
     });
 
   const readBoard: ToolEntry = {
@@ -660,6 +701,12 @@ export function makeAgentGatewayKanbanTools(input: KanbanToolsInput): ReadonlyAr
                   ),
                 );
               }
+              // The board only renders ordinary projects — a caller inside a
+              // managed chat/Studio container would create an invisible card.
+              yield* requireOrdinaryKanbanProject(
+                callerShell.projectId,
+                `Cannot create a Kanban task from project "${callerShell.projectId}" — container projects have no board.`,
+              );
               // Default the provider to the caller's own and the model to the
               // caller's own thread model, so an agent never spawns a task on a
               // provider it cannot reason about — or silently on a different
@@ -944,7 +991,7 @@ export function makeAgentGatewayKanbanTools(input: KanbanToolsInput): ReadonlyAr
           },
           description: {
             type: "string",
-            maxLength: MAX_KANBAN_TEXT_CHARS,
+            maxLength: MAX_KANBAN_NOTES_CHARS,
             description: "Optional task description; stored as the thread notes.",
           },
           projectId: {
@@ -990,7 +1037,7 @@ export function makeAgentGatewayKanbanTools(input: KanbanToolsInput): ReadonlyAr
               const description = readStringArg(args, "description");
               yield* checkTextLength("title", title, MAX_KANBAN_TITLE_CHARS);
               if (description !== undefined) {
-                yield* checkTextLength("description", description, MAX_KANBAN_TEXT_CHARS);
+                yield* checkTextLength("description", description, MAX_KANBAN_NOTES_CHARS);
               }
               const projectId = readStringArg(args, "projectId");
               const model = readStringArg(args, "model");
@@ -1006,6 +1053,10 @@ export function makeAgentGatewayKanbanTools(input: KanbanToolsInput): ReadonlyAr
                   ),
                 );
               }
+              yield* requireOrdinaryKanbanProject(
+                callerShell.projectId,
+                `Cannot create a Kanban draft from project "${callerShell.projectId}" — container projects have no board.`,
+              );
               const { threadId: createdThreadId } = yield* createDraftThread({
                 title,
                 projectId: String(callerShell.projectId),
@@ -1158,7 +1209,7 @@ export function makeAgentGatewayKanbanTools(input: KanbanToolsInput): ReadonlyAr
           },
           description: {
             type: "string",
-            maxLength: MAX_KANBAN_TEXT_CHARS,
+            maxLength: MAX_KANBAN_NOTES_CHARS,
             description: "New description; stored as the thread notes.",
           },
         },
@@ -1194,7 +1245,7 @@ export function makeAgentGatewayKanbanTools(input: KanbanToolsInput): ReadonlyAr
                 yield* checkTextLength("title", title, MAX_KANBAN_TITLE_CHARS);
               }
               if (description !== undefined) {
-                yield* checkTextLength("description", description, MAX_KANBAN_TEXT_CHARS);
+                yield* checkTextLength("description", description, MAX_KANBAN_NOTES_CHARS);
               }
               if (title === undefined && description === undefined) {
                 return yield* Effect.fail(

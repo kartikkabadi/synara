@@ -12,6 +12,7 @@ import {
   type OrchestrationEvent,
 } from "@synara/contracts";
 import fs from "node:fs/promises";
+import path from "node:path";
 import { Effect, Layer, ManagedRuntime, Option, Queue, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
@@ -934,7 +935,26 @@ describe("OrchestrationEngine", () => {
     expect(goalFilePath).toContain("thread-goals");
     await expect(fs.readFile(goalFilePath ?? "", "utf8")).resolves.toBe(oversizedGoal);
 
-    // Goals at or under the inline threshold keep their literal text.
+    // A second oversized goal gets its own file — the previous file is pruned
+    // once the new reference commits, so the live file can never be clobbered.
+    const supersedingGoal = `Replacement objective. ${"r".repeat(THREAD_GOAL_INLINE_MAX_CHARS)}`;
+    await system.run(
+      engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-goal-materialize-supersede"),
+        threadId,
+        goal: supersedingGoal,
+      }),
+    );
+    const supersededThread = (await system.run(engine.getReadModel())).threads.find(
+      (entry) => entry.id === threadId,
+    );
+    const supersededPath = supersededThread?.goal?.replace("Read this file: ", "");
+    expect(supersededPath).not.toBe(goalFilePath);
+    await expect(fs.readFile(supersededPath ?? "", "utf8")).resolves.toBe(supersedingGoal);
+    await expect(fs.access(goalFilePath ?? "")).rejects.toThrow();
+
+    // Moving the goal back inline removes the thread's goal files.
     await system.run(
       engine.dispatch({
         type: "thread.meta.update",
@@ -947,6 +967,7 @@ describe("OrchestrationEngine", () => {
       (await system.run(engine.getReadModel())).threads.find((entry) => entry.id === threadId)
         ?.goal,
     ).toBe("Ship it");
+    await expect(fs.readdir(path.dirname(supersededPath ?? ""))).rejects.toThrow();
 
     await system.dispose();
   });

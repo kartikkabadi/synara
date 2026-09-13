@@ -71,6 +71,8 @@ import { decideOrchestrationCommand } from "../decider.ts";
 import {
   isOversizedThreadGoal,
   materializeThreadGoalFile,
+  pruneThreadGoalFiles,
+  threadGoalFileName,
   threadGoalFileReference,
 } from "../threadGoalMaterialization.ts";
 import { PROJECT_METADATA_SNAPSHOT_PROJECTORS } from "../projectMetadataProjection.ts";
@@ -808,11 +810,14 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         };
       }
 
+      let materializedGoalFileName: string | undefined;
       if (command.type === "thread.meta.update" && isOversizedThreadGoal(command.goal)) {
         // A goal is re-injected into every provider turn — a huge inline goal
-        // would bloat each prompt. Materialize it to a per-thread file and
+        // would bloat each prompt. Materialize it to a per-command file and
         // persist a resolvable "read this file" reference instead (same
-        // contract Codex uses for oversized input).
+        // contract Codex uses for oversized input). The per-command filename
+        // keeps a rejected update from overwriting the file a live reference
+        // still points at; the reference only commits if the command does.
         const goalCommand = command;
         const oversizedGoal = command.goal;
         const goalFilePath = yield* Effect.tryPromise({
@@ -820,6 +825,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             materializeThreadGoalFile({
               stateDir: serverConfig.stateDir,
               threadId: goalCommand.threadId,
+              commandId: goalCommand.commandId,
               goal: oversizedGoal,
             }),
           catch: () =>
@@ -828,6 +834,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
               "Could not materialize the oversized thread goal to a file.",
             ),
         });
+        materializedGoalFileName = threadGoalFileName(goalCommand.commandId);
         command = { ...goalCommand, goal: threadGoalFileReference(goalFilePath) };
       }
 
@@ -974,6 +981,39 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             ),
           ),
         );
+
+      // Goal-file housekeeping only runs once the command committed: the
+      // accepted update decides which files still matter — a fresh oversized
+      // goal keeps only its own file, a goal moved back inline / marked
+      // achieved or a deleted thread drops the directory (also sweeping files
+      // orphaned by rejected materializations). Rejected commands never reach
+      // here, so a failure can't delete a file a live reference still uses.
+      const goalFilesDropThreadId =
+        command.type === "thread.delete"
+          ? command.threadId
+          : command.type === "thread.meta.update" &&
+              (materializedGoalFileName !== undefined ||
+                command.goal !== undefined ||
+                command.goalAchieved === true)
+            ? command.threadId
+            : null;
+      if (goalFilesDropThreadId !== null) {
+        yield* Effect.tryPromise({
+          try: () =>
+            pruneThreadGoalFiles({
+              stateDir: serverConfig.stateDir,
+              threadId: goalFilesDropThreadId,
+              keepFileName: materializedGoalFileName,
+            }),
+          catch: () => undefined,
+        }).pipe(
+          Effect.catch(() =>
+            Effect.logWarning("Thread goal file cleanup failed.", {
+              threadId: goalFilesDropThreadId,
+            }),
+          ),
+        );
+      }
 
       commandReadModel = committedCommand.nextCommandReadModel;
       yield* Effect.forEach(

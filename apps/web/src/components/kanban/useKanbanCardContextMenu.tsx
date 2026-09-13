@@ -6,7 +6,7 @@
 // Layer: Kanban UI hook
 // Exports: useKanbanCardContextMenu
 
-import type { ThreadId } from "@synara/contracts";
+import { THREAD_GOAL_MAX_CHARS, type ThreadId } from "@synara/contracts";
 import { resolveThreadWorkspaceCwd } from "@synara/shared/threadEnvironment";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { type MouseEvent, useState } from "react";
@@ -259,11 +259,21 @@ export function useKanbanCardContextMenu(): KanbanCardContextMenuController {
           });
           return;
         }
+        // Same bound the other goal paths enforce — beyond the wire cap the
+        // goal is rejected, never silently sliced.
+        if (goal.length > THREAD_GOAL_MAX_CHARS) {
+          toastManager.add({
+            type: "error",
+            title: "Could not set goal",
+            description: `The goal is ${goal.length.toLocaleString()} characters; keep it within ${THREAD_GOAL_MAX_CHARS.toLocaleString()}.`,
+          });
+          return;
+        }
         try {
           // Mirrors the AsGoal dispatch's metadata write (goal + defer), but
           // starts no turn — the existing thread picks the goal up next run.
-          // Clamped to the same cap the dispatch path enforces.
-          await dispatchThreadGoal(card.threadId, goal.slice(0, 4096), {
+          // Oversized goals materialize server-side into a file reference.
+          await dispatchThreadGoal(card.threadId, goal, {
             startBehavior: "defer",
           });
         } catch (error) {
