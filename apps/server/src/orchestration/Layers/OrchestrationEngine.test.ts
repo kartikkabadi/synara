@@ -5,11 +5,14 @@ import {
   EventId,
   MessageId,
   ProjectId,
+  THREAD_GOAL_INLINE_MAX_CHARS,
   ThreadId,
   TurnId,
   type OrchestrationCommand,
   type OrchestrationEvent,
 } from "@synara/contracts";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { Effect, Layer, ManagedRuntime, Option, Queue, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
@@ -872,6 +875,100 @@ describe("OrchestrationEngine", () => {
     );
 
     expect(eventTypes).toEqual(["thread.created", "thread.meta-updated"]);
+    await system.dispose();
+  });
+
+  it("materializes an oversized thread goal to a file and stores a read-file reference", async () => {
+    const system = await createOrchestrationSystem();
+    const { engine } = system;
+    const createdAt = now();
+    const threadId = ThreadId.makeUnsafe("thread-goal-materialize");
+
+    await system.run(
+      engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.makeUnsafe("cmd-project-goal-materialize"),
+        projectId: asProjectId("project-goal-materialize"),
+        title: "Goal Materialize Project",
+        workspaceRoot: "/tmp/project-goal-materialize",
+        defaultModelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        createdAt,
+      }),
+    );
+    await system.run(
+      engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.makeUnsafe("cmd-goal-materialize-create"),
+        threadId,
+        projectId: asProjectId("project-goal-materialize"),
+        title: "goal-materialize",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5-codex",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      }),
+    );
+
+    const oversizedGoal = `Long-lived objective. ${"d".repeat(THREAD_GOAL_INLINE_MAX_CHARS)}`;
+    await system.run(
+      engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-goal-materialize-update"),
+        threadId,
+        goal: oversizedGoal,
+      }),
+    );
+
+    const thread = (await system.run(engine.getReadModel())).threads.find(
+      (entry) => entry.id === threadId,
+    );
+    expect(thread?.goal).toMatch(/^Read this file: /);
+    const goalFilePath = thread?.goal?.replace("Read this file: ", "");
+    expect(goalFilePath).toContain("thread-goals");
+    await expect(fs.readFile(goalFilePath ?? "", "utf8")).resolves.toBe(oversizedGoal);
+
+    // A second oversized goal gets its own file — the previous file is pruned
+    // once the new reference commits, so the live file can never be clobbered.
+    const supersedingGoal = `Replacement objective. ${"r".repeat(THREAD_GOAL_INLINE_MAX_CHARS)}`;
+    await system.run(
+      engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-goal-materialize-supersede"),
+        threadId,
+        goal: supersedingGoal,
+      }),
+    );
+    const supersededThread = (await system.run(engine.getReadModel())).threads.find(
+      (entry) => entry.id === threadId,
+    );
+    const supersededPath = supersededThread?.goal?.replace("Read this file: ", "");
+    expect(supersededPath).not.toBe(goalFilePath);
+    await expect(fs.readFile(supersededPath ?? "", "utf8")).resolves.toBe(supersedingGoal);
+    await expect(fs.access(goalFilePath ?? "")).rejects.toThrow();
+
+    // Moving the goal back inline removes the thread's goal files.
+    await system.run(
+      engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-goal-materialize-inline"),
+        threadId,
+        goal: "Ship it",
+      }),
+    );
+    expect(
+      (await system.run(engine.getReadModel())).threads.find((entry) => entry.id === threadId)
+        ?.goal,
+    ).toBe("Ship it");
+    await expect(fs.readdir(path.dirname(supersededPath ?? ""))).rejects.toThrow();
+
     await system.dispose();
   });
 
