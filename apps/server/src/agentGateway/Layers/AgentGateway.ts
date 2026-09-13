@@ -19,8 +19,11 @@ import {
   CommandId,
   SYNARA_GATEWAY_MAX_THREADS_PER_OPERATION,
   MessageId,
+  ProjectId,
   THREAD_GOAL_MAX_CHARS,
   ThreadId,
+  TurnId,
+  type ModelSelection,
   type ProviderKind,
   type RuntimeMode,
   type ServerProviderStatus,
@@ -49,6 +52,7 @@ import { ProviderHealth } from "../../provider/Services/ProviderHealth.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import {
   AGENT_GATEWAY_TARGET_OPTIONS_DESCRIPTION,
+  resolveAgentGatewayTarget,
   type AgentGatewayProviderAvailability,
 } from "../targetResolver.ts";
 import { mcpToolResultError, mcpToolResultJson } from "../protocol.ts";
@@ -77,6 +81,7 @@ import { BrowserAutomationHost } from "../../browserAutomation/Services/BrowserA
 import { makeBrowserAutomationHost } from "../../browserAutomation/Layers/BrowserAutomationHost.ts";
 import { makeThreadReadTools } from "../threadReadTools.ts";
 import { makeThreadDiagnosticTools } from "../threadDiagnosticTools.ts";
+import { makeAgentGatewayKanbanTools } from "../kanbanTools.ts";
 import { pruneProjectedArchivedManagedWorktrees } from "../../managedWorktrees.ts";
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 
@@ -177,6 +182,33 @@ export const makeAgentGateway = Effect.gen(function* () {
         }),
       ),
     );
+
+  // Automation targets resolve like thread-creation targets: live provider availability
+  // and model discovery, against the workspace of the project the automation belongs to.
+  const resolveAutomationTarget = (input: {
+    readonly target: ModelSelection;
+    readonly projectId: ProjectId;
+  }): Effect.Effect<ModelSelection, unknown> =>
+    Effect.gen(function* () {
+      const project = yield* snapshotQuery.getProjectShellById(input.projectId).pipe(
+        Effect.mapError((error) => new ToolInputError(errorText(error))),
+        Effect.flatMap(
+          Option.match({
+            onNone: () =>
+              Effect.fail(new ToolInputError(`Project "${input.projectId}" was not found.`)),
+            onSome: Effect.succeed,
+          }),
+        ),
+      );
+      const providerAvailabilities = yield* loadProviderAvailabilities;
+      const availability = providerAvailabilities.get(input.target.provider);
+      return yield* resolveAgentGatewayTarget({
+        target: input.target,
+        discovery: providerDiscovery,
+        ...(availability !== undefined ? { availability } : {}),
+        cwd: project.workspaceRoot,
+      });
+    });
 
   // Privilege boundary shared by every tool that makes another thread execute
   // work or mutates another thread's state: a caller must not drive a thread
@@ -750,6 +782,7 @@ export const makeAgentGateway = Effect.gen(function* () {
     automationService,
     requireThreadShell,
     assertCallerMayDriveThread,
+    resolveAutomationTarget,
     surfaceAutomationProposal: ({ callerThreadId, definition }) => {
       const createdAt = isoNow();
       return orchestrationEngine
@@ -783,6 +816,118 @@ export const makeAgentGateway = Effect.gen(function* () {
       }).pipe(Effect.orElseSucceed(() => null)),
   });
 
+  const kanbanTools = makeAgentGatewayKanbanTools({
+    snapshotQuery,
+    workspacePaths: {
+      homeDir: serverConfig.homeDir,
+      chatWorkspaceRoot: serverConfig.chatWorkspaceRoot,
+    },
+    helpers: {
+      // Move-card re-reads and live-checks the target shell itself, so the
+      // plain loader is correct for every column.
+      requireThreadShell,
+      assertCallerMayDriveThread,
+      runCreateThreads,
+      startTurn: ({ threadId, message, dispatchMode, runtimeMode, interactionMode }) => {
+        const suffix = randomUUID();
+        return orchestrationEngine
+          .dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.makeUnsafe(`agent:${suffix}:kanban-move`),
+            threadId: ThreadId.makeUnsafe(threadId),
+            message: {
+              messageId: MessageId.makeUnsafe(`agent:${suffix}:message`),
+              role: "user",
+              text: message,
+              attachments: [],
+            },
+            dispatchMode,
+            dispatchOrigin: "agent",
+            runtimeMode,
+            interactionMode,
+            createdAt: isoNow(),
+          })
+          .pipe(Effect.mapError((error) => new ToolInputError(errorText(error))));
+      },
+      interruptTurn: ({ threadId }) => {
+        const suffix = randomUUID();
+        return orchestrationEngine
+          .dispatch({
+            type: "thread.turn.interrupt",
+            commandId: CommandId.makeUnsafe(`agent:${suffix}:kanban-interrupt`),
+            threadId: ThreadId.makeUnsafe(threadId),
+            createdAt: isoNow(),
+          })
+          .pipe(
+            Effect.map((eventSequence) => ({ sequence: eventSequence.sequence })),
+            Effect.mapError((error) => new ToolInputError(errorText(error))),
+          );
+      },
+      // Draft creation mirrors the creation saga's thread.create dispatch but
+      // starts no turn, so the thread lands in the Draft column. No worktree
+      // setup runs: drafts are local threads until a move dispatches them.
+      createDraftThread: ({
+        title,
+        projectId,
+        modelSelection,
+        runtimeMode,
+        interactionMode,
+        sourceThreadId,
+        sourceTurnId,
+      }) => {
+        const threadId = ThreadId.makeUnsafe(randomUUID());
+        return orchestrationEngine
+          .dispatch({
+            type: "thread.create",
+            commandId: CommandId.makeUnsafe(`agent:${randomUUID()}:kanban-draft`),
+            threadId,
+            projectId: ProjectId.makeUnsafe(projectId),
+            title,
+            modelSelection,
+            runtimeMode,
+            interactionMode,
+            envMode: "local",
+            branch: null,
+            worktreePath: null,
+            creationSource: "synara_mcp",
+            sourceThreadId: ThreadId.makeUnsafe(sourceThreadId),
+            ...(sourceTurnId !== null ? { sourceTurnId: TurnId.makeUnsafe(sourceTurnId) } : {}),
+            createdAt: isoNow(),
+          })
+          .pipe(
+            Effect.map(() => ({ threadId: String(threadId) })),
+            Effect.mapError((error) => new ToolInputError(errorText(error))),
+          );
+      },
+      // Card metadata patch for the update/goal tools — mirrors setThreadTitle.
+      updateThreadMeta: ({ threadId, title, notes, goal }) =>
+        orchestrationEngine
+          .dispatch({
+            type: "thread.meta.update",
+            commandId: CommandId.makeUnsafe(`agent:${randomUUID()}:kanban-update`),
+            threadId: ThreadId.makeUnsafe(threadId),
+            ...(title !== undefined ? { title } : {}),
+            ...(notes !== undefined ? { notes } : {}),
+            ...(goal !== undefined ? { goal } : {}),
+          })
+          .pipe(
+            Effect.asVoid,
+            Effect.mapError((error) => new ToolInputError(errorText(error))),
+          ),
+      deleteThread: ({ threadId }) =>
+        orchestrationEngine
+          .dispatch({
+            type: "thread.delete",
+            commandId: CommandId.makeUnsafe(`agent:${randomUUID()}:kanban-delete`),
+            threadId: ThreadId.makeUnsafe(threadId),
+          })
+          .pipe(
+            Effect.asVoid,
+            Effect.mapError((error) => new ToolInputError(errorText(error))),
+          ),
+    },
+  });
+
   const tools: ReadonlyArray<ToolEntry> = [
     ...readTools,
     ...diagnosticTools,
@@ -796,6 +941,7 @@ export const makeAgentGateway = Effect.gen(function* () {
     setThreadGoal,
     ...automationTools,
     ...browserTools,
+    ...kanbanTools,
     ...(deviceService?.supported === true
       ? makeAgentGatewayDeviceTools({ manager: deviceService.manager })
       : []),
