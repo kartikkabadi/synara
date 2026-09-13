@@ -247,13 +247,13 @@ layer("MindRepository", (it) => {
     }),
   );
 
-  it("buildMindFtsMatchExpr quotes every token and attaches the prefix asterisk", () => {
+  it("buildMindFtsMatchExpr quotes every token, attaches the prefix asterisk, and OR-joins terms", () => {
     assert.strictEqual(
       buildMindFtsMatchExpr("  use   bun run test "),
-      '"use"* "bun"* "run"* "test"*',
+      '"use"* OR "bun"* OR "run"* OR "test"*',
     );
-    assert.strictEqual(buildMindFtsMatchExpr('say "hello"'), '"say"* """hello"""*');
-    assert.strictEqual(buildMindFtsMatchExpr("NEAR(a b) OR x"), '"NEAR(a"* "b)"* "OR"* "x"*');
+    assert.strictEqual(buildMindFtsMatchExpr('say "hello"'), '"say"* OR """hello"""*');
+    assert.strictEqual(buildMindFtsMatchExpr("NEAR(a b) OR x"), '"NEAR(a"* OR "b)"* OR "OR"* OR "x"*');
     assert.strictEqual(buildMindFtsMatchExpr(""), "");
   });
 
