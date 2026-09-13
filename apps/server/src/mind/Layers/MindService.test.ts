@@ -64,6 +64,7 @@ const PROJECTS = {
   pureRead: "project-mind-service-pure-read",
   digest: "project-mind-service-digest",
   rank: "project-mind-service-rank",
+  naturalLanguageRecall: "project-mind-service-natural-language-recall",
   confirm: "project-mind-service-confirm",
   cap: "project-mind-service-cap",
   secret: "project-mind-service-secret",
@@ -351,6 +352,30 @@ layer("MindService", (it) => {
       const weighted = yield* service.recall({ projectId, query: "bun" });
       const ids = weighted.items.map((item) => item.memoryId);
       assert.isTrue(ids.indexOf(confirmed.memoryId) < ids.indexOf(fresh.memoryId));
+    }),
+  );
+
+  it.effect("query recall matches natural-language terms with OR prefix semantics", () =>
+    Effect.gen(function* () {
+      const service = yield* MindService;
+      yield* runMigrations();
+      const projectId = ProjectId.makeUnsafe(PROJECTS.naturalLanguageRecall);
+      yield* ensureProjectRow(PROJECTS.naturalLanguageRecall);
+      const remembered = yield* seedMemory({
+        projectId,
+        textHash: "natural-language-recall",
+        text: "Tests go in a tests/ folder, never beside source files.",
+      });
+
+      const recalled = yield* service.recall({
+        projectId,
+        query: "testing file preference test location",
+      });
+
+      assert.deepStrictEqual(
+        recalled.items.map((item) => item.memoryId),
+        [remembered.memoryId],
+      );
     }),
   );
 

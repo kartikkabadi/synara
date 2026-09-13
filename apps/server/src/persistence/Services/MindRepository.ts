@@ -237,17 +237,18 @@ export type PutMindReceiptInput = typeof PutMindReceiptInput.Type;
 
 /**
  * Builds a safe FTS5 MATCH expression from raw user text: every whitespace
- * token is double-quoted (internal quotes doubled so they stay literal) and
- * turned into a prefix query with a trailing `*`. Quoting neutralizes FTS5
- * operator syntax (`AND`, `OR`, `NOT`, `NEAR(...)`, column filters), so user
- * text can never inject match operators.
+ * token is double-quoted (internal quotes doubled so they stay literal),
+ * turned into a prefix query with a trailing `*`, and combined with OR.
+ * Quoting neutralizes FTS5 operator syntax (`AND`, `OR`, `NOT`, `NEAR(...)`,
+ * column filters), so user text can never inject match operators. OR keeps a
+ * natural-language query useful when only some terms appear in a memory.
  */
 export const buildMindFtsMatchExpr = (query: string): string =>
   query
     .split(/\s+/)
     .filter((token) => token.length > 0)
     .map((token) => `"${token.replace(/"/g, '""')}"*`)
-    .join(" ");
+    .join(" OR ");
 
 /**
  * Read guard for FTS5 candidate search: an expression with no letter or digit
