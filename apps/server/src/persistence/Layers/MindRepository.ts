@@ -752,6 +752,23 @@ const makeMindRepository = Effect.gen(function* () {
       Effect.flatMap(toMemoryListSafe),
     );
 
+  const listProjectIdsRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: Schema.Struct({ projectId: ProjectId }),
+    execute: () =>
+      sql`
+        SELECT DISTINCT project_id AS "projectId"
+        FROM mind_memories
+        ORDER BY project_id ASC
+      `,
+  });
+
+  const listProjectIds: MindRepositoryShape["listProjectIds"] = () =>
+    listProjectIdsRows(undefined).pipe(
+      Effect.mapError(toPersistenceSqlError("MindRepository.listProjectIds:query")),
+      Effect.map((rows) => rows.map(({ projectId }) => projectId)),
+    );
+
   const countAllRows = SqlSchema.findAll({
     Request: Schema.Void,
     Result: Schema.Struct({ count: Schema.Number }),
@@ -975,6 +992,7 @@ const makeMindRepository = Effect.gen(function* () {
     getById,
     listByProject,
     listAll,
+    listProjectIds,
     countAll,
     searchCandidates,
     applyConfirm,
