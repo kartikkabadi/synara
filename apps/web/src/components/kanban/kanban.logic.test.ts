@@ -693,6 +693,7 @@ const makeDraftSource = (
   terminalContexts: [],
   assistantSelections: [],
   fileComments: [],
+  pastedTexts: [],
   activeProvider: null,
   ...overrides,
 });

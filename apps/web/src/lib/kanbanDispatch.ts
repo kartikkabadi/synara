@@ -12,6 +12,7 @@ import type {
   ThreadEnvironmentMode,
   ThreadId,
 } from "@synara/contracts";
+import { PROVIDER_SEND_TURN_MAX_ATTACHMENTS } from "@synara/contracts";
 import { buildPromptThreadTitleFallback } from "@synara/shared/chatThreads";
 import { isPendingThreadWorktree } from "@synara/shared/threadEnvironment";
 import {
@@ -27,6 +28,7 @@ import {
 } from "../composerDraftStore";
 import { useKanbanUiStore } from "../kanbanUiStore";
 import { readNativeApi } from "../nativeApi";
+import type { ComposerFileAttachment } from "../composerDraftDomain";
 import {
   clearPendingTurnDispatch,
   hasPendingTurnDispatch,
@@ -48,6 +50,11 @@ import {
 } from "./composerSend";
 import { appendFileCommentsToPrompt, formatFileCommentTitleSeed } from "./fileComments";
 import {
+  appendPastedTextsToPrompt,
+  filterPastedTextsWithText,
+  pastedTextTitle,
+} from "./composerPastedText";
+import {
   filterPromptProviderMentionReferences,
   filterPromptSkillReferences,
 } from "./composerMentions";
@@ -58,7 +65,7 @@ import {
 } from "./terminalContext";
 import { resolveTerminalThreadCreationState } from "./threadBootstrap";
 import { promoteThreadCreate } from "./threadCreatePromotion";
-import { newCommandId, newMessageId } from "./utils";
+import { newCommandId, newMessageId, randomUUID } from "./utils";
 
 export type KanbanDraftDispatchResult =
   /** The drafted prompt is on its way; runtime events move the card to In Progress. */
@@ -151,7 +158,48 @@ interface KanbanDraftDispatchInput {
   providerOptions?: ProviderStartOptions | undefined;
 }
 
-const MAX_KANBAN_GOAL_LENGTH = 4096;
+/**
+ * Prompts longer than this ride to the provider as a managed file attachment
+ * (Codex-style large-input handling): the sent message becomes a short "read
+ * this file" pointer and the provider resolves the on-disk path from the
+ * attachment projection. Keeps transcripts compact and sidesteps oversized
+ * inline payloads. Attachments stay inline when the turn is already at the
+ * attachment cap — content delivery beats the file form.
+ */
+export const KANBAN_PROMPT_FILE_THRESHOLD_CHARS = 1_000;
+
+/**
+ * Converts an oversized outgoing prompt into a managed file attachment. The
+ * sent message becomes a "read this file" pointer; the provider's attachment
+ * projection supplies the resolved on-disk path. Returns null below the
+ * threshold or when the attachment cap would be exceeded — in that case the
+ * text is sent inline so nothing is lost.
+ */
+function buildKanbanPromptFileAttachment(input: {
+  messageId: string;
+  text: string;
+  existingAttachmentCount: number;
+}): { attachment: ComposerFileAttachment; reference: string } | null {
+  if (input.text.length <= KANBAN_PROMPT_FILE_THRESHOLD_CHARS) {
+    return null;
+  }
+  if (input.existingAttachmentCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
+    return null;
+  }
+  const name = `synara-prompt-${input.messageId}.md`;
+  const file = new File([input.text], name, { type: "text/markdown" });
+  return {
+    attachment: {
+      type: "file",
+      id: randomUUID(),
+      name,
+      mimeType: "text/markdown",
+      sizeBytes: file.size,
+      file,
+    },
+    reference: `Read this file: ${name}`,
+  };
+}
 
 // Racing callers (a re-drop before the board re-derives, drag + send-now, or a
 // drag racing a right-click "Send as goal") must not queue two turns for the
@@ -305,11 +353,13 @@ async function dispatchKanbanDraftThreadOnce(
   const composerAssistantSelections = draftComposerState?.assistantSelections ?? [];
   const composerBrowserAnnotations = draftComposerState?.browserAnnotations ?? [];
   const composerFileComments = draftComposerState?.fileComments ?? [];
+  const sendablePastedTexts = filterPastedTextsWithText(draftComposerState?.pastedTexts ?? []);
   const sendableTerminalContexts = filterTerminalContextsWithText(
     draftComposerState?.terminalContexts ?? [],
   );
   const titleSeed =
     prompt ||
+    (sendablePastedTexts[0] ? pastedTextTitle(sendablePastedTexts[0].text) : "") ||
     (composerImages[0] ? `Image: ${composerImages[0].name}` : "") ||
     (composerFiles[0] ? `File: ${composerFiles[0].name}` : "") ||
     (composerAssistantSelections.length > 0 ? "Referenced assistant selection" : "") ||
@@ -326,32 +376,51 @@ async function dispatchKanbanDraftThreadOnce(
   // Browser annotations serialize outermost so display extraction can validate
   // their message-bound transport before unwrapping the remaining context blocks.
   const messageText = appendBrowserAnnotationsToPrompt(
-    appendFileCommentsToPrompt(
-      appendTerminalContextsToPrompt(
-        appendAssistantSelectionsToPrompt(liveSnapshot?.prompt ?? "", composerAssistantSelections),
-        sendableTerminalContexts,
+    appendPastedTextsToPrompt(
+      appendFileCommentsToPrompt(
+        appendTerminalContextsToPrompt(
+          appendAssistantSelectionsToPrompt(
+            liveSnapshot?.prompt ?? "",
+            composerAssistantSelections,
+          ),
+          sendableTerminalContexts,
+        ),
+        composerFileComments,
       ),
-      composerFileComments,
+      sendablePastedTexts,
     ),
     composerBrowserAnnotations,
     messageId,
   );
-  const outgoingMessageText = formatOutgoingComposerPrompt({
+  const fullOutgoingMessageText = formatOutgoingComposerPrompt({
     provider: modelSelection.provider,
     model: modelSelection.model,
     effort: resolvePromptEffortFromModelSelection(modelSelection),
     text: messageText || (composerImages.length > 0 ? IMAGE_ONLY_BOOTSTRAP_PROMPT : ""),
   });
+  // Skill/mention filters must see the full text: after file conversion the sent
+  // text is only a pointer and no longer mentions any references.
   const mentionedSkills = filterPromptSkillReferences(
-    outgoingMessageText,
+    fullOutgoingMessageText,
     skills,
     modelSelection.provider,
   );
-  const mentionedMentions = filterPromptProviderMentionReferences(outgoingMessageText, mentions);
+  const mentionedMentions = filterPromptProviderMentionReferences(
+    fullOutgoingMessageText,
+    mentions,
+  );
+  const promptFile = buildKanbanPromptFileAttachment({
+    messageId,
+    text: fullOutgoingMessageText,
+    existingAttachmentCount:
+      composerImages.length + composerFiles.length + composerAssistantSelections.length,
+  });
+  const outgoingMessageText = promptFile ? promptFile.reference : fullOutgoingMessageText;
+  const filesForSend = promptFile ? [...composerFiles, promptFile.attachment] : composerFiles;
   const turnAttachmentsPromise = stageUploadComposerAttachments({
     threadId,
     images: composerImages,
-    files: composerFiles,
+    files: filesForSend,
     assistantSelections: composerAssistantSelections,
   });
   // The same instant feeds both the command timestamps and the optimistic entry:
@@ -431,14 +500,14 @@ async function dispatchKanbanDraftThreadOnce(
       }
     }
 
-    if (mode === "goal" && prompt.length > 0) {
-      // Attachment-only drafts intentionally dispatch no goal command; a prompt
-      // over the cap is clamped so the metadata update never fails validation.
-      const truncated = prompt.length > MAX_KANBAN_GOAL_LENGTH;
-      const goal = truncated ? prompt.slice(0, MAX_KANBAN_GOAL_LENGTH) : prompt;
-      if (truncated) {
-        goalWarning = `Goal saved truncated to ${MAX_KANBAN_GOAL_LENGTH} characters.`;
-      }
+    if (mode === "goal" && (prompt.length > 0 || sendablePastedTexts.length > 0)) {
+      // The objective is the full authored text — prompt plus collapsed big
+      // pastes. Oversized goals are materialized to a per-thread file
+      // server-side and persisted as a "read this file" reference, so no
+      // client-side truncation applies.
+      const goal = [prompt, ...sendablePastedTexts.map((pasted) => pasted.text)]
+        .filter((part) => part.trim().length > 0)
+        .join("\n\n");
       try {
         await api.orchestration.dispatchCommand({
           type: "thread.meta.update",

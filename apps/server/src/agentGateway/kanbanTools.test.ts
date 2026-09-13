@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { ProjectId, ThreadId, TurnId, type OrchestrationThreadShell } from "@synara/contracts";
+import {
+  ProjectId,
+  THREAD_GOAL_MAX_CHARS,
+  ThreadId,
+  TurnId,
+  type OrchestrationThreadShell,
+} from "@synara/contracts";
 import { Effect } from "effect";
 
 import type { ProjectionSnapshotQueryShape } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -778,11 +784,11 @@ describe("synara_set_kanban_goal", () => {
     const result = jsonText(
       await runHandler(toolById(tools, "synara_set_kanban_goal"), {
         threadId: "thread-draft",
-        goal: "x".repeat(4097),
+        goal: "x".repeat(THREAD_GOAL_MAX_CHARS + 1),
       }),
     );
     expect(result.isError).toBe(true);
-    expect(result.__errorText).toContain("at most 4096");
+    expect(result.__errorText).toContain(`at most ${THREAD_GOAL_MAX_CHARS}`);
     expect(metaUpdated).toHaveLength(0);
   });
 });

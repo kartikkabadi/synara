@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { resetComposerDraftStore } from "../composerDraftStoreTestFixtures";
 import { buildKanbanComposerDraftSnapshot } from "../components/kanban/kanban.logic";
+import { createPastedTextDraft } from "./composerPastedText";
 import { clearPendingTurnDispatch, markPendingTurnDispatch } from "../pendingTurnDispatch";
 import type { SidebarThreadSummary } from "../types";
 import {
@@ -16,6 +17,7 @@ import {
 const nativeApiMocks = vi.hoisted(() => ({
   dispatchCommand: vi.fn(async (..._args: unknown[]) => undefined),
   cleanup: vi.fn(),
+  stagedUploads: [] as Array<{ files?: ReadonlyArray<unknown> | undefined }>,
   runWithDispatch: vi.fn(async (fn: (attachments: unknown) => Promise<unknown>) => {
     await fn([]);
   }),
@@ -62,10 +64,15 @@ vi.mock("./composerSend", async () => {
   const actual = await vi.importActual<typeof import("./composerSend")>("./composerSend");
   return {
     ...actual,
-    stageUploadComposerAttachments: vi.fn(async () => ({
-      runWithDispatch: nativeApiMocks.runWithDispatch,
-      cleanup: nativeApiMocks.cleanup,
-    })),
+    stageUploadComposerAttachments: vi.fn(
+      async (input: { files?: ReadonlyArray<unknown> | undefined }) => {
+        nativeApiMocks.stagedUploads.push(input);
+        return {
+          runWithDispatch: nativeApiMocks.runWithDispatch,
+          cleanup: nativeApiMocks.cleanup,
+        };
+      },
+    ),
   };
 });
 
@@ -229,5 +236,116 @@ describe("kanbanDispatch board-vs-chat turn guard", () => {
     // Board side still owns the guard; only the waiter gave up.
     expect(isKanbanDispatchInFlight(threadId)).toBe(true);
     void boardPromise;
+  });
+});
+
+describe("kanbanDispatch oversized prompts and pasted text", () => {
+  beforeEach(() => {
+    resetComposerDraftStore();
+    nativeApiMocks.dispatchCommand.mockReset();
+    nativeApiMocks.stagedUploads.length = 0;
+    nativeApiMocks.runWithDispatch.mockClear();
+  });
+
+  const threadSummary = (threadId: ThreadId, projectId: ProjectId) =>
+    ({ id: threadId, projectId }) as unknown as SidebarThreadSummary;
+
+  function dispatchedCommand<T>(type: string): T | undefined {
+    return nativeApiMocks.dispatchCommand.mock.calls
+      .map(([command]) => command as { type?: string })
+      .filter((command) => command.type === type)
+      .at(-1) as T | undefined;
+  }
+
+  function lastStagedFile(): { name: string; file: File } | undefined {
+    const staged = nativeApiMocks.stagedUploads.at(-1);
+    return staged?.files?.at(-1) as { name: string; file: File } | undefined;
+  }
+
+  it("converts an oversized prompt into a managed file attachment", async () => {
+    const threadId = ThreadId.makeUnsafe("thread-big-prompt-file");
+    const projectId = ProjectId.makeUnsafe("project-big-prompt-file");
+    const prompt = `Big task. ${"x".repeat(1500)}`;
+    useComposerDraftStore.getState().setPrompt(threadId, prompt);
+
+    const result = await dispatchKanbanDraftThread({
+      threadId,
+      projectId,
+      thread: threadSummary(threadId, projectId),
+      defaultProvider: "codex",
+      assistantDeliveryMode: "buffered",
+    });
+
+    expect(result.kind).toBe("dispatched");
+    const turnStart = dispatchedCommand<{ message: { text: string } }>("thread.turn.start");
+    expect(turnStart?.message.text).toMatch(/^Read this file: synara-prompt-.+\.md$/);
+    const staged = lastStagedFile();
+    expect(staged?.name).toMatch(/^synara-prompt-.+\.md$/);
+    await expect(staged?.file.text() ?? Promise.resolve("")).resolves.toContain(prompt);
+  });
+
+  it("dispatches a draft made only of a large pasted text", async () => {
+    const threadId = ThreadId.makeUnsafe("thread-pasted-only");
+    const projectId = ProjectId.makeUnsafe("project-pasted-only");
+    useComposerDraftStore.getState().addPastedTexts(threadId, [
+      createPastedTextDraft({
+        id: "pasted-1",
+        createdAt: new Date().toISOString(),
+        text: "y".repeat(5000),
+      }),
+    ]);
+
+    const result = await dispatchKanbanDraftThread({
+      threadId,
+      projectId,
+      thread: threadSummary(threadId, projectId),
+      defaultProvider: "codex",
+      assistantDeliveryMode: "buffered",
+    });
+
+    expect(result.kind).toBe("dispatched");
+    const turnStart = dispatchedCommand<{ message: { text: string } }>("thread.turn.start");
+    expect(turnStart?.message.text).toMatch(/^Read this file: /);
+    await expect(lastStagedFile()?.file.text() ?? Promise.resolve("")).resolves.toContain(
+      "<pasted_text>",
+    );
+  });
+
+  it("sends the full oversized goal text untruncated for the server to materialize", async () => {
+    const threadId = ThreadId.makeUnsafe("thread-big-goal");
+    const projectId = ProjectId.makeUnsafe("project-big-goal");
+    const prompt = `g${"o".repeat(5000)}`;
+    useComposerDraftStore.getState().setPrompt(threadId, prompt);
+
+    const result = await dispatchKanbanDraftThreadAsGoal({
+      threadId,
+      projectId,
+      thread: threadSummary(threadId, projectId),
+      defaultProvider: "codex",
+      assistantDeliveryMode: "buffered",
+    });
+
+    expect(result.kind).toBe("dispatched");
+    const metaUpdate = dispatchedCommand<{ goal?: string }>("thread.meta.update");
+    expect(metaUpdate?.goal).toBe(prompt);
+  });
+
+  it("leaves a small prompt inline", async () => {
+    const threadId = ThreadId.makeUnsafe("thread-small-prompt");
+    const projectId = ProjectId.makeUnsafe("project-small-prompt");
+    useComposerDraftStore.getState().setPrompt(threadId, "short prompt");
+
+    const result = await dispatchKanbanDraftThread({
+      threadId,
+      projectId,
+      thread: threadSummary(threadId, projectId),
+      defaultProvider: "codex",
+      assistantDeliveryMode: "buffered",
+    });
+
+    expect(result.kind).toBe("dispatched");
+    const turnStart = dispatchedCommand<{ message: { text: string } }>("thread.turn.start");
+    expect(turnStart?.message.text).toBe("short prompt");
+    expect(lastStagedFile()).toBeUndefined();
   });
 });

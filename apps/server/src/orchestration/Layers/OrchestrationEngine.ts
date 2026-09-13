@@ -68,6 +68,11 @@ import {
   isQuiescingCommandAdmissible,
 } from "../orchestrationAdmission.ts";
 import { decideOrchestrationCommand } from "../decider.ts";
+import {
+  isOversizedThreadGoal,
+  materializeThreadGoalFile,
+  threadGoalFileReference,
+} from "../threadGoalMaterialization.ts";
 import { PROJECT_METADATA_SNAPSHOT_PROJECTORS } from "../projectMetadataProjection.ts";
 import { createEmptyReadModel, projectEvent } from "../projector.ts";
 import {
@@ -801,6 +806,29 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           ...startCommand,
           message: { ...startCommand.message, attachments },
         };
+      }
+
+      if (command.type === "thread.meta.update" && isOversizedThreadGoal(command.goal)) {
+        // A goal is re-injected into every provider turn — a huge inline goal
+        // would bloat each prompt. Materialize it to a per-thread file and
+        // persist a resolvable "read this file" reference instead (same
+        // contract Codex uses for oversized input).
+        const goalCommand = command;
+        const oversizedGoal = command.goal;
+        const goalFilePath = yield* Effect.tryPromise({
+          try: () =>
+            materializeThreadGoalFile({
+              stateDir: serverConfig.stateDir,
+              threadId: goalCommand.threadId,
+              goal: oversizedGoal,
+            }),
+          catch: () =>
+            makeCommandInternalError(
+              goalCommand,
+              "Could not materialize the oversized thread goal to a file.",
+            ),
+        });
+        command = { ...goalCommand, goal: threadGoalFileReference(goalFilePath) };
       }
 
       if (command.type === "thread.meta.update" && command.expectedTitleSequence !== undefined) {
