@@ -293,6 +293,8 @@ export interface MindRepositoryShape {
   readonly listAll: (
     input?: ListAllMindMemoriesInput,
   ) => Effect.Effect<ReadonlyArray<MindMemoryRow>, MindRepositoryError>;
+  /** Every project represented by at least one memory row. */
+  readonly listProjectIds: () => Effect.Effect<ReadonlyArray<ProjectId>, MindRepositoryError>;
   /** True total across all projects — the denominator for the bounded `listAll` page. */
   readonly countAll: () => Effect.Effect<number, MindRepositoryError>;
   /**

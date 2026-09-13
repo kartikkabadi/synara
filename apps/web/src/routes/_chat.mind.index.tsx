@@ -580,20 +580,18 @@ function MindRouteView() {
     [projects],
   );
 
-  // Projects present in the loaded page, for the filter chips.
+  // Filter chips describe the loaded memory page and do not invent projects.
   const visibleProjects = useMemo(() => {
     const ids = [...new Set(data.memories.map((memory) => memory.projectId))];
     return ids.map((id) => ({ id, name: projectNamesById.get(id) ?? "Unknown project" }));
   }, [data.memories, projectNamesById]);
   // The profile card edits exactly one project: the chip-selected one, or the
-  // only loaded project when no filter is set. Otherwise the card names the
-  // missing choice instead of guessing across projects. The id re-gains its
-  // brand here — it always originates from server-loaded memory rows.
+  // only project in the project store when no filter is set.
   const profileProjectId =
     projectFilter !== null
       ? ProjectId.makeUnsafe(projectFilter)
-      : visibleProjects.length === 1 && visibleProjects[0] !== undefined
-        ? ProjectId.makeUnsafe(visibleProjects[0].id)
+      : projects.length === 1 && projects[0] !== undefined
+        ? ProjectId.makeUnsafe(projects[0].id)
         : null;
   const pinnedCount = useMemo(
     () => data.memories.filter((memory) => memory.pinned).length,
@@ -630,9 +628,11 @@ function MindRouteView() {
       formatMindDigestSuffix({
         staleCount: countStaleMindMemories(data.memories),
         count: data.count,
-        cap: data.cap,
+        // The global count spans projects, so the per-project cap is not a
+        // meaningful denominator here.
+        cap: 0,
       }),
-    [data.memories, data.count, data.cap],
+    [data.memories, data.count],
   );
 
   const renderMindList = () => (
@@ -725,18 +725,16 @@ function MindRouteView() {
             <h1 className="px-2 font-heading text-2xl font-semibold tracking-tight text-foreground">
               Mind
             </h1>
-            {data.memories.length > 0 ? (
-              profileProjectId !== null ? (
-                <MindProfileCard
-                  key={profileProjectId}
-                  projectId={profileProjectId}
-                  projectName={projectNamesById.get(profileProjectId) ?? "Unknown project"}
-                />
-              ) : (
-                <p className="px-2 text-xs text-muted-foreground">
-                  Select a project to edit its profile.
-                </p>
-              )
+            {profileProjectId !== null ? (
+              <MindProfileCard
+                key={profileProjectId}
+                projectId={profileProjectId}
+                projectName={projectNamesById.get(profileProjectId) ?? "Unknown project"}
+              />
+            ) : projects.length > 1 ? (
+              <p className="px-2 text-xs text-muted-foreground">
+                Select a project to edit its profile.
+              </p>
             ) : null}
             {data.memories.length > 0 ? (
               <div className="flex flex-col gap-2 px-2">

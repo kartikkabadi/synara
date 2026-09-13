@@ -229,7 +229,6 @@ const makeMindService = Effect.gen(function* () {
       if (lastSweepAt !== undefined && nowMillis - lastSweepAt < PRUNE_SWEEP_INTERVAL_MS) {
         return;
       }
-      lastSweepAtByProject.set(projectId, nowMillis);
       const nowIso = new Date(nowMillis).toISOString();
       const rows = yield* repository.listByProject({ projectId });
       const pruneIds = rows
@@ -265,6 +264,7 @@ const makeMindService = Effect.gen(function* () {
           prunedReceipts: receiptsPruned,
         });
       }
+      lastSweepAtByProject.set(projectId, nowMillis);
     });
 
   // The remember mutation serialized in its own transaction (check-then-act:
@@ -519,127 +519,167 @@ const makeMindService = Effect.gen(function* () {
     });
 
   const confirm = (input: MindConfirmRequest): Effect.Effect<MindMemory, MindServiceError> =>
-    Effect.gen(function* () {
-      const existing = yield* repository.getById({ memoryId: input.memoryId });
-      if (Option.isNone(existing)) {
-        return yield* Effect.fail(
-          new MindMemoryNotFoundError({
-            memoryId: input.memoryId,
-            message: "No memory with this id; recall or list memories to get a valid id.",
-          }),
-        );
-      }
-      const row = existing.value;
-      if (row.projectId !== input.projectId) {
-        return yield* Effect.fail(
-          new MindMemoryNotFoundError({
-            memoryId: input.memoryId,
-            message: "No memory with this id; recall or list memories to get a valid id.",
-          }),
-        );
-      }
-      const operationId =
-        input.turnId === null ? null : `confirm:${input.turnId}:${input.memoryId}`;
-      // Confirm-race note: the read (getById) and write (applyConfirm) below
-      // are not atomic, but repeats are still safe. Same-turn repeats hit the
-      // receipt/journal replay above and return the row untouched; concurrent
-      // confirms from different turns may each apply once (+0.15, capped at
-      // 1.0, decay anchor reset) — a benign double-bump, never a lost write.
-      if (operationId !== null) {
-        const receipt = yield* repository.getReceipt({
-          projectId: row.projectId,
-          operationId,
-        });
-        const replayed =
-          Option.isSome(receipt) ||
-          Option.isSome(
-            yield* repository.findJournalOp({
-              memoryId: input.memoryId,
-              op: "confirm",
-              turnId: input.turnId,
-            }),
-          );
-        if (replayed) {
-          // Durable no-op: re-read the row the first confirm updated.
-          const current = yield* repository.getById({ memoryId: input.memoryId });
-          if (Option.isSome(current)) {
-            const nowIso = yield* nowIsoNow;
-            return toMindMemory(current.value, nowIso);
+    sqlClient
+      .withTransaction(
+        Effect.gen(function* () {
+          const existing = yield* repository.getById({ memoryId: input.memoryId });
+          if (Option.isNone(existing)) {
+            return yield* Effect.fail(
+              new MindMemoryNotFoundError({
+                memoryId: input.memoryId,
+                message: "No memory with this id; recall or list memories to get a valid id.",
+              }),
+            );
           }
-        }
-      }
-      const nowMillis = yield* Clock.currentTimeMillis;
-      const nowIso = new Date(nowMillis).toISOString();
-      const updated = yield* repository.applyConfirm({
-        memoryId: input.memoryId,
-        peakWeight: confirmedWeight(row.peakWeight),
-        lastAccessedAt: nowIso,
-      });
-      if (Option.isNone(updated)) {
-        return yield* Effect.fail(
-          new MindMemoryNotFoundError({
+          const row = existing.value;
+          if (row.projectId !== input.projectId) {
+            return yield* Effect.fail(
+              new MindMemoryNotFoundError({
+                memoryId: input.memoryId,
+                message: "No memory with this id; recall or list memories to get a valid id.",
+              }),
+            );
+          }
+          const operationId =
+            input.turnId === null ? null : `confirm:${input.turnId}:${input.memoryId}`;
+          if (operationId !== null) {
+            const receipt = yield* repository.getReceipt({
+              projectId: row.projectId,
+              operationId,
+            });
+            const replayed =
+              Option.isSome(receipt) ||
+              Option.isSome(
+                yield* repository.findJournalOp({
+                  memoryId: input.memoryId,
+                  op: "confirm",
+                  turnId: input.turnId,
+                }),
+              );
+            if (replayed) {
+              // Durable no-op: re-read the row the first confirm updated.
+              const current = yield* repository.getById({ memoryId: input.memoryId });
+              if (Option.isSome(current)) {
+                const nowIso = yield* nowIsoNow;
+                return toMindMemory(current.value, nowIso);
+              }
+            }
+          }
+          const nowMillis = yield* Clock.currentTimeMillis;
+          const nowIso = new Date(nowMillis).toISOString();
+          const updated = yield* repository.applyConfirm({
             memoryId: input.memoryId,
-            message: "The memory was deleted while confirming; recall to get a valid id.",
-          }),
-        );
-      }
-      yield* repository.appendJournal({
-        projectId: row.projectId,
-        memoryId: input.memoryId,
-        op: "confirm",
-        actor: input.actor,
-        threadId: input.threadId,
-        turnId: input.turnId,
-        createdAt: nowIso,
-      });
-      if (operationId !== null) {
-        yield* repository.putReceipt({
-          projectId: row.projectId,
-          operationId,
-          op: "confirm",
-          resultJson: JSON.stringify({
+            peakWeight: confirmedWeight(row.peakWeight),
+            lastAccessedAt: nowIso,
+          });
+          if (Option.isNone(updated)) {
+            return yield* Effect.fail(
+              new MindMemoryNotFoundError({
+                memoryId: input.memoryId,
+                message: "The memory was deleted while confirming; recall to get a valid id.",
+              }),
+            );
+          }
+          yield* repository.appendJournal({
+            projectId: row.projectId,
             memoryId: input.memoryId,
-            peakWeight: updated.value.peakWeight,
-          }),
-          createdAt: nowIso,
-        });
-      }
-      // Sweep after the mutation: the just-confirmed row is fresh and exempt,
-      // so an explicit confirm can never be pre-empted by the prune sweep.
-      yield* maybeSweep(row.projectId);
-      return toMindMemory(updated.value, nowIso);
-    });
+            op: "confirm",
+            actor: input.actor,
+            threadId: input.threadId,
+            turnId: input.turnId,
+            createdAt: nowIso,
+          });
+          if (operationId !== null) {
+            yield* repository.putReceipt({
+              projectId: row.projectId,
+              operationId,
+              op: "confirm",
+              resultJson: JSON.stringify({
+                memoryId: input.memoryId,
+                peakWeight: updated.value.peakWeight,
+              }),
+              createdAt: nowIso,
+            });
+          }
+          // Sweep after the mutation: the just-confirmed row is fresh and exempt,
+          return toMindMemory(updated.value, nowIso);
+        }),
+      )
+      .pipe(
+        Effect.catchIf(
+          (error): error is SqlError => error._tag === "SqlError",
+          (error) => Effect.fail(toPersistenceSqlError("MindService.confirm:transaction")(error)),
+        ),
+      )
+      .pipe(Effect.tap((memory) => maybeSweep(memory.projectId)));
 
   const forget = (input: MindForgetRequest): Effect.Effect<MindForgetResult, MindServiceError> =>
-    Effect.gen(function* () {
-      const nowIso = yield* nowIsoNow;
-      const existing = yield* repository.getById({ memoryId: input.memoryId });
-      if (Option.isNone(existing)) {
-        // Idempotent: forgetting a missing id succeeds.
-        return { memoryId: input.memoryId, deleted: false, alreadyGone: true };
-      }
-      const row = existing.value;
-      if (row.projectId !== input.projectId) {
-        // From the caller's project the memory is already gone: idempotent success.
-        return { memoryId: input.memoryId, deleted: false, alreadyGone: true };
-      }
-      const deleted = yield* repository.deleteById({ memoryId: input.memoryId });
-      if (!deleted) {
-        return { memoryId: input.memoryId, deleted: false, alreadyGone: true };
-      }
-      // Journal rows carry the op and ids only — never memory text.
-      yield* repository.appendJournal({
-        projectId: row.projectId,
-        memoryId: input.memoryId,
-        op: "forget",
-        actor: input.actor,
-        threadId: input.threadId,
-        turnId: input.turnId,
-        createdAt: nowIso,
-      });
-      yield* maybeSweep(row.projectId);
-      return { memoryId: input.memoryId, deleted: true, alreadyGone: false };
-    });
+    sqlClient
+      .withTransaction(
+        Effect.gen(function* () {
+          const nowIso = yield* nowIsoNow;
+          const operationId =
+            input.turnId === null ? null : `forget:${input.turnId}:${input.memoryId}`;
+          if (operationId !== null) {
+            const receipt = yield* repository.getReceipt({
+              projectId: input.projectId,
+              operationId,
+            });
+            if (Option.isSome(receipt)) {
+              return {
+                memoryId: input.memoryId,
+                deleted: true,
+                alreadyGone: false,
+              };
+            }
+          }
+          const existing = yield* repository.getById({ memoryId: input.memoryId });
+          if (Option.isNone(existing)) {
+            // Idempotent: forgetting a missing id succeeds.
+            return { memoryId: input.memoryId, deleted: false, alreadyGone: true };
+          }
+          const row = existing.value;
+          if (row.projectId !== input.projectId) {
+            // From the caller's project the memory is already gone: idempotent success.
+            return { memoryId: input.memoryId, deleted: false, alreadyGone: true };
+          }
+          const deleted = yield* repository.deleteById({ memoryId: input.memoryId });
+          if (!deleted) {
+            return { memoryId: input.memoryId, deleted: false, alreadyGone: true };
+          }
+          // Journal rows carry the op and ids only — never memory text.
+          yield* repository.appendJournal({
+            projectId: row.projectId,
+            memoryId: input.memoryId,
+            op: "forget",
+            actor: input.actor,
+            threadId: input.threadId,
+            turnId: input.turnId,
+            createdAt: nowIso,
+          });
+          if (operationId !== null) {
+            yield* repository.putReceipt({
+              projectId: row.projectId,
+              operationId,
+              op: "forget",
+              resultJson: JSON.stringify({
+                memoryId: input.memoryId,
+                deleted: true,
+                alreadyGone: false,
+              }),
+              createdAt: nowIso,
+            });
+          }
+          return { memoryId: input.memoryId, deleted: true, alreadyGone: false };
+        }),
+      )
+      .pipe(
+        Effect.catchIf(
+          (error): error is SqlError => error._tag === "SqlError",
+          (error) => Effect.fail(toPersistenceSqlError("MindService.forget:transaction")(error)),
+        ),
+      )
+      .pipe(Effect.tap((result) => (result.deleted ? maybeSweep(input.projectId) : Effect.void)));
 
   const status = (input: MindStatusRequest): Effect.Effect<MindStatusResult, MindServiceError> =>
     Effect.gen(function* () {
@@ -651,7 +691,7 @@ const makeMindService = Effect.gen(function* () {
       const oldestIdleDays = rows.reduce((max, row) => Math.max(max, idleDaysOf(row, nowIso)), 0);
       const profile = yield* repository.getProfile({ projectId: input.projectId });
       return {
-        count: rows.length,
+        count: yield* repository.countByProject({ projectId: input.projectId }),
         cap: MIND_MEMORY_PROJECT_CAP,
         pinnedCount: rows.filter((row) => row.pinned).length,
         digestChars: renderDigestWithProfile(digestItems, optedInProfileText(profile)).length,
@@ -688,17 +728,23 @@ const makeMindService = Effect.gen(function* () {
       };
     });
 
-  // Global list for the project-agnostic Mind view: every memory across all
-  // projects, so rows whose project left the projection stay reachable. The
-  // repository page is bounded to one cap; `count` stays the true total and
-  // `skipped` counts only undecodable rows within the page, never the
-  // truncation beyond it.
+  // Global list for the project-agnostic Mind view: fetch each project's
+  // bounded candidate set, rank the combined decoded rows, then apply the
+  // global page limit. This prevents a recent low-weight row from displacing a
+  // stronger memory before service-side effective-weight ranking.
   const listAll = (): Effect.Effect<MindListResult, MindServiceError> =>
     Effect.gen(function* () {
       const nowIso = yield* nowIsoNow;
-      const rows = yield* repository.listAll({ limit: MIND_MEMORY_PROJECT_CAP });
+      const projectIds = yield* repository.listProjectIds();
+      const rows = (yield* Effect.forEach(
+        projectIds,
+        (projectId) => repository.listByProject({ projectId }),
+        {
+          concurrency: 1,
+        },
+      )).flat();
       const total = yield* repository.countAll();
-      const skipped = Math.max(0, Math.min(total, MIND_MEMORY_PROJECT_CAP) - rows.length);
+      const skipped = Math.max(0, total - rows.length);
       if (skipped > 0) {
         yield* Effect.logWarning("Mind list skipped undecodable rows.", {
           shown: rows.length,
@@ -708,7 +754,8 @@ const makeMindService = Effect.gen(function* () {
       }
       const memories = rows
         .map((row) => toMindMemory(row, nowIso))
-        .toSorted((a, b) => b.weight - a.weight || a.memoryId.localeCompare(b.memoryId));
+        .toSorted((a, b) => b.weight - a.weight || a.memoryId.localeCompare(b.memoryId))
+        .slice(0, MIND_MEMORY_PROJECT_CAP);
       return {
         memories,
         count: total,
@@ -718,53 +765,88 @@ const makeMindService = Effect.gen(function* () {
     });
 
   const setPinned = (input: MindSetPinnedRequest): Effect.Effect<MindMemory, MindServiceError> =>
-    Effect.gen(function* () {
-      const existing = yield* repository.getById({ memoryId: input.memoryId });
-      if (Option.isNone(existing)) {
-        return yield* Effect.fail(
-          new MindMemoryNotFoundError({
+    sqlClient
+      .withTransaction(
+        Effect.gen(function* () {
+          const operationId =
+            input.turnId === null
+              ? null
+              : `setPinned:${input.turnId}:${input.memoryId}:${input.pinned ? "1" : "0"}`;
+          if (operationId !== null) {
+            const receipt = yield* repository.getReceipt({
+              projectId: input.projectId,
+              operationId,
+            });
+            if (Option.isSome(receipt)) {
+              const current = yield* repository.getById({ memoryId: input.memoryId });
+              if (Option.isSome(current) && current.value.projectId === input.projectId) {
+                const nowIso = yield* nowIsoNow;
+                return toMindMemory(current.value, nowIso);
+              }
+            }
+          }
+          const existing = yield* repository.getById({ memoryId: input.memoryId });
+          if (Option.isNone(existing)) {
+            return yield* Effect.fail(
+              new MindMemoryNotFoundError({
+                memoryId: input.memoryId,
+                message: "No memory with this id; list memories to get a valid id.",
+              }),
+            );
+          }
+          const row = existing.value;
+          if (row.projectId !== input.projectId) {
+            return yield* Effect.fail(
+              new MindMemoryNotFoundError({
+                memoryId: input.memoryId,
+                message: "No memory with this id; list memories to get a valid id.",
+              }),
+            );
+          }
+          const nowIso = yield* nowIsoNow;
+          const updated = yield* repository.setPinned({
             memoryId: input.memoryId,
-            message: "No memory with this id; list memories to get a valid id.",
-          }),
-        );
-      }
-      const row = existing.value;
-      if (row.projectId !== input.projectId) {
-        return yield* Effect.fail(
-          new MindMemoryNotFoundError({
+            pinned: input.pinned,
+          });
+          if (Option.isNone(updated)) {
+            return yield* Effect.fail(
+              new MindMemoryNotFoundError({
+                memoryId: input.memoryId,
+                message: "The memory was deleted while pinning; list memories to get a valid id.",
+              }),
+            );
+          }
+          yield* repository.appendJournal({
+            projectId: row.projectId,
             memoryId: input.memoryId,
-            message: "No memory with this id; list memories to get a valid id.",
-          }),
-        );
-      }
-      const nowIso = yield* nowIsoNow;
-      const updated = yield* repository.setPinned({
-        memoryId: input.memoryId,
-        pinned: input.pinned,
-      });
-      if (Option.isNone(updated)) {
-        return yield* Effect.fail(
-          new MindMemoryNotFoundError({
-            memoryId: input.memoryId,
-            message: "The memory was deleted while pinning; list memories to get a valid id.",
-          }),
-        );
-      }
-      yield* repository.appendJournal({
-        projectId: row.projectId,
-        memoryId: input.memoryId,
-        op: input.pinned ? "pin" : "unpin",
-        actor: input.actor,
-        threadId: input.threadId,
-        turnId: input.turnId,
-        createdAt: nowIso,
-      });
-      // Sweep after the mutation: pinning a prune-eligible row must protect it.
-      // A sweep before the update would delete the row first and fail below
-      // with "deleted while pinning". Mirrors confirm.
-      yield* maybeSweep(row.projectId);
-      return toMindMemory(updated.value, nowIso);
-    });
+            op: input.pinned ? "pin" : "unpin",
+            actor: input.actor,
+            threadId: input.threadId,
+            turnId: input.turnId,
+            createdAt: nowIso,
+          });
+          if (operationId !== null) {
+            yield* repository.putReceipt({
+              projectId: row.projectId,
+              operationId,
+              op: input.pinned ? "pin" : "unpin",
+              resultJson: JSON.stringify({
+                memoryId: input.memoryId,
+                pinned: input.pinned,
+              }),
+              createdAt: nowIso,
+            });
+          }
+          return toMindMemory(updated.value, nowIso);
+        }),
+      )
+      .pipe(
+        Effect.catchIf(
+          (error): error is SqlError => error._tag === "SqlError",
+          (error) => Effect.fail(toPersistenceSqlError("MindService.setPinned:transaction")(error)),
+        ),
+      )
+      .pipe(Effect.tap((memory) => maybeSweep(memory.projectId)));
 
   // The edit mutation serialized in its own transaction (check-then-act:
   // receipt lookup, collision check, row update, revision insert) so
@@ -929,57 +1011,68 @@ const makeMindService = Effect.gen(function* () {
   // An empty text on opt-out keeps the last saved text; with no prior profile
   // there is nothing to keep, so the save is rejected as empty.
   const profileSet = (input: MindProfileSetRequest): Effect.Effect<MindProfile, MindServiceError> =>
-    Effect.gen(function* () {
-      const nowIso = yield* nowIsoNow;
-      const existing = yield* repository.getProfile({ projectId: input.projectId });
-      const normalized = normalizeMindText(input.text);
-      const nextText =
-        normalized.length > 0 ? normalized : Option.isSome(existing) ? existing.value.text : "";
-      if (nextText.length === 0) {
-        return yield* Effect.fail(
-          new MindInvalidTextError({
-            reason: "empty",
-            message: "Profile text is empty; write a short project profile or opt back in later.",
-          }),
-        );
-      }
-      if (nextText.length > MIND_PROFILE_TEXT_MAX_CHARS) {
-        return yield* Effect.fail(
-          new MindInvalidTextError({
-            reason: "tooLong",
-            message: `Profile text is ${nextText.length} characters after trimming; keep it at ${MIND_PROFILE_TEXT_MAX_CHARS} or fewer.`,
-          }),
-        );
-      }
-      if (isMindSecret(nextText)) {
-        return yield* Effect.fail(
-          new MindSecretRejectedError({
-            message:
-              "Profile text matches a credential or secret pattern and was rejected; keep secrets in a secret store, never in project memory.",
-          }),
-        );
-      }
-      yield* repository.setProfile({
-        projectId: input.projectId,
-        text: nextText,
-        optedIn: input.optedIn,
-        updatedAt: nowIso,
-      });
-      if (!Option.isSome(existing) || existing.value.text !== nextText) {
-        yield* repository.insertProfileRevision({
-          projectId: input.projectId,
-          textHash: hashMindText(nextText),
-          actor: { kind: "user" },
-          createdAt: nowIso,
-        });
-      }
-      return {
-        projectId: input.projectId,
-        text: nextText,
-        optedIn: input.optedIn,
-        updatedAt: nowIso,
-      };
-    });
+    sqlClient
+      .withTransaction(
+        Effect.gen(function* () {
+          const nowIso = yield* nowIsoNow;
+          const existing = yield* repository.getProfile({ projectId: input.projectId });
+          const normalized = normalizeMindText(input.text);
+          const nextText =
+            normalized.length > 0 ? normalized : Option.isSome(existing) ? existing.value.text : "";
+          if (nextText.length === 0) {
+            return yield* Effect.fail(
+              new MindInvalidTextError({
+                reason: "empty",
+                message:
+                  "Profile text is empty; write a short project profile or opt back in later.",
+              }),
+            );
+          }
+          if (nextText.length > MIND_PROFILE_TEXT_MAX_CHARS) {
+            return yield* Effect.fail(
+              new MindInvalidTextError({
+                reason: "tooLong",
+                message: `Profile text is ${nextText.length} characters after trimming; keep it at ${MIND_PROFILE_TEXT_MAX_CHARS} or fewer.`,
+              }),
+            );
+          }
+          if (isMindSecret(nextText)) {
+            return yield* Effect.fail(
+              new MindSecretRejectedError({
+                message:
+                  "Profile text matches a credential or secret pattern and was rejected; keep secrets in a secret store, never in project memory.",
+              }),
+            );
+          }
+          yield* repository.setProfile({
+            projectId: input.projectId,
+            text: nextText,
+            optedIn: input.optedIn,
+            updatedAt: nowIso,
+          });
+          if (!Option.isSome(existing) || existing.value.text !== nextText) {
+            yield* repository.insertProfileRevision({
+              projectId: input.projectId,
+              textHash: hashMindText(nextText),
+              actor: { kind: "user" },
+              createdAt: nowIso,
+            });
+          }
+          return {
+            projectId: input.projectId,
+            text: nextText,
+            optedIn: input.optedIn,
+            updatedAt: nowIso,
+          };
+        }),
+      )
+      .pipe(
+        Effect.catchIf(
+          (error): error is SqlError => error._tag === "SqlError",
+          (error) =>
+            Effect.fail(toPersistenceSqlError("MindService.profileSet:transaction")(error)),
+        ),
+      );
 
   const history = (input: MindHistoryRequest): Effect.Effect<MindHistoryResult, MindServiceError> =>
     Effect.gen(function* () {
