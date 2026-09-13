@@ -253,7 +253,10 @@ layer("MindRepository", (it) => {
       '"use"* OR "bun"* OR "run"* OR "test"*',
     );
     assert.strictEqual(buildMindFtsMatchExpr('say "hello"'), '"say"* OR """hello"""*');
-    assert.strictEqual(buildMindFtsMatchExpr("NEAR(a b) OR x"), '"NEAR(a"* OR "b)"* OR "OR"* OR "x"*');
+    assert.strictEqual(
+      buildMindFtsMatchExpr("NEAR(a b) OR x"),
+      '"NEAR(a"* OR "b)"* OR "OR"* OR "x"*',
+    );
     assert.strictEqual(buildMindFtsMatchExpr(""), "");
   });
 
