@@ -201,6 +201,7 @@ import {
   ServerGenerateAutomationIntentResult,
   ServerGenerateThreadRecapInput,
   ServerGenerateThreadRecapResult,
+  ServerGlobalInstructionsResult,
   ServerGetEnvironmentResult,
   ServerGetProviderUsageSnapshotInput,
   ServerGetProviderUsageSnapshotResult,
@@ -218,6 +219,7 @@ import {
   ServerStopLocalServerResult,
   ServerUpdateSettingsInput,
   ServerUpdateSettingsResult,
+  ServerUpdateGlobalInstructionsInput,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
   ServerVoicePrewarmInput,
@@ -976,6 +978,21 @@ export const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
   error: WsRpcError,
 });
 
+export const WsServerGetGlobalInstructionsRpc = Rpc.make(WS_METHODS.serverGetGlobalInstructions, {
+  payload: Schema.Struct({}),
+  success: ServerGlobalInstructionsResult,
+  error: WsRpcError,
+});
+
+export const WsServerUpdateGlobalInstructionsRpc = Rpc.make(
+  WS_METHODS.serverUpdateGlobalInstructions,
+  {
+    payload: ServerUpdateGlobalInstructionsInput,
+    success: ServerGlobalInstructionsResult,
+    error: WsRpcError,
+  },
+);
+
 export const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSettings, {
   payload: ServerUpdateSettingsInput,
   success: ServerUpdateSettingsResult,
@@ -1355,6 +1372,8 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerGetEnvironmentRpc,
   WsServerGetSettingsRpc,
+  WsServerGetGlobalInstructionsRpc,
+  WsServerUpdateGlobalInstructionsRpc,
   WsServerUpdateSettingsRpc,
   WsServerRefreshProvidersRpc,
   WsServerUpdateProviderRpc,

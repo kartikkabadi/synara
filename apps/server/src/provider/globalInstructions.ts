@@ -1,5 +1,6 @@
 import { FileSystem, Effect, Path } from "effect";
 
+import { writeFileStringAtomically } from "../atomicWrite";
 import { ServerConfig } from "../config";
 
 export const GLOBAL_INSTRUCTIONS_FILE_NAME = "SYNARA.md";
@@ -50,6 +51,22 @@ export const loadGlobalInstructions = Effect.fn("loadGlobalInstructions")(functi
   );
   cache.set(filePath, { mtimeMs, size, text });
   return text || null;
+});
+
+export const readGlobalInstructions = loadGlobalInstructions().pipe(
+  Effect.map((contents) => ({ contents: contents ?? "" })),
+);
+
+export const saveGlobalInstructions = Effect.fn("saveGlobalInstructions")(function* (
+  contents: string,
+) {
+  const path = yield* Path.Path;
+  const config = yield* ServerConfig;
+  const filePath = path.join(config.homeDir, GLOBAL_INSTRUCTIONS_FILE_NAME);
+  const normalized = normalizeGlobalInstructions(contents);
+  yield* writeFileStringAtomically({ filePath, contents: normalized });
+  cache.delete(filePath);
+  return { contents: normalized };
 });
 
 const cache = new Map<string, CachedInstructions>();

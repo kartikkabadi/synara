@@ -9,6 +9,7 @@ import { sameAppSnapShortcut } from "@synara/shared/appSnapShortcut";
 import { SafariAccessSetupButton } from "../components/SafariAccessOnboarding";
 import { createFileRoute, useSearch } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   type AppSettings,
@@ -83,6 +84,7 @@ import { useOnboardingDialogStore } from "../onboarding/onboardingDialogStore";
 import { Input } from "../components/ui/input";
 import { SelectItem } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
+import { Textarea } from "../components/ui/textarea";
 import { toastManager } from "../components/ui/toast";
 import { RouteInsetSurface } from "../components/RouteInsetSurface";
 import { SidebarHeaderNavigationControls } from "../components/SidebarHeaderNavigationControls";
@@ -93,6 +95,7 @@ import { isUiDensity } from "../lib/appDensity";
 import { isChatWidthMode, type ChatWidthMode } from "../lib/chatWidth";
 import { isElectron } from "../env";
 import { ResetIcon } from "../lib/icons";
+import { serverGlobalInstructionsQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
 import {
   cn,
   getNavigatorPlatform,
@@ -213,9 +216,29 @@ function SettingsRouteView() {
   } = useTheme();
   const { settings, defaults, updateSettings, updateSettingsAndWait, resetSettings } =
     useAppSettings();
+  const globalInstructionsQuery = useQuery(serverGlobalInstructionsQueryOptions());
+  const queryClient = useQueryClient();
+  const [globalInstructionsDraft, setGlobalInstructionsDraft] = useState<string | undefined>();
+  const globalInstructionsMutation = useMutation({
+    mutationFn: async (contents: string) => {
+      const api = ensureNativeApi();
+      return api.server.updateGlobalInstructions({ contents });
+    },
+    onSuccess: (result) => {
+      setGlobalInstructionsDraft(result.contents);
+      queryClient.setQueryData(serverQueryKeys.globalInstructions(), result);
+    },
+  });
   const desktopTopBarTrafficLightGutterClassName = useDesktopTopBarTrafficLightGutterClassName();
   const [releaseHistoryOpen, setReleaseHistoryOpen] = useState(false);
   const [resetEpoch, setResetEpoch] = useState(0);
+  const globalInstructions =
+    globalInstructionsDraft ?? globalInstructionsQuery.data?.contents ?? "";
+  const savedGlobalInstructions = globalInstructionsQuery.data?.contents ?? "";
+  const globalInstructionsError = globalInstructionsQuery.error ?? globalInstructionsMutation.error;
+  const globalInstructionsLoading =
+    globalInstructionsQuery.isPending && globalInstructionsDraft === undefined;
+  const globalInstructionsSaving = globalInstructionsMutation.isPending;
   const platform = getNavigatorPlatform();
   const shouldShowFontSmoothing = isMacPlatform(platform);
   const supportsCustomTitleBarSetting =
@@ -461,6 +484,48 @@ function SettingsRouteView() {
           resetLabel: "global SYNARA.md instructions",
           ariaLabel: "Enable global SYNARA.md instructions",
         })}
+        <SettingsRow
+          title="Global instructions content"
+          description="Edit the optional guidance stored in ~/SYNARA.md. It is limited to 6,000 characters and can be saved while the setting above is off."
+          status={
+            globalInstructionsError
+              ? globalInstructionsError instanceof Error
+                ? globalInstructionsError.message
+                : "Failed to load or save."
+              : globalInstructionsLoading
+                ? "Loading…"
+                : globalInstructions !== savedGlobalInstructions
+                  ? "Unsaved changes"
+                  : "Saved"
+          }
+          control={
+            <Button
+              variant="outline"
+              disabled={
+                globalInstructionsLoading ||
+                globalInstructionsSaving ||
+                globalInstructions === savedGlobalInstructions
+              }
+              onClick={() => globalInstructionsMutation.mutate(globalInstructions)}
+            >
+              {globalInstructionsSaving ? "Saving…" : "Save"}
+            </Button>
+          }
+        >
+          <div className="mt-3 space-y-2">
+            <Textarea
+              value={globalInstructions}
+              maxLength={6_000}
+              disabled={globalInstructionsLoading || globalInstructionsSaving}
+              onChange={(event) => setGlobalInstructionsDraft(event.target.value)}
+              aria-label="Global SYNARA.md instructions content"
+              placeholder="Add durable guidance for new or restarted agent sessions…"
+            />
+            <div className="text-right text-[11px] text-muted-foreground">
+              {globalInstructions.length.toLocaleString()} / 6,000 characters
+            </div>
+          </div>
+        </SettingsRow>
         <SettingsRow
           title="Default provider"
           description="Provider used for new chats until you pick a model. New chats then reuse your most recent model and options."

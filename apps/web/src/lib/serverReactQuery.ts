@@ -19,6 +19,7 @@ export const serverQueryKeys = {
   authSession: () => ["server", "auth", "session"] as const,
   environment: () => ["server", "environment"] as const,
   settings: () => ["server", "settings"] as const,
+  globalInstructions: () => ["server", "globalInstructions"] as const,
   worktrees: () => ["server", "worktrees"] as const,
   localServers: () => ["server", "localServers"] as const,
   providerUsage: (provider: ProviderKind | null | undefined, homePath?: string | null) =>
@@ -43,6 +44,17 @@ export function serverConfigQueryOptions() {
     queryFn: async () => {
       const api = ensureNativeApi();
       return api.server.getConfig();
+    },
+    staleTime: Infinity,
+  });
+}
+
+export function serverGlobalInstructionsQueryOptions() {
+  return queryOptions({
+    queryKey: serverQueryKeys.globalInstructions(),
+    queryFn: async () => {
+      const api = ensureNativeApi();
+      return api.server.getGlobalInstructions();
     },
     staleTime: Infinity,
   });
