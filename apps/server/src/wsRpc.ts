@@ -2,7 +2,6 @@ import { readEventLoopStatus } from "./eventLoopMonitor";
 import { makeGitActionRunner } from "./git/gitActionRunner";
 import { AgentGatewaySessionRegistry } from "./agentGateway/Services/AgentGatewaySessionRegistry";
 import { execFile } from "node:child_process";
-
 import {
   CommandId,
   COMPUTER_WS_METHODS,
@@ -159,6 +158,7 @@ import {
 } from "./orchestration/Errors";
 import { makeDispatchCommandNormalizer } from "./orchestration/dispatchCommandNormalization";
 import { sanitizeOrchestrationEventProviderOptions } from "./orchestration/providerOptionsSecurity";
+import { dispatchAutomaticPullRequestReview } from "./orchestration/automaticPullRequestReview";
 import { prepareQuitResume } from "./orchestration/quitResume";
 import { makeImportThreadHandler } from "./orchestration/importThreadRoute";
 import { makeProjectImportHandlers } from "./orchestration/projectImportRoute";
@@ -563,7 +563,7 @@ const makeWsRpcHandlersLayer = () =>
         Effect.gen(function* () {
           const settings = yield* serverSettings.getSettings;
           const routing = resolveTextGenerationRouting(settings, input);
-          yield* gitManager.runStackedAction(
+          const result = yield* gitManager.runStackedAction(
             {
               ...input,
               ...(routing.modelSelection
@@ -573,6 +573,42 @@ const makeWsRpcHandlersLayer = () =>
             },
             { actionId: input.actionId, progressReporter: { publish } },
           );
+          if (
+            input.threadId &&
+            result.pr.status !== "skipped_not_requested" &&
+            result.pr.baseBranch &&
+            result.pr.url
+          ) {
+            yield* Effect.gen(function* () {
+              const thread = Option.getOrUndefined(
+                yield* projectionReadModelQuery.getThreadShellById(input.threadId!),
+              );
+              if (!thread || thread.archivedAt) return;
+              const project = Option.getOrUndefined(
+                yield* projectionReadModelQuery.getProjectShellById(thread.projectId),
+              );
+              if (!project) return;
+              const workspace = resolveThreadWorkspaceCwd({ thread, projects: [project] });
+              if (!workspace) return;
+              const paths = yield* Effect.all([
+                fileSystem.realPath(workspace),
+                fileSystem.realPath(input.cwd),
+              ]);
+              if (!workspaceRootsEqual(paths[0], paths[1], { platform: process.platform })) return;
+              yield* dispatchAutomaticPullRequestReview({
+                orchestrationEngine,
+                thread,
+                baseBranch: result.pr.baseBranch!,
+                pullRequestUrl: result.pr.url!,
+              });
+            }).pipe(
+              Effect.catchCause(() =>
+                Effect.logWarning("automatic pull request review dispatch failed", {
+                  threadId: input.threadId,
+                }),
+              ),
+            );
+          }
           yield* refreshGitStatusInBackground(input.cwd);
         }).pipe(
           Effect.catchCause((cause) => Effect.fail(toWsRpcError(cause, "Git action failed"))),

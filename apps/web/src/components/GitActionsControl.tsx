@@ -360,6 +360,7 @@ export default function GitActionsControl({
   const runImmediateGitActionMutation = useMutation(
     gitRunStackedActionMutationOptions({
       cwd: gitCwd,
+      threadId: activeThreadId,
       queryClient,
       codexHomePath: settings.codexHomePath || null,
       model: settings.textGenerationModel ?? null,
@@ -809,6 +810,7 @@ export default function GitActionsControl({
 
       const promise = runImmediateGitActionMutation.mutateAsync({
         actionId,
+        ...(activeThreadId ? { threadId: activeThreadId } : {}),
         action,
         ...(commitMessage ? { commitMessage } : {}),
         ...(featureBranch ? { featureBranch } : {}),

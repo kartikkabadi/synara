@@ -227,6 +227,7 @@ export const GitRunStackedActionInput = Schema.Struct({
   // Reattach only: never start a missing action after a lost acknowledgement.
   resume: Schema.optional(Schema.Boolean),
   cwd: TrimmedNonEmptyStringSchema,
+  threadId: Schema.optional(ThreadId),
   action: GitStackedAction,
   commitMessage: Schema.optional(TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(10_000))),
   featureBranch: Schema.optional(Schema.Boolean),

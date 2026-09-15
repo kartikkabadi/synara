@@ -32,6 +32,7 @@ import {
 import { ManagedAttachmentRepository } from "../../persistence/Services/ManagedAttachments.ts";
 import { OrchestrationCommandReceiptRepository } from "../../persistence/Services/OrchestrationCommandReceipts.ts";
 import { materializeThreadGoalFile, pruneThreadGoalFiles } from "../threadGoalMaterialization.ts";
+import { dispatchAutomaticPullRequestReview } from "../automaticPullRequestReview";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive as OrchestrationProjectionSnapshotQueryBase } from "./ProjectionSnapshotQuery.ts";
@@ -202,6 +203,62 @@ function now() {
 }
 
 describe("OrchestrationEngine", () => {
+  it("durably admits one automatic review for repeated PR association", async () => {
+    const system = await createOrchestrationSystem();
+    try {
+      const createdAt = now();
+      const projectId = asProjectId("automatic-review-project");
+      const threadId = ThreadId.makeUnsafe("automatic-review-thread");
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("automatic-review-project"),
+          projectId,
+          title: "Review fixture",
+          workspaceRoot: "/tmp/automatic-review-fixture",
+          defaultModelSelection: { provider: "codex", model: "gpt-5-codex" },
+          createdAt,
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.makeUnsafe("automatic-review-thread"),
+          threadId,
+          projectId,
+          title: "Review fixture",
+          modelSelection: { provider: "codex", model: "gpt-5-codex" },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        }),
+      );
+      const thread = (await system.run(system.engine.getReadModel())).threads.find(
+        (x) => x.id === threadId,
+      )!;
+      const input = {
+        orchestrationEngine: system.engine,
+        thread,
+        baseBranch: "main",
+        pullRequestUrl: "https://github.com/example/fixture/pull/1",
+      };
+      expect(await system.run(dispatchAutomaticPullRequestReview(input))).toBe(true);
+      const acceptedSequence = await system.run(system.engine.getEventHighWaterSequence);
+      await system.run(dispatchAutomaticPullRequestReview(input));
+      expect(await system.run(system.engine.getEventHighWaterSequence)).toBe(acceptedSequence);
+      const current = (await system.run(system.engine.getReadModel())).threads.find(
+        (x) => x.id === threadId,
+      )!;
+      expect(current.messages.filter((x) => x.id.startsWith("automatic-pr-review:"))).toHaveLength(
+        1,
+      );
+    } finally {
+      await system.dispose();
+    }
+  });
+
   it("commits the metadata snapshot cursor before publishing its accepted event", async () => {
     const system = await createOrchestrationSystem();
     const commandId = CommandId.makeUnsafe("metadata-phase-commit");
