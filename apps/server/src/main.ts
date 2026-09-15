@@ -73,6 +73,11 @@ import {
   embeddedMigrationRuntimeSourceDigest,
   verifyMigrationRuntimeIdentity,
 } from "./migrationBundleIdentity";
+import {
+  parseStatuslineJson,
+  readStdin,
+  storeAntigravityStatusline,
+} from "./providerUsage/antigravityStatusline";
 
 export class StartupError extends Data.TaggedError("StartupError")<{
   readonly message: string;
@@ -721,9 +726,34 @@ const mcpCommand = Command.make("mcp").pipe(
   Command.withSubcommands([mcpServeCommand, mcpPairCommand]),
 );
 
+const antigravityStatuslineCommand = Command.make(
+  "statusline",
+  {
+    stateDir: Flag.string("state-dir").pipe(
+      Flag.withDescription("Synara private state directory for Antigravity quota data."),
+    ),
+  },
+  ({ stateDir }) =>
+    Effect.gen(function* () {
+      const raw = yield* Effect.promise(readStdin);
+      const payload = parseStatuslineJson(raw);
+      if (payload === null) {
+        return yield* new StartupError({
+          message: "Antigravity status-line input was not valid JSON.",
+        });
+      }
+      yield* Effect.promise(() => storeAntigravityStatusline(stateDir, payload));
+    }),
+).pipe(Command.withDescription("Receive Antigravity's documented status-line JSON payload."));
+
+const antigravityCommand = Command.make("antigravity").pipe(
+  Command.withDescription("Integrate Synara with Antigravity's CLI-owned surfaces."),
+  Command.withSubcommands([antigravityStatuslineCommand]),
+);
+
 const serverCommand = baseServerCommand.pipe(
   Command.withHandler((input) => makeServerProgram(input)),
-  Command.withSubcommands([serverToolsCommand, mcpCommand]),
+  Command.withSubcommands([serverToolsCommand, mcpCommand, antigravityCommand]),
 );
 
 export const synaraCli = serverCommand;
