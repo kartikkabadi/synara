@@ -187,6 +187,7 @@ import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
 import { KeepAwakeService } from "./keepAwake";
 import { ServerSettingsService } from "./serverSettings";
+import { readGlobalInstructions, saveGlobalInstructions } from "./provider/globalInstructions";
 import { isLoopbackHost } from "./startupAccess";
 import { TerminalManager } from "./terminal/Services/Manager";
 import { TerminalThreadTitleTracker } from "./terminal/terminalThreadTitleTracker";
@@ -2244,6 +2245,10 @@ const makeWsRpcHandlersLayer = () =>
           rpcEffect(serverEnvironment.getDescriptor, "Failed to load server environment"),
         [WS_METHODS.serverGetSettings]: () =>
           rpcEffect(serverSettings.getSettingsView, "Failed to load server settings"),
+        [WS_METHODS.serverGetGlobalInstructions]: () =>
+          rpcEffect(readGlobalInstructions, "Failed to load global instructions"),
+        [WS_METHODS.serverUpdateGlobalInstructions]: (input) =>
+          rpcEffect(saveGlobalInstructions(input.contents), "Failed to update global instructions"),
         [WS_METHODS.serverUpdateSettings]: (input) =>
           rpcEffect(serverSettings.updateSettingsView(input), "Failed to update server settings"),
         [WS_METHODS.serverRefreshProviders]: () =>

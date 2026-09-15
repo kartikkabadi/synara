@@ -284,6 +284,7 @@ import type {
   ServerGenerateAutomationIntentResult,
   ServerGenerateThreadRecapInput,
   ServerGenerateThreadRecapResult,
+  ServerGlobalInstructionsResult,
   ServerGetEnvironmentResult,
   ServerConsumeCodexResetCreditInput,
   ServerConsumeCodexResetCreditResult,
@@ -303,6 +304,7 @@ import type {
   ServerUpdateSettingsResult,
   ServerEditKeybindingsInput,
   ServerEditKeybindingsResult,
+  ServerUpdateGlobalInstructionsInput,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
   ServerVoicePrewarmInput,
@@ -1278,6 +1280,10 @@ export interface NativeApi {
     getConfig: () => Promise<ServerConfig>;
     getEnvironment: () => Promise<ServerGetEnvironmentResult>;
     getSettings: () => Promise<ServerGetSettingsResult>;
+    getGlobalInstructions: () => Promise<ServerGlobalInstructionsResult>;
+    updateGlobalInstructions: (
+      input: ServerUpdateGlobalInstructionsInput,
+    ) => Promise<ServerGlobalInstructionsResult>;
     updateSettings: (input: ServerUpdateSettingsInput) => Promise<ServerUpdateSettingsResult>;
     getAuthSession: () => Promise<AuthSessionState>;
     bootstrapAuth: (input: AuthBootstrapInput) => Promise<AuthBootstrapResult>;
