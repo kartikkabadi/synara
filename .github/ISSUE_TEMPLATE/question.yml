@@ -1,0 +1,31 @@
+name: Question
+description: Ask how to use Synara or understand documented behavior.
+title: "[Question]: "
+labels:
+  - type:question
+  - state:needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search the documentation and existing issues first.
+        Do not include credentials, cookies, private source code, or unredacted transcripts.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the documentation and existing issues.
+          required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: What are you trying to do?
+      description: Describe the goal and where you are stuck.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Include the relevant version, platform, provider, and links you checked.

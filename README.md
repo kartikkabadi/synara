@@ -4,7 +4,7 @@
   <p><strong>A focused workspace for coding agents.</strong><br>
   Projects, provider sessions, execution surfaces, and review tools in one local-first desktop application.</p>
   <p>
-    <a href="https://github.com/Emanuele-web04/synara/releases/latest">Download</a>
+    <a href="https://github.com/kartikkabadi/synara/releases/latest">Download</a>
     &nbsp;·&nbsp;
     <a href="https://www.trysynara.com/">Website</a>
     &nbsp;·&nbsp;
@@ -12,7 +12,7 @@
     &nbsp;·&nbsp;
     <a href="./docs/external-mcp.md">MCP integration</a>
     &nbsp;·&nbsp;
-    <a href="https://github.com/Emanuele-web04/synara/issues/new/choose">Report an issue</a>
+    <a href="https://github.com/kartikkabadi/synara/issues/new/choose">Report an issue</a>
   </p>
 </div>
 
@@ -28,6 +28,9 @@
 
 > [!NOTE]
 > Synara is early-stage software. APIs and interface details remain under active development.
+
+Read [the project vision](./VISION.md) and [the architecture overview](./DESIGN.md)
+to understand the direction and boundaries behind the codebase.
 
 ## Capabilities
 
@@ -113,7 +116,7 @@ Configure the shell to match the way you work with light and dark themes, typogr
 
 ### Desktop application
 
-Download the latest build from [GitHub Releases](https://github.com/Emanuele-web04/synara/releases) or visit [trysynara.com](https://www.trysynara.com/).
+Download the latest build from [GitHub Releases](https://github.com/kartikkabadi/synara/releases) or visit [trysynara.com](https://www.trysynara.com/).
 
 Current native release targets are Windows x64, macOS Intel, macOS Apple Silicon, and Linux x64.
 
@@ -126,7 +129,7 @@ Synara uses the provider installations and subscriptions already configured on t
 The development checkout uses [Bun 1.4.2](https://bun.sh/) and [Node.js 24.13.1](https://nodejs.org/).
 
 ```console
-git clone https://github.com/Emanuele-web04/synara.git
+git clone https://github.com/kartikkabadi/synara.git
 cd synara
 bun install
 bun run dev
@@ -148,9 +151,12 @@ the root `typecheck` command also ensures that patch is applied before checking.
 
 ## Contributing
 
-Bug fixes, reliability improvements, performance work, documentation, and maintenance changes are welcome.
+Bug fixes, reliability improvements, performance work, documentation, and
+maintenance changes are welcome when they fit the project direction.
 
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a pull request. For a reproducible problem, [open an issue](https://github.com/Emanuele-web04/synara/issues/new/choose) with the Synara version, operating system, runtime, and relevant logs.
+Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a pull request. For a
+reproducible problem, [open an issue](https://github.com/kartikkabadi/synara/issues/new/choose)
+with the Synara version, operating system, runtime, and relevant logs.
 
 ## License
 

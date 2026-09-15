@@ -2,8 +2,8 @@ name: Feature request
 description: Propose a scoped improvement or new capability.
 title: "[Feature]: "
 labels:
-  - enhancement
-  - needs-triage
+  - type:feature
+  - state:needs-triage
 body:
   - type: markdown
     attributes:

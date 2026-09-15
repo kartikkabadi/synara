@@ -2,6 +2,10 @@
 
 Synara is a multi-provider coding-agent workspace with web, server, CLI, and desktop surfaces. Prioritize correctness, reliability, and predictable performance during streaming, reconnects, cancellation, and recovery. Do not treat the project as a disposable early prototype or use this file as permission for unrelated rewrites.
 
+Read [VISION.md](VISION.md) for product principles and [DESIGN.md](DESIGN.md)
+for architectural boundaries. This file is the implementation policy for
+coding agents; it is not a substitute for reading the task-specific docs.
+
 ## Contracts and ownership
 
 - Keep cross-process schemas in `packages/contracts`; do not introduce runtime orchestration there. Shared runtime utilities belong in `packages/shared` with explicit subpath exports, not a barrel index.
@@ -18,6 +22,8 @@ Read only what the task needs:
 - Contribution and verification conventions: [CONTRIBUTING.md](CONTRIBUTING.md) and the affected package's scripts.
 - Release/signing work: [release guide](docs/release.md). Local Canary operations: [Canary guide](docs/canary.md).
 - Current commands, toolchain requirements, and patched dependencies: [package.json](package.json), `bun.lock`, and `.mise.toml`. Resolve current paths from the checkout rather than relying on an old repository map.
+- Public contribution expectations: [CONTRIBUTING.md](CONTRIBUTING.md),
+  [GOVERNANCE.md](GOVERNANCE.md), and [SECURITY.md](SECURITY.md).
 
 ## Transcript and UI safeguards
 

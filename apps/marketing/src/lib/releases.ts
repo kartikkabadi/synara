@@ -11,7 +11,7 @@ import "server-only";
 
 import storedLatestReleaseDownloads from "@/data/latest-release-downloads.json";
 
-const REPO = "Emanuele-web04/synara";
+const REPO = "kartikkabadi/synara";
 const LATEST_RELEASE_API_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
 
 export const RELEASES_URL = `https://github.com/${REPO}/releases`;

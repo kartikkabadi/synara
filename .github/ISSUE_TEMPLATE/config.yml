@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://www.trysynara.com/docs
+    about: Read the documentation before opening an issue.
+  - name: Security vulnerability
+    url: https://github.com/kartikkabadi/synara/security/advisories/new
+    about: Report security vulnerabilities privately.

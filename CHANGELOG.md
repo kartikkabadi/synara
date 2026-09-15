@@ -8,142 +8,142 @@
 
 #### Workspace editing, diffs and documents
 
-- Edit workspace text files directly from Explorer and the full editor; edit the working side directly from supported Git diff views. The editors use the same Pierre/Shiki stack as Synara's diff rendering, including app fonts, theme and syntax highlighting. Explorer uses a numbered plain-text fallback for larger files; the full file and diff editors continue to use Pierre. ([#561](https://github.com/Emanuele-web04/synara/pull/561), [#1123](https://github.com/Emanuele-web04/synara/pull/1123))
-- Undo, redo and undoable revert-all header controls, an immediate Save action and configurable Cmd/Ctrl+S binding. ([#561](https://github.com/Emanuele-web04/synara/pull/561))
-- Shared file drafts and writer across Explorer, file editor and diff editor. Autosave follows a 400 ms typing pause; switching files/pages and sending prompts wait for pending writes. Successful edits refresh Unstaged changes without staging files. ([#1186](https://github.com/Emanuele-web04/synara/pull/1186))
-- Conflict-aware saves preserve original encoding and line endings; failed/conflicting saves retain the draft, expose errors, stop automatic retries and offer explicit recovery. In-flight saves finish before leaving; new typing during a disk reload is protected. Reload/discard and explicit full-editor Overwrite are distinct recovery choices. ([#561](https://github.com/Emanuele-web04/synara/pull/561), [#1186](https://github.com/Emanuele-web04/synara/pull/1186))
-- Compare the working tree against another branch or commit, with compare scopes remembered per repository and correct branch merge-base or index comparison where appropriate. ([#561](https://github.com/Emanuele-web04/synara/pull/561))
-- Click supported diff lines to view Git blame; new/untracked files and empty repositories receive uncommitted attribution. Deleted lines are attributed against the displayed base, including old rename paths. Blame is intentionally scoped away from staged/unstaged and turn diff line numbering. ([#561](https://github.com/Emanuele-web04/synara/pull/561))
-- Navigate changed files with next/previous actions, scrollbar change markers and Alt+Up/Down shortcuts; file-tree and jump-menu selection follow the visible file as you scroll. ([#561](https://github.com/Emanuele-web04/synara/pull/561))
-- Word-level highlighting within modified lines and change gutters in file previews. ([#561](https://github.com/Emanuele-web04/synara/pull/561))
-- File and document preview panes can maximize across the chat area and restore their split layout; closing the last maximized pane returns to chat. ([#1023](https://github.com/Emanuele-web04/synara/pull/1023))
-- Basic workspace Wiki links in Markdown: `[[notes/design]]`, `[[notes/design|Design notes]]`, and explicitly extended file links such as `[[guide.pdf]]`. Wiki paths start at the workspace root; normal Markdown links remain relative to their document. ([#1023](https://github.com/Emanuele-web04/synara/pull/1023))
+- Edit workspace text files directly from Explorer and the full editor; edit the working side directly from supported Git diff views. The editors use the same Pierre/Shiki stack as Synara's diff rendering, including app fonts, theme and syntax highlighting. Explorer uses a numbered plain-text fallback for larger files; the full file and diff editors continue to use Pierre. ([#561](https://github.com/kartikkabadi/synara/pull/561), [#1123](https://github.com/kartikkabadi/synara/pull/1123))
+- Undo, redo and undoable revert-all header controls, an immediate Save action and configurable Cmd/Ctrl+S binding. ([#561](https://github.com/kartikkabadi/synara/pull/561))
+- Shared file drafts and writer across Explorer, file editor and diff editor. Autosave follows a 400 ms typing pause; switching files/pages and sending prompts wait for pending writes. Successful edits refresh Unstaged changes without staging files. ([#1186](https://github.com/kartikkabadi/synara/pull/1186))
+- Conflict-aware saves preserve original encoding and line endings; failed/conflicting saves retain the draft, expose errors, stop automatic retries and offer explicit recovery. In-flight saves finish before leaving; new typing during a disk reload is protected. Reload/discard and explicit full-editor Overwrite are distinct recovery choices. ([#561](https://github.com/kartikkabadi/synara/pull/561), [#1186](https://github.com/kartikkabadi/synara/pull/1186))
+- Compare the working tree against another branch or commit, with compare scopes remembered per repository and correct branch merge-base or index comparison where appropriate. ([#561](https://github.com/kartikkabadi/synara/pull/561))
+- Click supported diff lines to view Git blame; new/untracked files and empty repositories receive uncommitted attribution. Deleted lines are attributed against the displayed base, including old rename paths. Blame is intentionally scoped away from staged/unstaged and turn diff line numbering. ([#561](https://github.com/kartikkabadi/synara/pull/561))
+- Navigate changed files with next/previous actions, scrollbar change markers and Alt+Up/Down shortcuts; file-tree and jump-menu selection follow the visible file as you scroll. ([#561](https://github.com/kartikkabadi/synara/pull/561))
+- Word-level highlighting within modified lines and change gutters in file previews. ([#561](https://github.com/kartikkabadi/synara/pull/561))
+- File and document preview panes can maximize across the chat area and restore their split layout; closing the last maximized pane returns to chat. ([#1023](https://github.com/kartikkabadi/synara/pull/1023))
+- Basic workspace Wiki links in Markdown: `[[notes/design]]`, `[[notes/design|Design notes]]`, and explicitly extended file links such as `[[guide.pdf]]`. Wiki paths start at the workspace root; normal Markdown links remain relative to their document. ([#1023](https://github.com/kartikkabadi/synara/pull/1023))
 
 #### Browser sessions and application capture
 
-- Replace the former desktop browser automation implementation with BetterWright; agents retain navigation, snapshots, screenshots, scripting and related browser actions through Synara's browser tools. ([#1114](https://github.com/Emanuele-web04/synara/pull/1114))
-- Import existing site login cookies into the current embedded browser site and restore eligible imported sessions across restarts using protected local storage. Current-site import is scoped to the visible destination and guarded against navigation during the operation. All sites in this profile is also available with an explicit consent checkbox. ([#1114](https://github.com/Emanuele-web04/synara/pull/1114))
-- Browser cookies and sign-ins are shared across tasks. Saved Logins interface with save/update prompts, optional autosaving of accepted logins, account list, deletion, lock/unlock and password reveal protected by a master password. Agent access is optional account metadata discovery only. ([#1114](https://github.com/Emanuele-web04/synara/pull/1114))
-- Popups open as tabs inside Synara, supporting in-app sign-in flows without losing the browser context. Popup navigation and downloads retain their existing guards. ([#1114](https://github.com/Emanuele-web04/synara/pull/1114))
-- Floating browser previews expand into the interactive browser panel. Collapsed previews are deliberately noninteractive; automation still operates against its own target and hidden browser execution remains responsive. ([#1114](https://github.com/Emanuele-web04/synara/pull/1114))
-- Refreshed Safari import setup with app icon, Finder flow and macOS Full Disk Access explanation, preserving previous onboarding choices and providing a way to reopen setup. ([#1114](https://github.com/Emanuele-web04/synara/pull/1114), commit 3b16d6d00)
-- AppSnap window picker: attach a chosen open application window, with app icons/titles, capture readiness, bounded retries and target validation. ([#1141](https://github.com/Emanuele-web04/synara/pull/1141))
-- Composer + menu can capture the frontmost application document window in one click; a trailing arrow/ArrowRight opens the full window list. It prefers a titled document over an untitled auxiliary window from the same app. ([#1177](https://github.com/Emanuele-web04/synara/pull/1177))
+- Replace the former desktop browser automation implementation with BetterWright; agents retain navigation, snapshots, screenshots, scripting and related browser actions through Synara's browser tools. ([#1114](https://github.com/kartikkabadi/synara/pull/1114))
+- Import existing site login cookies into the current embedded browser site and restore eligible imported sessions across restarts using protected local storage. Current-site import is scoped to the visible destination and guarded against navigation during the operation. All sites in this profile is also available with an explicit consent checkbox. ([#1114](https://github.com/kartikkabadi/synara/pull/1114))
+- Browser cookies and sign-ins are shared across tasks. Saved Logins interface with save/update prompts, optional autosaving of accepted logins, account list, deletion, lock/unlock and password reveal protected by a master password. Agent access is optional account metadata discovery only. ([#1114](https://github.com/kartikkabadi/synara/pull/1114))
+- Popups open as tabs inside Synara, supporting in-app sign-in flows without losing the browser context. Popup navigation and downloads retain their existing guards. ([#1114](https://github.com/kartikkabadi/synara/pull/1114))
+- Floating browser previews expand into the interactive browser panel. Collapsed previews are deliberately noninteractive; automation still operates against its own target and hidden browser execution remains responsive. ([#1114](https://github.com/kartikkabadi/synara/pull/1114))
+- Refreshed Safari import setup with app icon, Finder flow and macOS Full Disk Access explanation, preserving previous onboarding choices and providing a way to reopen setup. ([#1114](https://github.com/kartikkabadi/synara/pull/1114), commit 3b16d6d00)
+- AppSnap window picker: attach a chosen open application window, with app icons/titles, capture readiness, bounded retries and target validation. ([#1141](https://github.com/kartikkabadi/synara/pull/1141))
+- Composer + menu can capture the frontmost application document window in one click; a trailing arrow/ArrowRight opens the full window list. It prefers a titled document over an untitled auxiliary window from the same app. ([#1177](https://github.com/kartikkabadi/synara/pull/1177))
 
 #### Onboarding, composer and selected context
 
-- Interactive first-run setup covering provider discovery/enablement and sign-in terminal, appearance/theme selection, feature tour and project creation. Project setup accepts dropped folders. ([#1031](https://github.com/Emanuele-web04/synara/pull/1031))
-- Replay setup from Settings; completion is installation-specific, persisted locally first and reconciled to the server. Existing installs do not unexpectedly reopen onboarding after removing their final project or restoring defaults. ([#1031](https://github.com/Emanuele-web04/synara/pull/1031))
-- Assistant selection toolbar provides Add to Chat, Add to Side and Add to new Chat. A shared mini composer creates a new task with selected context, with queued-send failures retained for recovery and retry bounds. ([#1130](https://github.com/Emanuele-web04/synara/pull/1130))
-- Side chats can select provider/model before their first real turn even when they contain imported fork history; `/side <provider>` works with the provider argument still present in the composer. ([#1055](https://github.com/Emanuele-web04/synara/pull/1055))
-- Model effort uses a stepped slider by default, with supported effort levels, Fast toggle and reset. A composer setting controls the new layout. Magnetic snapping, drag cursor feedback, corrected minimum fill and a flush thumb make the interaction clearer. ([#1120](https://github.com/Emanuele-web04/synara/pull/1120), 3b16d6d00, abb797240, a311a844a)
+- Interactive first-run setup covering provider discovery/enablement and sign-in terminal, appearance/theme selection, feature tour and project creation. Project setup accepts dropped folders. ([#1031](https://github.com/kartikkabadi/synara/pull/1031))
+- Replay setup from Settings; completion is installation-specific, persisted locally first and reconciled to the server. Existing installs do not unexpectedly reopen onboarding after removing their final project or restoring defaults. ([#1031](https://github.com/kartikkabadi/synara/pull/1031))
+- Assistant selection toolbar provides Add to Chat, Add to Side and Add to new Chat. A shared mini composer creates a new task with selected context, with queued-send failures retained for recovery and retry bounds. ([#1130](https://github.com/kartikkabadi/synara/pull/1130))
+- Side chats can select provider/model before their first real turn even when they contain imported fork history; `/side <provider>` works with the provider argument still present in the composer. ([#1055](https://github.com/kartikkabadi/synara/pull/1055))
+- Model effort uses a stepped slider by default, with supported effort levels, Fast toggle and reset. A composer setting controls the new layout. Magnetic snapping, drag cursor feedback, corrected minimum fill and a flush thumb make the interaction clearer. ([#1120](https://github.com/kartikkabadi/synara/pull/1120), 3b16d6d00, abb797240, a311a844a)
 - Model selection closes the nested model menu but leaves the effort slider open for the next adjustment. (31ed6b9ae)
-- Composer + menu becomes a shared flat command panel above the composer, with file attachments, AppSnap, Goal insertion and toggleable Plan, Debug and supported Fast modes. Literal goal text is preserved. ([#1146](https://github.com/Emanuele-web04/synara/pull/1146), [#1177](https://github.com/Emanuele-web04/synara/pull/1177))
-- Agent-authored standalone and dedicated automations can specify exact provider/model/options, validated against executable provider availability and the target workspace. They may be created disabled for staged review. Lists and create responses expose the chosen model; updates preserve omitted selections. ([#1167](https://github.com/Emanuele-web04/synara/pull/1167))
+- Composer + menu becomes a shared flat command panel above the composer, with file attachments, AppSnap, Goal insertion and toggleable Plan, Debug and supported Fast modes. Literal goal text is preserved. ([#1146](https://github.com/kartikkabadi/synara/pull/1146), [#1177](https://github.com/kartikkabadi/synara/pull/1177))
+- Agent-authored standalone and dedicated automations can specify exact provider/model/options, validated against executable provider availability and the target workspace. They may be created disabled for staged review. Lists and create responses expose the chosen model; updates preserve omitted selections. ([#1167](https://github.com/kartikkabadi/synara/pull/1167))
 
 ### Changed
 
 #### Pull requests and project organization
 
-- Pull request context cards can be added to a draft from PR Repair/Add to Chat actions and expanded in sent user messages. Context survives drafts, queues, sends and retries. ([#1071](https://github.com/Emanuele-web04/synara/pull/1071))
+- Pull request context cards can be added to a draft from PR Repair/Add to Chat actions and expanded in sent user messages. Context survives drafts, queues, sends and retries. ([#1071](https://github.com/kartikkabadi/synara/pull/1071))
 - Thread pull request chips open the right-hand dock; modifier-click retains navigation to GitHub. (2e98e50b5)
-- Merge actions remain disabled until capabilities/details load and are rechecked at confirmation. PR popup submenu placement and trailing-value alignment are corrected. ([#1071](https://github.com/Emanuele-web04/synara/pull/1071))
-- Environment PR status updates immediately after a successful action; late/in-flight fetches cannot roll back the confirmed result. ([#1126](https://github.com/Emanuele-web04/synara/pull/1126))
-- Merged and closed PR status remains visible for the branch in Environment. ([#1103](https://github.com/Emanuele-web04/synara/pull/1103))
-- Each project remembers its Local or Worktree choice for subsequent new chats. ([#1105](https://github.com/Emanuele-web04/synara/pull/1105))
-- Configured project display names remain visible in narrow sidebar rows; the redundant muted folder suffix was removed. ([#1086](https://github.com/Emanuele-web04/synara/pull/1086), fixes [#1000](https://github.com/Emanuele-web04/synara/issues/1000))
-- Project/environment/branch pickers share compact menu styling, width behavior and typography. Environment menu is labeled Work in; landing composer tray spans the composer without background tint. ([#1108](https://github.com/Emanuele-web04/synara/pull/1108) plus 03368a072, 7aa0ecb1a)
+- Merge actions remain disabled until capabilities/details load and are rechecked at confirmation. PR popup submenu placement and trailing-value alignment are corrected. ([#1071](https://github.com/kartikkabadi/synara/pull/1071))
+- Environment PR status updates immediately after a successful action; late/in-flight fetches cannot roll back the confirmed result. ([#1126](https://github.com/kartikkabadi/synara/pull/1126))
+- Merged and closed PR status remains visible for the branch in Environment. ([#1103](https://github.com/kartikkabadi/synara/pull/1103))
+- Each project remembers its Local or Worktree choice for subsequent new chats. ([#1105](https://github.com/kartikkabadi/synara/pull/1105))
+- Configured project display names remain visible in narrow sidebar rows; the redundant muted folder suffix was removed. ([#1086](https://github.com/kartikkabadi/synara/pull/1086), fixes [#1000](https://github.com/kartikkabadi/synara/issues/1000))
+- Project/environment/branch pickers share compact menu styling, width behavior and typography. Environment menu is labeled Work in; landing composer tray spans the composer without background tint. ([#1108](https://github.com/kartikkabadi/synara/pull/1108) plus 03368a072, 7aa0ecb1a)
 - Sidebar PR badges become consistent square icon controls, retaining PR numbers in accessible labels. (348a1dfb9)
 
 #### Visual polish
 
-- Refined sidebar glass/translucency, background blur, selected-row colors and neutral surface washes in light and dark themes. Final selected rows reuse the secondary/user-message surface. ([#1089](https://github.com/Emanuele-web04/synara/pull/1089) plus 690a9ac4e, a08a0c854, d8bbe9086, 77a09d6f7, c6328f62f, f4d1ee81f, 4a62652ee, 71862f9b2)
+- Refined sidebar glass/translucency, background blur, selected-row colors and neutral surface washes in light and dark themes. Final selected rows reuse the secondary/user-message surface. ([#1089](https://github.com/kartikkabadi/synara/pull/1089) plus 690a9ac4e, a08a0c854, d8bbe9086, 77a09d6f7, c6328f62f, f4d1ee81f, 4a62652ee, 71862f9b2)
 - Refined user message bubble corner smoothing, seam contrast, compact final spacing and notification surfaces. (4362f6ea4, 49d24f4c0, 3b18b8fa3, e307d251d, b335765c4)
 - Raised-surface borders are softer. (79bd48963)
 - Picker controls, autocomplete labels and branch-create actions follow configured UI font size/family. (cfa32ece5)
-- Toast actions use consistent font-matched ghost buttons. ([#1176](https://github.com/Emanuele-web04/synara/pull/1176))
-- Native context menus render properly sized rasterized icons on macOS; icon metadata survives IPC and web fallback rendering. ([#1183](https://github.com/Emanuele-web04/synara/pull/1183))
+- Toast actions use consistent font-matched ghost buttons. ([#1176](https://github.com/kartikkabadi/synara/pull/1176))
+- Native context menus render properly sized rasterized icons on macOS; icon metadata survives IPC and web fallback rendering. ([#1183](https://github.com/kartikkabadi/synara/pull/1183))
 - Compact text-selection controls and mini composer, with action labels no longer clipped at supported font sizes. (abb797240, ac68cd0f5)
 - Shared PanelLeft sidebar trigger icon. (6ae3a6937)
 
 #### Providers, accounting and process lifetime
 
 - GPT-6 Astra is added and becomes the default Codex model, with Low, Medium(default), High, Extra High, Max and Ultra effort options; `astra`, `6`, `gpt-6` aliases resolve to it. (5a25d5c81)
-- Model display names normalize consistently across providers without changing executable model IDs: canonical brand casing/version punctuation and provider-discovered labels are retained. Devin alias discovery keeps SWE-1.6 Fast distinct. ([#1016](https://github.com/Emanuele-web04/synara/pull/1016), [#1139](https://github.com/Emanuele-web04/synara/pull/1139))
-- Codex Fast mode can be reset correctly and selected skill input is no longer duplicated. ([#1125](https://github.com/Emanuele-web04/synara/pull/1125))
-- Codex startup can be retried after a confirmed failed process teardown; uncertain native liveness is not falsely certified as clean. ([#1074](https://github.com/Emanuele-web04/synara/pull/1074))
-- Codex uses a single actual SQLite home rather than symlinking databases/WAL sidecars through the overlay, preventing divergent WAL paths and resume database corruption, particularly on Windows. Old overlay symlinks are cleaned while regular files and explicit CODEX_SQLITE_HOME overrides are preserved. ([#1062](https://github.com/Emanuele-web04/synara/pull/1062))
-- Claude pending questions recover after server restarts and expired sessions, including duplicate submission handling. ([#1113](https://github.com/Emanuele-web04/synara/pull/1113))
-- Claude request tokens count once per response rather than once per repeated SDK content block; per-result model totals distinguish cumulative usage, caches and subagents. Context usage, processed totals and Profile Stats have distinct, corrected scopes. ([#1127](https://github.com/Emanuele-web04/synara/pull/1127))
-- Verified Claude usage is versioned; Profile Stats excludes unverifiable historical totals and explains that old history can be incomplete. Retained legacy main-loop evidence is preserved by migration, but purged totals are not invented or retroactively halved. ([#1127](https://github.com/Emanuele-web04/synara/pull/1127))
-- Claude overage telemetry is mapped to the Fable weekly sublimit. ([#1104](https://github.com/Emanuele-web04/synara/pull/1104))
-- Per-turn provider usage/cache baselines survive session changes correctly; successful native fork resumes avoid redundantly prepending transcript recaps. Antigravity usage projection remains deferred where unverifiable. ([#1024](https://github.com/Emanuele-web04/synara/pull/1024))
-- Cursor ACP Task calls appear as active subagent work with description/prompt, and quiet subagents remain Working rather than falsely Idle. ([#1119](https://github.com/Emanuele-web04/synara/pull/1119))
-- Pi mid-turn sends queue as follow-ups instead of raw Agent is already processing errors. Dispatch is serialized per task; cancellation during prompt preflight is retained and dispatched/stopping/aborted races settle correctly. ([#1135](https://github.com/Emanuele-web04/synara/pull/1135))
-- Pi transient auto-retry errors display inline warnings, retaining the active turn and autonomous goal; End task cancels retry backoff instead of freezing. ([#1061](https://github.com/Emanuele-web04/synara/pull/1061))
-- Pi extension terminal status is excluded from the tool timeline while meaningful notifications and plain text remain. ([#1093](https://github.com/Emanuele-web04/synara/pull/1093))
-- Antigravity final print output/completion and terminal outcomes are preserved and duplicate tool events reconciled, including recovered first turns. ([#1021](https://github.com/Emanuele-web04/synara/pull/1021))
-- Antigravity transcript-discovered background commands stay alive after the model's Stop hook; completion/kill, delayed hooks, anonymous and qualified IDs, concurrent commands and turn changes are reconciled without resurrecting settled work. ([#1170](https://github.com/Emanuele-web04/synara/pull/1170))
-- OpenCode pools normalize executable/workspace identity without destroying parent-directory traversal semantics. ([#1169](https://github.com/Emanuele-web04/synara/pull/1169))
-- Desktop backend lifetime follows the owning Electron parent through stdin EOF, invokes normal cleanup on parent loss and terminates only the backend if cleanup hangs; CLI stdin behavior is preserved. ([#1154](https://github.com/Emanuele-web04/synara/pull/1154))
-- Provider teardown and callback ownership are tightened: failed idle teardown can retry; Claude keeps ownership during failed installation; ACP callback buffers are bounded; copied snapshots avoid mutation leaks; OpenCode/Pi drop redundant retained state; dock/terminal runtimes dispose with their hosts. ([#1097](https://github.com/Emanuele-web04/synara/pull/1097))
-- Orchestration command dispatch stays responsive when subscribers are slow. ([#1115](https://github.com/Emanuele-web04/synara/pull/1115))
+- Model display names normalize consistently across providers without changing executable model IDs: canonical brand casing/version punctuation and provider-discovered labels are retained. Devin alias discovery keeps SWE-1.6 Fast distinct. ([#1016](https://github.com/kartikkabadi/synara/pull/1016), [#1139](https://github.com/kartikkabadi/synara/pull/1139))
+- Codex Fast mode can be reset correctly and selected skill input is no longer duplicated. ([#1125](https://github.com/kartikkabadi/synara/pull/1125))
+- Codex startup can be retried after a confirmed failed process teardown; uncertain native liveness is not falsely certified as clean. ([#1074](https://github.com/kartikkabadi/synara/pull/1074))
+- Codex uses a single actual SQLite home rather than symlinking databases/WAL sidecars through the overlay, preventing divergent WAL paths and resume database corruption, particularly on Windows. Old overlay symlinks are cleaned while regular files and explicit CODEX_SQLITE_HOME overrides are preserved. ([#1062](https://github.com/kartikkabadi/synara/pull/1062))
+- Claude pending questions recover after server restarts and expired sessions, including duplicate submission handling. ([#1113](https://github.com/kartikkabadi/synara/pull/1113))
+- Claude request tokens count once per response rather than once per repeated SDK content block; per-result model totals distinguish cumulative usage, caches and subagents. Context usage, processed totals and Profile Stats have distinct, corrected scopes. ([#1127](https://github.com/kartikkabadi/synara/pull/1127))
+- Verified Claude usage is versioned; Profile Stats excludes unverifiable historical totals and explains that old history can be incomplete. Retained legacy main-loop evidence is preserved by migration, but purged totals are not invented or retroactively halved. ([#1127](https://github.com/kartikkabadi/synara/pull/1127))
+- Claude overage telemetry is mapped to the Fable weekly sublimit. ([#1104](https://github.com/kartikkabadi/synara/pull/1104))
+- Per-turn provider usage/cache baselines survive session changes correctly; successful native fork resumes avoid redundantly prepending transcript recaps. Antigravity usage projection remains deferred where unverifiable. ([#1024](https://github.com/kartikkabadi/synara/pull/1024))
+- Cursor ACP Task calls appear as active subagent work with description/prompt, and quiet subagents remain Working rather than falsely Idle. ([#1119](https://github.com/kartikkabadi/synara/pull/1119))
+- Pi mid-turn sends queue as follow-ups instead of raw Agent is already processing errors. Dispatch is serialized per task; cancellation during prompt preflight is retained and dispatched/stopping/aborted races settle correctly. ([#1135](https://github.com/kartikkabadi/synara/pull/1135))
+- Pi transient auto-retry errors display inline warnings, retaining the active turn and autonomous goal; End task cancels retry backoff instead of freezing. ([#1061](https://github.com/kartikkabadi/synara/pull/1061))
+- Pi extension terminal status is excluded from the tool timeline while meaningful notifications and plain text remain. ([#1093](https://github.com/kartikkabadi/synara/pull/1093))
+- Antigravity final print output/completion and terminal outcomes are preserved and duplicate tool events reconciled, including recovered first turns. ([#1021](https://github.com/kartikkabadi/synara/pull/1021))
+- Antigravity transcript-discovered background commands stay alive after the model's Stop hook; completion/kill, delayed hooks, anonymous and qualified IDs, concurrent commands and turn changes are reconciled without resurrecting settled work. ([#1170](https://github.com/kartikkabadi/synara/pull/1170))
+- OpenCode pools normalize executable/workspace identity without destroying parent-directory traversal semantics. ([#1169](https://github.com/kartikkabadi/synara/pull/1169))
+- Desktop backend lifetime follows the owning Electron parent through stdin EOF, invokes normal cleanup on parent loss and terminates only the backend if cleanup hangs; CLI stdin behavior is preserved. ([#1154](https://github.com/kartikkabadi/synara/pull/1154))
+- Provider teardown and callback ownership are tightened: failed idle teardown can retry; Claude keeps ownership during failed installation; ACP callback buffers are bounded; copied snapshots avoid mutation leaks; OpenCode/Pi drop redundant retained state; dock/terminal runtimes dispose with their hosts. ([#1097](https://github.com/kartikkabadi/synara/pull/1097))
+- Orchestration command dispatch stays responsive when subscribers are slow. ([#1115](https://github.com/kartikkabadi/synara/pull/1115))
 
 ### Fixed
 
 #### Transcript, turn ordering and recovery
 
 - Preserve embedded NUL characters and the following Unicode text through completion, segments, restart and resume on Node 24 SQLite. The full release suite exposed this truncation; the existing JSON fallback now covers NULs as well as unmatched surrogate code units.
-- Invisible Codex provider events no longer split adjacent Markdown text into broken chunks; saved adjacent segments coalesce while real work/turn boundaries remain intact. ([#1155](https://github.com/Emanuele-web04/synara/pull/1155))
-- Tool calls remain visible and correctly attached after steering. Effective native versus emulated-steer boundaries persist across reloads; providers without native steering create their separate queued turn correctly. ([#1124](https://github.com/Emanuele-web04/synara/pull/1124))
-- Tool/work activity ordering remains stable between live events and snapshots, including late background updates retaining their original chronological position instead of moving underneath later user prompts. ([#1019](https://github.com/Emanuele-web04/synara/pull/1019) and [#1114](https://github.com/Emanuele-web04/synara/pull/1114))
-- Real message changes and geometry changes are separated in tail anchoring so tool-only work does not prolong live-output follow/quiet holds. Streaming preserves partially visible rows and deferred layout settles correctly. ([#1077](https://github.com/Emanuele-web04/synara/pull/1077), [#1064](https://github.com/Emanuele-web04/synara/pull/1064), [#1155](https://github.com/Emanuele-web04/synara/pull/1155))
-- Context compaction appears as a transcript progress row with an icon. ([#1129](https://github.com/Emanuele-web04/synara/pull/1129))
-- Session restart/context-loss rail markers use plain language and explain when interruption escalation caused a restart; recovery acceptance preserves the relevant cause until the provider accepts it. ([#1058](https://github.com/Emanuele-web04/synara/pull/1058))
-- First task startup no longer flickers while the initial turn/session is being established. ([#1084](https://github.com/Emanuele-web04/synara/pull/1084))
-- Bracketed display math, numeric inline formulas and literal dollar signs before Markdown links render correctly. ([#1020](https://github.com/Emanuele-web04/synara/pull/1020))
-- Inspected input images are no longer mislabeled as newly generated outputs. ([#1100](https://github.com/Emanuele-web04/synara/pull/1100))
-- Existing simulator screenshot previews outside standard allowed roots can recover via authenticated per-file grants; expansion/download renews grants and transient transports can retry without background polling. ([#1153](https://github.com/Emanuele-web04/synara/pull/1153))
-- Simulator attachment keeps the canvas mounted for the first frame, preventing an idle screen from leaving the pane stuck Connecting; UDID device identity and decoder error reporting are preserved. ([#1164](https://github.com/Emanuele-web04/synara/pull/1164))
-- Windows directory links, including workspace paths in Markdown, navigate through Explorer correctly. ([#1085](https://github.com/Emanuele-web04/synara/pull/1085))
-- Malformed percent encoding in pasted theme share strings reports the normal readable validation error instead of a raw URIError. ([#1168](https://github.com/Emanuele-web04/synara/pull/1168))
-- Duplicate/racing approval responses reconcile without stale undo callbacks or orphaned interaction handlers. ([#1102](https://github.com/Emanuele-web04/synara/pull/1102))
-- Runtime journal acknowledgement retries do not duplicate buffered assistant output; cached completion text survives missing projected detail. ([#1097](https://github.com/Emanuele-web04/synara/pull/1097)/[#1098](https://github.com/Emanuele-web04/synara/pull/1098) and 95b3101c2, 12706a9aa)
+- Invisible Codex provider events no longer split adjacent Markdown text into broken chunks; saved adjacent segments coalesce while real work/turn boundaries remain intact. ([#1155](https://github.com/kartikkabadi/synara/pull/1155))
+- Tool calls remain visible and correctly attached after steering. Effective native versus emulated-steer boundaries persist across reloads; providers without native steering create their separate queued turn correctly. ([#1124](https://github.com/kartikkabadi/synara/pull/1124))
+- Tool/work activity ordering remains stable between live events and snapshots, including late background updates retaining their original chronological position instead of moving underneath later user prompts. ([#1019](https://github.com/kartikkabadi/synara/pull/1019) and [#1114](https://github.com/kartikkabadi/synara/pull/1114))
+- Real message changes and geometry changes are separated in tail anchoring so tool-only work does not prolong live-output follow/quiet holds. Streaming preserves partially visible rows and deferred layout settles correctly. ([#1077](https://github.com/kartikkabadi/synara/pull/1077), [#1064](https://github.com/kartikkabadi/synara/pull/1064), [#1155](https://github.com/kartikkabadi/synara/pull/1155))
+- Context compaction appears as a transcript progress row with an icon. ([#1129](https://github.com/kartikkabadi/synara/pull/1129))
+- Session restart/context-loss rail markers use plain language and explain when interruption escalation caused a restart; recovery acceptance preserves the relevant cause until the provider accepts it. ([#1058](https://github.com/kartikkabadi/synara/pull/1058))
+- First task startup no longer flickers while the initial turn/session is being established. ([#1084](https://github.com/kartikkabadi/synara/pull/1084))
+- Bracketed display math, numeric inline formulas and literal dollar signs before Markdown links render correctly. ([#1020](https://github.com/kartikkabadi/synara/pull/1020))
+- Inspected input images are no longer mislabeled as newly generated outputs. ([#1100](https://github.com/kartikkabadi/synara/pull/1100))
+- Existing simulator screenshot previews outside standard allowed roots can recover via authenticated per-file grants; expansion/download renews grants and transient transports can retry without background polling. ([#1153](https://github.com/kartikkabadi/synara/pull/1153))
+- Simulator attachment keeps the canvas mounted for the first frame, preventing an idle screen from leaving the pane stuck Connecting; UDID device identity and decoder error reporting are preserved. ([#1164](https://github.com/kartikkabadi/synara/pull/1164))
+- Windows directory links, including workspace paths in Markdown, navigate through Explorer correctly. ([#1085](https://github.com/kartikkabadi/synara/pull/1085))
+- Malformed percent encoding in pasted theme share strings reports the normal readable validation error instead of a raw URIError. ([#1168](https://github.com/kartikkabadi/synara/pull/1168))
+- Duplicate/racing approval responses reconcile without stale undo callbacks or orphaned interaction handlers. ([#1102](https://github.com/kartikkabadi/synara/pull/1102))
+- Runtime journal acknowledgement retries do not duplicate buffered assistant output; cached completion text survives missing projected detail. ([#1097](https://github.com/kartikkabadi/synara/pull/1097)/[#1098](https://github.com/kartikkabadi/synara/pull/1098) and 95b3101c2, 12706a9aa)
 
 #### Browser automation integration
 
 - Empty browser vaults and session stores defer OS key creation until first use, avoiding unnecessary Keychain access during first launch. Existing encrypted data keeps its established decryption path; password-save consent and encryption remain required.
-- Browser target input stays out of the chat composer, restoring prior focus without overriding subsequent human focus changes; concurrent targets and cancellation are isolated. ([#1114](https://github.com/Emanuele-web04/synara/pull/1114))
-- Hidden browser captures and Retina/zoom screenshot dimensions/input are corrected. ([#1114](https://github.com/Emanuele-web04/synara/pull/1114))
-- Clipboard copy preserves user operations, native keyboard safety policies cover additional aliases/accelerators, and workspace upload staging cleans up failed uploads. ([#1114](https://github.com/Emanuele-web04/synara/pull/1114))
-- Navigation waits follow client redirects; empty results and sign-in failures produce clearer feedback. ([#1114](https://github.com/Emanuele-web04/synara/pull/1114))
-- Browser runtimes survive panel mounting, recover stale CDP sessions only after confirmed teardown, and release canceled/failed target setup. Webview remount crashes and ASAR executable-resolution races are fixed. ([#1114](https://github.com/Emanuele-web04/synara/pull/1114))
-- Agents receive screenshot-proof and on-demand browser E2E review guidance. ([#1114](https://github.com/Emanuele-web04/synara/pull/1114))
+- Browser target input stays out of the chat composer, restoring prior focus without overriding subsequent human focus changes; concurrent targets and cancellation are isolated. ([#1114](https://github.com/kartikkabadi/synara/pull/1114))
+- Hidden browser captures and Retina/zoom screenshot dimensions/input are corrected. ([#1114](https://github.com/kartikkabadi/synara/pull/1114))
+- Clipboard copy preserves user operations, native keyboard safety policies cover additional aliases/accelerators, and workspace upload staging cleans up failed uploads. ([#1114](https://github.com/kartikkabadi/synara/pull/1114))
+- Navigation waits follow client redirects; empty results and sign-in failures produce clearer feedback. ([#1114](https://github.com/kartikkabadi/synara/pull/1114))
+- Browser runtimes survive panel mounting, recover stale CDP sessions only after confirmed teardown, and release canceled/failed target setup. Webview remount crashes and ASAR executable-resolution races are fixed. ([#1114](https://github.com/kartikkabadi/synara/pull/1114))
+- Agents receive screenshot-proof and on-demand browser E2E review guidance. ([#1114](https://github.com/kartikkabadi/synara/pull/1114))
 
 #### Live diffs and large repositories
 
-- Mounted Git views and blame/gutters refresh after editor saves, external watched file changes, Git operations and branch movement. ([#561](https://github.com/Emanuele-web04/synara/pull/561), [#1175](https://github.com/Emanuele-web04/synara/pull/1175))
-- Oversized aggregate/untracked Git patches return bounded partial output and explicit truncation metadata rather than failing the entire Review panel at the size cap; partial-patch consumers handle incomplete content safely. ([#1138](https://github.com/Emanuele-web04/synara/pull/1138))
-- Rename, binary, symlink, submodule, SHA-256 repository, empty repository and compare-ref added/untracked edge cases are corrected. Unsafe editor actions are hidden and unsupported file formats remain read-only. ([#561](https://github.com/Emanuele-web04/synara/pull/561))
-- Compare refs use a temporary index to correctly represent recreated files and force-added ignored files against the chosen reference; unresolved revisions fail visibly rather than opening a false empty base. ([#561](https://github.com/Emanuele-web04/synara/pull/561))
+- Mounted Git views and blame/gutters refresh after editor saves, external watched file changes, Git operations and branch movement. ([#561](https://github.com/kartikkabadi/synara/pull/561), [#1175](https://github.com/kartikkabadi/synara/pull/1175))
+- Oversized aggregate/untracked Git patches return bounded partial output and explicit truncation metadata rather than failing the entire Review panel at the size cap; partial-patch consumers handle incomplete content safely. ([#1138](https://github.com/kartikkabadi/synara/pull/1138))
+- Rename, binary, symlink, submodule, SHA-256 repository, empty repository and compare-ref added/untracked edge cases are corrected. Unsafe editor actions are hidden and unsupported file formats remain read-only. ([#561](https://github.com/kartikkabadi/synara/pull/561))
+- Compare refs use a temporary index to correctly represent recreated files and force-added ignored files against the chosen reference; unresolved revisions fail visibly rather than opening a false empty base. ([#561](https://github.com/kartikkabadi/synara/pull/561))
 
 ### Removed and data migrations
 
-- Saved transcript highlights and underlines are removed, including marker UI and obsolete docs. Migration 101 removes stored marker payloads and the projection marker column while preserving event IDs, sequence/replay continuity and timestamps. Stored highlight and underline data is deleted; message history, pins and notes remain. ([#1131](https://github.com/Emanuele-web04/synara/pull/1131))
-- Migration 100 adds append-only streamed-text chunks while preserving existing history/cursors, without a completed-history backfill. ([#1097](https://github.com/Emanuele-web04/synara/pull/1097))
-- Migration 102 stores effective user-message turn boundaries for stable steering replay. ([#1124](https://github.com/Emanuele-web04/synara/pull/1124))
-- Migration 103 adds versioned Claude deleted-token snapshots and retained legacy main-loop evidence, leaving immutable history unchanged and acknowledging unrecoverable gaps. ([#1127](https://github.com/Emanuele-web04/synara/pull/1127))
-- The old browser-automation implementation is replaced by BetterWright; the final workspace editor uses Pierre and the Explorer plain-text fallback. ([#1114](https://github.com/Emanuele-web04/synara/pull/1114), [#561](https://github.com/Emanuele-web04/synara/pull/561))
+- Saved transcript highlights and underlines are removed, including marker UI and obsolete docs. Migration 101 removes stored marker payloads and the projection marker column while preserving event IDs, sequence/replay continuity and timestamps. Stored highlight and underline data is deleted; message history, pins and notes remain. ([#1131](https://github.com/kartikkabadi/synara/pull/1131))
+- Migration 100 adds append-only streamed-text chunks while preserving existing history/cursors, without a completed-history backfill. ([#1097](https://github.com/kartikkabadi/synara/pull/1097))
+- Migration 102 stores effective user-message turn boundaries for stable steering replay. ([#1124](https://github.com/kartikkabadi/synara/pull/1124))
+- Migration 103 adds versioned Claude deleted-token snapshots and retained legacy main-loop evidence, leaving immutable history unchanged and acknowledging unrecoverable gaps. ([#1127](https://github.com/kartikkabadi/synara/pull/1127))
+- The old browser-automation implementation is replaced by BetterWright; the final workspace editor uses Pierre and the Explorer plain-text fallback. ([#1114](https://github.com/kartikkabadi/synara/pull/1114), [#561](https://github.com/kartikkabadi/synara/pull/561))
 
 ### Development and verification infrastructure
 
-- CI test parallelism/partitioning, browser hydration pre-transform and Windows dependency restoration improve reliability/critical path. ([#1140](https://github.com/Emanuele-web04/synara/pull/1140))
-- React ChatView structure and storage schema machinery are consolidated; structural refactoring is a maintainability improvement. ([#1144](https://github.com/Emanuele-web04/synara/pull/1144))
-- Performance runner closes Electron when firstWindow fails. ([#1078](https://github.com/Emanuele-web04/synara/pull/1078))
-- Typecheck benchmark docs now qualify contracts/shared full-check methodology. ([#1008](https://github.com/Emanuele-web04/synara/pull/1008))
-- Docs-only CI classification excludes all .github images. ([#1014](https://github.com/Emanuele-web04/synara/pull/1014))
-- Shared AGENTS/CLAUDE instructions refreshed; real-provider E2E guidance, isolated port/auth preflight clarified. ([#1171](https://github.com/Emanuele-web04/synara/pull/1171), f668f5be2)
-- Stray Devin wedge investigation report removed; personal asset context document added. These are repository maintenance changes. ([#1149](https://github.com/Emanuele-web04/synara/pull/1149), 5e65a8871)
+- CI test parallelism/partitioning, browser hydration pre-transform and Windows dependency restoration improve reliability/critical path. ([#1140](https://github.com/kartikkabadi/synara/pull/1140))
+- React ChatView structure and storage schema machinery are consolidated; structural refactoring is a maintainability improvement. ([#1144](https://github.com/kartikkabadi/synara/pull/1144))
+- Performance runner closes Electron when firstWindow fails. ([#1078](https://github.com/kartikkabadi/synara/pull/1078))
+- Typecheck benchmark docs now qualify contracts/shared full-check methodology. ([#1008](https://github.com/kartikkabadi/synara/pull/1008))
+- Docs-only CI classification excludes all .github images. ([#1014](https://github.com/kartikkabadi/synara/pull/1014))
+- Shared AGENTS/CLAUDE instructions refreshed; real-provider E2E guidance, isolated port/auth preflight clarified. ([#1171](https://github.com/kartikkabadi/synara/pull/1171), f668f5be2)
+- Stray Devin wedge investigation report removed; personal asset context document added. These are repository maintenance changes. ([#1149](https://github.com/kartikkabadi/synara/pull/1149), 5e65a8871)
 
 ### Measured performance
 
@@ -173,7 +173,7 @@ Synthetic history with 6,000 messages and 6,000 tool activities, each with a 16 
 | Bulk activities          |            255.92 → 115.16 MiB |         55.0% |                  19.15 → 7.21 ms |
 | Single-thread activities |            379.66 → 275.58 MiB |         27.4% |                177.51 → 19.22 ms |
 
-RSS includes the query worker and warmup; it is not the whole Synara footprint. Returned JavaScript heap is essentially unchanged. These short samples do not measure peak application RAM, crash frequency or leak freedom. [Historical report](https://github.com/Emanuele-web04/synara/blob/325779db29cad03a8da9e81f409fd211dc848357/docs/performance/2026-09-09-memory-crash/report.md), [baseline samples](https://github.com/Emanuele-web04/synara/blob/325779db29cad03a8da9e81f409fd211dc848357/docs/performance/2026-09-09-memory-crash/baseline.json), [optimized samples](https://github.com/Emanuele-web04/synara/blob/325779db29cad03a8da9e81f409fd211dc848357/docs/performance/2026-09-09-memory-crash/optimized.json).
+RSS includes the query worker and warmup; it is not the whole Synara footprint. Returned JavaScript heap is essentially unchanged. These short samples do not measure peak application RAM, crash frequency or leak freedom. [Historical report](https://github.com/kartikkabadi/synara/blob/325779db29cad03a8da9e81f409fd211dc848357/docs/performance/2026-09-09-memory-crash/report.md), [baseline samples](https://github.com/kartikkabadi/synara/blob/325779db29cad03a8da9e81f409fd211dc848357/docs/performance/2026-09-09-memory-crash/baseline.json), [optimized samples](https://github.com/kartikkabadi/synara/blob/325779db29cad03a8da9e81f409fd211dc848357/docs/performance/2026-09-09-memory-crash/optimized.json).
 
 #### Provider retained memory
 
@@ -181,7 +181,7 @@ RSS includes the query worker and warmup; it is not the whole Synara footprint. 
 - A separate 256-update cumulative-output fixture: **32.50 → 0.59 MiB** extra heap, retaining the latest part while dropping obsolete snapshots. This is a different mechanism and sample; do not add its saving to the preceding result.
 - ACP callback buffers are bounded, Pi keeps current tool snapshots, failed startup retains process ownership, idle teardown retries, and host/dock terminals dispose their xterm runtimes. These fixes have correctness coverage but no universal MiB saving.
 
-These experiments exclude complete SDK sessions, providers and Electron. A proposed history-eviction policy was rejected and is not part of this release. [Retention evidence](https://github.com/Emanuele-web04/synara/blob/325779db29cad03a8da9e81f409fd211dc848357/docs/performance/2026-09-09-memory-crash/implementation-2026-09-10.md).
+These experiments exclude complete SDK sessions, providers and Electron. A proposed history-eviction policy was rejected and is not part of this release. [Retention evidence](https://github.com/kartikkabadi/synara/blob/325779db29cad03a8da9e81f409fd211dc848357/docs/performance/2026-09-09-memory-crash/implementation-2026-09-10.md).
 
 #### Streaming persistence and write amplification
 
@@ -199,7 +199,7 @@ Production engine, Effect SQL and real migrations in fresh file databases and fr
 - A 1,000-event journal fixture falls **26.3 → 21.9 KB/event** with 128-row pages; with no backlog it remains 26.3 KB/event. A notification-drain regression checks at most four cursor transactions for 32 queued notifications, previously 32.
 - Engine WAL excludes the runtime journal and provider processes and does not equal physical SSD writes. The two stages are separate experiments, so their arithmetic is not presented as one paired 76% end-to-end gain. Small single-sample cases are directional. Engine sampled RSS/heap did not establish a RAM reduction.
 
-[Append-only measurements](https://github.com/Emanuele-web04/synara/blob/325779db29cad03a8da9e81f409fd211dc848357/docs/performance/2026-09-09-memory-crash/implementation-2026-09-10.md), [raw summary](https://github.com/Emanuele-web04/synara/blob/325779db29cad03a8da9e81f409fd211dc848357/docs/performance/2026-09-09-memory-crash/implementation-summary.json), [write-floor follow-up](https://github.com/Emanuele-web04/synara/blob/93fb8975b0ec47f09f6f23ea8bc0b6c1af895e39/docs/performance/2026-09-09-memory-crash/write-floor-2026-09-10.md). The investigation documents were intentionally removed before merge; these links point to their immutable historical versions.
+[Append-only measurements](https://github.com/kartikkabadi/synara/blob/325779db29cad03a8da9e81f409fd211dc848357/docs/performance/2026-09-09-memory-crash/implementation-2026-09-10.md), [raw summary](https://github.com/kartikkabadi/synara/blob/325779db29cad03a8da9e81f409fd211dc848357/docs/performance/2026-09-09-memory-crash/implementation-summary.json), [write-floor follow-up](https://github.com/kartikkabadi/synara/blob/93fb8975b0ec47f09f6f23ea8bc0b6c1af895e39/docs/performance/2026-09-09-memory-crash/write-floor-2026-09-10.md). The investigation documents were intentionally removed before merge; these links point to their immutable historical versions.
 
 #### Warm chat opening and latest-turn lookup
 
@@ -208,7 +208,7 @@ Production engine, Effect SQL and real migrations in fresh file databases and fr
 | 10 messages, 20 activities    |      570.5 ms |     374.5 ms |     34.4% |
 | 81 messages, 1,609 activities |      595.3 ms |     326.3 ms |     45.2% |
 
-Six samples per variant and fixture, alternating batches, warm modules and fresh router, real CSS, mocked RPC, Chromium development build on one unthrottled Mac. This measures storage-schema reuse inside the refactored route, including frame waits; it is not original-monolith-to-final, cold startup, model latency or a mounted-shell chat switch. Workflow timer ticks additionally cause zero parent transcript renders instead of ten over ten seconds. [Benchmark and tradeoffs](https://github.com/Emanuele-web04/synara/pull/1144).
+Six samples per variant and fixture, alternating batches, warm modules and fresh router, real CSS, mocked RPC, Chromium development build on one unthrottled Mac. This measures storage-schema reuse inside the refactored route, including frame waits; it is not original-monolith-to-final, cold startup, model latency or a mounted-shell chat switch. Workflow timer ticks additionally cause zero parent transcript renders instead of ten over ten seconds. [Benchmark and tradeoffs](https://github.com/kartikkabadi/synara/pull/1144).
 
 A retained synthetic Node SQLite result for **600 chats / 300,000 historical turns** records latest-turn query medians **253.79 → 21.03 ms (91.7%)**, returning **300,000 → 600 rows**. The release archives the [original result](docs/performance/2026-09-14-release/latest-turn-query.json) with its [limited provenance](docs/performance/2026-09-14-release/README.md): hardware, repetition counts and dispersion were not retained, and this has not been rerun for the release. It is operation-level evidence, not whole startup.
 
@@ -244,106 +244,106 @@ A retained synthetic Node SQLite result for **600 chats / 300,000 historical tur
 
 ### Complete change index
 
-[All development and release-preparation commits and the complete diff](https://github.com/Emanuele-web04/synara/compare/v0.8.3...v0.8.4). The following first-parent index includes merged pull requests and direct changes, newest first; intermediate commits inside merged branches are available in the comparison.
+[All development and release-preparation commits and the complete diff](https://github.com/kartikkabadi/synara/compare/v0.8.3...v0.8.4). The following first-parent index includes merged pull requests and direct changes, newest first; intermediate commits inside merged branches are available in the comparison.
 
 <details>
 <summary>Expand the complete mainline change list</summary>
 
-- [0eaf3831e](https://github.com/Emanuele-web04/synara/commit/0eaf3831e) Improve workspace editor autosave and dirty-state handling (#1186)
-- [91ad50f9c](https://github.com/Emanuele-web04/synara/commit/91ad50f9c) Update verify skill with real-provider E2E guidance (#1171)
-- [eb34fc538](https://github.com/Emanuele-web04/synara/commit/eb34fc538) docs(perf): qualify cold/incremental methodology for contracts and shared (#1008)
-- [3b021c681](https://github.com/Emanuele-web04/synara/commit/3b021c681) fix(web): separate message and geometry signals in tail anchor scroll (#1077)
-- [2f93cd4c1](https://github.com/Emanuele-web04/synara/commit/2f93cd4c1) fix(perf): close Electron app when firstWindow fails in status runner (#1078)
-- [c0f999df1](https://github.com/Emanuele-web04/synara/commit/c0f999df1) Add correctly sized icons to native context menus (#1183)
-- [2e9819ea2](https://github.com/Emanuele-web04/synara/commit/2e9819ea2) Refine composer extras menu (#1177)
-- [4db0e34bd](https://github.com/Emanuele-web04/synara/commit/4db0e34bd) Standardize toast actions as font-matched ghost buttons (#1176)
-- [12ee8f937](https://github.com/Emanuele-web04/synara/commit/12ee8f937) Refresh Git diff views after editor saves and file changes (#1175)
-- [c9c09b0a8](https://github.com/Emanuele-web04/synara/commit/c9c09b0a8) fix(antigravity): register background tasks from transcript before the stop hook (#1170)
-- [3a0d491df](https://github.com/Emanuele-web04/synara/commit/3a0d491df) Allow exact provider targets for agent-authored automations (#1167)
-- [478b38660](https://github.com/Emanuele-web04/synara/commit/478b38660) fix: normalize OpenCode server pool identity (#1169)
-- [99d7dd117](https://github.com/Emanuele-web04/synara/commit/99d7dd117) fix(web): reject malformed percent-encoding in theme share strings (#1168)
-- [6ae3a6937](https://github.com/Emanuele-web04/synara/commit/6ae3a6937) Use shared PanelLeft icon for sidebar trigger
-- [c21645a25](https://github.com/Emanuele-web04/synara/commit/c21645a25) Redesign composer extras as a shared command panel (#1146)
-- [939d93c35](https://github.com/Emanuele-web04/synara/commit/939d93c35) Fix simulator pane stuck connecting after its first frame (#1164)
-- [889eb4212](https://github.com/Emanuele-web04/synara/commit/889eb4212) Fix simulator screenshot previews and downloads in chat (#1153)
-- [5d068e088](https://github.com/Emanuele-web04/synara/commit/5d068e088) Fix desktop backend lifetime after parent exit (#1154)
-- [2d05ebf0a](https://github.com/Emanuele-web04/synara/commit/2d05ebf0a) Keep Codex Markdown together across text segments (#1155)
-- [f668f5be2](https://github.com/Emanuele-web04/synara/commit/f668f5be2) docs: refresh shared agent guidance and remove conflicting policies
-- [5a25d5c81](https://github.com/Emanuele-web04/synara/commit/5a25d5c81) Add GPT-6 Astra as the default Codex model
-- [7126c9803](https://github.com/Emanuele-web04/synara/commit/7126c9803) Merge pull request #1149 from kartikkabadi/chore/remove-devin-cli-wedge-report
-- [5e65a8871](https://github.com/Emanuele-web04/synara/commit/5e65a8871) Add personal asset context document
-- [a355cf200](https://github.com/Emanuele-web04/synara/commit/a355cf200) Refactor ChatView and reuse storage schema machinery (#1144)
-- [31ed6b9ae](https://github.com/Emanuele-web04/synara/commit/31ed6b9ae) Keep effort slider open after model selection
-- [ac68cd0f5](https://github.com/Emanuele-web04/synara/commit/ac68cd0f5) Prevent transcript action labels from clipping
-- [abb797240](https://github.com/Emanuele-web04/synara/commit/abb797240) Compact selection controls and fix empty slider fill
-- [79bd48963](https://github.com/Emanuele-web04/synara/commit/79bd48963) Soften raised surface borders
-- [a311a844a](https://github.com/Emanuele-web04/synara/commit/a311a844a) Keep effort slider thumb flush and soften its shadow
-- [48699c1e7](https://github.com/Emanuele-web04/synara/commit/48699c1e7) fix(pi): queue mid-turn sends as follow-ups instead of erroring (#1135)
-- [c72b2cf4e](https://github.com/Emanuele-web04/synara/commit/c72b2cf4e) Optimize CI test parallelism and reduce critical-path runtime (#1140)
-- [c317f5949](https://github.com/Emanuele-web04/synara/commit/c317f5949) [codex] Fix Claude token accounting and verified usage stats (#1127)
-- [65309b9e2](https://github.com/Emanuele-web04/synara/commit/65309b9e2) [codex] Fix immediate PR status updates in Environment (#1126)
-- [98783f7f8](https://github.com/Emanuele-web04/synara/commit/98783f7f8) feat(desktop): add safe AppSnap window picker (#1141)
-- [bf5efc58f](https://github.com/Emanuele-web04/synara/commit/bf5efc58f) truncate oversized working-tree patches instead of hard-failing (#1138)
-- [0e44fd59d](https://github.com/Emanuele-web04/synara/commit/0e44fd59d) Canonicalize model display names through one shared humanizer (#1139)
-- [53668e185](https://github.com/Emanuele-web04/synara/commit/53668e185) [codex] Fix missing tool calls after steering (#1124)
-- [f65f34260](https://github.com/Emanuele-web04/synara/commit/f65f34260) Remove saved transcript highlights and underlines (#1131)
-- [df9c90577](https://github.com/Emanuele-web04/synara/commit/df9c90577) Add selection actions and a shared mini chat composer (#1130)
-- [870c9d2e9](https://github.com/Emanuele-web04/synara/commit/870c9d2e9) [codex] Show context compaction progress with an icon (#1129)
-- [4457f5f40](https://github.com/Emanuele-web04/synara/commit/4457f5f40) [codex] Fix Fast mode reset and duplicate skill input (#1125)
-- [ad8db6fdb](https://github.com/Emanuele-web04/synara/commit/ad8db6fdb) Remove effort level description from composer slider
-- [b335765c4](https://github.com/Emanuele-web04/synara/commit/b335765c4) Tighten user message bubble spacing
-- [3b16d6d00](https://github.com/Emanuele-web04/synara/commit/3b16d6d00) Refresh Safari onboarding and add magnetic effort slider
-- [021090808](https://github.com/Emanuele-web04/synara/commit/021090808) feat(browser): BetterWright browser automation with saved logins and embedded popups (#1114)
-- [0b82e2196](https://github.com/Emanuele-web04/synara/commit/0b82e2196) feat(web): combine highlighted Explorer editing with a fast numbered fallback (#1123)
-- [3b531ad0d](https://github.com/Emanuele-web04/synara/commit/3b531ad0d) Add slider-based composer effort control (#1120)
-- [1de0ab31a](https://github.com/Emanuele-web04/synara/commit/1de0ab31a) Render Cursor ACP Task calls as active subagent runs (#1119)
-- [e307d251d](https://github.com/Emanuele-web04/synara/commit/e307d251d) Increase user message bubble horizontal padding
-- [3b18b8fa3](https://github.com/Emanuele-web04/synara/commit/3b18b8fa3) Reduce user message bubble horizontal padding
-- [49d24f4c0](https://github.com/Emanuele-web04/synara/commit/49d24f4c0) Refine chat bubbles and notification surfaces
-- [4362f6ea4](https://github.com/Emanuele-web04/synara/commit/4362f6ea4) Refine chat bubble corners and seam contrast
-- [cfa32ece5](https://github.com/Emanuele-web04/synara/commit/cfa32ece5) Align picker controls with app typography settings
-- [df82e80a7](https://github.com/Emanuele-web04/synara/commit/df82e80a7) Merge pull request #1108 from Emanuele-web04/synara/refine-project-picker-menus
-- [2e98e50b5](https://github.com/Emanuele-web04/synara/commit/2e98e50b5) Open thread pull requests in the right dock
-- [7aa0ecb1a](https://github.com/Emanuele-web04/synara/commit/7aa0ecb1a) Unfill composer landing tray in both themes
-- [738a3ce71](https://github.com/Emanuele-web04/synara/commit/738a3ce71) Keep orchestration dispatch responsive under slow subscribers (#1115)
-- [c680c24b2](https://github.com/Emanuele-web04/synara/commit/c680c24b2) Recover pending Claude questions across restarts and expired sessions (#1113)
-- [3d71dcee8](https://github.com/Emanuele-web04/synara/commit/3d71dcee8) fix(approvals): reconcile duplicate response races (#1102)
-- [16f63051c](https://github.com/Emanuele-web04/synara/commit/16f63051c) fix(pi): keep extension status out of tool timeline (#1093)
-- [a30dc14ff](https://github.com/Emanuele-web04/synara/commit/a30dc14ff) Merge pull request #1098 from Emanuele-web04/perf/streaming-write-floor
-- [d724d3ccc](https://github.com/Emanuele-web04/synara/commit/d724d3ccc) Merge pull request #1097 from Emanuele-web04/perf/streaming-chunks-memory-cleanup
-- [dd028735a](https://github.com/Emanuele-web04/synara/commit/dd028735a) fix(images): keep inspected images out of generated outputs (#1100)
-- [d9e0b0ba3](https://github.com/Emanuele-web04/synara/commit/d9e0b0ba3) Keep branch PR status visible after merge or close (#1103)
-- [becd74977](https://github.com/Emanuele-web04/synara/commit/becd74977) Remember each project's Local or Worktree chat preference (#1105)
-- [0036f6afc](https://github.com/Emanuele-web04/synara/commit/0036f6afc) Map Claude overage telemetry to the Fable weekly sublimit (#1104)
-- [348a1dfb9](https://github.com/Emanuele-web04/synara/commit/348a1dfb9) Render pull request badges as icon-only sidebar controls
-- [71862f9b2](https://github.com/Emanuele-web04/synara/commit/71862f9b2) Lighten translucent sidebar surfaces
-- [4a62652ee](https://github.com/Emanuele-web04/synara/commit/4a62652ee) Increase translucent sidebar blur to 4px
-- [f4d1ee81f](https://github.com/Emanuele-web04/synara/commit/f4d1ee81f) Deepen dark translucent sidebar surface
-- [c6328f62f](https://github.com/Emanuele-web04/synara/commit/c6328f62f) Make dark translucent sidebar surfaces sheerer
-- [77a09d6f7](https://github.com/Emanuele-web04/synara/commit/77a09d6f7) Neutralize theme washes and lighten dark sidebar glass
-- [d8bbe9086](https://github.com/Emanuele-web04/synara/commit/d8bbe9086) Match selected sidebar rows to the secondary surface
-- [a08a0c854](https://github.com/Emanuele-web04/synara/commit/a08a0c854) Align sidebar selection with themed ink washes
-- [690a9ac4e](https://github.com/Emanuele-web04/synara/commit/690a9ac4e) Reduce sidebar translucency and backdrop blur
-- [1e94e7a65](https://github.com/Emanuele-web04/synara/commit/1e94e7a65) Fix Windows workspace directory links (#1085)
-- [699de4f5d](https://github.com/Emanuele-web04/synara/commit/699de4f5d) Refine sidebar translucency and accent-tinted selection (#1089)
-- [3b21b4c97](https://github.com/Emanuele-web04/synara/commit/3b21b4c97) fix(web): show configured project name in sidebar (#1000) (#1086)
-- [59db80a17](https://github.com/Emanuele-web04/synara/commit/59db80a17) feat: maximize document previews and resolve workspace wiki links (#1023)
-- [65eb5b90c](https://github.com/Emanuele-web04/synara/commit/65eb5b90c) feat: polish session restart / context-loss rail markers (#1058)
-- [3aff699f8](https://github.com/Emanuele-web04/synara/commit/3aff699f8) fix: preserve bracketed math and numeric inline formulas (#1020)
-- [428f07e5e](https://github.com/Emanuele-web04/synara/commit/428f07e5e) Diff view upgrades: live updates, blame, compare-with-ref, change navigation, and in-app editing (#561)
-- [5651de17d](https://github.com/Emanuele-web04/synara/commit/5651de17d) [codex] Fix first-thread startup flicker (#1084)
-- [4bb3dccfa](https://github.com/Emanuele-web04/synara/commit/4bb3dccfa) Allow retries after confirmed Codex startup failures (#1074)
-- [bdfa181c8](https://github.com/Emanuele-web04/synara/commit/bdfa181c8) Add interactive first-run onboarding flow (#1031)
-- [7fe2a9032](https://github.com/Emanuele-web04/synara/commit/7fe2a9032) Add pull request context cards to composer and transcript (#1071)
-- [91e454b62](https://github.com/Emanuele-web04/synara/commit/91e454b62) fix(server): preserve Antigravity print output and terminal states (#1021)
-- [bbfcd9387](https://github.com/Emanuele-web04/synara/commit/bbfcd9387) fix(server): correct provider usage and native fork resumes (#1024)
-- [ede5961c5](https://github.com/Emanuele-web04/synara/commit/ede5961c5) fix: preserve activity ordering across live updates and snapshots (#1019)
-- [fd309cb8d](https://github.com/Emanuele-web04/synara/commit/fd309cb8d) fix(server): handle Pi auto-retry as inline warnings, keep End task responsive (#1061)
-- [d3f6b1b67](https://github.com/Emanuele-web04/synara/commit/d3f6b1b67) Optimize status animations and timeline resource usage (#1064)
-- [bbae09b75](https://github.com/Emanuele-web04/synara/commit/bbae09b75) fix(models): normalize provider model display names (#1016)
-- [c3685a487](https://github.com/Emanuele-web04/synara/commit/c3685a487) feat(web): let Side chats pick provider/model before first turn (#1055)
-- [28ae187d1](https://github.com/Emanuele-web04/synara/commit/28ae187d1) ci: exclude all .github images from the docs-only filter (#1014)
-- [e6b1aef22](https://github.com/Emanuele-web04/synara/commit/e6b1aef22) fix(server): stop mirroring Codex SQLite state into the home overlay (#1062)
+- [0eaf3831e](https://github.com/kartikkabadi/synara/commit/0eaf3831e) Improve workspace editor autosave and dirty-state handling (#1186)
+- [91ad50f9c](https://github.com/kartikkabadi/synara/commit/91ad50f9c) Update verify skill with real-provider E2E guidance (#1171)
+- [eb34fc538](https://github.com/kartikkabadi/synara/commit/eb34fc538) docs(perf): qualify cold/incremental methodology for contracts and shared (#1008)
+- [3b021c681](https://github.com/kartikkabadi/synara/commit/3b021c681) fix(web): separate message and geometry signals in tail anchor scroll (#1077)
+- [2f93cd4c1](https://github.com/kartikkabadi/synara/commit/2f93cd4c1) fix(perf): close Electron app when firstWindow fails in status runner (#1078)
+- [c0f999df1](https://github.com/kartikkabadi/synara/commit/c0f999df1) Add correctly sized icons to native context menus (#1183)
+- [2e9819ea2](https://github.com/kartikkabadi/synara/commit/2e9819ea2) Refine composer extras menu (#1177)
+- [4db0e34bd](https://github.com/kartikkabadi/synara/commit/4db0e34bd) Standardize toast actions as font-matched ghost buttons (#1176)
+- [12ee8f937](https://github.com/kartikkabadi/synara/commit/12ee8f937) Refresh Git diff views after editor saves and file changes (#1175)
+- [c9c09b0a8](https://github.com/kartikkabadi/synara/commit/c9c09b0a8) fix(antigravity): register background tasks from transcript before the stop hook (#1170)
+- [3a0d491df](https://github.com/kartikkabadi/synara/commit/3a0d491df) Allow exact provider targets for agent-authored automations (#1167)
+- [478b38660](https://github.com/kartikkabadi/synara/commit/478b38660) fix: normalize OpenCode server pool identity (#1169)
+- [99d7dd117](https://github.com/kartikkabadi/synara/commit/99d7dd117) fix(web): reject malformed percent-encoding in theme share strings (#1168)
+- [6ae3a6937](https://github.com/kartikkabadi/synara/commit/6ae3a6937) Use shared PanelLeft icon for sidebar trigger
+- [c21645a25](https://github.com/kartikkabadi/synara/commit/c21645a25) Redesign composer extras as a shared command panel (#1146)
+- [939d93c35](https://github.com/kartikkabadi/synara/commit/939d93c35) Fix simulator pane stuck connecting after its first frame (#1164)
+- [889eb4212](https://github.com/kartikkabadi/synara/commit/889eb4212) Fix simulator screenshot previews and downloads in chat (#1153)
+- [5d068e088](https://github.com/kartikkabadi/synara/commit/5d068e088) Fix desktop backend lifetime after parent exit (#1154)
+- [2d05ebf0a](https://github.com/kartikkabadi/synara/commit/2d05ebf0a) Keep Codex Markdown together across text segments (#1155)
+- [f668f5be2](https://github.com/kartikkabadi/synara/commit/f668f5be2) docs: refresh shared agent guidance and remove conflicting policies
+- [5a25d5c81](https://github.com/kartikkabadi/synara/commit/5a25d5c81) Add GPT-6 Astra as the default Codex model
+- [7126c9803](https://github.com/kartikkabadi/synara/commit/7126c9803) Merge pull request #1149 from kartikkabadi/chore/remove-devin-cli-wedge-report
+- [5e65a8871](https://github.com/kartikkabadi/synara/commit/5e65a8871) Add personal asset context document
+- [a355cf200](https://github.com/kartikkabadi/synara/commit/a355cf200) Refactor ChatView and reuse storage schema machinery (#1144)
+- [31ed6b9ae](https://github.com/kartikkabadi/synara/commit/31ed6b9ae) Keep effort slider open after model selection
+- [ac68cd0f5](https://github.com/kartikkabadi/synara/commit/ac68cd0f5) Prevent transcript action labels from clipping
+- [abb797240](https://github.com/kartikkabadi/synara/commit/abb797240) Compact selection controls and fix empty slider fill
+- [79bd48963](https://github.com/kartikkabadi/synara/commit/79bd48963) Soften raised surface borders
+- [a311a844a](https://github.com/kartikkabadi/synara/commit/a311a844a) Keep effort slider thumb flush and soften its shadow
+- [48699c1e7](https://github.com/kartikkabadi/synara/commit/48699c1e7) fix(pi): queue mid-turn sends as follow-ups instead of erroring (#1135)
+- [c72b2cf4e](https://github.com/kartikkabadi/synara/commit/c72b2cf4e) Optimize CI test parallelism and reduce critical-path runtime (#1140)
+- [c317f5949](https://github.com/kartikkabadi/synara/commit/c317f5949) [codex] Fix Claude token accounting and verified usage stats (#1127)
+- [65309b9e2](https://github.com/kartikkabadi/synara/commit/65309b9e2) [codex] Fix immediate PR status updates in Environment (#1126)
+- [98783f7f8](https://github.com/kartikkabadi/synara/commit/98783f7f8) feat(desktop): add safe AppSnap window picker (#1141)
+- [bf5efc58f](https://github.com/kartikkabadi/synara/commit/bf5efc58f) truncate oversized working-tree patches instead of hard-failing (#1138)
+- [0e44fd59d](https://github.com/kartikkabadi/synara/commit/0e44fd59d) Canonicalize model display names through one shared humanizer (#1139)
+- [53668e185](https://github.com/kartikkabadi/synara/commit/53668e185) [codex] Fix missing tool calls after steering (#1124)
+- [f65f34260](https://github.com/kartikkabadi/synara/commit/f65f34260) Remove saved transcript highlights and underlines (#1131)
+- [df9c90577](https://github.com/kartikkabadi/synara/commit/df9c90577) Add selection actions and a shared mini chat composer (#1130)
+- [870c9d2e9](https://github.com/kartikkabadi/synara/commit/870c9d2e9) [codex] Show context compaction progress with an icon (#1129)
+- [4457f5f40](https://github.com/kartikkabadi/synara/commit/4457f5f40) [codex] Fix Fast mode reset and duplicate skill input (#1125)
+- [ad8db6fdb](https://github.com/kartikkabadi/synara/commit/ad8db6fdb) Remove effort level description from composer slider
+- [b335765c4](https://github.com/kartikkabadi/synara/commit/b335765c4) Tighten user message bubble spacing
+- [3b16d6d00](https://github.com/kartikkabadi/synara/commit/3b16d6d00) Refresh Safari onboarding and add magnetic effort slider
+- [021090808](https://github.com/kartikkabadi/synara/commit/021090808) feat(browser): BetterWright browser automation with saved logins and embedded popups (#1114)
+- [0b82e2196](https://github.com/kartikkabadi/synara/commit/0b82e2196) feat(web): combine highlighted Explorer editing with a fast numbered fallback (#1123)
+- [3b531ad0d](https://github.com/kartikkabadi/synara/commit/3b531ad0d) Add slider-based composer effort control (#1120)
+- [1de0ab31a](https://github.com/kartikkabadi/synara/commit/1de0ab31a) Render Cursor ACP Task calls as active subagent runs (#1119)
+- [e307d251d](https://github.com/kartikkabadi/synara/commit/e307d251d) Increase user message bubble horizontal padding
+- [3b18b8fa3](https://github.com/kartikkabadi/synara/commit/3b18b8fa3) Reduce user message bubble horizontal padding
+- [49d24f4c0](https://github.com/kartikkabadi/synara/commit/49d24f4c0) Refine chat bubbles and notification surfaces
+- [4362f6ea4](https://github.com/kartikkabadi/synara/commit/4362f6ea4) Refine chat bubble corners and seam contrast
+- [cfa32ece5](https://github.com/kartikkabadi/synara/commit/cfa32ece5) Align picker controls with app typography settings
+- [df82e80a7](https://github.com/kartikkabadi/synara/commit/df82e80a7) Merge pull request #1108 from kartikkabadi/synara/refine-project-picker-menus
+- [2e98e50b5](https://github.com/kartikkabadi/synara/commit/2e98e50b5) Open thread pull requests in the right dock
+- [7aa0ecb1a](https://github.com/kartikkabadi/synara/commit/7aa0ecb1a) Unfill composer landing tray in both themes
+- [738a3ce71](https://github.com/kartikkabadi/synara/commit/738a3ce71) Keep orchestration dispatch responsive under slow subscribers (#1115)
+- [c680c24b2](https://github.com/kartikkabadi/synara/commit/c680c24b2) Recover pending Claude questions across restarts and expired sessions (#1113)
+- [3d71dcee8](https://github.com/kartikkabadi/synara/commit/3d71dcee8) fix(approvals): reconcile duplicate response races (#1102)
+- [16f63051c](https://github.com/kartikkabadi/synara/commit/16f63051c) fix(pi): keep extension status out of tool timeline (#1093)
+- [a30dc14ff](https://github.com/kartikkabadi/synara/commit/a30dc14ff) Merge pull request #1098 from Emanuele-web04/perf/streaming-write-floor
+- [d724d3ccc](https://github.com/kartikkabadi/synara/commit/d724d3ccc) Merge pull request #1097 from Emanuele-web04/perf/streaming-chunks-memory-cleanup
+- [dd028735a](https://github.com/kartikkabadi/synara/commit/dd028735a) fix(images): keep inspected images out of generated outputs (#1100)
+- [d9e0b0ba3](https://github.com/kartikkabadi/synara/commit/d9e0b0ba3) Keep branch PR status visible after merge or close (#1103)
+- [becd74977](https://github.com/kartikkabadi/synara/commit/becd74977) Remember each project's Local or Worktree chat preference (#1105)
+- [0036f6afc](https://github.com/kartikkabadi/synara/commit/0036f6afc) Map Claude overage telemetry to the Fable weekly sublimit (#1104)
+- [348a1dfb9](https://github.com/kartikkabadi/synara/commit/348a1dfb9) Render pull request badges as icon-only sidebar controls
+- [71862f9b2](https://github.com/kartikkabadi/synara/commit/71862f9b2) Lighten translucent sidebar surfaces
+- [4a62652ee](https://github.com/kartikkabadi/synara/commit/4a62652ee) Increase translucent sidebar blur to 4px
+- [f4d1ee81f](https://github.com/kartikkabadi/synara/commit/f4d1ee81f) Deepen dark translucent sidebar surface
+- [c6328f62f](https://github.com/kartikkabadi/synara/commit/c6328f62f) Make dark translucent sidebar surfaces sheerer
+- [77a09d6f7](https://github.com/kartikkabadi/synara/commit/77a09d6f7) Neutralize theme washes and lighten dark sidebar glass
+- [d8bbe9086](https://github.com/kartikkabadi/synara/commit/d8bbe9086) Match selected sidebar rows to the secondary surface
+- [a08a0c854](https://github.com/kartikkabadi/synara/commit/a08a0c854) Align sidebar selection with themed ink washes
+- [690a9ac4e](https://github.com/kartikkabadi/synara/commit/690a9ac4e) Reduce sidebar translucency and backdrop blur
+- [1e94e7a65](https://github.com/kartikkabadi/synara/commit/1e94e7a65) Fix Windows workspace directory links (#1085)
+- [699de4f5d](https://github.com/kartikkabadi/synara/commit/699de4f5d) Refine sidebar translucency and accent-tinted selection (#1089)
+- [3b21b4c97](https://github.com/kartikkabadi/synara/commit/3b21b4c97) fix(web): show configured project name in sidebar (#1000) (#1086)
+- [59db80a17](https://github.com/kartikkabadi/synara/commit/59db80a17) feat: maximize document previews and resolve workspace wiki links (#1023)
+- [65eb5b90c](https://github.com/kartikkabadi/synara/commit/65eb5b90c) feat: polish session restart / context-loss rail markers (#1058)
+- [3aff699f8](https://github.com/kartikkabadi/synara/commit/3aff699f8) fix: preserve bracketed math and numeric inline formulas (#1020)
+- [428f07e5e](https://github.com/kartikkabadi/synara/commit/428f07e5e) Diff view upgrades: live updates, blame, compare-with-ref, change navigation, and in-app editing (#561)
+- [5651de17d](https://github.com/kartikkabadi/synara/commit/5651de17d) [codex] Fix first-thread startup flicker (#1084)
+- [4bb3dccfa](https://github.com/kartikkabadi/synara/commit/4bb3dccfa) Allow retries after confirmed Codex startup failures (#1074)
+- [bdfa181c8](https://github.com/kartikkabadi/synara/commit/bdfa181c8) Add interactive first-run onboarding flow (#1031)
+- [7fe2a9032](https://github.com/kartikkabadi/synara/commit/7fe2a9032) Add pull request context cards to composer and transcript (#1071)
+- [91e454b62](https://github.com/kartikkabadi/synara/commit/91e454b62) fix(server): preserve Antigravity print output and terminal states (#1021)
+- [bbfcd9387](https://github.com/kartikkabadi/synara/commit/bbfcd9387) fix(server): correct provider usage and native fork resumes (#1024)
+- [ede5961c5](https://github.com/kartikkabadi/synara/commit/ede5961c5) fix: preserve activity ordering across live updates and snapshots (#1019)
+- [fd309cb8d](https://github.com/kartikkabadi/synara/commit/fd309cb8d) fix(server): handle Pi auto-retry as inline warnings, keep End task responsive (#1061)
+- [d3f6b1b67](https://github.com/kartikkabadi/synara/commit/d3f6b1b67) Optimize status animations and timeline resource usage (#1064)
+- [bbae09b75](https://github.com/kartikkabadi/synara/commit/bbae09b75) fix(models): normalize provider model display names (#1016)
+- [c3685a487](https://github.com/kartikkabadi/synara/commit/c3685a487) feat(web): let Side chats pick provider/model before first turn (#1055)
+- [28ae187d1](https://github.com/kartikkabadi/synara/commit/28ae187d1) ci: exclude all .github images from the docs-only filter (#1014)
+- [e6b1aef22](https://github.com/kartikkabadi/synara/commit/e6b1aef22) fix(server): stop mirroring Codex SQLite state into the home overlay (#1062)
 
 </details>
 

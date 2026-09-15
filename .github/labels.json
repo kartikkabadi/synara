@@ -1,0 +1,137 @@
+[
+  {
+    "name": "type:bug",
+    "color": "d73a4a",
+    "description": "Broken behavior, regression, crash, or reliability issue."
+  },
+  {
+    "name": "type:feature",
+    "color": "a2eeef",
+    "description": "Requested improvement or new capability."
+  },
+  {
+    "name": "type:docs",
+    "color": "0075ca",
+    "description": "Documentation, examples, or project guidance."
+  },
+  {
+    "name": "type:question",
+    "color": "d876e3",
+    "description": "Usage or clarification question."
+  },
+  {
+    "name": "type:security",
+    "color": "b60205",
+    "description": "Security-related tracking label; vulnerabilities stay private."
+  },
+  {
+    "name": "state:needs-triage",
+    "color": "fbca04",
+    "description": "Needs maintainer review and initial categorization."
+  },
+  {
+    "name": "state:needs-info",
+    "color": "cfd3d7",
+    "description": "Waiting for information from the author."
+  },
+  {
+    "name": "state:accepted",
+    "color": "0e8a16",
+    "description": "Direction accepted for future work."
+  },
+  {
+    "name": "state:in-progress",
+    "color": "1d76db",
+    "description": "An active implementation or investigation is underway."
+  },
+  {
+    "name": "state:blocked",
+    "color": "b60205",
+    "description": "Cannot proceed until an external dependency or decision changes."
+  },
+  {
+    "name": "area:web",
+    "color": "5319e7",
+    "description": "React web client and browser-facing UI."
+  },
+  {
+    "name": "area:server",
+    "color": "5319e7",
+    "description": "Server, orchestration, persistence, or RPC."
+  },
+  {
+    "name": "area:desktop",
+    "color": "5319e7",
+    "description": "Electron shell or operating-system integration."
+  },
+  {
+    "name": "area:provider",
+    "color": "5319e7",
+    "description": "Provider adapters, discovery, sessions, or capabilities."
+  },
+  {
+    "name": "area:docs",
+    "color": "5319e7",
+    "description": "Documentation and website content."
+  },
+  {
+    "name": "area:ci",
+    "color": "5319e7",
+    "description": "Build, CI, release, or repository automation."
+  },
+  {
+    "name": "good first issue",
+    "color": "7057ff",
+    "description": "Scoped issue suitable for a new contributor."
+  },
+  {
+    "name": "help wanted",
+    "color": "008672",
+    "description": "Maintainers welcome community help on this issue."
+  },
+  {
+    "name": "size:XS",
+    "color": "c2e0c6",
+    "description": "0-9 effective changed lines."
+  },
+  {
+    "name": "size:S",
+    "color": "7bdcb5",
+    "description": "10-29 effective changed lines."
+  },
+  {
+    "name": "size:M",
+    "color": "fef2c0",
+    "description": "30-99 effective changed lines."
+  },
+  {
+    "name": "size:L",
+    "color": "f9d0c4",
+    "description": "100-499 effective changed lines."
+  },
+  {
+    "name": "size:XL",
+    "color": "f9a6a6",
+    "description": "500-999 effective changed lines."
+  },
+  {
+    "name": "size:XXL",
+    "color": "b60205",
+    "description": "1,000 or more effective changed lines."
+  },
+  {
+    "name": "vouch:trusted",
+    "color": "0e8a16",
+    "description": "Contributor is trusted by the repository workflow."
+  },
+  {
+    "name": "vouch:unvouched",
+    "color": "cfd3d7",
+    "description": "Contributor has not been explicitly vouched."
+  },
+  {
+    "name": "vouch:denounced",
+    "color": "b60205",
+    "description": "Contributor is blocked by the repository trust workflow."
+  }
+]

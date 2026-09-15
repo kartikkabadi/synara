@@ -11,7 +11,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");
 const downloadsOutputPath = resolve(projectRoot, "src/data/installer-downloads.json");
 const latestOutputPath = resolve(projectRoot, "src/data/latest-release-downloads.json");
-const releasesApiUrl = "https://api.github.com/repos/Emanuele-web04/synara/releases";
+const releasesApiUrl = "https://api.github.com/repos/kartikkabadi/synara/releases";
 const latestReleaseApiUrl = `${releasesApiUrl}/latest`;
 const installerFilePattern = /\.(dmg|exe|AppImage)$/i;
 
@@ -96,7 +96,7 @@ function countInstallerDownloads(releases) {
 function getReleaseDownloads(release, source) {
   const assets = release.assets ?? [];
   const releasesUrl =
-    release.html_url ?? `https://github.com/Emanuele-web04/synara/releases/tag/${release.tag_name}`;
+    release.html_url ?? `https://github.com/kartikkabadi/synara/releases/tag/${release.tag_name}`;
   const urlFor = (pattern) =>
     assets.find((asset) => asset.name && pattern.test(asset.name))?.browser_download_url ??
     releasesUrl;

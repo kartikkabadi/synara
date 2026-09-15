@@ -87,7 +87,7 @@ export default function PrivacySection() {
             <LuArrowRight className="size-4" aria-hidden="true" />
           </Link>
           <a
-            href="https://github.com/Emanuele-web04/synara"
+            href="https://github.com/kartikkabadi/synara"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent-link)]"

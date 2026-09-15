@@ -1,38 +1,30 @@
-<!--
-⚠️ READ BEFORE OPENING ⚠️
+## Summary
 
-We are not actively accepting contributions right now.
+<!-- What changed? Keep this focused on the user-visible or maintainer-visible result. -->
 
-You can still open a PR, but please do so knowing there is a high chance
-we may close it without merging it, or never review it.
+## Problem and motivation
 
-- Small, focused PRs are strongly preferred. Bug fixes are most likely to be merged.
-- New features will most likely just annoy us.
-- 1,000+ line PRs with a bunch of new features will probably get you banned from the repo.
--->
+<!-- What problem does this solve? Link the issue or proposal when one exists. -->
 
-## What Changed
+## Scope and design
 
-<!-- Describe the change clearly and keep scope tight. -->
+<!-- Call out important boundaries, alternatives, migrations, risks, or follow-up work. -->
 
-## Why
+## UI evidence
 
-<!-- Explain the problem being solved and why this approach is the right one. -->
-
-## UI Changes
-
-<!-- If this PR changes UI, include clear before/after screenshots.
-     If the change involves motion or interaction, include a short video.
-     Delete this section if not applicable. -->
+<!-- Include before/after screenshots for UI changes and a short recording for
+     motion or interaction changes. Delete this section if not applicable. -->
 
 ## Verification
 
-<!-- List the checks you ran. For focused web tests from the repository root:
-     bun run test:web:focused src/path/to/example.test.ts -->
+<!-- List the exact commands and focused checks you ran. Mention anything you
+     could not run and why. -->
 
 ## Checklist
 
-- [ ] This PR is small and focused
-- [ ] I explained what changed and why
-- [ ] I included before/after screenshots for any UI changes
-- [ ] I included a video for animation/interaction changes
+- [ ] This change is focused and does not mix unrelated cleanup.
+- [ ] I linked the relevant issue, proposal, or design discussion.
+- [ ] I documented user-facing or operational changes.
+- [ ] I included UI evidence when applicable.
+- [ ] I ran relevant tests, lint, formatting, and type checks.
+- [ ] I did not include secrets, credentials, or unredacted private data.

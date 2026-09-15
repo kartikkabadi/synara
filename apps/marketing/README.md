@@ -42,4 +42,4 @@ description of Synara.
 
 Learn more at [trysynara.com](https://www.trysynara.com), in the
 [documentation](https://www.trysynara.com/docs), or in the
-[Synara app repository](https://github.com/Emanuele-web04/synara).
+[Synara app repository](https://github.com/kartikkabadi/synara).

@@ -23,7 +23,7 @@ export const SITE_NAME = PRODUCT_NAME;
 
 export const CREATOR_NAME = "Emanuele Di Pietro";
 export const CREATOR_URL = "https://emanueledipietro.com";
-export const GITHUB_REPO_URL = "https://github.com/Emanuele-web04/synara";
+export const GITHUB_REPO_URL = "https://github.com/kartikkabadi/synara";
 export const GITHUB_RELEASES_URL = `${GITHUB_REPO_URL}/releases`;
 export const GITHUB_SPONSORS_URL = "https://github.com/sponsors/Emanuele-web04";
 export const X_PROFILE_URL = "https://x.com/emanueledpt";
