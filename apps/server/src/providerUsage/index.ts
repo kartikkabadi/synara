@@ -100,7 +100,9 @@ const snapshotCacheGenerations = new Map<ProviderKind, number>();
 const snapshotCacheTtlMs = (snapshot: ServerProviderUsageSnapshot): number =>
   snapshot.stale === true
     ? 0
-    : (snapshot.status ?? "ok") === "error" || (snapshot.status ?? "ok") === "needs-auth"
+    : (snapshot.status ?? "ok") === "error" ||
+        (snapshot.status ?? "ok") === "needs-auth" ||
+        (snapshot.status ?? "ok") === "unsupported"
       ? SNAPSHOT_CACHE_DEGRADED_TTL_MS
       : SNAPSHOT_CACHE_TTL_MS;
 
