@@ -41,7 +41,8 @@ To remove stored credentials from an interactive Antigravity session, use:
 /logout
 ```
 
-Synara does not copy or replace the credential profile stored by Antigravity.
+Synara does not read, refresh, write, or transmit Antigravity credential files. Authentication and
+quota ownership remain inside the `agy` CLI.
 
 ## Verify
 
@@ -104,6 +105,23 @@ Synara does not currently classify Antigravity as supporting native live-turn st
 
 Antigravity keeps its own settings and conversation data. Changes to its permission mode, sandbox, model, hooks, or workspace trust can alter behavior even when the same task is opened through Synara.
 
+## Quota and usage
+
+Antigravity does not expose a standalone `agy usage` or `agy quota` command. Its documented
+machine-readable usage surface is the status-line JSON hook. When Antigravity is enabled, Synara
+adds its status-line receiver to a settings file only when no custom status-line command is already
+configured. The receiver stores quota data in Synara's private state directory; it never accesses
+Antigravity credentials or calls Antigravity's private backend endpoints.
+
+Quota data is available after an Antigravity session emits a status-line update. If no session has
+reported data, or the last update is older than fifteen minutes, Synara explains that the value is
+unavailable or stale. Open an authenticated `agy` session and use `/usage` (also available as
+`/quota`) to refresh Antigravity's own quota view.
+
+If you already use a custom status-line command, Synara leaves it unchanged. In that case, keep
+using the Antigravity `/usage` panel or manually compose a status-line command that forwards the
+documented JSON payload to Synara.
+
 ## Updating
 
 Antigravity includes a native update path and its installer can install or upgrade the CLI. Keep the installation directory writable by your user and restart Synara after the executable changes.
@@ -135,6 +153,8 @@ Follow Antigravity’s updater troubleshooting guidance. A stale updater lock, r
 
 - [Antigravity installation and authentication](https://antigravity.google/docs/cli/install)
 - [Antigravity CLI usage](https://antigravity.google/docs/cli-using)
+- [Antigravity usage and quota](https://antigravity.google/docs/cli/commands/usage/)
+- [Antigravity status line](https://antigravity.google/docs/cli/statusline)
 - [Antigravity troubleshooting](https://antigravity.google/docs/cli-troubleshooting)
 
 Continue with [Your first task](/docs/getting-started/first-task) or [Provider handoffs](/docs/workflows/handoffs).
