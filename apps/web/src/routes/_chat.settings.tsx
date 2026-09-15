@@ -61,7 +61,7 @@ import {
 } from "../components/settings/SettingsPanelPrimitives";
 import { SkillsSettingsPanel } from "../components/settings/SkillsSettingsPanel";
 import { ThemeModePicker } from "../components/settings/ThemeModePicker";
-import { ThemePackEditor } from "../components/ThemePackEditor";
+import { ThemePackEditor, ThemeVisualPresetPicker } from "../components/ThemePackEditor";
 import {
   CHAT_CONTENT_CARD_CLASS_NAME,
   CHAT_MAIN_VIEWPORT_SHELL_CLASS_NAME,
@@ -752,6 +752,8 @@ function SettingsRouteView() {
         <div id={settingRowAnchorId("Theme")} className="scroll-mt-24 pb-1.5">
           <ThemeModePicker value={theme} onValueChange={setTheme} ariaLabel="Theme preference" />
         </div>
+
+        <ThemeVisualPresetPicker />
 
         <div className="space-y-3">
           {(resolvedTheme === "dark"

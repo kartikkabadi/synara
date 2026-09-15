@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000">
+  <defs>
+    <linearGradient id="field" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#23392d"/>
+      <stop offset=".55" stop-color="#66734a"/>
+      <stop offset="1" stop-color="#b19a6d"/>
+    </linearGradient>
+    <pattern id="leaves" width="180" height="130" patternUnits="userSpaceOnUse" patternTransform="rotate(-16)">
+      <path d="M20 100C72 74 95 42 130 4" fill="none" stroke="#d6c18b" stroke-opacity=".42" stroke-width="5"/>
+      <ellipse cx="65" cy="69" rx="12" ry="30" fill="#d7d39c" fill-opacity=".38" transform="rotate(52 65 69)"/>
+      <ellipse cx="96" cy="42" rx="12" ry="30" fill="#c6d18e" fill-opacity=".34" transform="rotate(52 96 42)"/>
+      <circle cx="44" cy="87" r="7" fill="#8d6841" fill-opacity=".6"/>
+    </pattern>
+  </defs>
+  <rect width="1600" height="1000" fill="url(#field)"/>
+  <circle cx="1280" cy="160" r="240" fill="#f1dc9c" fill-opacity=".18"/>
+  <rect width="1600" height="1000" fill="url(#leaves)" opacity=".68"/>
+  <path d="M0 840c330-110 620-60 850-130 250-76 480-160 750-120v410H0Z" fill="#14261f" fill-opacity=".52"/>
+</svg>
