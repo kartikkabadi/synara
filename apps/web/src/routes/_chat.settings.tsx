@@ -453,6 +453,14 @@ function SettingsRouteView() {
     <div className="space-y-6">
       <SafariAccessSetupButton />
       <SettingsSection title="Core defaults">
+        {renderBooleanSettingRow({
+          settingKey: "globalInstructionsEnabled",
+          title: "Global SYNARA.md instructions",
+          description:
+            "When enabled, Synara reads ~/SYNARA.md and adds its bounded contents to each new or restarted agent session. It is off by default.",
+          resetLabel: "global SYNARA.md instructions",
+          ariaLabel: "Enable global SYNARA.md instructions",
+        })}
         <SettingsRow
           title="Default provider"
           description="Provider used for new chats until you pick a model. New chats then reuse your most recent model and options."
