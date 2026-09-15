@@ -70,8 +70,10 @@ export async function ensureAntigravityStatusline(
     const parsed = JSON.parse(await readFile(settingsPath, "utf8")) as unknown;
     const record = asRecord(parsed);
     if (record) settings = record;
-  } catch {
-    // A missing settings file is normal before the first Antigravity login.
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== "ENOENT") {
+      return { configured: false, reason: "Could not read Antigravity status-line settings." };
+    }
   }
 
   const existingStatusLine = asRecord(settings.statusLine);
