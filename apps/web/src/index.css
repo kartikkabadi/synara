@@ -97,9 +97,38 @@
   }
   body {
     @apply text-foreground relative;
+    isolation: isolate;
     /* `--app-window-background` is the single translucent coat when the whole window is
        glass (see theme.logic); otherwise it matches the shell background. */
     background: var(--app-window-background, var(--app-shell-background, transparent));
+  }
+
+  body::before {
+    position: fixed;
+    z-index: 0;
+    inset: -3%;
+    pointer-events: none;
+    content: "";
+    background-image:
+      linear-gradient(
+        rgb(0 0 0 / var(--app-wallpaper-dim, 0)),
+        rgb(0 0 0 / var(--app-wallpaper-dim, 0))
+      ),
+      var(--app-wallpaper-image, none);
+    background-position: center;
+    background-size: cover;
+    filter: blur(var(--app-wallpaper-blur, 0px));
+    opacity: var(--app-wallpaper-opacity, 0);
+    transform: scale(1.03);
+    transition:
+      opacity 220ms ease,
+      filter 220ms ease;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    body::before {
+      transition: none;
+    }
   }
   :root {
     /* One token for the INTERNAL chat-surface dividers: the horizontal chrome-bar
@@ -324,6 +353,11 @@
      the pane a backdrop root, so the composer's blur sampled an empty layer instead of the
      surface behind the pane and rendered as a dark slab on a glass window. */
   isolation: isolate;
+}
+
+body > #root {
+  position: relative;
+  z-index: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -18,6 +18,7 @@ import {
   type WindowTranslucency,
   areThemePacksEqual,
   areWindowTranslucenciesEqual,
+  applyThemeVisualPreset,
   buildThemeCssVariables,
   canParseThemeShareString,
   createThemeShareString,
@@ -310,6 +311,10 @@ function setCodeThemeId(variant: ThemeVariant, codeThemeId: string) {
   updateStoredThemeState((state) => setThemeCodeThemeId(state, variant, codeThemeId));
 }
 
+function setVisualPreset(presetId: string) {
+  updateStoredThemeState((state) => applyThemeVisualPreset(state, presetId));
+}
+
 export function useTheme() {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, () => ({
     state: DEFAULT_THEME_STATE,
@@ -374,6 +379,7 @@ export function useTheme() {
     resetActiveTheme,
     resetAllThemes,
     resetThemeVariant,
+    setVisualPreset,
     resolvedTheme,
     setCodeThemeId,
     setTheme,

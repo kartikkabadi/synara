@@ -41,9 +41,12 @@ import {
   VIBRANCY_EQUIVALENT_BLUR_RADIUS,
   WINDOW_TRANSLUCENCY_OPACITY_MIN,
   buildThemeCssVariables,
+  THEME_VISUAL_PRESETS,
+  THEME_WALLPAPER_OPTIONS,
   getAvailableCodeThemes,
   getCodeThemeSeed,
   resolveThemePack,
+  resolveThemeWallpaper,
 } from "../theme/theme.logic";
 
 type ThemePackEditorProps = {
@@ -51,6 +54,48 @@ type ThemePackEditorProps = {
   mode?: ThemeMode;
   variant: ThemeVariant;
 };
+
+export function ThemeVisualPresetPicker() {
+  const { setVisualPreset } = useTheme();
+
+  return (
+    <div className="space-y-2.5">
+      <div>
+        <p className="text-ui font-medium text-foreground">Curated visual packs</p>
+        <p className="mt-0.5 max-w-2xl text-ui-sm text-[var(--color-text-foreground-secondary)]">
+          Apply a coordinated palette, font pairing, code theme, and local artwork to both modes.
+        </p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {THEME_VISUAL_PRESETS.map((preset) => (
+          <Button
+            variant="outline"
+            className={cn(
+              "group block h-auto overflow-hidden rounded-lg border border-[color:var(--color-border)] text-left transition-colors hover:border-[color:var(--color-border-focus)] p-0",
+              SETTINGS_CONTROL_RADIUS_CLASS_NAME,
+            )}
+            key={preset.id}
+            onClick={() => setVisualPreset(preset.id)}
+            type="button"
+          >
+            <div
+              className="h-16"
+              style={{
+                background: `linear-gradient(135deg, ${preset.light.theme.surface}, ${preset.light.theme.accent} 58%, ${preset.dark.theme.surface})`,
+              }}
+            />
+            <div className="space-y-0.5 px-3 py-2.5">
+              <p className="text-ui-sm font-medium text-foreground">{preset.label}</p>
+              <p className="line-clamp-2 text-ui-xs leading-4 text-[var(--color-text-foreground-secondary)]">
+                {preset.description}
+              </p>
+            </div>
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 const WINDOW_MATERIAL_OPTIONS = [
@@ -99,6 +144,9 @@ export function ThemePackEditor({
     [pack, variant, systemUiFont],
   );
   const defaultTheme = resolveThemePack(DEFAULT_THEME_STATE, variant).theme;
+  const wallpaper = resolveThemeWallpaper(theme, variant);
+  const updateWallpaper = (patch: Partial<typeof wallpaper>) =>
+    updateThemePack(variant, { wallpaper: { ...wallpaper, ...patch } });
   const codeThemes = useMemo(() => {
     const options = getAvailableCodeThemes(variant);
     return options.map((option) => ({
@@ -314,6 +362,72 @@ export function ThemePackEditor({
             />
           </div>
         </ThemeRow>
+
+        <ThemeRow label="Wallpaper">
+          <Select
+            value={wallpaper.id ?? "none"}
+            onValueChange={(value) => {
+              if (typeof value !== "string") return;
+              updateWallpaper({ id: value === "none" ? null : value });
+            }}
+          >
+            <SelectTrigger
+              size="sm"
+              className={cn(SETTINGS_CONTROL_RADIUS_CLASS_NAME, "min-w-36")}
+              aria-label={`${titleLabel} wallpaper`}
+            >
+              <SelectValue>
+                {THEME_WALLPAPER_OPTIONS.find(
+                  (option) => (option.id ?? "none") === (wallpaper.id ?? "none"),
+                )?.label ?? "None"}
+              </SelectValue>
+            </SelectTrigger>
+            <SettingsSelectPopup align="end" className="p-1.5">
+              {THEME_WALLPAPER_OPTIONS.map((option) => (
+                <SelectItem
+                  hideIndicator
+                  key={option.id ?? "none"}
+                  value={option.id ?? "none"}
+                  className={cn(SETTINGS_CONTROL_RADIUS_CLASS_NAME, "px-2 py-2")}
+                >
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SettingsSelectPopup>
+          </Select>
+        </ThemeRow>
+
+        {wallpaper.id ? (
+          <>
+            <ThemeRow label="Wallpaper opacity">
+              <ThemeSlider
+                ariaLabel={`${titleLabel} wallpaper opacity`}
+                max={70}
+                min={0}
+                value={Math.round(wallpaper.opacity * 100)}
+                onChange={(value) => updateWallpaper({ opacity: value / 100 })}
+              />
+            </ThemeRow>
+            <ThemeRow label="Wallpaper dim">
+              <ThemeSlider
+                ariaLabel={`${titleLabel} wallpaper dim`}
+                max={80}
+                min={0}
+                value={Math.round(wallpaper.dim * 100)}
+                onChange={(value) => updateWallpaper({ dim: value / 100 })}
+              />
+            </ThemeRow>
+            <ThemeRow label="Wallpaper blur">
+              <ThemeSlider
+                ariaLabel={`${titleLabel} wallpaper blur`}
+                max={40}
+                min={0}
+                value={wallpaper.blur}
+                onChange={(value) => updateWallpaper({ blur: value })}
+              />
+            </ThemeRow>
+          </>
+        ) : null}
 
         <div>
           <ThemeRow label="Window">
