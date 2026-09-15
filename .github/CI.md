@@ -221,8 +221,8 @@ cache initialization is not hidden.
 The final optimization commit `1d27eb0d9` ran twice, first in #1197 and again when
 the same branch reopened as #1202. Both completed successfully:
 
-| Run                                                                                              | Workflow elapsed | Raw runner minutes |
-| ------------------------------------------------------------------------------------------------ | ---------------: | -----------------: |
+| Run                                                                                            | Workflow elapsed | Raw runner minutes |
+| ---------------------------------------------------------------------------------------------- | ---------------: | -----------------: |
 | [Reference main](https://github.com/kartikkabadi/synara/actions/runs/34792874548)              |            5m23s |              35.97 |
 | [First final-candidate run](https://github.com/kartikkabadi/synara/actions/runs/34836521794)   |            4m17s |              33.40 |
 | [Reopened PR, same candidate](https://github.com/kartikkabadi/synara/actions/runs/34851349076) |            6m45s |              38.67 |

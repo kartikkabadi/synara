@@ -6,8 +6,8 @@ The target is a 20–30% reduction in pull-request CI wall time without removing
 
 Eight successful, first-attempt code-change runs from September 10–11 had a median wall time of **10m 51s**, ranging from **9m 31s to 12m 37s**. Seven are PR runs and one is a main push. Wall time is workflow creation through completion, including runner queueing; job durations below are execution time.
 
-| Run                                                                              | Wall time | Longest job                |
-| -------------------------------------------------------------------------------- | --------- | -------------------------- |
+| Run                                                                            | Wall time | Longest job                |
+| ------------------------------------------------------------------------------ | --------- | -------------------------- |
 | [34601479519](https://github.com/kartikkabadi/synara/actions/runs/34601479519) | 10m 40s   | Browser Tests (stable 3/3) |
 | [34600331685](https://github.com/kartikkabadi/synara/actions/runs/34600331685) | 10m 03s   | Unit Tests (server)        |
 | [34598565030](https://github.com/kartikkabadi/synara/actions/runs/34598565030) | 11m 16s   | Browser Tests (stable 3/3) |
