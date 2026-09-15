@@ -18,6 +18,13 @@ export interface ThemeFonts {
   code: string | null;
 }
 
+export interface ThemeWallpaper {
+  blur: number;
+  dim: number;
+  id: string | null;
+  opacity: number;
+}
+
 export interface ThemeSemanticColors {
   diffAdded: string;
   diffRemoved: string;
@@ -32,6 +39,7 @@ export interface ChromeTheme {
   opaqueWindows: boolean;
   semanticColors: ThemeSemanticColors;
   surface: string;
+  wallpaper?: ThemeWallpaper;
 }
 
 export interface ThemePack {
@@ -57,6 +65,14 @@ export interface ThemeSharePayload {
   codeThemeId: string;
   theme: ChromeTheme;
   variant: ThemeVariant;
+}
+
+export interface ThemeVisualPreset {
+  description: string;
+  dark: ThemePack;
+  id: string;
+  label: string;
+  light: ThemePack;
 }
 
 export interface ThemeCssVariableBuild {
@@ -116,7 +132,7 @@ export interface ResolvedThemeTokens {
 }
 
 type ChromeThemeSeedPatch = Partial<
-  Pick<ChromeTheme, "accent" | "contrast" | "ink" | "opaqueWindows" | "surface">
+  Pick<ChromeTheme, "accent" | "contrast" | "ink" | "opaqueWindows" | "surface" | "wallpaper">
 > & {
   fonts?: Partial<ThemeFonts>;
   semanticColors?: Partial<ThemeSemanticColors>;
@@ -157,6 +173,20 @@ const SURFACE_UNDER_CONTRAST_STEP: Record<ThemeVariant, number> = {
 const WARNING_COLOR_BY_VARIANT: Record<ThemeVariant, string> = {
   dark: "#f5b44a",
   light: "#d97706",
+};
+
+export const THEME_WALLPAPER_OPTIONS = [
+  { id: null, label: "None" },
+  { id: "parthenon", label: "Parthenon" },
+  { id: "attic-valley", label: "Attic valley" },
+] as const;
+
+type ThemeWallpaperId = (typeof THEME_WALLPAPER_OPTIONS)[number]["id"];
+const DEFAULT_THEME_WALLPAPER: ThemeWallpaper = {
+  blur: 18,
+  dim: 0.2,
+  id: null,
+  opacity: 0.35,
 };
 const PANEL_BASE_ALPHA: Record<ThemeVariant, number> = {
   dark: 0.03,
@@ -278,6 +308,110 @@ export const DEFAULT_THEME_STATE: ThemeState = {
   mode: "system",
 };
 
+function makeVisualTheme(
+  variant: ThemeVariant,
+  patch: Partial<Omit<ChromeTheme, "semanticColors">> & {
+    semanticColors?: Partial<ThemeSemanticColors>;
+  },
+): ChromeTheme {
+  return normalizeChromeTheme(
+    {
+      ...DEFAULT_CHROME_THEME_BY_VARIANT[variant],
+      ...patch,
+      fonts: {
+        ...DEFAULT_CHROME_THEME_BY_VARIANT[variant].fonts,
+        ...(patch.fonts ?? {}),
+      },
+      semanticColors: {
+        ...DEFAULT_CHROME_THEME_BY_VARIANT[variant].semanticColors,
+        ...(patch.semanticColors ?? {}),
+      },
+    },
+    variant,
+  );
+}
+
+export const THEME_VISUAL_PRESETS: readonly ThemeVisualPreset[] = [
+  {
+    description: "Sunlit Parthenon stone, Attic blue, and warm marble.",
+    dark: {
+      codeThemeId: "nord",
+      theme: makeVisualTheme("dark", {
+        accent: "#d5a85e",
+        contrast: 10,
+        fonts: { code: "JetBrains Mono", ui: "Avenir Next" },
+        ink: "#f7f1e3",
+        opaqueWindows: false,
+        surface: "#1b2430",
+        wallpaper: { blur: 12, dim: 0.5, id: "parthenon", opacity: 0.3 },
+      }),
+    },
+    id: "parthenon",
+    label: "Parthenon",
+    light: {
+      codeThemeId: "proof",
+      theme: makeVisualTheme("light", {
+        accent: "#2f6f9f",
+        contrast: 6,
+        fonts: { code: "JetBrains Mono", ui: "Avenir Next" },
+        ink: "#304255",
+        surface: "#f3eee3",
+        wallpaper: { blur: 10, dim: 0.2, id: "parthenon", opacity: 0.24 },
+      }),
+    },
+  },
+  {
+    description: "Olive groves, mountain temples, and late Attic gold.",
+    dark: {
+      codeThemeId: "everforest",
+      theme: makeVisualTheme("dark", {
+        accent: "#d7a75c",
+        contrast: 8,
+        fonts: { code: "IBM Plex Mono", ui: "IBM Plex Sans" },
+        ink: "#f3ecda",
+        surface: "#202820",
+        wallpaper: { blur: 14, dim: 0.54, id: "attic-valley", opacity: 0.28 },
+      }),
+    },
+    id: "attic-valley",
+    label: "Attic valley",
+    light: {
+      codeThemeId: "everforest",
+      theme: makeVisualTheme("light", {
+        accent: "#7b7a43",
+        contrast: 5,
+        fonts: { code: "IBM Plex Mono", ui: "IBM Plex Sans" },
+        ink: "#3b372d",
+        surface: "#f1ead6",
+        wallpaper: { blur: 12, dim: 0.2, id: "attic-valley", opacity: 0.22 },
+      }),
+    },
+  },
+];
+
+export function isThemeWallpaperId(value: unknown): value is ThemeWallpaperId {
+  return THEME_WALLPAPER_OPTIONS.some((option) => option.id === value);
+}
+
+export function normalizeThemeWallpaper(value: unknown, fallback: ThemeWallpaper): ThemeWallpaper {
+  const wallpaper = isRecord(value) ? value : {};
+  const id = isThemeWallpaperId(wallpaper.id) ? wallpaper.id : fallback.id;
+  const numberOrFallback = (candidate: unknown, defaultValue: number) =>
+    typeof candidate === "number" && Number.isFinite(candidate) ? candidate : defaultValue;
+  return {
+    blur: Math.min(40, Math.max(0, numberOrFallback(wallpaper.blur, fallback.blur))),
+    dim: Math.min(0.8, Math.max(0, numberOrFallback(wallpaper.dim, fallback.dim))),
+    id,
+    opacity: Math.min(0.7, Math.max(0, numberOrFallback(wallpaper.opacity, fallback.opacity))),
+  };
+}
+
+export function resolveThemeWallpaper(theme: ChromeTheme, variant: ThemeVariant): ThemeWallpaper {
+  return (
+    theme.wallpaper ?? DEFAULT_CHROME_THEME_BY_VARIANT[variant].wallpaper ?? DEFAULT_THEME_WALLPAPER
+  );
+}
+
 // ─── Theme catalog helpers ────────────────────────────────────────────────
 
 export function isThemeMode(value: unknown): value is ThemeMode {
@@ -346,6 +480,14 @@ export function normalizeChromeTheme(value: unknown, variant: ThemeVariant): Chr
         : fallback.opaqueWindows,
     semanticColors: normalizeSemanticColors(theme.semanticColors, fallback.semanticColors),
     surface: normalizeHexColor(theme.surface) ?? fallback.surface,
+    ...(isRecord(theme.wallpaper)
+      ? {
+          wallpaper: normalizeThemeWallpaper(
+            theme.wallpaper,
+            fallback.wallpaper ?? DEFAULT_THEME_WALLPAPER,
+          ),
+        }
+      : {}),
   };
 }
 
@@ -507,6 +649,25 @@ export function updateThemePackFromShareString(
   };
 }
 
+export function applyThemeVisualPreset(state: ThemeState, presetId: string): ThemeState {
+  const preset = THEME_VISUAL_PRESETS.find((candidate) => candidate.id === presetId);
+  if (!preset) {
+    return state;
+  }
+
+  return {
+    ...state,
+    chromeThemes: {
+      dark: preset.dark.theme,
+      light: preset.light.theme,
+    },
+    codeThemeIds: {
+      dark: preset.dark.codeThemeId,
+      light: preset.light.codeThemeId,
+    },
+  };
+}
+
 // ─── Granular pack mutators ───────────────────────────────────────────────
 
 export function updateChromeTheme(
@@ -660,6 +821,8 @@ export function resolveThemePack(state: ThemeState, variant: ThemeVariant): Them
 }
 
 export function areThemePacksEqual(left: ThemePack, right: ThemePack): boolean {
+  const leftWallpaper = resolveThemeWallpaper(left.theme, "light");
+  const rightWallpaper = resolveThemeWallpaper(right.theme, "light");
   return (
     left.codeThemeId === right.codeThemeId &&
     left.theme.accent === right.theme.accent &&
@@ -671,7 +834,11 @@ export function areThemePacksEqual(left: ThemePack, right: ThemePack): boolean {
     left.theme.semanticColors.diffAdded === right.theme.semanticColors.diffAdded &&
     left.theme.semanticColors.diffRemoved === right.theme.semanticColors.diffRemoved &&
     left.theme.semanticColors.skill === right.theme.semanticColors.skill &&
-    left.theme.surface === right.theme.surface
+    left.theme.surface === right.theme.surface &&
+    leftWallpaper.blur === rightWallpaper.blur &&
+    leftWallpaper.dim === rightWallpaper.dim &&
+    leftWallpaper.id === rightWallpaper.id &&
+    leftWallpaper.opacity === rightWallpaper.opacity
   );
 }
 
@@ -708,6 +875,8 @@ export function buildThemeCssVariables(
   // surface keeps its pure color matching Codex in both light and dark.
   const sidebarSurface = readCodexVariable("--color-background-surface");
   const settingsSurface = readCodexVariable("--color-background-surface");
+  const wallpaper = resolveThemeWallpaper(pack.theme, variant);
+  const wallpaperEnabled = wallpaper.id !== null;
   const composerSurface =
     variant === "dark"
       ? readCodexVariable("--color-background-control-opaque")
@@ -729,9 +898,15 @@ export function buildThemeCssVariables(
     "--accent": readCodexVariable("--color-background-accent"),
     "--accent-foreground": readCodexVariable("--color-text-foreground"),
     "--app-shell-background":
-      material === "translucent"
+      wallpaperEnabled || material === "translucent"
         ? "transparent"
         : readCodexVariable("--color-background-surface-under"),
+    "--app-wallpaper-blur": `${wallpaper.blur}px`,
+    "--app-wallpaper-dim": String(wallpaper.dim),
+    "--app-wallpaper-image": wallpaperEnabled
+      ? `url("/theme-wallpapers/${wallpaper.id}.webp")`
+      : "none",
+    "--app-wallpaper-opacity": String(wallpaper.opacity),
     "--app-composer-focus-border": composerFocusBorder,
     // Frosted blur only when the shell is translucent (macOS). On an opaque
     // shell this promotes the surface to a GPU layer that Chromium rasterizes at
@@ -746,23 +921,23 @@ export function buildThemeCssVariables(
     "--app-user-message-background": chatCodeSurface,
     "--app-sidebar-backdrop-filter":
       material === "translucent" ? "blur(4px) saturate(130%)" : "none",
-    // Settings mirrors the chat surface (opaque --color-background-surface) so every
-    // settings element reads as outline-only. With an opaque page there is nothing to
-    // frost, so we skip the backdrop blur (and its compositing cost) entirely.
-    "--app-settings-backdrop-filter": "none",
     // Translucent shell: a sheer fill so the desktop clearly shows through, paired
     // with a very light blur that only takes the edge off the backdrop. Dark themes
     // deepen the fill toward black and keep it denser so the sidebar reads as
     // charcoal glass. Keep in sync with the `:root` / `.dark` fallbacks in index.css.
-    "--app-sidebar-surface":
-      material === "translucent"
+    "--app-sidebar-surface": wallpaperEnabled
+      ? `color-mix(in srgb, ${sidebarSurface} 78%, transparent)`
+      : material === "translucent"
         ? variant === "dark"
           ? `color-mix(in srgb, color-mix(in srgb, ${sidebarSurface} 80%, black) 72%, transparent)`
           : `color-mix(in srgb, ${sidebarSurface} 38%, transparent)`
         : sidebarSurface,
-    // Always opaque so the settings page background matches the chat surface exactly,
-    // regardless of window material.
-    "--app-settings-surface": settingsSurface,
+    // Wallpaper mode turns the settings surface into readable frosted glass while
+    // keeping the default appearance fully opaque.
+    "--app-settings-backdrop-filter": wallpaperEnabled ? "blur(24px) saturate(115%)" : "none",
+    "--app-settings-surface": wallpaperEnabled
+      ? `color-mix(in srgb, ${settingsSurface} 80%, transparent)`
+      : settingsSurface,
     "--background": readCodexVariable("--color-background-surface-under"),
     "--border": readCodexVariable("--color-border"),
     "--card": readCodexVariable("--color-background-panel"),
