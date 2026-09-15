@@ -177,10 +177,8 @@ const WARNING_COLOR_BY_VARIANT: Record<ThemeVariant, string> = {
 
 export const THEME_WALLPAPER_OPTIONS = [
   { id: null, label: "None" },
-  { id: "aegean", label: "Aegean" },
-  { id: "marble", label: "Marble" },
-  { id: "papyrus", label: "Papyrus" },
-  { id: "olive", label: "Olive grove" },
+  { id: "parthenon", label: "Parthenon" },
+  { id: "attic-valley", label: "Attic valley" },
 ] as const;
 
 type ThemeWallpaperId = (typeof THEME_WALLPAPER_OPTIONS)[number]["id"];
@@ -335,84 +333,57 @@ function makeVisualTheme(
 
 export const THEME_VISUAL_PRESETS: readonly ThemeVisualPreset[] = [
   {
-    description: "Cobalt, marble, and warm Aegean light.",
+    description: "Sunlit Parthenon stone, Attic blue, and warm marble.",
     dark: {
       codeThemeId: "nord",
       theme: makeVisualTheme("dark", {
-        accent: "#7aa2d6",
-        contrast: 12,
+        accent: "#d5a85e",
+        contrast: 10,
         fonts: { code: "JetBrains Mono", ui: "Avenir Next" },
-        ink: "#f3f4ee",
+        ink: "#f7f1e3",
         opaqueWindows: false,
-        surface: "#151c25",
-        wallpaper: { blur: 22, dim: 0.42, id: "aegean", opacity: 0.46 },
+        surface: "#1b2430",
+        wallpaper: { blur: 12, dim: 0.5, id: "parthenon", opacity: 0.3 },
       }),
     },
-    id: "aegean",
-    label: "Aegean",
+    id: "parthenon",
+    label: "Parthenon",
     light: {
       codeThemeId: "proof",
       theme: makeVisualTheme("light", {
-        accent: "#16739b",
-        contrast: 8,
-        fonts: { code: "JetBrains Mono", ui: "Avenir Next" },
-        ink: "#203342",
-        surface: "#f4efe4",
-        wallpaper: { blur: 20, dim: 0.18, id: "aegean", opacity: 0.4 },
-      }),
-    },
-  },
-  {
-    description: "A quiet olive, bronze, and archival-paper palette.",
-    dark: {
-      codeThemeId: "everforest",
-      theme: makeVisualTheme("dark", {
-        accent: "#d2a15a",
-        contrast: 10,
-        fonts: { code: "IBM Plex Mono", ui: "IBM Plex Sans" },
-        ink: "#f0eadc",
-        surface: "#1c211d",
-        wallpaper: { blur: 24, dim: 0.46, id: "olive", opacity: 0.4 },
-      }),
-    },
-    id: "olive-bronze",
-    label: "Olive & bronze",
-    light: {
-      codeThemeId: "everforest",
-      theme: makeVisualTheme("light", {
-        accent: "#718044",
+        accent: "#2f6f9f",
         contrast: 6,
-        fonts: { code: "IBM Plex Mono", ui: "IBM Plex Sans" },
-        ink: "#342f27",
-        surface: "#f1eadb",
-        wallpaper: { blur: 24, dim: 0.16, id: "olive", opacity: 0.34 },
+        fonts: { code: "JetBrains Mono", ui: "Avenir Next" },
+        ink: "#304255",
+        surface: "#f3eee3",
+        wallpaper: { blur: 10, dim: 0.2, id: "parthenon", opacity: 0.24 },
       }),
     },
   },
   {
-    description: "Cool slate surfaces with a carved-stone texture.",
+    description: "Olive groves, mountain temples, and late Attic gold.",
     dark: {
-      codeThemeId: "raycast",
+      codeThemeId: "everforest",
       theme: makeVisualTheme("dark", {
-        accent: "#99a9ff",
+        accent: "#d7a75c",
         contrast: 8,
-        fonts: { code: "JetBrains Mono", ui: "Inter" },
-        ink: "#f4f5f8",
-        surface: "#141923",
-        wallpaper: { blur: 26, dim: 0.52, id: "marble", opacity: 0.36 },
+        fonts: { code: "IBM Plex Mono", ui: "IBM Plex Sans" },
+        ink: "#f3ecda",
+        surface: "#202820",
+        wallpaper: { blur: 14, dim: 0.54, id: "attic-valley", opacity: 0.28 },
       }),
     },
-    id: "midnight-marble",
-    label: "Midnight marble",
+    id: "attic-valley",
+    label: "Attic valley",
     light: {
-      codeThemeId: "raycast",
+      codeThemeId: "everforest",
       theme: makeVisualTheme("light", {
-        accent: "#5368c8",
-        contrast: 4,
-        fonts: { code: "JetBrains Mono", ui: "Inter" },
-        ink: "#202735",
-        surface: "#eef1f5",
-        wallpaper: { blur: 25, dim: 0.2, id: "marble", opacity: 0.32 },
+        accent: "#7b7a43",
+        contrast: 5,
+        fonts: { code: "IBM Plex Mono", ui: "IBM Plex Sans" },
+        ink: "#3b372d",
+        surface: "#f1ead6",
+        wallpaper: { blur: 12, dim: 0.2, id: "attic-valley", opacity: 0.22 },
       }),
     },
   },
@@ -933,7 +904,7 @@ export function buildThemeCssVariables(
     "--app-wallpaper-blur": `${wallpaper.blur}px`,
     "--app-wallpaper-dim": String(wallpaper.dim),
     "--app-wallpaper-image": wallpaperEnabled
-      ? `url("/theme-wallpapers/${wallpaper.id}.svg")`
+      ? `url("/theme-wallpapers/${wallpaper.id}.webp")`
       : "none",
     "--app-wallpaper-opacity": String(wallpaper.opacity),
     "--app-composer-focus-border": composerFocusBorder,
