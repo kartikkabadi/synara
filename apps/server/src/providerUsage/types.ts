@@ -11,6 +11,8 @@ import type { ProviderKind, ServerProviderUsageSnapshot } from "@synara/contract
 export interface ProviderUsageContext {
   /** Resolved user home directory (ServerConfig.homeDir). */
   readonly homeDir: string;
+  /** Synara's private state directory for CLI-owned usage bridges and caches. */
+  readonly stateDir?: string;
   /** Process environment (lets fetchers honor CODEX_HOME, CLAUDE_CONFIG_DIR, etc.). */
   readonly env: NodeJS.ProcessEnv;
   /** Host platform; keychain reads only run on darwin. */

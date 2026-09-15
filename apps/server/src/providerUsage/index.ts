@@ -31,6 +31,7 @@ const providerChildKind = (provider: ProviderKind): ProviderChildKind =>
 function buildContext(): ProviderUsageContext {
   return {
     homeDir: "",
+    stateDir: "",
     env: process.env,
     platform: process.platform,
     nowMs: Date.now(),
@@ -264,6 +265,7 @@ export const listProviderUsage = Effect.fn(function* (input: ServerListProviderU
         {
           ...buildContext(),
           homeDir: serverConfig.homeDir,
+          stateDir: serverConfig.stateDir,
           claudeBinaryPath: settings.providers.claudeAgent.binaryPath,
         },
         {
