@@ -306,6 +306,7 @@ describe("wsNativeApi", () => {
         enableProviderUpdateChecks: true,
         keepAwakeMode: "off",
         lowerProviderProcessPriority: true,
+        globalInstructionsEnabled: false,
         defaultThreadEnvMode: "local",
         addProjectBaseDirectory: "",
         githubInboxIncludeUpstreams: false,

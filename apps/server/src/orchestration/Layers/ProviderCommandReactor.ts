@@ -162,6 +162,10 @@ import {
   resolveProviderInstance,
 } from "@synara/shared/providerInstances";
 import { providerStartOptionsFromServerSettings } from "@synara/shared/serverSettings";
+import {
+  formatGlobalInstructionsPrompt,
+  loadGlobalInstructions,
+} from "../../provider/globalInstructions.ts";
 import { clearWorkspaceIndexCache } from "../../workspaceEntries.ts";
 import {
   buildPriorTranscriptBootstrapText,
@@ -3008,9 +3012,16 @@ const make = Effect.gen(function* () {
     const projectContext = [projectContextPacket, projectFoldersPreamble ?? ""]
       .filter((block) => block.trim().length > 0)
       .join("\n\n");
+    const settings = yield* serverSettings.getSettings;
+    const globalInstructions = settings.globalInstructionsEnabled
+      ? yield* loadGlobalInstructions()
+      : null;
+    const globalInstructionsPrompt =
+      globalInstructions === null ? null : formatGlobalInstructionsPrompt(globalInstructions);
     const debugPromptOverheadChars = debugModePromptOverheadChars(input.interactionMode);
     const goalPromptOverheadChars = providerGoalPromptOverheadChars(activeThreadGoal(thread));
-    const providerPromptOverheadChars = debugPromptOverheadChars + goalPromptOverheadChars;
+    const providerPromptOverheadChars =
+      debugPromptOverheadChars + goalPromptOverheadChars + (globalInstructionsPrompt?.length ?? 0);
     const computerInvocation =
       input.dispatchOrigin === undefined || input.dispatchOrigin === "user"
         ? parseComputerInvocation(input.messageText)
@@ -3492,12 +3503,18 @@ const make = Effect.gen(function* () {
                 wrapLatestUserMessage: true,
               }
             : null;
+    const shouldInjectGlobalInstructions =
+      globalInstructionsPrompt !== null &&
+      (activeSessionBeforeEnsure === undefined || nativeSessionRestarted);
     const composeProviderInput = (bootstrap: BootstrapContextSelection | null): string =>
-      `${projectContextPrefix}${
-        bootstrap
-          ? wrapProviderContext({ ...bootstrap, messageText: boundaryMessageText })
-          : boundaryMessageText
-      }`;
+      [
+        ...(shouldInjectGlobalInstructions ? [globalInstructionsPrompt] : []),
+        `${projectContextPrefix}${
+          bootstrap
+            ? wrapProviderContext({ ...bootstrap, messageText: boundaryMessageText })
+            : boundaryMessageText
+        }`,
+      ].join("\n\n");
     const providerInputWithMentionContext = withProviderThreadStatePrompts({
       interactionMode: input.interactionMode,
       goal: activeThreadGoal(thread),

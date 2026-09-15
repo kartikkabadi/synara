@@ -473,6 +473,7 @@ export const AppSettingsSchema = Schema.Struct({
   showEnvironmentPinned: Schema.Boolean.pipe(withDefaults(() => true)),
   showEnvironmentSubagents: Schema.Boolean.pipe(withDefaults(() => true)),
   showEnvironmentInstructions: Schema.Boolean.pipe(withDefaults(() => false)),
+  globalInstructionsEnabled: Schema.Boolean.pipe(withDefaults(() => false)),
   showEnvironmentNotepad: Schema.Boolean.pipe(withDefaults(() => false)),
   followUpBehavior: FollowUpBehavior.pipe(withDefaults(() => DEFAULT_FOLLOW_UP_BEHAVIOR)),
   voiceEnterBehavior: VoiceEnterBehavior.pipe(withDefaults(() => DEFAULT_VOICE_ENTER_BEHAVIOR)),
@@ -1538,6 +1539,7 @@ export function serverSettingsToAppSettings(settings: ServerSettingsView): Parti
     enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
     keepAwakeMode: settings.keepAwakeMode,
     lowerProviderProcessPriority: settings.lowerProviderProcessPriority,
+    globalInstructionsEnabled: settings.globalInstructionsEnabled,
     antigravityBinaryPath: settings.providers.antigravity.binaryPath,
     grokBinaryPath: settings.providers.grok.binaryPath,
     droidBinaryPath: settings.providers.droid.binaryPath,
@@ -1682,6 +1684,9 @@ export function appSettingsPatchToServerSettingsPatch(
   }
   if (hasOwn(patch, "lowerProviderProcessPriority")) {
     serverPatch.lowerProviderProcessPriority = Boolean(patch.lowerProviderProcessPriority);
+  }
+  if (hasOwn(patch, "globalInstructionsEnabled")) {
+    serverPatch.globalInstructionsEnabled = Boolean(patch.globalInstructionsEnabled);
   }
   if (patch.defaultThreadEnvMode === "local" || patch.defaultThreadEnvMode === "worktree") {
     serverPatch.defaultThreadEnvMode = patch.defaultThreadEnvMode;
