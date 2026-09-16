@@ -33,6 +33,8 @@ retry_download() {
 step "Toolchain (mise: node + bun from .mise.toml)"
 if ! command -v mise >/dev/null 2>&1; then
   curl -fsSL https://mise.run | sh
+  # The installer writes to ~/.local/bin and cannot update this shell's PATH.
+  export PATH="$HOME/.local/bin:$PATH"
 fi
 mise install --yes
 # Use the pins for the rest of this script. Later shells get them from the hook below.
@@ -40,6 +42,11 @@ export PATH="$HOME/.local/share/mise/shims:$PATH"
 
 # Shims resolve .mise.toml inside this repository and fall back to the base image's
 # node/bun everywhere else, so the hook is safe to apply to every orb shell.
+if [ ! -e "$HOME/.bash_profile" ] && [ -f "$HOME/.profile" ]; then
+  # Bash reads only the first of .bash_profile, .bash_login, and .profile. Creating
+  # .bash_profile would otherwise drop the initialization .profile already does.
+  printf '%s\n' '. "$HOME/.profile"' >"$HOME/.bash_profile"
+fi
 if ! grep -Fqx "# Synara: pinned toolchain (mise)" "$HOME/.bash_profile" 2>/dev/null; then
   cat >>"$HOME/.bash_profile" <<'EOF'
 
