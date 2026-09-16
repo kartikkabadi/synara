@@ -45,10 +45,14 @@ export PATH="$HOME/.local/share/mise/shims:$PATH"
 
 # Shims resolve .mise.toml inside this repository and fall back to the base image's
 # node/bun everywhere else, so the hook is safe to apply to every orb shell.
-if [ ! -e "$HOME/.bash_profile" ] && [ -f "$HOME/.profile" ]; then
-  # Bash reads only the first of .bash_profile, .bash_login, and .profile. Creating
-  # .bash_profile would otherwise drop the initialization .profile already does.
-  printf '%s\n' '. "$HOME/.profile"' >"$HOME/.bash_profile"
+if [ ! -e "$HOME/.bash_profile" ]; then
+  # Bash reads only the first existing of .bash_profile, .bash_login, and .profile.
+  # Creating .bash_profile would otherwise skip whichever login file already exists.
+  if [ -f "$HOME/.bash_login" ]; then
+    printf '%s\n' '. "$HOME/.bash_login"' >"$HOME/.bash_profile"
+  elif [ -f "$HOME/.profile" ]; then
+    printf '%s\n' '. "$HOME/.profile"' >"$HOME/.bash_profile"
+  fi
 fi
 if ! grep -Fqx "# Synara: pinned toolchain (mise)" "$HOME/.bash_profile" 2>/dev/null; then
   cat >>"$HOME/.bash_profile" <<'EOF'
