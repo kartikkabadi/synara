@@ -155,7 +155,7 @@ export default function PrivacyPage() {
             Synara is open source under the MIT license. If a sentence on this page isn&apos;t
             enough, you can verify every claim yourself —{" "}
             <a
-              href="https://github.com/Emanuele-web04/synara"
+              href="https://github.com/kartikkabadi/synara"
               target="_blank"
               rel="noopener noreferrer"
               className="text-[var(--accent-link)] transition-colors hover:text-[var(--accent-link-hover)]"

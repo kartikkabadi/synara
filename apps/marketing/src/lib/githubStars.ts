@@ -2,7 +2,7 @@
 // Purpose: Fetches and formats the public GitHub star count shown in the navbar.
 // Layer: server utility.
 
-const GITHUB_REPO_API_URL = "https://api.github.com/repos/Emanuele-web04/synara";
+const GITHUB_REPO_API_URL = "https://api.github.com/repos/kartikkabadi/synara";
 
 export async function getStars(): Promise<number | null> {
   if (process.env.VISUAL_TEST === "1") return 4300;

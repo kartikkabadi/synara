@@ -1,0 +1,9 @@
+# Default ownership for repository changes.
+* @kartikkabadi
+
+# Security and release changes require maintainer review.
+/SECURITY.md @kartikkabadi
+/.github/ @kartikkabadi
+/scripts/ @kartikkabadi
+/apps/server/src/provider/ @kartikkabadi
+/apps/server/src/persistence/ @kartikkabadi

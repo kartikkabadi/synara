@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - .github/ISSUE_TEMPLATE/**
+      - .github/labels.json
       - .github/workflows/issue-labels.yml
   workflow_dispatch:
 
@@ -17,27 +17,15 @@ jobs:
     name: Sync issue labels
     runs-on: ubuntu-24.04
     steps:
-      - name: Ensure managed issue labels exist
+      - uses: actions/checkout@v4
+      - name: Ensure managed labels exist
         uses: actions/github-script@v7
         with:
           script: |
-            const managedLabels = [
-              {
-                name: "bug",
-                color: "d73a4a",
-                description: "Something is broken or behaving incorrectly.",
-              },
-              {
-                name: "enhancement",
-                color: "a2eeef",
-                description: "Requested improvement or new capability.",
-              },
-              {
-                name: "needs-triage",
-                color: "fbca04",
-                description: "Issue needs maintainer review and initial categorization.",
-              },
-            ];
+            const fs = require("node:fs");
+            const managedLabels = JSON.parse(
+              fs.readFileSync(".github/labels.json", "utf8"),
+            );
 
             for (const label of managedLabels) {
               try {

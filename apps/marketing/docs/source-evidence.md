@@ -116,7 +116,7 @@ setup docs.
 **Primary source:** Local checkout `/tmp/synara` (checked 2026-08-07): `docs/canary.md`
 (Canary isolation, app name `Synara Canary`, bundle ID `com.emanueledipietro.synara.canary`,
 data dir `~/.synara-canary`) and `README.md` (MCP-native agent harness description).
-Live GitHub URLs `https://github.com/Emanuele-web04/synara*` verified HTTP 200 on 2026-08-07.
+Live GitHub URLs `https://github.com/kartikkabadi/synara*` verified HTTP 200 on 2026-08-07.
 
 ## Site metadata (src/lib/seo.ts)
 

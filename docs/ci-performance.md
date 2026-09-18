@@ -6,16 +6,16 @@ The target is a 20–30% reduction in pull-request CI wall time without removing
 
 Eight successful, first-attempt code-change runs from September 10–11 had a median wall time of **10m 51s**, ranging from **9m 31s to 12m 37s**. Seven are PR runs and one is a main push. Wall time is workflow creation through completion, including runner queueing; job durations below are execution time.
 
-| Run                                                                              | Wall time | Longest job                |
-| -------------------------------------------------------------------------------- | --------- | -------------------------- |
-| [34601479519](https://github.com/Emanuele-web04/synara/actions/runs/34601479519) | 10m 40s   | Browser Tests (stable 3/3) |
-| [34600331685](https://github.com/Emanuele-web04/synara/actions/runs/34600331685) | 10m 03s   | Unit Tests (server)        |
-| [34598565030](https://github.com/Emanuele-web04/synara/actions/runs/34598565030) | 11m 16s   | Browser Tests (stable 3/3) |
-| [34593171942](https://github.com/Emanuele-web04/synara/actions/runs/34593171942) | 10m 54s   | Browser Tests (stable 3/3) |
-| [34589969875](https://github.com/Emanuele-web04/synara/actions/runs/34589969875) | 10m 54s   | Browser Tests (stable 3/3) |
-| [34543900804](https://github.com/Emanuele-web04/synara/actions/runs/34543900804) | 10m 48s   | Windows Process Regression |
-| [34543102075](https://github.com/Emanuele-web04/synara/actions/runs/34543102075) | 12m 37s   | Browser Tests (stable 3/3) |
-| [34599928192](https://github.com/Emanuele-web04/synara/actions/runs/34599928192) | 9m 31s    | Unit Tests (server)        |
+| Run                                                                            | Wall time | Longest job                |
+| ------------------------------------------------------------------------------ | --------- | -------------------------- |
+| [34601479519](https://github.com/kartikkabadi/synara/actions/runs/34601479519) | 10m 40s   | Browser Tests (stable 3/3) |
+| [34600331685](https://github.com/kartikkabadi/synara/actions/runs/34600331685) | 10m 03s   | Unit Tests (server)        |
+| [34598565030](https://github.com/kartikkabadi/synara/actions/runs/34598565030) | 11m 16s   | Browser Tests (stable 3/3) |
+| [34593171942](https://github.com/kartikkabadi/synara/actions/runs/34593171942) | 10m 54s   | Browser Tests (stable 3/3) |
+| [34589969875](https://github.com/kartikkabadi/synara/actions/runs/34589969875) | 10m 54s   | Browser Tests (stable 3/3) |
+| [34543900804](https://github.com/kartikkabadi/synara/actions/runs/34543900804) | 10m 48s   | Windows Process Regression |
+| [34543102075](https://github.com/kartikkabadi/synara/actions/runs/34543102075) | 12m 37s   | Browser Tests (stable 3/3) |
+| [34599928192](https://github.com/kartikkabadi/synara/actions/runs/34599928192) | 9m 31s    | Unit Tests (server)        |
 
 | Job                | Median  | Range          |
 | ------------------ | ------- | -------------- |
@@ -70,7 +70,7 @@ Removing the redundant ~148s frontend build and dividing server tests removes th
 - The complete ChatView file took 214.01s locally; the larger final partition took 161.30s and its complement took 96.22s. That is a 24.6% reduction in this local file's critical path, not a measured whole-workflow or hosted improvement.
 - Both component shards pass: 42 files / 168 tests and 42 files / 193 tests, with the existing quarantined case retained. All four browser jobs pass locally (482 active cases total).
 
-These test timings are local macOS results. Hosted run [34608752703](https://github.com/Emanuele-web04/synara/actions/runs/34608752703) passed all browser, unit, static, and build checks, but Windows failed during dependency setup after restoring `node_modules`: Fumadocs could not resolve its declared `tinyglobby` dependency. The preceding cold Windows install succeeded. Windows now skips the installed-tree cache; this correction still needs a hosted run. The end-to-end speedup remains unverified across successful runs.
+These test timings are local macOS results. Hosted run [34608752703](https://github.com/kartikkabadi/synara/actions/runs/34608752703) passed all browser, unit, static, and build checks, but Windows failed during dependency setup after restoring `node_modules`: Fumadocs could not resolve its declared `tinyglobby` dependency. The preceding cold Windows install succeeded. Windows now skips the installed-tree cache; this correction still needs a hosted run. The end-to-end speedup remains unverified across successful runs.
 
 ## Hosted acceptance
 
