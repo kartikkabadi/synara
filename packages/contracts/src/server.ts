@@ -511,6 +511,14 @@ export type ServerProviderUpdateResult = typeof ServerProviderUpdateResult.Type;
 export const ServerGetSettingsResult = ServerSettingsView;
 export type ServerGetSettingsResult = typeof ServerGetSettingsResult.Type;
 
+export const ServerGlobalInstructionsResult = Schema.Struct({
+  contents: Schema.String.check(Schema.isMaxLength(6_000)),
+});
+export type ServerGlobalInstructionsResult = typeof ServerGlobalInstructionsResult.Type;
+
+export const ServerUpdateGlobalInstructionsInput = ServerGlobalInstructionsResult;
+export type ServerUpdateGlobalInstructionsInput = typeof ServerUpdateGlobalInstructionsInput.Type;
+
 export const ServerGetEnvironmentResult = ExecutionEnvironmentDescriptor;
 export type ServerGetEnvironmentResult = typeof ServerGetEnvironmentResult.Type;
 
