@@ -87,6 +87,7 @@ import {
   AutomationEventTriggersEditor,
   AutomationModelPicker,
   automationIntervalPresetOptions,
+  automationRunTriggerLabel,
   automationTargetThreads,
   canCancelAutomationRun,
   datetimeLocalFromIso,
@@ -102,8 +103,7 @@ import {
   providerOptionsForAutomationModelSelection,
   runResultSummary,
   runResultTitle,
-  runStatusLabel,
-  RunStatusIndicator,
+  RunStatusPill,
   SCHEDULE_KIND_OPTIONS,
   scheduleFromKind,
   scheduleKindFromSchedule,
@@ -1380,11 +1380,21 @@ function RunRow({
         openable ? "cursor-pointer hover:bg-foreground/[0.03]" : undefined,
       )}
     >
-      <RunStatusIndicator status={run.status} />
+      <span className="flex w-32 shrink-0 items-center gap-1.5 text-muted-foreground/80">
+        <CentralIcon
+          name={automationRunTriggerLabel(run).icon}
+          className="size-3.5 shrink-0"
+          aria-hidden="true"
+        />
+        <span className="truncate text-ui-xs">{automationRunTriggerLabel(run).label}</span>
+      </span>
+      <RunStatusPill status={run.status} />
       <div className="min-w-0 flex-1 truncate">
-        <span className="text-foreground/90">{runStatusLabel(run.status)}</span>
-        {resultTitle ? <span className="text-foreground/90"> · {resultTitle}</span> : null}
-        <span className="text-muted-foreground"> · {runResultSummary(run)}</span>
+        {resultTitle ? <span className="text-foreground/90">{resultTitle} </span> : null}
+        <span className="text-muted-foreground">
+          {resultTitle ? "· " : ""}
+          {runResultSummary(run)}
+        </span>
       </div>
       {triageActionable ? (
         <div className="flex shrink-0 items-center gap-1.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">

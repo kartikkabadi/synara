@@ -22,7 +22,8 @@ import {
 } from "@synara/contracts";
 import { automationRequiresTargetThread } from "@synara/shared/automationMode";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useAppSettings } from "~/appSettings";
 import type { Thread } from "~/types";
@@ -33,6 +34,7 @@ import {
 import { ProviderModelPicker } from "~/components/chat/ProviderModelPicker";
 import { RUNTIME_AUTO_ICON_ACCENT_CLASS_NAME } from "~/components/chat/composerPickerStyles";
 import { Alert, AlertDescription, AlertTitle } from "~/components/ui/alert";
+import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Dialog, DialogPopup, DialogTitle } from "~/components/ui/dialog";
 import {
@@ -47,6 +49,9 @@ import {
   MenuSubTrigger,
   MenuTrigger,
 } from "~/components/ui/menu";
+import { SearchInput } from "~/components/ui/search-input";
+import { Switch } from "~/components/ui/switch";
+import { ELEVATED_HOVER_SURFACE_CLASS_NAME } from "~/surfaceStyles";
 import { TimePicker } from "~/components/ui/time-picker";
 import { toastManager } from "~/components/ui/toast";
 import type { AutomationDraftWarning, AutomationDraftWarningId } from "~/lib/automationDraft";
@@ -197,6 +202,10 @@ export type AutomationTemplate = {
   readonly label: string;
   readonly name: string;
   readonly prompt: string;
+  /** One-line summary rendered on the template gallery card. */
+  readonly description: string;
+  /** CentralIcon name rendered on the template gallery card. */
+  readonly icon: string;
   readonly schedule?: AutomationSchedule;
   readonly eventTrigger?: {
     readonly event: AutomationEventKind;
@@ -211,7 +220,7 @@ export type AutomationTemplateCategory = {
   readonly templates: readonly AutomationTemplate[];
 };
 
-/** Categorized gallery surfaced behind the composer's "Use template" button. */
+/** Categorized gallery rendered on the automations index page. */
 export const AUTOMATION_TEMPLATE_CATEGORIES: readonly AutomationTemplateCategory[] = [
   {
     label: "Popular",
@@ -219,6 +228,8 @@ export const AUTOMATION_TEMPLATE_CATEGORIES: readonly AutomationTemplateCategory
       {
         label: "Daily standup summary",
         name: "Daily summary",
+        description: "Recap the last day of changes as a standup update.",
+        icon: "note-1",
         prompt:
           "Summarize what changed on the main branch in the last 24 hours as a short standup update.",
         schedule: { type: "daily", timeOfDay: "09:00" },
@@ -226,12 +237,16 @@ export const AUTOMATION_TEMPLATE_CATEGORIES: readonly AutomationTemplateCategory
       {
         label: "Triage new crashes",
         name: "Triage crashes",
+        description: "Watch error reporting and open fix PRs for top crashes.",
+        icon: "siren",
         prompt: "Look for new crashes in $sentry and open a fix PR for the most impactful one.",
         schedule: { type: "interval", everySeconds: 3600 },
       },
       {
         label: "Update dependencies",
         name: "Update dependencies",
+        description: "Bump safe dependency versions and run the test suite.",
+        icon: "package-block",
         prompt:
           "Check for outdated dependencies, bump the safe minor and patch versions, then run the tests.",
         schedule: { type: "weekly", dayOfWeek: 1, timeOfDay: "09:00" },
@@ -244,6 +259,8 @@ export const AUTOMATION_TEMPLATE_CATEGORIES: readonly AutomationTemplateCategory
       {
         label: "Review every new PR",
         name: "PR reviewer",
+        description: "Review each new pull request for correctness.",
+        icon: "pull-request",
         prompt:
           "A pull request was just opened in {{repository}}: {{title}} ({{url}}). Review it for correctness and leave a summary of your findings.",
         eventTrigger: { event: "pull_request_opened" },
@@ -251,6 +268,8 @@ export const AUTOMATION_TEMPLATE_CATEGORIES: readonly AutomationTemplateCategory
       {
         label: "Review PRs targeting main",
         name: "Main-branch PR reviewer",
+        description: "Review pull requests that target the main branch.",
+        icon: "pull-request-simple",
         prompt:
           "A pull request targeting the main branch was just opened in {{repository}}: {{title}} ({{url}}). Review the diff and post your findings.",
         eventTrigger: { event: "pull_request_opened", branch: "main" },
@@ -258,6 +277,8 @@ export const AUTOMATION_TEMPLATE_CATEGORIES: readonly AutomationTemplateCategory
       {
         label: "Watch draft PRs",
         name: "Draft PR watcher",
+        description: "Give early feedback on newly opened draft PRs.",
+        icon: "file-edit",
         prompt:
           "A draft pull request was just opened in {{repository}}: {{title}} ({{url}}). Give early feedback on the approach before it is marked ready.",
         eventTrigger: { event: "draft_opened" },
@@ -270,6 +291,8 @@ export const AUTOMATION_TEMPLATE_CATEGORIES: readonly AutomationTemplateCategory
       {
         label: "Triage new issues",
         name: "Issue triage",
+        description: "Classify new issues and open fix PRs or summaries.",
+        icon: "arrow-inbox",
         prompt:
           "An issue was just opened in {{repository}}: {{title}} ({{url}}). Classify it, estimate the fix, and either open a fix PR or post a triage summary.",
         eventTrigger: { event: "issue_opened" },
@@ -277,6 +300,8 @@ export const AUTOMATION_TEMPLATE_CATEGORIES: readonly AutomationTemplateCategory
       {
         label: "Reproduce reported bugs",
         name: "Bug reproduction",
+        description: "Reproduce new bug reports and document the steps.",
+        icon: "bug",
         prompt:
           "A new issue in {{repository}} looks like a bug report: {{title}} ({{url}}). Try to reproduce it locally and document the steps.",
         eventTrigger: { event: "issue_opened" },
@@ -289,6 +314,8 @@ export const AUTOMATION_TEMPLATE_CATEGORIES: readonly AutomationTemplateCategory
       {
         label: "Weekly dependency check",
         name: "Dependency check",
+        description: "Check weekly for outdated dependencies.",
+        icon: "package-search",
         prompt:
           "Check for outdated dependencies, bump the safe minor and patch versions, then run the tests.",
         schedule: { type: "weekly", dayOfWeek: 1, timeOfDay: "09:00" },
@@ -296,6 +323,8 @@ export const AUTOMATION_TEMPLATE_CATEGORIES: readonly AutomationTemplateCategory
       {
         label: "Flaky test report",
         name: "Flaky test report",
+        description: "List intermittently failing tests and likely offenders.",
+        icon: "douple-check",
         prompt:
           "Run the test suite, list tests that fail intermittently, and file a summary with the likely offenders.",
         schedule: { type: "daily", timeOfDay: "07:00" },
@@ -303,6 +332,8 @@ export const AUTOMATION_TEMPLATE_CATEGORIES: readonly AutomationTemplateCategory
       {
         label: "Dead code sweep",
         name: "Dead code sweep",
+        description: "Find unused exports and files and open a cleanup PR.",
+        icon: "scan-code",
         prompt:
           "Find exported symbols that nothing imports and unused files, then open a cleanup PR removing the clear cases.",
         schedule: { type: "weekly", dayOfWeek: 5, timeOfDay: "17:00" },
@@ -315,6 +346,8 @@ export const AUTOMATION_TEMPLATE_CATEGORIES: readonly AutomationTemplateCategory
       {
         label: "Morning changelog",
         name: "Morning changelog",
+        description: "Turn yesterday's merged commits into changelog entries.",
+        icon: "newspaper",
         prompt:
           "Summarize every commit merged to the default branch since yesterday as a changelog entry.",
         schedule: { type: "daily", timeOfDay: "08:30" },
@@ -322,6 +355,8 @@ export const AUTOMATION_TEMPLATE_CATEGORIES: readonly AutomationTemplateCategory
       {
         label: "Competitor watch",
         name: "Competitor watch",
+        description: "Watch upstream releases and flag breaking changes.",
+        icon: "search-intelligence",
         prompt:
           "Scan recent upstream releases of the libraries this project depends on and flag breaking changes we should plan for.",
         schedule: { type: "weekly", dayOfWeek: 1, timeOfDay: "10:00" },
@@ -352,12 +387,296 @@ export function formatAutomationEventTrigger(trigger: AutomationEventTrigger): s
   return parts.join(" ");
 }
 
+/** Trigger caption for a template gallery card: the event label or the cadence. */
+export function templateTriggerLabel(template: AutomationTemplate): string {
+  if (template.eventTrigger) {
+    return automationEventTriggerLabel(template.eventTrigger.event);
+  }
+  return template.schedule ? formatCadenceLong(template.schedule) : "Manual";
+}
+
+/**
+ * Applies a template to a create/edit form: fills name (when blank), prompt, schedule,
+ * and appends the template's event trigger draft. Shared by the gallery cards and the
+ * create dialog's initial state.
+ */
+export function applyAutomationTemplateToForm(
+  form: AutomationFormState,
+  template: AutomationTemplate,
+): AutomationFormState {
+  const withSchedule = template.schedule ? applyScheduleToForm(form, template.schedule) : form;
+  return {
+    ...withSchedule,
+    name: form.name.trim() ? form.name : template.name,
+    prompt: template.prompt,
+    eventTriggers: template.eventTrigger
+      ? [
+          ...withSchedule.eventTriggers,
+          {
+            ...newEventTriggerDraft(template.eventTrigger.event),
+            repositories: template.eventTrigger.repositories ?? "",
+            branch: template.eventTrigger.branch ?? "",
+            actor: template.eventTrigger.actor ?? "",
+          },
+        ]
+      : withSchedule.eventTriggers,
+  };
+}
+
+/** Primary trigger icon + label for a saved definition, as shown in the rail card. */
+export function automationTriggerSummary(definition: AutomationDefinition): {
+  readonly icon: string;
+  readonly label: string;
+} {
+  const eventTriggers = definition.eventTriggers ?? [];
+  const scheduled = definition.schedule.type !== "manual";
+  const triggerCount = eventTriggers.length + (scheduled ? 1 : 0);
+  const [firstEventTrigger] = eventTriggers;
+  const baseLabel = firstEventTrigger
+    ? automationEventTriggerLabel(firstEventTrigger.event)
+    : formatCadence(definition.schedule);
+  return {
+    icon: firstEventTrigger ? "github" : "clock",
+    label: triggerCount > 1 ? `${baseLabel} +${triggerCount - 1}` : baseLabel,
+  };
+}
+
+/**
+ * Full-page "Pick an example or start from scratch" gallery shown on the automations
+ * index, mirroring monocode's AutomationPicker.
+ */
+export function AutomationTemplateGallery({
+  onBlank,
+  onPick,
+}: {
+  readonly onBlank: () => void;
+  readonly onPick: (template: AutomationTemplate) => void;
+}) {
+  const [category, setCategory] = useState(0);
+  const activeTemplates =
+    AUTOMATION_TEMPLATE_CATEGORIES[category]?.templates ??
+    AUTOMATION_TEMPLATE_CATEGORIES[0]?.templates ??
+    [];
+  return (
+    <div className="mx-auto w-full max-w-5xl px-6 py-10 sm:px-10">
+      <h1 className="font-heading text-ui-lg font-medium text-foreground">New automation</h1>
+      <p className="mt-1 text-ui text-muted-foreground">Pick an example or start from scratch.</p>
+      <div className="mt-4 flex flex-wrap gap-1.5">
+        {AUTOMATION_TEMPLATE_CATEGORIES.map((entry, index) => (
+          <button
+            key={entry.label}
+            type="button"
+            aria-pressed={index === category}
+            onClick={() => setCategory(index)}
+            className={cn(
+              "h-7 rounded-full px-3 text-ui-sm transition-colors",
+              index === category
+                ? "bg-foreground text-background"
+                : "border border-border text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {entry.label}
+          </button>
+        ))}
+      </div>
+      <div className="mt-5 grid grid-cols-1 gap-3 min-[780px]:grid-cols-2">
+        <button
+          type="button"
+          onClick={onBlank}
+          className="flex min-h-32 flex-col items-start gap-2 rounded-xl border border-dashed border-border p-4 text-left transition-colors hover:border-foreground/30 hover:bg-foreground/[0.03]"
+        >
+          <span className="flex size-9 items-center justify-center rounded-full bg-foreground/8">
+            <CentralIcon name="plus-small" className="size-4 text-foreground" />
+          </span>
+          <span className="text-ui font-medium text-foreground">Start from scratch</span>
+          <span className="text-ui-sm leading-snug text-muted-foreground">
+            Blank prompt and schedule — configure everything yourself.
+          </span>
+        </button>
+        {activeTemplates.map((template) => (
+          <button
+            key={template.label}
+            type="button"
+            onClick={() => onPick(template)}
+            className="flex min-h-32 flex-col items-start gap-2 rounded-xl border border-border p-4 text-left transition-colors hover:border-foreground/30 hover:bg-foreground/[0.03]"
+          >
+            <span className="flex size-9 items-center justify-center rounded-full bg-foreground/8">
+              <CentralIcon name={template.icon} className="size-4 text-foreground" />
+            </span>
+            <span className="text-ui font-medium text-foreground">{template.name}</span>
+            <span className="flex-1 text-ui-sm leading-snug text-muted-foreground">
+              {template.description}
+            </span>
+            <span className="mt-auto flex items-center gap-1.5 text-ui-xs text-muted-foreground/80">
+              <CentralIcon name={template.eventTrigger ? "github" : "clock"} className="size-3.5" />
+              {templateTriggerLabel(template)}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Monocode-style left rail listing every automation: filter box, "+" to the gallery,
+ * cards with trigger summary, an inline enable switch, and project/last-run/model meta.
+ */
+export function AutomationsRail({ selectedId }: { readonly selectedId: string | null }) {
+  const navigate = useNavigate();
+  const { data, updateMutation, runsByAutomationId } = useAutomations();
+  const projects = useStore((state) => state.projects);
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleDefinitions = useMemo(() => {
+    if (normalizedQuery.length === 0) return data.definitions;
+    return data.definitions.filter((definition) => {
+      const project = projects.find((candidate) => candidate.id === definition.projectId);
+      return (
+        definition.name.toLowerCase().includes(normalizedQuery) ||
+        definition.prompt.toLowerCase().includes(normalizedQuery) ||
+        (project?.name.toLowerCase().includes(normalizedQuery) ?? false)
+      );
+    });
+  }, [data.definitions, normalizedQuery, projects]);
+
+  const openAutomation = (automationId: AutomationId) =>
+    void navigate({ to: "/automations/$automationId", params: { automationId } });
+
+  return (
+    <aside className="flex w-72 shrink-0 flex-col border-r border-[var(--app-surface-divider)]">
+      <div className="flex items-center gap-1 px-2 pt-2 pb-1.5">
+        <SearchInput
+          className="min-w-0 flex-1"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Filter automations"
+          aria-label="Filter automations"
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="New automation"
+          title="New automation"
+          onClick={() => void navigate({ to: "/automations" })}
+        >
+          <CentralIcon name="plus-small" className="size-4" />
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
+        {visibleDefinitions.map((definition) => {
+          const latestRun = runsByAutomationId.get(definition.id)?.[0] ?? null;
+          const trigger = automationTriggerSummary(definition);
+          const projectName =
+            projects.find((candidate) => candidate.id === definition.projectId)?.name ?? null;
+          const lastRunAt =
+            latestRun?.finishedAt ?? latestRun?.startedAt ?? latestRun?.createdAt ?? null;
+          return (
+            <button
+              key={definition.id}
+              type="button"
+              onClick={() => openAutomation(definition.id)}
+              className={cn(
+                "group flex w-full flex-col gap-0.5 rounded-md px-2 py-2 text-left transition-colors",
+                definition.id === selectedId
+                  ? "bg-foreground/10"
+                  : ELEVATED_HOVER_SURFACE_CLASS_NAME,
+              )}
+            >
+              <div className="flex min-w-0 items-center gap-1.5">
+                <CentralIcon
+                  name={trigger.icon}
+                  className="size-3.5 shrink-0 text-muted-foreground"
+                />
+                <span className="min-w-0 flex-1 truncate text-ui-xs text-muted-foreground">
+                  {trigger.label}
+                </span>
+                <span
+                  onClick={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => event.stopPropagation()}
+                >
+                  <Switch
+                    checked={definition.enabled}
+                    disabled={updateMutation.isPending}
+                    onCheckedChange={(checked) =>
+                      updateMutation.mutate({ id: definition.id, enabled: checked })
+                    }
+                    aria-label={`${definition.enabled ? "Pause" : "Resume"} ${definition.name}`}
+                    className="[--thumb-size:--spacing(3)]"
+                  />
+                </span>
+              </div>
+              <div
+                className={cn(
+                  "truncate text-ui font-medium",
+                  definition.enabled ? "text-foreground" : "text-muted-foreground",
+                )}
+              >
+                {definition.name}
+              </div>
+              <div className="flex min-w-0 items-center gap-1.5 text-ui-xs text-muted-foreground/80">
+                {projectName ? <span className="truncate">{projectName}</span> : null}
+                {lastRunAt ? (
+                  <span className="shrink-0">
+                    {projectName ? "· " : ""}
+                    {formatRelativeTime(lastRunAt)}
+                  </span>
+                ) : null}
+                <span className="ml-auto truncate pl-2 text-muted-foreground/60">
+                  {definition.modelSelection.model}
+                </span>
+              </div>
+            </button>
+          );
+        })}
+        {visibleDefinitions.length === 0 ? (
+          <p className="px-2 py-6 text-ui-sm leading-snug text-muted-foreground">
+            {data.definitions.length === 0
+              ? "No automations yet. Pick a template or start from scratch."
+              : "No automations match this filter."}
+          </p>
+        ) : null}
+      </div>
+    </aside>
+  );
+}
+
+/** Caption for what fired a run, mirroring monocode's run-history Trigger column. */
+export function automationRunTriggerLabel(run: AutomationRun): {
+  readonly icon: string;
+  readonly label: string;
+} {
+  switch (run.trigger.type) {
+    case "manual":
+      return { icon: "play", label: "Test run" };
+    case "scheduled":
+      return { icon: "clock", label: "Scheduled" };
+    case "event":
+      return {
+        icon: "github",
+        label: `${automationEventTriggerLabel(run.trigger.event.event)} · ${run.trigger.event.repository}#${run.trigger.event.itemNumber}`,
+      };
+  }
+}
+
+/** Status-colored badge for a run row, mirroring monocode's RunStatusPill. */
+export function RunStatusPill({ status }: { readonly status: AutomationRun["status"] }) {
+  return (
+    <Badge variant={runStatusVariant(status)} size="sm" className="shrink-0 capitalize">
+      {runStatusLabel(status)}
+    </Badge>
+  );
+}
+
 const EVENT_TRIGGER_INPUT_CLASS =
   "w-full min-w-0 rounded-md border border-border bg-transparent px-2 py-1.5 text-ui leading-snug outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
 /**
  * Editor for an automation's GitHub event subscriptions, shared by the create
  * dialog (drafts) and the detail page (saved triggers converted to drafts).
+ * Rows live in one bordered box; the trailing "Add event trigger" row opens the
+ * event-kind menu instead of a bare button, mirroring monocode's trigger box.
  */
 export function AutomationEventTriggersEditor({
   value,
@@ -371,13 +690,18 @@ export function AutomationEventTriggersEditor({
   const updateTrigger = (id: string, patch: Partial<AutomationEventTriggerDraft>) =>
     onChange(value.map((trigger) => (trigger.id === id ? { ...trigger, ...patch } : trigger)));
   return (
-    <div className="flex flex-col gap-2">
+    <div className="overflow-hidden rounded-md border border-border">
       {value.map((trigger) => (
         <div
           key={trigger.id}
-          className="flex flex-col gap-1.5 rounded-lg border border-border/60 bg-foreground/[0.02] p-2.5"
+          className="group flex flex-col gap-1.5 border-b border-border/60 bg-foreground/[0.02] p-2.5 last:border-b-0"
         >
           <div className="flex items-center gap-2">
+            <CentralIcon
+              name="github"
+              className="size-4 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
             <select
               value={trigger.event}
               disabled={disabled}
@@ -408,6 +732,7 @@ export function AutomationEventTriggersEditor({
               aria-label="Remove event trigger"
               disabled={disabled}
               onClick={() => onChange(value.filter((entry) => entry.id !== trigger.id))}
+              className="opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
             >
               <CentralIcon name="cross-small" className="size-4" />
             </Button>
@@ -433,17 +758,34 @@ export function AutomationEventTriggersEditor({
         </div>
       ))}
       {value.length < AUTOMATION_EVENT_TRIGGER_MAX_COUNT ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="self-start"
-          disabled={disabled}
-          onClick={() => onChange([...value, newEventTriggerDraft()])}
-        >
-          <CentralIcon name="plus-small" className="size-4" />
-          Add event trigger
-        </Button>
+        <Menu>
+          <MenuTrigger
+            render={
+              <button
+                type="button"
+                disabled={disabled}
+                className={cn(
+                  "flex h-10 w-full items-center gap-2 px-2.5 text-ui-sm text-muted-foreground transition-colors",
+                  "hover:bg-foreground/[0.04] hover:text-foreground disabled:pointer-events-none disabled:opacity-50",
+                )}
+              />
+            }
+          >
+            <CentralIcon name="plus-small" className="size-4" />
+            Add event trigger
+          </MenuTrigger>
+          <ComposerPickerMenuPopup align="start" className="w-52">
+            {AUTOMATION_EVENT_KIND_OPTIONS.map((option) => (
+              <MenuItem
+                key={option.value}
+                onClick={() => onChange([...value, newEventTriggerDraft(option.value)])}
+              >
+                <CentralIcon name="github" className="size-3.5" />
+                {option.label}
+              </MenuItem>
+            ))}
+          </ComposerPickerMenuPopup>
+        </Menu>
       ) : null}
     </div>
   );
@@ -1287,26 +1629,6 @@ export function AutomationDialog({
     });
   };
 
-  const applyTemplate = (template: AutomationTemplate) => {
-    const withSchedule = template.schedule ? applyScheduleToForm(form, template.schedule) : form;
-    onFormChange({
-      ...withSchedule,
-      name: form.name.trim() ? form.name : template.name,
-      prompt: template.prompt,
-      eventTriggers: template.eventTrigger
-        ? [
-            ...withSchedule.eventTriggers,
-            {
-              ...newEventTriggerDraft(template.eventTrigger.event),
-              repositories: template.eventTrigger.repositories ?? "",
-              branch: template.eventTrigger.branch ?? "",
-              actor: template.eventTrigger.actor ?? "",
-            },
-          ]
-        : withSchedule.eventTriggers,
-    });
-  };
-
   const submit = () => {
     if (busy || !submittable) return;
     onSubmit();
@@ -1340,23 +1662,6 @@ export function AutomationDialog({
             >
               <CentralIcon name="info-simple" className="size-4" />
             </Button>
-            <Menu>
-              <MenuTrigger render={<Button variant="outline" size="sm" />}>
-                Use template
-              </MenuTrigger>
-              <ComposerPickerMenuPopup align="end" className="w-56">
-                {AUTOMATION_TEMPLATE_CATEGORIES.map((category) => (
-                  <MenuGroup key={category.label}>
-                    <MenuGroupLabel>{category.label}</MenuGroupLabel>
-                    {category.templates.map((template) => (
-                      <MenuItem key={template.label} onClick={() => applyTemplate(template)}>
-                        {template.label}
-                      </MenuItem>
-                    ))}
-                  </MenuGroup>
-                ))}
-              </ComposerPickerMenuPopup>
-            </Menu>
             <Button
               type="button"
               variant="ghost"
