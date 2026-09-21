@@ -1,6 +1,8 @@
 import {
   type AutomationCreateInput,
   type AutomationDefinition,
+  type AutomationEventKind,
+  type AutomationEventTrigger,
   type AutomationId,
   type AutomationListResult,
   type AutomationMemory,
@@ -8,6 +10,7 @@ import {
   type AutomationNotificationPolicy,
   type AutomationRun,
   type AutomationRunResult,
+  type AutomationSchedule,
   type AutomationStreamEvent,
   type AutomationUpdateInput,
   type AutomationWorktreeMode,
@@ -15,6 +18,7 @@ import {
   type ProviderKind,
   type RuntimeMode,
   type ThreadId,
+  AUTOMATION_EVENT_TRIGGER_MAX_COUNT,
 } from "@synara/contracts";
 import { automationRequiresTargetThread } from "@synara/shared/automationMode";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -49,13 +53,19 @@ import type { AutomationDraftWarning, AutomationDraftWarningId } from "~/lib/aut
 import {
   acknowledgedRiskIdsForFormWarnings,
   applyScheduleToForm,
+  AUTOMATION_EVENT_KIND_OPTIONS,
+  AUTOMATION_MISSED_RUN_GRACE_OPTIONS,
   automationFastIntervalLimitMessage,
   automationFormSubmitBlockReason,
   automationIntervalPresetOptions,
+  automationMissedRunGraceLabel,
   buildAutomationFormWarnings,
   createInputFromForm,
   datetimeLocalFromIso,
   defaultModelSelection,
+  eventTriggerDraftsFromTriggers,
+  eventTriggerDraftsToTriggers,
+  eventTriggerRepositories,
   formatCadence,
   formatCadenceLong,
   formatClockTime,
@@ -69,6 +79,7 @@ import {
   isFormSubmittable,
   isoFromDatetimeLocal,
   modelSelectionForProjectChange,
+  newEventTriggerDraft,
   projectModelSelection,
   providerOptionsForAutomationModelSelection,
   scheduleFromForm,
@@ -79,6 +90,7 @@ import {
   updateWeeklyScheduleDay,
   updateWeeklyScheduleTime,
   weekdayLabel,
+  type AutomationEventTriggerDraft,
   type AutomationFormState,
   type IntervalUnit,
   type ScheduleKind,
@@ -133,13 +145,19 @@ export function automationDefinitionUpdateMutationOptions(
 export {
   acknowledgedRiskIdsForFormWarnings,
   applyScheduleToForm,
+  AUTOMATION_EVENT_KIND_OPTIONS,
+  AUTOMATION_MISSED_RUN_GRACE_OPTIONS,
   automationFastIntervalLimitMessage,
   automationFormSubmitBlockReason,
   automationIntervalPresetOptions,
+  automationMissedRunGraceLabel,
   buildAutomationFormWarnings,
   createInputFromForm,
   datetimeLocalFromIso,
   defaultModelSelection,
+  eventTriggerDraftsFromTriggers,
+  eventTriggerDraftsToTriggers,
+  eventTriggerRepositories,
   formatCadence,
   formatCadenceLong,
   formatClockTime,
@@ -152,6 +170,7 @@ export {
   isFormSubmittable,
   isoFromDatetimeLocal,
   modelSelectionForProjectChange,
+  newEventTriggerDraft,
   projectModelSelection,
   providerOptionsForAutomationModelSelection,
   scheduleFromForm,
@@ -162,35 +181,273 @@ export {
   updateWeeklyScheduleDay,
   updateWeeklyScheduleTime,
   weekdayLabel,
+  type AutomationEventTriggerDraft,
   type AutomationFormState,
   type IntervalUnit,
   type ScheduleKind,
 };
 
-/** Starter prompts surfaced behind the composer's "Use template" button. */
-export const AUTOMATION_TEMPLATES: readonly {
+/**
+ * A starter automation: prompt plus the cadence or event subscription it expects.
+ * `schedule` fills the schedule picker; `eventTrigger` adds a GitHub trigger row.
+ * A template can set both — monocode-style event automations often also sweep on
+ * a slow cadence for items missed while the app was closed.
+ */
+export type AutomationTemplate = {
   readonly label: string;
   readonly name: string;
   readonly prompt: string;
-}[] = [
+  readonly schedule?: AutomationSchedule;
+  readonly eventTrigger?: {
+    readonly event: AutomationEventKind;
+    readonly repositories?: string;
+    readonly branch?: string;
+    readonly actor?: string;
+  };
+};
+
+export type AutomationTemplateCategory = {
+  readonly label: string;
+  readonly templates: readonly AutomationTemplate[];
+};
+
+/** Categorized gallery surfaced behind the composer's "Use template" button. */
+export const AUTOMATION_TEMPLATE_CATEGORIES: readonly AutomationTemplateCategory[] = [
   {
-    label: "Triage new crashes",
-    name: "Triage crashes",
-    prompt: "Look for new crashes in $sentry and open a fix PR for the most impactful one.",
+    label: "Popular",
+    templates: [
+      {
+        label: "Daily standup summary",
+        name: "Daily summary",
+        prompt:
+          "Summarize what changed on the main branch in the last 24 hours as a short standup update.",
+        schedule: { type: "daily", timeOfDay: "09:00" },
+      },
+      {
+        label: "Triage new crashes",
+        name: "Triage crashes",
+        prompt: "Look for new crashes in $sentry and open a fix PR for the most impactful one.",
+        schedule: { type: "interval", everySeconds: 3600 },
+      },
+      {
+        label: "Update dependencies",
+        name: "Update dependencies",
+        prompt:
+          "Check for outdated dependencies, bump the safe minor and patch versions, then run the tests.",
+        schedule: { type: "weekly", dayOfWeek: 1, timeOfDay: "09:00" },
+      },
+    ],
   },
   {
-    label: "Update dependencies",
-    name: "Update dependencies",
-    prompt:
-      "Check for outdated dependencies, bump the safe minor and patch versions, then run the tests.",
+    label: "Review",
+    templates: [
+      {
+        label: "Review every new PR",
+        name: "PR reviewer",
+        prompt:
+          "A pull request was just opened in {{repository}}: {{title}} ({{url}}). Review it for correctness and leave a summary of your findings.",
+        eventTrigger: { event: "pull_request_opened" },
+      },
+      {
+        label: "Review PRs targeting main",
+        name: "Main-branch PR reviewer",
+        prompt:
+          "A pull request targeting the main branch was just opened in {{repository}}: {{title}} ({{url}}). Review the diff and post your findings.",
+        eventTrigger: { event: "pull_request_opened", branch: "main" },
+      },
+      {
+        label: "Watch draft PRs",
+        name: "Draft PR watcher",
+        prompt:
+          "A draft pull request was just opened in {{repository}}: {{title}} ({{url}}). Give early feedback on the approach before it is marked ready.",
+        eventTrigger: { event: "draft_opened" },
+      },
+    ],
   },
   {
-    label: "Daily standup summary",
-    name: "Daily summary",
-    prompt:
-      "Summarize what changed on the main branch in the last 24 hours as a short standup update.",
+    label: "Triage",
+    templates: [
+      {
+        label: "Triage new issues",
+        name: "Issue triage",
+        prompt:
+          "An issue was just opened in {{repository}}: {{title}} ({{url}}). Classify it, estimate the fix, and either open a fix PR or post a triage summary.",
+        eventTrigger: { event: "issue_opened" },
+      },
+      {
+        label: "Reproduce reported bugs",
+        name: "Bug reproduction",
+        prompt:
+          "A new issue in {{repository}} looks like a bug report: {{title}} ({{url}}). Try to reproduce it locally and document the steps.",
+        eventTrigger: { event: "issue_opened" },
+      },
+    ],
+  },
+  {
+    label: "Maintenance",
+    templates: [
+      {
+        label: "Weekly dependency check",
+        name: "Dependency check",
+        prompt:
+          "Check for outdated dependencies, bump the safe minor and patch versions, then run the tests.",
+        schedule: { type: "weekly", dayOfWeek: 1, timeOfDay: "09:00" },
+      },
+      {
+        label: "Flaky test report",
+        name: "Flaky test report",
+        prompt:
+          "Run the test suite, list tests that fail intermittently, and file a summary with the likely offenders.",
+        schedule: { type: "daily", timeOfDay: "07:00" },
+      },
+      {
+        label: "Dead code sweep",
+        name: "Dead code sweep",
+        prompt:
+          "Find exported symbols that nothing imports and unused files, then open a cleanup PR removing the clear cases.",
+        schedule: { type: "weekly", dayOfWeek: 5, timeOfDay: "17:00" },
+      },
+    ],
+  },
+  {
+    label: "Research",
+    templates: [
+      {
+        label: "Morning changelog",
+        name: "Morning changelog",
+        prompt:
+          "Summarize every commit merged to the default branch since yesterday as a changelog entry.",
+        schedule: { type: "daily", timeOfDay: "08:30" },
+      },
+      {
+        label: "Competitor watch",
+        name: "Competitor watch",
+        prompt:
+          "Scan recent upstream releases of the libraries this project depends on and flag breaking changes we should plan for.",
+        schedule: { type: "weekly", dayOfWeek: 1, timeOfDay: "10:00" },
+      },
+    ],
   },
 ];
+
+/** Template rows the detail page renders beside the saved definition fields. */
+export function automationEventTriggerLabel(event: AutomationEventKind): string {
+  return AUTOMATION_EVENT_KIND_OPTIONS.find((option) => option.value === event)?.label ?? event;
+}
+
+export function formatAutomationEventTrigger(trigger: AutomationEventTrigger): string {
+  const parts = [automationEventTriggerLabel(trigger.event)];
+  if (trigger.repositories.length > 0) {
+    parts.push(`in ${trigger.repositories.join(", ")}`);
+  } else {
+    parts.push("in all project repositories");
+  }
+  const filters = [
+    trigger.branch ? `base ${trigger.branch}` : null,
+    trigger.actor ? `by ${trigger.actor}` : null,
+  ].filter((part): part is string => part !== null);
+  if (filters.length > 0) {
+    parts.push(`(${filters.join(", ")})`);
+  }
+  return parts.join(" ");
+}
+
+const EVENT_TRIGGER_INPUT_CLASS =
+  "w-full min-w-0 rounded-md border border-border bg-transparent px-2 py-1.5 text-ui leading-snug outline-none focus-visible:ring-1 focus-visible:ring-ring";
+
+/**
+ * Editor for an automation's GitHub event subscriptions, shared by the create
+ * dialog (drafts) and the detail page (saved triggers converted to drafts).
+ */
+export function AutomationEventTriggersEditor({
+  value,
+  disabled,
+  onChange,
+}: {
+  readonly value: readonly AutomationEventTriggerDraft[];
+  readonly disabled?: boolean;
+  readonly onChange: (next: AutomationEventTriggerDraft[]) => void;
+}) {
+  const updateTrigger = (id: string, patch: Partial<AutomationEventTriggerDraft>) =>
+    onChange(value.map((trigger) => (trigger.id === id ? { ...trigger, ...patch } : trigger)));
+  return (
+    <div className="flex flex-col gap-2">
+      {value.map((trigger) => (
+        <div
+          key={trigger.id}
+          className="flex flex-col gap-1.5 rounded-lg border border-border/60 bg-foreground/[0.02] p-2.5"
+        >
+          <div className="flex items-center gap-2">
+            <select
+              value={trigger.event}
+              disabled={disabled}
+              onChange={(event) =>
+                updateTrigger(trigger.id, { event: event.target.value as AutomationEventKind })
+              }
+              aria-label="Event kind"
+              className={cn(EVENT_TRIGGER_INPUT_CLASS, "w-auto shrink-0")}
+            >
+              {AUTOMATION_EVENT_KIND_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <input
+              value={trigger.repositories}
+              disabled={disabled}
+              onChange={(event) => updateTrigger(trigger.id, { repositories: event.target.value })}
+              placeholder="owner/name, owner/two (empty = all project repos)"
+              aria-label="Repositories"
+              className={EVENT_TRIGGER_INPUT_CLASS}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Remove event trigger"
+              disabled={disabled}
+              onClick={() => onChange(value.filter((entry) => entry.id !== trigger.id))}
+            >
+              <CentralIcon name="cross-small" className="size-4" />
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              value={trigger.branch}
+              disabled={disabled}
+              onChange={(event) => updateTrigger(trigger.id, { branch: event.target.value })}
+              placeholder="Base branch (optional, e.g. main)"
+              aria-label="Base branch filter"
+              className={EVENT_TRIGGER_INPUT_CLASS}
+            />
+            <input
+              value={trigger.actor}
+              disabled={disabled}
+              onChange={(event) => updateTrigger(trigger.id, { actor: event.target.value })}
+              placeholder="Author login (optional)"
+              aria-label="Author filter"
+              className={EVENT_TRIGGER_INPUT_CLASS}
+            />
+          </div>
+        </div>
+      ))}
+      {value.length < AUTOMATION_EVENT_TRIGGER_MAX_COUNT ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="self-start"
+          disabled={disabled}
+          onClick={() => onChange([...value, newEventTriggerDraft()])}
+        >
+          <CentralIcon name="plus-small" className="size-4" />
+          Add event trigger
+        </Button>
+      ) : null}
+    </div>
+  );
+}
 
 export function formatRelativeTime(iso: string | null): string {
   if (!iso) return "";
@@ -1030,12 +1287,25 @@ export function AutomationDialog({
     });
   };
 
-  const applyTemplate = (template: (typeof AUTOMATION_TEMPLATES)[number]) =>
+  const applyTemplate = (template: AutomationTemplate) => {
+    const withSchedule = template.schedule ? applyScheduleToForm(form, template.schedule) : form;
     onFormChange({
-      ...form,
+      ...withSchedule,
       name: form.name.trim() ? form.name : template.name,
       prompt: template.prompt,
+      eventTriggers: template.eventTrigger
+        ? [
+            ...withSchedule.eventTriggers,
+            {
+              ...newEventTriggerDraft(template.eventTrigger.event),
+              repositories: template.eventTrigger.repositories ?? "",
+              branch: template.eventTrigger.branch ?? "",
+              actor: template.eventTrigger.actor ?? "",
+            },
+          ]
+        : withSchedule.eventTriggers,
     });
+  };
 
   const submit = () => {
     if (busy || !submittable) return;
@@ -1074,11 +1344,16 @@ export function AutomationDialog({
               <MenuTrigger render={<Button variant="outline" size="sm" />}>
                 Use template
               </MenuTrigger>
-              <ComposerPickerMenuPopup align="end" className="w-52">
-                {AUTOMATION_TEMPLATES.map((template) => (
-                  <MenuItem key={template.label} onClick={() => applyTemplate(template)}>
-                    {template.label}
-                  </MenuItem>
+              <ComposerPickerMenuPopup align="end" className="w-56">
+                {AUTOMATION_TEMPLATE_CATEGORIES.map((category) => (
+                  <MenuGroup key={category.label}>
+                    <MenuGroupLabel>{category.label}</MenuGroupLabel>
+                    {category.templates.map((template) => (
+                      <MenuItem key={template.label} onClick={() => applyTemplate(template)}>
+                        {template.label}
+                      </MenuItem>
+                    ))}
+                  </MenuGroup>
                 ))}
               </ComposerPickerMenuPopup>
             </Menu>
@@ -1109,6 +1384,44 @@ export function AutomationDialog({
             aria-label="Automation prompt"
             className="min-h-[15rem] w-full flex-1 resize-none overflow-y-auto bg-transparent font-system-ui text-ui leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/50"
           />
+
+          <div className="mt-3 flex flex-col gap-2 border-t border-border/50 pt-3">
+            <div className="flex items-center justify-between">
+              <span className="text-ui-sm font-medium text-muted-foreground">Event triggers</span>
+              {form.eventTriggers.length > 0 ? (
+                <span className="text-ui-xs text-muted-foreground/70">
+                  {form.eventTriggers.length} GitHub
+                </span>
+              ) : null}
+            </div>
+            {form.eventTriggers.length === 0 ? (
+              <p className="text-ui-sm leading-snug text-muted-foreground/80">
+                Runs on the schedule above. Add a trigger to also run when a GitHub PR or issue
+                appears in the project's repositories.
+              </p>
+            ) : null}
+            <AutomationEventTriggersEditor
+              value={form.eventTriggers}
+              onChange={(next) => setField("eventTriggers", next)}
+            />
+          </div>
+
+          <div className="mt-3 flex items-center gap-2 border-t border-border/50 pt-3">
+            <label
+              htmlFor="automation-missed-run-grace"
+              className="shrink-0 text-ui-sm font-medium text-muted-foreground"
+            >
+              Missed-run grace
+            </label>
+            <input
+              id="automation-missed-run-grace"
+              value={form.missedRunGraceSeconds}
+              onChange={(event) => setField("missedRunGraceSeconds", event.target.value)}
+              placeholder="seconds (empty = policy default)"
+              inputMode="numeric"
+              className="w-full min-w-0 rounded-md border border-border bg-transparent px-2 py-1.5 text-ui leading-snug outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+          </div>
 
           {warnings.length > 0 ? (
             <div className="mt-2 flex flex-col gap-1.5 border-t border-border/50 pt-3">

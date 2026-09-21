@@ -13,6 +13,8 @@ import {
   type AutomationAllowedCapability,
   type AutomationCompletionPolicy,
   type AutomationCreateInput,
+  type AutomationEventRunContext,
+  type AutomationEventTrigger,
   type AutomationDefinition,
   type AutomationRun,
   type AutomationRunResult,
@@ -33,6 +35,7 @@ import {
   automationRequiresTargetThread,
 } from "@synara/shared/automationMode";
 import { buildTemporaryWorktreeBranchName } from "@synara/shared/git";
+import { isValidGitHubRepositoryNameWithOwner } from "@synara/shared/githubRepository";
 import { providerStartOptionsFromServerSettings } from "@synara/shared/serverSettings";
 import { autoRuntimeModeSelectionIssue } from "@synara/shared/runtimeMode";
 import { Cause, Effect, Layer, Option, PubSub, Queue, Stream } from "effect";
@@ -87,6 +90,8 @@ const AUTOMATION_HEARTBEAT_DEFER_RETRY_MS = 15_000;
 const AUTOMATION_HEARTBEAT_DEFER_WINDOW_MS = 10 * 60_000;
 const AUTOMATION_MEMORY_MAX_BYTES = 32 * 1_024;
 const AUTOMATION_DEFINITION_UPDATE_MAX_ATTEMPTS = 3;
+const AUTOMATION_RUN_HISTORY_RETENTION = 100;
+const AUTOMATION_EVENT_DEFINITION_LIST_LIMIT = 500;
 
 interface AutomationCompletionEvaluationJob {
   readonly definition: AutomationDefinition;
@@ -461,8 +466,16 @@ function scheduledOccurrenceForDefinition(
 ) {
   const plannedScheduledFor = definition.nextRunAt ?? now;
   const missed = isBeforeIso(plannedScheduledFor, now);
+  const graceSeconds = definition.missedRunGraceSeconds ?? null;
+  const latenessSeconds = missed
+    ? Math.max(0, (Date.parse(now) - Date.parse(plannedScheduledFor)) / 1000)
+    : 0;
+  // A configured grace window overrides the misfire policy: occurrences late by no more
+  // than the window run as if on time, and occurrences beyond it are always skipped.
+  const missedBeyondGrace = missed && graceSeconds !== null && latenessSeconds > graceSeconds;
+  const effectiveMissed = missedBeyondGrace || (missed && graceSeconds === null);
   const scheduledFor =
-    missed && definition.misfirePolicy === "run-latest" ? now : plannedScheduledFor;
+    effectiveMissed && definition.misfirePolicy === "run-latest" ? now : plannedScheduledFor;
   const nextRunAt = computeNextAutomationRunAtAfter(
     definition.schedule,
     scheduledFor,
@@ -472,7 +485,7 @@ function scheduledOccurrenceForDefinition(
   return {
     scheduledFor,
     nextRunAt,
-    skip: missed && definition.misfirePolicy === "skip",
+    skip: missedBeyondGrace || (effectiveMissed && definition.misfirePolicy === "skip"),
   };
 }
 
@@ -565,6 +578,12 @@ function mergeDefinitionUpdate(
       : current.maxRuntimeSeconds,
     retryPolicy: input.retryPolicy ?? current.retryPolicy,
     misfirePolicy: input.misfirePolicy ?? current.misfirePolicy,
+    eventTriggers: input.eventTriggers ?? current.eventTriggers,
+    missedRunGraceSeconds: hasOwn(input, "missedRunGraceSeconds")
+      ? ((input.missedRunGraceSeconds as
+          | AutomationDefinition["missedRunGraceSeconds"]
+          | undefined) ?? null)
+      : current.missedRunGraceSeconds,
     acknowledgedRisks: input.acknowledgedRisks ?? current.acknowledgedRisks,
     iterationCount: userRestartedExhaustedLoop ? 0 : current.iterationCount,
     updatedAt: now,
@@ -861,6 +880,32 @@ export const AutomationServiceLive = Layer.effect(
       return issue === null
         ? Effect.void
         : Effect.fail(new AutomationServiceError({ message: issue }));
+    };
+
+    const validateEventTriggers = (
+      eventTriggers: ReadonlyArray<AutomationEventTrigger> | undefined,
+    ): Effect.Effect<void, AutomationServiceError> => {
+      const seenIds = new Set<string>();
+      for (const trigger of eventTriggers ?? []) {
+        if (seenIds.has(trigger.id)) {
+          return Effect.fail(
+            new AutomationServiceError({
+              message: `Automation event trigger ids must be unique: ${trigger.id}`,
+            }),
+          );
+        }
+        seenIds.add(trigger.id);
+        for (const repository of trigger.repositories) {
+          if (!isValidGitHubRepositoryNameWithOwner(repository)) {
+            return Effect.fail(
+              new AutomationServiceError({
+                message: `Automation event trigger repositories must be 'owner/name': ${repository}`,
+              }),
+            );
+          }
+        }
+      }
+      return Effect.void;
     };
 
     // Run-path backstop for the fast-interval policy. validateSchedulePolicy enforces this at
@@ -2060,6 +2105,7 @@ export const AutomationServiceLive = Layer.effect(
             interruptBeforePublish ? interruptRunBestEffort(updated, now) : Effect.void,
           ),
           Effect.tap((updated) => publish({ type: "run-upserted", run: updated })),
+          Effect.tap((updated) => trimRunHistoryBestEffort(updated.automationId)),
         );
 
     const loadRunAssistantText = (
@@ -2599,6 +2645,7 @@ export const AutomationServiceLive = Layer.effect(
           projectId: input.projectId,
           targetThreadId: input.targetThreadId ?? null,
         });
+        yield* validateEventTriggers(input.eventTriggers ?? []);
         const id = makeAutomationId();
         const initialNextRunAt = computeNextAutomationRunAt(
           input.schedule,
@@ -2634,6 +2681,7 @@ export const AutomationServiceLive = Layer.effect(
         });
         yield* validateAutoRuntimeMode(definition);
         yield* validateHeartbeatTarget(definition);
+        yield* validateEventTriggers(definition.eventTriggers ?? []);
       });
 
     const validateDedicatedProviderUpdate = (
@@ -3095,6 +3143,114 @@ export const AutomationServiceLive = Layer.effect(
         }
         return yield* dispatchRun(runnableDefinition, claimedRun.value, now);
       });
+
+    const trimRunHistoryBestEffort = (automationId: AutomationId) =>
+      automationRepository
+        .trimAutomationRunHistory({
+          automationId,
+          keepTerminalRuns: AUTOMATION_RUN_HISTORY_RETENTION,
+        })
+        .pipe(Effect.catch(() => Effect.void));
+
+    const runEvent: AutomationServiceShape["runEvent"] = (input) =>
+      Effect.gen(function* () {
+        const definition = yield* requireDefinition(input.automationId);
+        if (definition.proposalState === "pending") {
+          return null;
+        }
+        if (!definition.enabled) {
+          return null;
+        }
+        const now = isoNow();
+        // Idempotent claim: INSERT OR IGNORE wins once, so retried polls and competing
+        // server instances cannot enqueue a second run for the same event.
+        const claimed = yield* automationRepository
+          .claimAutomationEvent({
+            automationId: definition.id,
+            eventKey: input.event.key,
+            runId: null,
+            now,
+          })
+          .pipe(Effect.mapError(toServiceError("Failed to claim automation event.")));
+        if (!claimed) {
+          return null;
+        }
+        const disabledReason = yield* providerDisabledReason(definition);
+        if (disabledReason) {
+          return null;
+        }
+        const runnableDefinition = yield* restartExhaustedBoundedDefinition(definition, now);
+        const trigger: AutomationRun["trigger"] = { type: "event", event: input.event };
+        const continuationThreadId = automationContinuationThreadId(runnableDefinition);
+        if (continuationThreadId) {
+          const runState = yield* heartbeatThreadRunState(continuationThreadId);
+          const eligibility =
+            runState.activeRuns > 0
+              ? ({
+                  eligible: false as const,
+                  reason: "Target thread has an active automation run.",
+                } as const)
+              : runState.pendingCompletionEvaluations > 0
+                ? ({
+                    eligible: false as const,
+                    reason: "Target thread has a pending automation stop evaluation.",
+                  } as const)
+                : yield* continuationEligibility(runnableDefinition, now);
+          if (!eligibility.eligible) {
+            const deferState = heartbeatDeferState(now, now);
+            const deferredRun = yield* claimPendingRun(
+              runnableDefinition,
+              trigger,
+              now,
+              now,
+              undefined,
+              deferState.deferredUntil,
+              null,
+            );
+            if (Option.isSome(deferredRun)) {
+              yield* automationRepository
+                .attachAutomationEventRun({
+                  automationId: definition.id,
+                  eventKey: input.event.key,
+                  runId: deferredRun.value.id,
+                })
+                .pipe(Effect.catch(() => Effect.void));
+              return { run: deferredRun.value };
+            }
+            return null;
+          }
+        }
+        const claimedRun = yield* claimPendingRun(runnableDefinition, trigger, now, now);
+        if (Option.isNone(claimedRun)) {
+          return null;
+        }
+        yield* automationRepository
+          .attachAutomationEventRun({
+            automationId: definition.id,
+            eventKey: input.event.key,
+            runId: claimedRun.value.id,
+          })
+          .pipe(Effect.catch(() => Effect.void));
+        return yield* dispatchRun(runnableDefinition, claimedRun.value, now).pipe(
+          Effect.catch(() =>
+            automationRepository.getRunById({ id: claimedRun.value.id }).pipe(
+              Effect.mapError(toServiceError("Failed to load automation run.")),
+              Effect.map((runOption) =>
+                Option.match(runOption, {
+                  onNone: (): AutomationRunNowResult => ({ run: claimedRun.value }),
+                  onSome: (failed): AutomationRunNowResult => ({ run: failed }),
+                }),
+              ),
+            ),
+          ),
+        );
+      });
+
+    const listEventTriggeredDefinitions: AutomationServiceShape["listEventTriggeredDefinitions"] =
+      () =>
+        automationRepository
+          .listEventTriggeredDefinitions({ limit: AUTOMATION_EVENT_DEFINITION_LIST_LIMIT })
+          .pipe(Effect.mapError(toServiceError("Failed to load event-triggered automations.")));
 
     const cancelRun: AutomationServiceShape["cancelRun"] = (input) =>
       cancelRunById(input).pipe(Effect.map((run) => ({ run })));
@@ -3559,6 +3715,8 @@ export const AutomationServiceLive = Layer.effect(
       reportResult,
       resolveCallerRun,
       runNow,
+      runEvent,
+      listEventTriggeredDefinitions,
       cancelRun,
       markRunRead,
       archiveRun,

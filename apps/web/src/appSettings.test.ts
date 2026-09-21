@@ -37,7 +37,9 @@ import {
   normalizeStoredAppSettings,
   normalizeTerminalFontFamily,
   normalizeTerminalFontSizePx,
+  type NotificationCategoryId,
   patchCustomModels,
+  projectNotificationCategoryMuted,
   resolveAppModelSelection,
   resolveFollowUpDispatchMode,
   resolveTerminalFontFamilyStack,
@@ -1185,5 +1187,50 @@ describe("AppSettingsSchema", () => {
     expect(
       normalizeStoredAppSettings(decode(JSON.stringify({ enableAppshots: true }))),
     ).not.toHaveProperty("enableAppshots");
+  });
+});
+
+describe("projectNotificationCategoryMuted", () => {
+  it("treats missing prefs as unmuted", () => {
+    expect(
+      projectNotificationCategoryMuted(undefined, "reminders", Date.parse("2026-06-16T10:00:00Z")),
+    ).toBe(false);
+  });
+
+  it("mutes every category while mutedUntil is in the future", () => {
+    const prefs = {
+      mutedCategories: [] as NotificationCategoryId[],
+      mutedUntil: "2026-06-16T12:00:00.000Z",
+    };
+    const now = Date.parse("2026-06-16T11:00:00.000Z");
+
+    expect(projectNotificationCategoryMuted(prefs, "task-finished", now)).toBe(true);
+    expect(projectNotificationCategoryMuted(prefs, "reminders", now)).toBe(true);
+    expect(projectNotificationCategoryMuted(prefs, "needs-input", now)).toBe(true);
+  });
+
+  it("unmutes once mutedUntil passes and honors the category list", () => {
+    const prefs = {
+      mutedCategories: ["reminders"] as NotificationCategoryId[],
+      mutedUntil: "2026-06-16T10:00:00.000Z",
+    };
+    const now = Date.parse("2026-06-16T10:00:00.000Z");
+
+    expect(projectNotificationCategoryMuted(prefs, "task-finished", now)).toBe(false);
+    expect(projectNotificationCategoryMuted(prefs, "reminders", now)).toBe(true);
+  });
+
+  it("round-trips through the app settings schema with defaults", () => {
+    const decoded = Schema.decodeUnknownSync(AppSettingsSchema)({
+      projectNotificationPrefs: {
+        "project-1": { mutedCategories: ["needs-input"] },
+      },
+    });
+
+    expect(decoded.projectNotificationPrefs["project-1"]).toEqual({
+      mutedCategories: ["needs-input"],
+      mutedUntil: null,
+    });
+    expect(AppSettingsSchema.makeUnsafe({}).projectNotificationPrefs).toEqual({});
   });
 });

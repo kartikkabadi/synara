@@ -93,6 +93,17 @@ export interface GitHubPullRequestListBatch {
   readonly rawCount: number;
 }
 
+export interface GitHubIssueListItem {
+  readonly number: number;
+  readonly title: string;
+  readonly url: string;
+  readonly author: PullRequestActor | null;
+  readonly state: PullRequestState;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly labels: ReadonlyArray<PullRequestLabel>;
+}
+
 export interface GitHubPullRequestDetailData {
   readonly number: number;
   readonly title: string;
@@ -155,6 +166,17 @@ export interface GitHubCliShape {
     readonly viewer: string;
     readonly limit?: number;
   }) => Effect.Effect<GitHubPullRequestListBatch, GitHubCliError>;
+
+  /**
+   * List issues for a repository (`gh issue list --json ...`). Pull requests are excluded
+   * by GitHub itself, so no extra filtering is needed.
+   */
+  readonly listRepositoryIssues: (input: {
+    readonly cwd: string;
+    readonly repository: string;
+    readonly state: PullRequestState;
+    readonly limit?: number;
+  }) => Effect.Effect<ReadonlyArray<GitHubIssueListItem>, GitHubCliError>;
 
   /**
    * Fetch one pull request in the list-item shape (`gh pr view --json <list fields>`).

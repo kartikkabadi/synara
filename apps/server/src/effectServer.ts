@@ -8,6 +8,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { agentGatewayRouteLayer } from "./agentGateway/httpRoute";
 import { AgentGatewayCredentials } from "./agentGateway/Services/AgentGatewayCredentials";
+import { AutomationEventWatcher } from "./automation/Services/AutomationEventWatcher";
 import { AutomationRunReactor } from "./automation/Services/AutomationRunReactor";
 import { AutomationScheduler } from "./automation/Services/AutomationScheduler";
 import { AutomationService } from "./automation/Services/AutomationService";
@@ -31,6 +32,7 @@ import {
 } from "./orchestration/Services/OrchestrationEngine";
 import { OrchestrationReactor } from "./orchestration/Services/OrchestrationReactor";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
+import { ReminderService } from "./reminders/Services/ReminderService";
 import { ProjectionPendingInteractionRepository } from "./persistence/Services/ProjectionPendingInteractions";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor";
 import {
@@ -66,6 +68,7 @@ export interface ServerShape {
     | Path.Path
     | Keybindings
     | ManagedAttachmentCleanup
+    | AutomationEventWatcher
     | AutomationRunReactor
     | AutomationScheduler
     | AutomationService
@@ -77,6 +80,7 @@ export interface ServerShape {
     | ProviderSessionReaper
     | ProviderRuntimeReconciler
     | ProviderService
+    | ReminderService
     | ServerRuntimeStartup
     | ServerSettingsService
     | ThreadDeletionReactor
@@ -129,6 +133,7 @@ export const createEffectServer = Effect.fn(function* (
   const agentGatewayCredentials = yield* AgentGatewayCredentials;
   const automationRunReactor = yield* AutomationRunReactor;
   const automationScheduler = yield* AutomationScheduler;
+  const automationEventWatcher = yield* AutomationEventWatcher;
   const keybindings = yield* Keybindings;
   const managedAttachmentCleanup = yield* ManagedAttachmentCleanup;
   const lifecycleEvents = yield* ServerLifecycleEvents;
@@ -138,6 +143,7 @@ export const createEffectServer = Effect.fn(function* (
   const providerSessionReaper = yield* ProviderSessionReaper;
   const providerRuntimeReconciler = yield* ProviderRuntimeReconciler;
   const runtimeStartup = yield* ServerRuntimeStartup;
+  const reminderService = yield* ReminderService;
   const serverSettings = yield* ServerSettingsService;
   const threadDeletionReactor = yield* ThreadDeletionReactor;
   const readiness = yield* makeServerReadiness;
@@ -210,10 +216,12 @@ export const createEffectServer = Effect.fn(function* (
   );
   yield* Scope.provide(orchestrationReactor.start, subscriptionsScope);
   yield* Scope.provide(automationScheduler.start(), subscriptionsScope);
+  yield* Scope.provide(automationEventWatcher.start(), subscriptionsScope);
   yield* Scope.provide(automationRunReactor.start(), subscriptionsScope);
   yield* Scope.provide(threadDeletionReactor.start(), subscriptionsScope);
   yield* Scope.provide(providerSessionReaper.start(), subscriptionsScope);
   yield* Scope.provide(providerRuntimeReconciler.start(), subscriptionsScope);
+  yield* Scope.provide(reminderService.start(), subscriptionsScope);
   yield* readiness.markOrchestrationSubscriptionsReady;
   yield* readiness.markTerminalSubscriptionsReady;
   // Heal turns orphaned by the previous process exit (their in-memory runtimes

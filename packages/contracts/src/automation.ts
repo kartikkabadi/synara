@@ -93,9 +93,72 @@ export type AutomationNotificationPolicy = typeof AutomationNotificationPolicy.T
 export const DEFAULT_AUTOMATION_NOTIFICATION_POLICY: AutomationNotificationPolicy = "all";
 export const DEFAULT_AUTOMATION_HEARTBEAT_COOLDOWN_SECONDS = 60;
 
+/**
+ * Inbox sources an automation can subscribe to. "github" watches the repositories
+ * linked to the automation's project via the GitHub CLI.
+ */
+export const AutomationEventSource = Schema.Literals(["github"]);
+export type AutomationEventSource = typeof AutomationEventSource.Type;
+
+/**
+ * Items a source emits when they first appear in its watched inbox. Pull requests
+ * opened as drafts fire `draft_opened`, not `pull_request_opened`; a draft that is
+ * later marked ready does not re-fire (the item was already seen).
+ */
+export const AutomationEventKind = Schema.Literals([
+  "pull_request_opened",
+  "draft_opened",
+  "issue_opened",
+]);
+export type AutomationEventKind = typeof AutomationEventKind.Type;
+
+export const AUTOMATION_EVENT_TRIGGER_MAX_COUNT = 20;
+export const AUTOMATION_EVENT_KEY_MAX_LENGTH = 400;
+
+/**
+ * A single event subscription on an automation. `repositories` filters by
+ * `owner/name`; an empty list watches every GitHub repository linked to the
+ * automation's project. `branch` matches the item's base/target branch and
+ * `actor` matches the author's login; both accept `*` or an absent value as
+ * "match anything".
+ */
+export const AutomationEventTrigger = Schema.Struct({
+  id: TrimmedNonEmptyString.check(Schema.isMaxLength(80)),
+  source: AutomationEventSource,
+  event: AutomationEventKind,
+  repositories: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(200))).check(
+    Schema.isMaxLength(20),
+  ),
+  branch: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
+  actor: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
+});
+export type AutomationEventTrigger = typeof AutomationEventTrigger.Type;
+
+/**
+ * What fired an event-triggered run: the dedup key plus enough display context
+ * that a run row stays readable without re-querying the source.
+ */
+export const AutomationEventRunContext = Schema.Struct({
+  source: AutomationEventSource,
+  event: AutomationEventKind,
+  /** Stable dedup key, e.g. `github:pr:owner/repo:123`. */
+  key: TrimmedNonEmptyString.check(Schema.isMaxLength(AUTOMATION_EVENT_KEY_MAX_LENGTH)),
+  repository: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+  itemNumber: PositiveInt,
+  title: TrimmedNonEmptyString.check(Schema.isMaxLength(500)),
+  url: TrimmedNonEmptyString.check(Schema.isMaxLength(2000)),
+  author: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
+  baseBranch: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
+});
+export type AutomationEventRunContext = typeof AutomationEventRunContext.Type;
+
 export const AutomationTrigger = Schema.Union([
   Schema.Struct({ type: Schema.Literal("manual") }),
   Schema.Struct({ type: Schema.Literal("scheduled") }),
+  Schema.Struct({
+    type: Schema.Literal("event"),
+    event: AutomationEventRunContext,
+  }),
 ]);
 export type AutomationTrigger = typeof AutomationTrigger.Type;
 
@@ -276,6 +339,22 @@ export const AutomationDefinition = Schema.Struct({
   maxRuntimeSeconds: Schema.NullOr(PositiveInt),
   retryPolicy: AutomationRetryPolicy,
   misfirePolicy: AutomationMisfirePolicy,
+  /**
+   * Additional event subscriptions alongside the single schedule. An automation may
+   * carry up to {@link AUTOMATION_EVENT_TRIGGER_MAX_COUNT} event triggers; a
+   * `manual` schedule with event triggers means "event-driven only".
+   */
+  eventTriggers: Schema.optional(Schema.Array(AutomationEventTrigger)).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+  /**
+   * How far past a planned occurrence the scheduler may still start it. Null
+   * delegates to `misfirePolicy`; a value overrides the policy for lateness only:
+   * occurrences missed by more than this are skipped regardless of policy.
+   */
+  missedRunGraceSeconds: Schema.optional(Schema.NullOr(PositiveInt)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   acknowledgedRisks: Schema.Array(
     Schema.Literals(["full-access", "local-checkout", "fast-interval"]),
   ),
@@ -343,6 +422,12 @@ const AutomationDefinitionConfig = Schema.Struct({
   misfirePolicy: Schema.optional(AutomationMisfirePolicy).pipe(
     Schema.withDecodingDefault(() => DEFAULT_AUTOMATION_MISFIRE_POLICY),
   ),
+  eventTriggers: Schema.optional(Schema.Array(AutomationEventTrigger)).pipe(
+    Schema.withDecodingDefault(() => []),
+  ),
+  missedRunGraceSeconds: Schema.optional(Schema.NullOr(PositiveInt)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   acknowledgedRisks: Schema.optional(
     Schema.Array(Schema.Literals(["full-access", "local-checkout", "fast-interval"])),
   ).pipe(Schema.withDecodingDefault(() => [])),
@@ -382,6 +467,8 @@ export const AutomationUpdateInput = Schema.Struct({
   maxRuntimeSeconds: Schema.optional(Schema.NullOr(PositiveInt)),
   retryPolicy: Schema.optional(AutomationRetryPolicy),
   misfirePolicy: Schema.optional(AutomationMisfirePolicy),
+  eventTriggers: Schema.optional(Schema.Array(AutomationEventTrigger)),
+  missedRunGraceSeconds: Schema.optional(Schema.NullOr(PositiveInt)),
   acknowledgedRisks: Schema.optional(
     Schema.Array(Schema.Literals(["full-access", "local-checkout", "fast-interval"])),
   ),

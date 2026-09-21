@@ -48,6 +48,13 @@ import type {
   AutomationUpdateInput,
 } from "./automation";
 import type {
+  ReminderCancelInput,
+  ReminderListResult,
+  ReminderSetInput,
+  ReminderStreamEvent,
+  ThreadReminder,
+} from "./reminders";
+import type {
   GitCheckoutInput,
   GitActionProgressEvent,
   GitWorktreeSetupProgressEvent,
@@ -1081,6 +1088,12 @@ export interface NativeApi {
       input: AutomationResolveProposalInput,
     ) => Promise<AutomationResolveProposalResult>;
     onEvent: (callback: (event: AutomationStreamEvent) => void) => () => void;
+  };
+  reminder: {
+    list: () => Promise<ReminderListResult>;
+    set: (input: ReminderSetInput) => Promise<ThreadReminder>;
+    cancel: (input: ReminderCancelInput) => Promise<void>;
+    onEvent: (callback: (event: ReminderStreamEvent) => void) => () => void;
   };
   browser: BrowserControlMethods & {
     annotations: BrowserAnnotationMethods;

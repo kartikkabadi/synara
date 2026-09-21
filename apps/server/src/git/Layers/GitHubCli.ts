@@ -30,6 +30,7 @@ import {
   type GitHubRepositoryCloneUrls,
   type GitHubCliShape,
   type GitHubPullRequestDetailData,
+  type GitHubIssueListItem,
   type GitHubPullRequestListBatch,
   type GitHubPullRequestListItem,
   type GitHubPullRequestSummary,
@@ -276,6 +277,19 @@ const RawPullRequestListItemSchema = Schema.Struct({
 const RawPullRequestNumberSchema = Schema.Struct({
   number: PositiveInt,
 });
+
+const RawIssueListItemSchema = Schema.Struct({
+  number: PositiveInt,
+  title: TrimmedNonEmptyString,
+  url: TrimmedNonEmptyString,
+  author: Schema.optional(Schema.NullOr(RawActorSchema)),
+  state: Schema.optional(Schema.NullOr(Schema.String)),
+  createdAt: TrimmedNonEmptyString,
+  updatedAt: TrimmedNonEmptyString,
+  labels: Schema.optional(Schema.NullOr(Schema.Array(RawLabelSchema))),
+});
+
+const ISSUE_LIST_JSON_FIELDS = "number,title,url,author,state,createdAt,updatedAt,labels";
 
 const RawPullRequestDetailSchema = Schema.Struct({
   ...RawPullRequestListItemSchema.fields,
@@ -1576,6 +1590,56 @@ const makeGitHubCli = Effect.gen(function* () {
         ),
       );
     },
+    listRepositoryIssues: (input) =>
+      validateRepository(input.repository, "listRepositoryPullRequests").pipe(
+        Effect.flatMap((repository) =>
+          execute({
+            cwd: input.cwd,
+            args: [
+              "issue",
+              "list",
+              "--repo",
+              repositorySelector(repository),
+              "--state",
+              input.state,
+              "--limit",
+              String(input.limit ?? 100),
+              "--json",
+              ISSUE_LIST_JSON_FIELDS,
+            ],
+          }).pipe(
+            Effect.flatMap((result) =>
+              decodeGitHubJson(
+                result.stdout.trim(),
+                Schema.Array(Schema.Unknown),
+                "listRepositoryPullRequests",
+                "GitHub CLI returned invalid issue list JSON.",
+              ),
+            ),
+            Effect.map((entries) =>
+              entries.flatMap((entry): GitHubIssueListItem[] => {
+                try {
+                  const raw = Schema.decodeUnknownSync(RawIssueListItemSchema)(entry);
+                  return [
+                    {
+                      number: raw.number,
+                      title: raw.title,
+                      url: raw.url,
+                      author: normalizeActor(raw.author),
+                      state: normalizePullRequestState(raw),
+                      createdAt: raw.createdAt,
+                      updatedAt: raw.updatedAt,
+                      labels: normalizeLabels(raw.labels),
+                    },
+                  ];
+                } catch {
+                  return [];
+                }
+              }),
+            ),
+          ),
+        ),
+      ),
     getPullRequestListItem: (input) =>
       validateRepository(input.repository, "getPullRequestListItem").pipe(
         Effect.flatMap((repository) =>

@@ -2058,4 +2058,248 @@ layer("AutomationRepository", (it) => {
       assert.strictEqual(cancelled.finishedAt, "2026-06-16T10:01:00.000Z");
     }),
   );
+
+  it.effect("round-trips event triggers and missed-run grace on a definition", () =>
+    Effect.gen(function* () {
+      const repository = yield* AutomationRepository;
+      yield* runMigrations();
+
+      const created = yield* repository.createDefinition({
+        id: AutomationId.makeUnsafe("automation-event-triggers"),
+        input: {
+          ...createInputForProject("project-event-triggers"),
+          eventTriggers: [
+            {
+              id: "trigger-review",
+              source: "github",
+              event: "pull_request_opened",
+              repositories: ["acme/widgets"],
+              branch: "main",
+              actor: "dependabot[bot]",
+            },
+          ],
+          missedRunGraceSeconds: 600,
+        },
+        now: "2026-06-16T10:00:00.000Z",
+      });
+
+      assert.deepStrictEqual(created.eventTriggers, [
+        {
+          id: "trigger-review",
+          source: "github",
+          event: "pull_request_opened",
+          repositories: ["acme/widgets"],
+          branch: "main",
+          actor: "dependabot[bot]",
+        },
+      ]);
+      assert.strictEqual(created.missedRunGraceSeconds, 600);
+
+      const eventDefinitions = yield* repository.listEventTriggeredDefinitions({ limit: 10 });
+      assert.deepStrictEqual(
+        eventDefinitions.map((definition) => definition.id),
+        [created.id],
+      );
+    }),
+  );
+
+  it.effect("claims an event once per automation", () =>
+    Effect.gen(function* () {
+      const repository = yield* AutomationRepository;
+      yield* runMigrations();
+      const automationId = AutomationId.makeUnsafe("automation-claims");
+      yield* repository.createDefinition({
+        id: automationId,
+        input: createInputForProject("project-claims"),
+        now: "2026-06-16T10:00:00.000Z",
+      });
+
+      const first = yield* repository.claimAutomationEvent({
+        automationId,
+        eventKey: "github:pr:acme/widgets:7",
+        runId: null,
+        now: "2026-06-16T10:00:00.000Z",
+      });
+      const duplicate = yield* repository.claimAutomationEvent({
+        automationId,
+        eventKey: "github:pr:acme/widgets:7",
+        runId: null,
+        now: "2026-06-16T10:00:01.000Z",
+      });
+      // A different automation may claim the same event independently.
+      const otherAutomationId = AutomationId.makeUnsafe("automation-claims-other");
+      yield* repository.createDefinition({
+        id: otherAutomationId,
+        input: createInputForProject("project-claims"),
+        now: "2026-06-16T10:00:00.000Z",
+      });
+      const other = yield* repository.claimAutomationEvent({
+        automationId: otherAutomationId,
+        eventKey: "github:pr:acme/widgets:7",
+        runId: null,
+        now: "2026-06-16T10:00:02.000Z",
+      });
+
+      assert.isTrue(first);
+      assert.isFalse(duplicate);
+      assert.isTrue(other);
+
+      yield* repository.attachAutomationEventRun({
+        automationId,
+        eventKey: "github:pr:acme/widgets:7",
+        runId: AutomationRunId.makeUnsafe("run-claimed-7"),
+      });
+    }),
+  );
+
+  it.effect("seeds an empty first poll via the sentinel key", () =>
+    Effect.gen(function* () {
+      const repository = yield* AutomationRepository;
+      yield* runMigrations();
+
+      const input = { source: "github", repository: "acme/widgets" };
+      assert.isFalse(yield* repository.hasAutomationSeenEventsForRepository(input));
+
+      yield* repository.insertAutomationSeenEvents({
+        events: [
+          {
+            eventKey: "github:seed:acme/widgets",
+            source: "github",
+            repository: "acme/widgets",
+            seenAt: "2026-06-16T10:00:00.000Z",
+          },
+        ],
+      });
+
+      assert.isTrue(yield* repository.hasAutomationSeenEventsForRepository(input));
+      assert.deepStrictEqual(yield* repository.listAutomationSeenEventKeys(input), [
+        "github:seed:acme/widgets",
+      ]);
+    }),
+  );
+
+  it.effect("trims terminal runs beyond the retention cap", () =>
+    Effect.gen(function* () {
+      const repository = yield* AutomationRepository;
+      yield* runMigrations();
+      const automationId = AutomationId.makeUnsafe("automation-retention");
+      yield* repository.createDefinition({
+        id: automationId,
+        input: createInputForProject("project-retention"),
+        now: "2026-06-16T10:00:00.000Z",
+      });
+
+      yield* Effect.forEach(
+        Array.from({ length: 5 }, (_, index) => index),
+        (index) =>
+          repository
+            .createRun({
+              id: AutomationRunId.makeUnsafe(`run-retention-${index}`),
+              automationId,
+              projectId: ProjectId.makeUnsafe("project-retention"),
+              threadId: null,
+              trigger: { type: "manual" },
+              scheduledFor: `2026-06-16T10:0${index}:00.000Z`,
+              permissionSnapshot,
+              now: `2026-06-16T10:0${index}:00.000Z`,
+            })
+            .pipe(
+              Effect.andThen(() =>
+                repository.markRunSucceeded({
+                  id: AutomationRunId.makeUnsafe(`run-retention-${index}`),
+                  turnId: null,
+                  result: null,
+                  finishedAt: `2026-06-16T10:0${index}:30.000Z`,
+                  accountedAt: `2026-06-16T10:0${index}:30.000Z`,
+                }),
+              ),
+            ),
+        { discard: true },
+      );
+      // One non-terminal run survives trimming regardless of the cap.
+      yield* repository.createRun({
+        id: AutomationRunId.makeUnsafe("run-retention-live"),
+        automationId,
+        projectId: ProjectId.makeUnsafe("project-retention"),
+        threadId: null,
+        trigger: { type: "manual" },
+        scheduledFor: "2026-06-16T10:09:00.000Z",
+        permissionSnapshot,
+        now: "2026-06-16T10:09:00.000Z",
+      });
+
+      yield* repository.trimAutomationRunHistory({ automationId, keepTerminalRuns: 2 });
+
+      const remaining = yield* repository.listRunsForDefinition({
+        automationId,
+        limit: 20,
+      });
+      assert.deepStrictEqual(
+        remaining.map((run) => run.id).sort(),
+        ["run-retention-3", "run-retention-4", "run-retention-live"].sort(),
+      );
+    }),
+  );
+
+  it.effect("stores, fires, and deletes thread reminders", () =>
+    Effect.gen(function* () {
+      const repository = yield* AutomationRepository;
+      yield* runMigrations();
+      const threadId = ThreadId.makeUnsafe("thread-reminder");
+
+      const created = yield* repository.upsertThreadReminder({
+        threadId,
+        dueAt: "2026-06-16T11:00:00.000Z",
+        note: "Check the migration",
+        now: "2026-06-16T10:00:00.000Z",
+      });
+      assert.isNull(created.firedAt);
+      assert.strictEqual(created.note, "Check the migration");
+
+      // One reminder per thread: re-setting replaces dueAt.
+      const replaced = yield* repository.upsertThreadReminder({
+        threadId,
+        dueAt: "2026-06-16T11:30:00.000Z",
+        note: null,
+        now: "2026-06-16T10:05:00.000Z",
+      });
+      assert.strictEqual(replaced.dueAt, "2026-06-16T11:30:00.000Z");
+      assert.lengthOf(yield* repository.listThreadReminders(), 1);
+
+      assert.lengthOf(
+        yield* repository.listDueThreadReminders({
+          now: "2026-06-16T11:00:00.000Z",
+          limit: 10,
+        }),
+        0,
+      );
+      const due = yield* repository.listDueThreadReminders({
+        now: "2026-06-16T11:30:00.000Z",
+        limit: 10,
+      });
+      assert.lengthOf(due, 1);
+
+      const fired = yield* repository.markThreadReminderFired({
+        threadId,
+        firedAt: "2026-06-16T11:30:01.000Z",
+      });
+      assert.isTrue(Option.isSome(fired));
+      // Fired reminders leave the due set and cannot fire twice.
+      assert.lengthOf(
+        yield* repository.listDueThreadReminders({
+          now: "2026-06-16T12:00:00.000Z",
+          limit: 10,
+        }),
+        0,
+      );
+      const secondFire = yield* repository.markThreadReminderFired({
+        threadId,
+        firedAt: "2026-06-16T11:30:02.000Z",
+      });
+      assert.isTrue(Option.isNone(secondFire));
+
+      yield* repository.deleteThreadReminder({ threadId });
+      assert.lengthOf(yield* repository.listThreadReminders(), 0);
+    }),
+  );
 });

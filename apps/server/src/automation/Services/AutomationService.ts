@@ -15,6 +15,9 @@ import {
   AutomationRunActionResult,
   AutomationRunNowInput,
   AutomationRunNowResult,
+  AutomationEventRunContext,
+  AutomationEventTrigger,
+  AutomationId,
   AutomationStreamEvent,
   AutomationUpdateInput,
   ThreadId,
@@ -72,6 +75,21 @@ export interface AutomationServiceShape {
   readonly runNow: (
     input: AutomationRunNowInput,
   ) => Effect.Effect<AutomationRunNowResult, AutomationServiceError>;
+  /**
+   * Dispatch one external event for one automation. The event's claim row makes dispatch
+   * idempotent: a re-seen item or a competing watcher returns null instead of a second run.
+   * Runs queue as deferred pending runs when the automation's target thread is busy.
+   */
+  readonly runEvent: (input: {
+    readonly automationId: AutomationId;
+    readonly trigger: AutomationEventTrigger;
+    readonly event: AutomationEventRunContext;
+  }) => Effect.Effect<AutomationRunNowResult | null, AutomationServiceError>;
+  /** Enabled definitions carrying at least one event trigger (used by the event watcher). */
+  readonly listEventTriggeredDefinitions: () => Effect.Effect<
+    ReadonlyArray<AutomationDefinition>,
+    AutomationServiceError
+  >;
   readonly cancelRun: (
     input: AutomationCancelRunInput,
   ) => Effect.Effect<AutomationCancelRunResult, AutomationServiceError>;

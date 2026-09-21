@@ -4,6 +4,7 @@
 // Exports: form builders, schedule formatters, warning adapters, and payload mappers.
 
 import {
+  AUTOMATION_EVENT_TRIGGER_MAX_COUNT,
   AUTOMATION_NAME_MAX_LENGTH,
   AUTOMATION_PROMPT_MAX_LENGTH,
   DEFAULT_AUTOMATION_FAST_INTERVAL_MAX_ITERATIONS,
@@ -12,6 +13,8 @@ import {
 import type {
   AutomationCreateInput,
   AutomationDefinition,
+  AutomationEventKind,
+  AutomationEventTrigger,
   AutomationMode,
   AutomationNotificationPolicy,
   AutomationSchedule,
@@ -22,6 +25,7 @@ import type {
   RuntimeMode,
   ThreadId,
 } from "@synara/contracts";
+import { isValidGitHubRepositoryNameWithOwner } from "@synara/shared/githubRepository";
 
 import {
   completionPolicyFromStopWhen,
@@ -101,7 +105,110 @@ export type AutomationFormState = {
   readonly maxIterations: string;
   readonly stopAfterFailures: AutomationFailurePolicyValue;
   readonly stopWhen: string;
+  readonly eventTriggers: AutomationEventTriggerDraft[];
+  /** Seconds as a draft string; "" means the misfire policy decides. */
+  readonly missedRunGraceSeconds: string;
 };
+
+/**
+ * Editable event-trigger row. `repositories` stays comma-separated text while the
+ * user types; it splits into the contract's array only on submit.
+ */
+export type AutomationEventTriggerDraft = {
+  readonly id: string;
+  readonly event: AutomationEventKind;
+  readonly repositories: string;
+  readonly branch: string;
+  readonly actor: string;
+};
+
+export const AUTOMATION_EVENT_KIND_OPTIONS: readonly {
+  value: AutomationEventKind;
+  label: string;
+}[] = [
+  { value: "pull_request_opened", label: "PR opened" },
+  { value: "draft_opened", label: "Draft PR opened" },
+  { value: "issue_opened", label: "Issue opened" },
+];
+
+let eventTriggerDraftCounter = 0;
+
+export function newEventTriggerDraft(
+  event: AutomationEventKind = "pull_request_opened",
+): AutomationEventTriggerDraft {
+  // Counter suffices for uniqueness within a dialog session; ids persist on the
+  // saved trigger where only per-automation uniqueness is required.
+  eventTriggerDraftCounter += 1;
+  return {
+    id: `event-${Date.now().toString(36)}-${eventTriggerDraftCounter}`,
+    event,
+    repositories: "",
+    branch: "",
+    actor: "",
+  };
+}
+
+export function eventTriggerDraftsFromTriggers(
+  triggers: readonly AutomationEventTrigger[],
+): AutomationEventTriggerDraft[] {
+  return triggers.map((trigger) => ({
+    id: trigger.id,
+    event: trigger.event,
+    repositories: trigger.repositories.join(", "),
+    branch: trigger.branch ?? "",
+    actor: trigger.actor ?? "",
+  }));
+}
+
+export function eventTriggerRepositories(draft: AutomationEventTriggerDraft): string[] {
+  return draft.repositories
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+export function eventTriggerDraftsToTriggers(
+  drafts: readonly AutomationEventTriggerDraft[],
+): AutomationEventTrigger[] {
+  return drafts.map((draft) => ({
+    id: draft.id.trim() || newEventTriggerDraft().id,
+    source: "github" as const,
+    event: draft.event,
+    repositories: eventTriggerRepositories(draft),
+    ...(draft.branch.trim() ? { branch: draft.branch.trim() } : {}),
+    ...(draft.actor.trim() ? { actor: draft.actor.trim() } : {}),
+  }));
+}
+
+/** Preset missed-run grace windows (seconds; "" = misfire policy decides). */
+export const AUTOMATION_MISSED_RUN_GRACE_OPTIONS: readonly {
+  value: string;
+  label: string;
+}[] = [
+  { value: "", label: "Policy default" },
+  { value: "60", label: "1 minute" },
+  { value: "300", label: "5 minutes" },
+  { value: "1800", label: "30 minutes" },
+  { value: "3600", label: "1 hour" },
+  { value: "21600", label: "6 hours" },
+  { value: "86400", label: "1 day" },
+];
+
+export function automationMissedRunGraceLabel(value: string): string {
+  return (
+    AUTOMATION_MISSED_RUN_GRACE_OPTIONS.find((option) => option.value === value)?.label ??
+    `${value} seconds`
+  );
+}
+
+function missedRunGraceSecondsFromForm(
+  form: Pick<AutomationFormState, "missedRunGraceSeconds">,
+): number | null {
+  const trimmed = form.missedRunGraceSeconds.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const parsed = Number.parseInt(trimmed, 10);
+  return parsed > 0 ? parsed : null;
+}
 
 export type AutomationProjectModelSelectionSource = {
   readonly id: string;
@@ -486,6 +593,9 @@ export function formFromDefinition(
     stopWhen: definition
       ? stopWhenFromCompletionPolicy(definition.completionPolicy ?? { type: "none" })
       : "",
+    eventTriggers: eventTriggerDraftsFromTriggers(definition?.eventTriggers ?? []),
+    missedRunGraceSeconds:
+      definition?.missedRunGraceSeconds != null ? String(definition.missedRunGraceSeconds) : "",
   };
 }
 
@@ -650,6 +760,8 @@ export function createInputFromForm(
       form.stopAfterFailures,
     ),
     completionPolicy: completionPolicyFromStopWhen(stopWhen),
+    eventTriggers: eventTriggerDraftsToTriggers(form.eventTriggers),
+    missedRunGraceSeconds: missedRunGraceSecondsFromForm(form),
     ...(acknowledgedRisks ? { acknowledgedRisks } : {}),
   };
 }
@@ -766,6 +878,20 @@ export function automationFormSubmitBlockReason(
     !TIME_OF_DAY_PATTERN.test(form.timeOfDay)
   ) {
     return "Set a valid time";
+  }
+  if (form.eventTriggers.length > AUTOMATION_EVENT_TRIGGER_MAX_COUNT) {
+    return `Keep at most ${AUTOMATION_EVENT_TRIGGER_MAX_COUNT} event triggers`;
+  }
+  for (const trigger of form.eventTriggers) {
+    for (const repository of eventTriggerRepositories(trigger)) {
+      if (!isValidGitHubRepositoryNameWithOwner(repository)) {
+        return `Use owner/name for repository "${repository}"`;
+      }
+    }
+  }
+  const grace = form.missedRunGraceSeconds.trim();
+  if (grace && (!/^\d+$/.test(grace) || Number.parseInt(grace, 10) <= 0)) {
+    return "Grace period must be a number of seconds";
   }
   if (
     warnings.some(

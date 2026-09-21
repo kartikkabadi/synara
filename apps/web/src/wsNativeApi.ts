@@ -45,6 +45,7 @@ import {
   type WsWelcomePayload,
   type WsBootstrapNegotiateResult,
   type AutomationStreamEvent,
+  type ReminderStreamEvent,
   DEVICE_WS_CHANNELS,
   DEVICE_WS_METHODS,
   type DeviceEvent,
@@ -161,6 +162,7 @@ function omitNullUserInputAnswers(
 const terminalEventListeners = createListenerRegistry<TerminalEvent>();
 const projectDevServerEventListeners = createListenerRegistry<ProjectDevServerEvent>();
 const automationEventListeners = createListenerRegistry<AutomationStreamEvent>();
+const reminderEventListeners = createListenerRegistry<ReminderStreamEvent>();
 const deviceEventListeners = createListenerRegistry<DeviceEvent>();
 const computerEventListeners = createListenerRegistry<ComputerEvent>();
 const orchestrationDomainEventListeners = createListenerRegistry<OrchestrationEvent>();
@@ -182,6 +184,7 @@ function clearWsNativeApiListeners(): void {
   terminalEventListeners.clear();
   projectDevServerEventListeners.clear();
   automationEventListeners.clear();
+  reminderEventListeners.clear();
   deviceEventListeners.clear();
   computerEventListeners.clear();
   orchestrationDomainEventListeners.clear();
@@ -476,6 +479,9 @@ export function createWsNativeApi(): NativeApi {
   });
   transport.subscribe(WS_CHANNELS.automationEvent, (message) => {
     automationEventListeners.emit(message.data);
+  });
+  transport.subscribe(WS_CHANNELS.reminderEvent, (message) => {
+    reminderEventListeners.emit(message.data);
   });
   transport.subscribe(DEVICE_WS_CHANNELS.event, (message) => {
     deviceEventListeners.emit(message.data);
@@ -841,6 +847,12 @@ export function createWsNativeApi(): NativeApi {
       archiveRun: (input) => transport.request(WS_METHODS.automationArchiveRun, input),
       resolveProposal: (input) => transport.request(WS_METHODS.automationResolveProposal, input),
       onEvent: automationEventListeners.subscribe,
+    },
+    reminder: {
+      list: () => transport.request(WS_METHODS.reminderList, {}),
+      set: (input) => transport.request(WS_METHODS.reminderSet, input),
+      cancel: (input) => transport.request(WS_METHODS.reminderCancel, input),
+      onEvent: reminderEventListeners.subscribe,
     },
     device: {
       list: (input) => transport.request(DEVICE_WS_METHODS.list, input),

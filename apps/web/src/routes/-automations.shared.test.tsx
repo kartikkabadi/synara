@@ -21,15 +21,21 @@ import { describe, expect, it, vi } from "vitest";
 import {
   applyScheduleToForm,
   applyAutomationEvent,
+  AUTOMATION_TEMPLATE_CATEGORIES,
   automationDefinitionUpdateMutationOptions,
   automationAttentionCount,
   automationAttentionLabel,
+  automationEventTriggerLabel,
   automationFastIntervalLimitMessage,
+  automationFormSubmitBlockReason,
   automationListRowIcon,
   automationTargetThreads,
   canCancelAutomationRun,
   createInputFromForm,
   datetimeLocalFromIso,
+  eventTriggerDraftsFromTriggers,
+  eventTriggerDraftsToTriggers,
+  formatAutomationEventTrigger,
   formatCadence,
   formatCadenceLong,
   formatNextRun,
@@ -1072,5 +1078,180 @@ describe("rollbackAutomationDefinitionPatch", () => {
     );
 
     expect(rolledBack.definitions[1]).toBe(other);
+  });
+});
+
+describe("automation event triggers", () => {
+  it("round-trips saved triggers through form drafts", () => {
+    const form = formFromDefinition(
+      definitionWith({
+        eventTriggers: [
+          {
+            id: "trigger-1",
+            source: "github",
+            event: "pull_request_opened",
+            repositories: ["acme/widgets", "acme/gadgets"],
+            branch: "main",
+            actor: "dependabot[bot]",
+          },
+        ],
+      }),
+      "project-1",
+    );
+
+    expect(form.eventTriggers).toEqual([
+      {
+        id: "trigger-1",
+        event: "pull_request_opened",
+        repositories: "acme/widgets, acme/gadgets",
+        branch: "main",
+        actor: "dependabot[bot]",
+      },
+    ]);
+    expect(createInputFromForm(form).eventTriggers).toEqual([
+      {
+        id: "trigger-1",
+        source: "github",
+        event: "pull_request_opened",
+        repositories: ["acme/widgets", "acme/gadgets"],
+        branch: "main",
+        actor: "dependabot[bot]",
+      },
+    ]);
+  });
+
+  it("drops empty filters and blank repository entries on submit", () => {
+    const triggers = eventTriggerDraftsToTriggers([
+      {
+        id: "trigger-2",
+        event: "issue_opened",
+        repositories: "  acme/widgets,  , acme/gadgets ",
+        branch: "   ",
+        actor: "",
+      },
+    ]);
+
+    expect(triggers).toEqual([
+      {
+        id: "trigger-2",
+        source: "github",
+        event: "issue_opened",
+        repositories: ["acme/widgets", "acme/gadgets"],
+      },
+    ]);
+    // From empty repositories back to drafts stays an empty input string.
+    expect(
+      eventTriggerDraftsFromTriggers([
+        {
+          id: "trigger-3",
+          source: "github",
+          event: "draft_opened",
+          repositories: [],
+        },
+      ])[0]?.repositories,
+    ).toBe("");
+  });
+
+  it("blocks submit when a repository filter is not owner/name", () => {
+    const form = {
+      ...formFromDefinition(null, "project-1"),
+      name: "PR review",
+      prompt: "Review the PR.",
+      eventTriggers: [
+        {
+          id: "trigger-bad-repo",
+          event: "pull_request_opened" as const,
+          repositories: "widgets-only",
+          branch: "",
+          actor: "",
+        },
+      ],
+    };
+
+    expect(automationFormSubmitBlockReason(form, [], new Set())).toContain("owner/name");
+    expect(
+      automationFormSubmitBlockReason(
+        {
+          ...form,
+          eventTriggers: [{ ...form.eventTriggers[0]!, repositories: "acme/widgets" }],
+        },
+        [],
+        new Set(),
+      ),
+    ).toBeNull();
+  });
+
+  it("blocks a malformed grace period but accepts seconds", () => {
+    const form = {
+      ...formFromDefinition(null, "project-1"),
+      name: "Nightly",
+      prompt: "Check the build.",
+      missedRunGraceSeconds: "soon",
+    };
+
+    expect(automationFormSubmitBlockReason(form, [], new Set())).toBe(
+      "Grace period must be a number of seconds",
+    );
+    expect(
+      automationFormSubmitBlockReason({ ...form, missedRunGraceSeconds: "600" }, [], new Set()),
+    ).toBeNull();
+  });
+
+  it("serializes the missed-run grace period on create inputs", () => {
+    const form = {
+      ...formFromDefinition(null, "project-1"),
+      name: "Nightly",
+      prompt: "Check the build.",
+      missedRunGraceSeconds: "600",
+    };
+
+    expect(createInputFromForm(form).missedRunGraceSeconds).toBe(600);
+    expect(
+      createInputFromForm({ ...form, missedRunGraceSeconds: "" }).missedRunGraceSeconds,
+    ).toBeNull();
+    // A saved value lands back in the form as seconds text.
+    expect(
+      formFromDefinition(definitionWith({ missedRunGraceSeconds: 300 }), "project-1")
+        .missedRunGraceSeconds,
+    ).toBe("300");
+  });
+
+  it("labels and formats event triggers for the detail page", () => {
+    expect(automationEventTriggerLabel("pull_request_opened")).toBe("PR opened");
+    expect(
+      formatAutomationEventTrigger({
+        id: "t",
+        source: "github",
+        event: "pull_request_opened",
+        repositories: [],
+      }),
+    ).toBe("PR opened in all project repositories");
+    expect(
+      formatAutomationEventTrigger({
+        id: "t",
+        source: "github",
+        event: "issue_opened",
+        repositories: ["acme/widgets"],
+        branch: "main",
+        actor: "octocat",
+      }),
+    ).toBe("Issue opened in acme/widgets (base main, by octocat)");
+  });
+
+  it("ships only valid templates: real schedules and known event kinds", () => {
+    const eventKinds = new Set(["pull_request_opened", "draft_opened", "issue_opened"]);
+    for (const category of AUTOMATION_TEMPLATE_CATEGORIES) {
+      expect(category.templates.length).toBeGreaterThan(0);
+      for (const template of category.templates) {
+        expect(template.label.trim().length).toBeGreaterThan(0);
+        expect(template.prompt.trim().length).toBeGreaterThan(0);
+        if (template.schedule) {
+          expect(scheduleKindFromSchedule(template.schedule)).not.toBe("manual");
+        }
+        if (template.eventTrigger) {
+          expect(eventKinds.has(template.eventTrigger.event)).toBe(true);
+        }
+      }
+    }
   });
 });
