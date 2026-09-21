@@ -32,6 +32,16 @@ Then open http://localhost:5899/.
 - Add a disposable git workspace through the sidebar's **Projects → Add project**
   button and enter its absolute folder path. If New project in the composer
   picker does not open the dialog, use this sidebar entry point instead.
+  The "+" icon button is hover-revealed and may be hard to click reliably —
+  `Ctrl+Shift+O` (see `apps/web/src/keybindings.ts`) opens the Create project
+  dialog directly.
+- To inspect server state in SQLite (`$SYNARA_HOME/dev/state.sqlite`): the live
+  DB is WAL-locked and `sqlite3` may not be installed — copy `state.sqlite` and
+  `state.sqlite-wal` to a scratch path first, then query the copy with
+  `bun -e "const {Database}=require('bun:sqlite'); ..."` from the repo root.
+- Right-click context menus render as DOM popups in web mode
+  (`showContextMenuFallback`), so they are visible to screenshots and DOM
+  inspection — right-click the target element, then click the menu item.
 - To see diffs: select a git workspace with uncommitted changes, then click the **+N −N** toggle in the top-right chat header — it opens the DiffPanel (working-tree diff). No project/thread needed.
 - Server tests: don't run the suite from a checkout under `/private/tmp` — `localImageRoute.test.ts` fails there (its "outside the workspace" fixture lands in an allowed temp root). It passes from a normal checkout and on CI.
 

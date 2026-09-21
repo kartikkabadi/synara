@@ -3146,6 +3146,7 @@ export default function Sidebar() {
         try {
           if (clicked === "reminder-cancel") {
             await api.reminder.cancel({ threadId });
+            toastManager.add({ type: "success", title: "Reminder canceled" });
           } else {
             const dueAt = reminderDueAtForMenuId(clicked);
             if (dueAt !== null) {

@@ -82,6 +82,7 @@ import { useStore } from "~/store";
 import { createAllThreadsSelector } from "~/storeSelectors";
 import {
   AUTOMATION_MISSED_RUN_GRACE_OPTIONS,
+  automationMissedRunGraceLabel,
   AutomationApprovalBanner,
   AutomationEventTriggersEditor,
   AutomationModelPicker,
@@ -123,6 +124,20 @@ const selectAllThreads = createAllThreadsSelector();
 // Commit the trimmed text: the validators trim before checking, so committing the raw
 // draft would persist stray whitespace the validation never saw.
 const trimDraft = (value: string) => value.trim();
+
+function missedRunGraceOptions(graceSeconds: number | null | undefined) {
+  if (
+    graceSeconds == null ||
+    AUTOMATION_MISSED_RUN_GRACE_OPTIONS.some((option) => option.value === String(graceSeconds))
+  ) {
+    return AUTOMATION_MISSED_RUN_GRACE_OPTIONS;
+  }
+  const value = String(graceSeconds);
+  return [
+    ...AUTOMATION_MISSED_RUN_GRACE_OPTIONS,
+    { value, label: automationMissedRunGraceLabel(value) },
+  ];
+}
 
 function lastFinishedRun(runs: readonly AutomationRun[]): AutomationRun | null {
   return runs.find((run) => run.finishedAt != null || run.startedAt != null) ?? null;
@@ -1058,7 +1073,7 @@ function AutomationDetailView() {
                         ? ""
                         : String(definition.missedRunGraceSeconds)
                     }
-                    options={AUTOMATION_MISSED_RUN_GRACE_OPTIONS}
+                    options={missedRunGraceOptions(definition.missedRunGraceSeconds)}
                     disabled={!editable}
                     title={editDisabledTitle}
                     onChange={(value) =>

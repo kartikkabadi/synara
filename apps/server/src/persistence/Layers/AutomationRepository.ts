@@ -2419,6 +2419,7 @@ const makeAutomationRepository = Effect.gen(function* () {
           LIMIT ${input.keepTerminalRuns}
         )
     `.pipe(
+      Effect.asVoid,
       Effect.mapError(
         toPersistenceSqlError("AutomationRepository.trimAutomationRunHistory:delete"),
       ),
@@ -2533,6 +2534,7 @@ const makeAutomationRepository = Effect.gen(function* () {
       DELETE FROM thread_reminders
       WHERE thread_id = ${input.threadId}
     `.pipe(
+      Effect.asVoid,
       Effect.mapError(toPersistenceSqlError("AutomationRepository.deleteThreadReminder:delete")),
     );
 
