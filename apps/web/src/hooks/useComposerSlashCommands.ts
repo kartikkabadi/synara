@@ -385,15 +385,15 @@ export function useComposerSlashCommands(input: {
           });
           return;
         }
+        // Hoisted out of the `try` below: React Compiler cannot lower `?:` inside
+        // a try block and would bail out of compiling this whole hook.
+        const budgetTitle =
+          action.budget === null
+            ? "Thread goal token budget cleared"
+            : `Thread goal token budget set to ${action.budget.toLocaleString()} tokens`;
         try {
           await dispatchThreadGoalTokenBudget(activeThread.id, action.budget);
-          toastManager.add({
-            type: "success",
-            title:
-              action.budget === null
-                ? "Thread goal token budget cleared"
-                : `Thread goal token budget set to ${action.budget.toLocaleString()} tokens`,
-          });
+          toastManager.add({ type: "success", title: budgetTitle });
         } catch (error) {
           toastManager.add({
             type: "error",
