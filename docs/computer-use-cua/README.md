@@ -5,7 +5,7 @@ not a release certification. Results belong to the exact application, driver
 revision, platform and provider named in each report; an older passing fixture
 does not qualify the current branch.
 
-The current driver is Cua 0.28.2 with Synara native revision 37. The
+The current driver is Cua 0.28.2 with Synara native revision 39. The
 [release manifest](../../packages/shared/src/cuaDriverRelease.json) is the source
 of truth for source, patch checksum and Rust version. Packaging must verify the
 staged artifact against that manifest. The checked-in
@@ -17,6 +17,12 @@ guarantees. Its runtime admission requirements are listed below.
 
 The [remote-feedback follow-up](remote-feedback-fixes-2026-09-21.md) describes
 the current input, provider and concurrency corrections and their runtime limits.
+
+## Release support
+
+Synara 0.9.0 introduces Computer Use in beta on macOS only. Linux is coming soon.
+The Linux implementation and qualification material below describe development
+work, not released Linux Computer support.
 
 ## Isolated packaged build
 

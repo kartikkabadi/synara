@@ -103,6 +103,27 @@ Use this before publication to validate the real native macOS, Linux, and Window
 
 To publish from a manual dispatch instead of a tag push, pass `publish_release=true`. This is intentionally opt-in.
 
+### macOS release toolchains
+
+Both native macOS release runners use macOS 15. Native helpers and the pinned
+Cua apple-metal bridge build with Xcode 16.4's macOS 15 SDK. A separate macOS 26
+job compiles the architecture-independent Icon Composer catalog with Xcode 26.3
+from the same release checkout and passes it through a required workflow artifact.
+`SYNARA_MAC_ICON_CATALOG` points packaging at that catalog; a missing file fails
+the build. This avoids Apple's AssetRuntime framework crash on macOS 15 without
+changing the native SDK. Local builds without that variable compile icons with
+the selected Xcode on the local host.
+
+An older `actool` can exit successfully without creating `Assets.car`; that is a
+packaging failure, not permission to silently omit the Liquid Glass icon.
+
+### Linux native build dependencies
+
+The release job installs the Cua driver's OpenSSL, X11, XCB, xkbcommon and
+Wayland development libraries before provisioning. This matches the build
+prerequisites in `cua-linux-check.yml`; it does not qualify Linux Computer Use
+as a supported 0.9.0 feature.
+
 ### Local DMG appearance validation
 
 On an Apple Silicon Mac, build the DMG and macOS update ZIP in `release/` with:
