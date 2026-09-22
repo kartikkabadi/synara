@@ -2892,6 +2892,22 @@ const make = Effect.gen(function* () {
           yield* clearProviderDiffPlaceholder(thread.id, exitedTurnId);
         }
         yield* clearTurnStateForSession(thread.id);
+        // A crashed session emits no terminal turn event, so the goal would
+        // render "pursuing" forever while nothing can run.
+        if (
+          event.payload.exitKind === "error" &&
+          exitedTurnId !== undefined &&
+          activeThreadGoal(thread)?.trim() &&
+          thread.goalPausedAt == null
+        ) {
+          yield* orchestrationEngine.dispatch({
+            type: "thread.meta.update",
+            commandId: providerCommandId(event, "goal-error-exit-pause", thread.id),
+            threadId: thread.id,
+            goalPaused: true,
+            goalPausedReason: "error",
+          });
+        }
       }
 
       if (event.type === "runtime.error") {

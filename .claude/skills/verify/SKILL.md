@@ -34,6 +34,12 @@ Then open http://localhost:5899/.
   picker does not open the dialog, use this sidebar entry point instead.
 - To see diffs: select a git workspace with uncommitted changes, then click the **+N −N** toggle in the top-right chat header — it opens the DiffPanel (working-tree diff). No project/thread needed.
 - Server tests: don't run the suite from a checkout under `/private/tmp` — `localImageRoute.test.ts` fails there (its "outside the workspace" fixture lands in an allowed temp root). It passes from a normal checkout and on CI.
+- On machines where `mise exec -- bun ...` is required, `mise exec` only works from inside the repo (it resolves `.mise.toml`); from a scratch dir call the binary directly, e.g. `~/.local/share/mise/installs/bun/<ver>/bin/bun <repo>/apps/server/src/index.ts`.
+- opencode resolves as `~/.bun/bin/opencode` (a symlink into `~/.bun/install/global/node_modules/opencode-ai/bin/opencode.exe`); `@opencode-ai/cli@beta` ships as `opencode2`. Free no-auth models (e.g. `opencode/big-pickle`, `opencode/muse-spark-1.3-contributor-free`) need no API key — good default provider for isolated E2E.
+- Provider availability is cached at `$SYNARA_HOME/dev/provider-status/<provider>.json` — after a provider outage (missing binary, killed serve) the UI may keep it "unavailable" until restart/recheck, and the model picker only lists the thread's bound provider's models. Provider is fixed per thread; new threads inherit the most recently picked model — pick an OpenCode model on any working thread so a fresh thread seeds it.
+- Reading `state.sqlite` while the server runs: `?immutable=1` connects fine but silently ignores the WAL — recent commits are invisible. `?mode=ro` alone can hit `database is locked`. To inspect fresh state, copy `state.sqlite{,-wal,-shm}` to a scratch dir and open the copy.
+- Compact toasts auto-dismiss in ~2s: screenshot the whole screen fast rather than zooming; a title-only capture plus the server log/DB is acceptable corroboration.
+- Composer slash commands: clear any leftover draft first (`Cmd+A`, `Backspace`) — typed text can merge with a restored draft and send as a garbled user message instead of a `/command`. The first Enter selects the command chip; a second Enter submits.
 
 ## Playwright driving
 

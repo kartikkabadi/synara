@@ -1702,6 +1702,75 @@ describe("ProviderRuntimeIngestion", () => {
     },
   );
 
+  it("error-pauses an active goal when the session crashes mid-turn", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const turnId = asTurnId("crash-turn");
+    const base = { provider: "codex" as const, threadId, createdAt: new Date().toISOString() };
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("goal-before-crash"),
+        threadId,
+        goal: "Finish the task",
+      }),
+    );
+    harness.emit({ ...base, type: "turn.started", eventId: asEventId("crash-started"), turnId });
+    await waitForThread(harness.engine, (thread) => thread.session?.activeTurnId === turnId);
+
+    harness.emit({
+      ...base,
+      type: "session.exited",
+      eventId: asEventId("crash-exited"),
+      payload: { exitKind: "error" },
+    });
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) => entry.session?.status === "stopped" && entry.goalPausedAt != null,
+    );
+    expect(thread.goalPausedReason).toBe("error");
+    await harness.drain();
+    const events = Array.from(
+      await Effect.runPromise(Stream.runCollect(harness.engine.readEvents(0))),
+    );
+    expect(events.some((event) => event.type === "thread.goal-continuation-requested")).toBe(false);
+  });
+
+  it("does not pause an active goal on a graceful session exit", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const turnId = asTurnId("graceful-turn");
+    const base = { provider: "codex" as const, threadId, createdAt: new Date().toISOString() };
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("goal-before-graceful-exit"),
+        threadId,
+        goal: "Finish the task",
+      }),
+    );
+    harness.emit({
+      ...base,
+      type: "turn.started",
+      eventId: asEventId("graceful-started"),
+      turnId,
+    });
+    await waitForThread(harness.engine, (thread) => thread.session?.activeTurnId === turnId);
+
+    harness.emit({
+      ...base,
+      type: "session.exited",
+      eventId: asEventId("graceful-exited"),
+      payload: { exitKind: "graceful" },
+    });
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) => entry.session?.status === "stopped",
+    );
+    expect(thread.goalPausedAt).toBeNull();
+    expect(thread.goalPausedReason).toBeNull();
+  });
+
   it("applies provider session.state.changed transitions directly", async () => {
     const harness = await createHarness();
     const waitingAt = new Date().toISOString();

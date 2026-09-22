@@ -1882,6 +1882,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
               turnId: input.turnId,
               raw: input.raw,
             }),
+            providerRefs: { providerThreadId: context.openCodeSessionId },
             type: "thread.token-usage.updated",
             payload: {
               usage: normalizedUsage,
@@ -2206,6 +2207,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                     turnId,
                     raw: event,
                   }),
+                  providerRefs: { providerThreadId: context.openCodeSessionId },
                   type: "thread.token-usage.updated",
                   payload: {
                     usage: normalizedUsage,
@@ -2910,6 +2912,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                   createdAt: isoFromOpenCodeTimestamp(event.properties.timestamp),
                   raw: event,
                 }),
+                providerRefs: { providerThreadId: context.openCodeSessionId },
                 type: "thread.token-usage.updated",
                 payload: {
                   usage: normalizedUsage,
