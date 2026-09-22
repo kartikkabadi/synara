@@ -164,6 +164,8 @@ export interface DevinRestClient {
       readonly bytes: Uint8Array;
     },
   ) => Effect.Effect<DevinCloudAttachment, DevinRestError>;
+  /** DELETE returns 400 "already exited" for sessions that ended on their own —
+   *  callers wanting idempotent stop should treat that detail as success. */
   readonly terminateSession: (
     orgId: string,
     sessionId: string,

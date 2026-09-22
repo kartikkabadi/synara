@@ -2397,6 +2397,113 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
         ),
       ),
     );
+
+    it.effect("stays ready cloud-only when the CLI is missing but REST credentials resolve", () => {
+      const previousDevinKey = process.env.DEVIN_API_KEY;
+      delete process.env.DEVIN_API_KEY;
+      return Effect.gen(function* () {
+        const status = yield* makeCheckDevinProviderStatus(
+          { cloudMode: "auto", serverPasswordConfigured: true },
+          async () => undefined,
+        );
+        assert.strictEqual(status.status, "ready");
+        assert.strictEqual(status.available, true);
+        assert.strictEqual(status.authStatus, "authenticated");
+        assert.match(status.message ?? "", /REST API/u);
+      }).pipe(
+        Effect.provide(failingSpawnerLayer("spawn devin ENOENT")),
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (previousDevinKey === undefined) {
+              delete process.env.DEVIN_API_KEY;
+            } else {
+              process.env.DEVIN_API_KEY = previousDevinKey;
+            }
+          }),
+        ),
+      );
+    });
+
+    it.effect(
+      "errors with ACP guidance when the CLI is missing in acp mode despite credentials",
+      () => {
+        const previousDevinKey = process.env.DEVIN_API_KEY;
+        delete process.env.DEVIN_API_KEY;
+        return Effect.gen(function* () {
+          const status = yield* makeCheckDevinProviderStatus(
+            { cloudMode: "acp", serverPasswordConfigured: true },
+            async () => ({ apiKey: "stored-test-key" }),
+          );
+          assert.strictEqual(status.status, "error");
+          assert.strictEqual(status.available, false);
+          assert.match(status.message ?? "", /acp --cloud/u);
+        }).pipe(
+          Effect.provide(failingSpawnerLayer("spawn devin ENOENT")),
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (previousDevinKey === undefined) {
+                delete process.env.DEVIN_API_KEY;
+              } else {
+                process.env.DEVIN_API_KEY = previousDevinKey;
+              }
+            }),
+          ),
+        );
+      },
+    );
+
+    it.effect("errors in acp mode when `devin acp --help` lacks --cloud", () =>
+      Effect.gen(function* () {
+        const status = yield* makeCheckDevinProviderStatus(
+          { cloudMode: "acp" },
+          async () => undefined,
+        );
+        assert.strictEqual(status.status, "error");
+        assert.strictEqual(status.available, false);
+        assert.match(status.message ?? "", /--cloud/u);
+      }).pipe(
+        Effect.provide(
+          mockSpawnerLayer((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "devin 2.0.0\n", stderr: "", code: 0 };
+            if (joined === "acp --help") {
+              return {
+                stdout: "Usage: devin acp [options]\n\nOptions:\n  --help\n",
+                stderr: "",
+                code: 0,
+              };
+            }
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("is ready in acp mode when `devin acp --help` advertises --cloud", () =>
+      Effect.gen(function* () {
+        const status = yield* makeCheckDevinProviderStatus(
+          { cloudMode: "acp" },
+          async () => undefined,
+        );
+        assert.strictEqual(status.status, "ready");
+        assert.strictEqual(status.available, true);
+      }).pipe(
+        Effect.provide(
+          mockSpawnerLayer((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "devin 2.0.0\n", stderr: "", code: 0 };
+            if (joined === "acp --help") {
+              return {
+                stdout: "Usage: devin acp [options]\n\nOptions:\n  --cloud\n  --help\n",
+                stderr: "",
+                code: 0,
+              };
+            }
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
   });
 
   describe("checkCursorProviderStatus", () => {

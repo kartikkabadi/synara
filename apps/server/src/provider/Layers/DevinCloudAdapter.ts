@@ -188,11 +188,13 @@ function toAdapterError(error: unknown): ProviderAdapterError {
 }
 
 function restErrorDetail(error: DevinRestError): string {
-  if (error.status === 401 || error.status === 403) {
-    return "Devin Cloud credentials were rejected. Check the API key in Settings → Providers → Devin Cloud, or run `devin auth login`.";
+  if (error.status === 401) {
+    return "Devin Cloud credentials were rejected. Check the API key in Settings → Providers → Devin, or run `devin auth login`.";
   }
-  if (error.status === 404) {
-    return "The Devin Cloud session no longer exists.";
+  // The v3 API answers session-scoped calls with 403 for both a deleted
+  // session and a credential that lost org access — 404 is not used there.
+  if (error.status === 403 || error.status === 404) {
+    return "The Devin Cloud session is no longer accessible — it may have been deleted, or the credential lost access to the org.";
   }
   return error.message;
 }
@@ -612,9 +614,11 @@ export const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         while (!ctx.stopped) {
           yield* pollOnce(ctx).pipe(
             Effect.catch((error) =>
-              error.status === 404
-                ? closeSession(ctx, "Devin Cloud session was deleted.", true)
-                : error.status === 401 || error.status === 403
+              error.status === 404 || error.status === 403
+                ? // Session-scoped calls return 403 for deleted/inaccessible
+                  // sessions — treat both as a clean remote end.
+                  closeSession(ctx, "The Devin Cloud session is no longer accessible.", true)
+                : error.status === 401
                   ? failSession(ctx, restErrorDetail(error))
                   : Effect.logWarning("devinCloud.poll_failed", {
                       threadId: ctx.threadId,
@@ -632,18 +636,19 @@ export const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         }
       });
 
-    // Resume replays every stored message (both sides) so the transcript looks
-    // like the session never left; live polls then skip already-seen ids.
-    const replayHistory = (ctx: DevinCloudSessionContext) =>
+    // On resume the thread's journal already holds the transcript (this is a
+    // rebind to the same thread, never an attach to a foreign session — the
+    // binding cursor only ever references this thread's own session). Emitting
+    // stored messages again would append their text to already-projected
+    // items; the local ACP adapter suppresses resume replay for the same
+    // reason. Drain pages only to seed seenEventIds so the live poll dedups.
+    const seedSeenEventIds = (ctx: DevinCloudSessionContext) =>
       Effect.gen(function* () {
         let cursor: string | undefined;
         do {
           const page = yield* ctx.client.listMessages(ctx.orgId, ctx.devinSessionId, cursor);
           for (const message of page.items) {
-            if (ctx.seenEventIds.has(message.event_id)) continue;
             ctx.seenEventIds.add(message.event_id);
-            if (message.source !== "devin" && message.source !== "user") continue;
-            yield* emitMessageItem(ctx, message, undefined);
           }
           cursor = page.has_next_page ? (page.end_cursor ?? undefined) : undefined;
         } while (cursor !== undefined);
@@ -838,37 +843,40 @@ export const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         // The cloud session URL is the only place approvals can be answered
         // (REST can't), so it must be reachable from the transcript. No UI
         // consumes the sessionUrl metadata fields yet — emit one link item.
-        const urlItemId = RuntimeItemId.makeUnsafe(`devincloud:session-url:${remote.session_id}`);
-        yield* offerRuntimeEvent(input.lifecycleGeneration, {
-          type: "item.started",
-          ...(yield* makeEventStamp()),
-          provider: PROVIDER,
-          threadId: input.threadId,
-          itemId: urlItemId,
-          payload: { itemType: "assistant_message", status: "inProgress" },
-        });
-        yield* offerRuntimeEvent(input.lifecycleGeneration, {
-          type: "content.delta",
-          ...(yield* makeEventStamp()),
-          provider: PROVIDER,
-          threadId: input.threadId,
-          itemId: urlItemId,
-          payload: {
-            streamKind: "assistant_text",
-            delta: `Devin Cloud session: ${remote.url}`,
-          },
-        });
-        yield* offerRuntimeEvent(input.lifecycleGeneration, {
-          type: "item.completed",
-          ...(yield* makeEventStamp()),
-          provider: PROVIDER,
-          threadId: input.threadId,
-          itemId: urlItemId,
-          payload: { itemType: "assistant_message", status: "completed" },
-        });
+        // Skipped on resume: the journal already holds it from the first start.
+        if (!resumed) {
+          const urlItemId = RuntimeItemId.makeUnsafe(`devincloud:session-url:${remote.session_id}`);
+          yield* offerRuntimeEvent(input.lifecycleGeneration, {
+            type: "item.started",
+            ...(yield* makeEventStamp()),
+            provider: PROVIDER,
+            threadId: input.threadId,
+            itemId: urlItemId,
+            payload: { itemType: "assistant_message", status: "inProgress" },
+          });
+          yield* offerRuntimeEvent(input.lifecycleGeneration, {
+            type: "content.delta",
+            ...(yield* makeEventStamp()),
+            provider: PROVIDER,
+            threadId: input.threadId,
+            itemId: urlItemId,
+            payload: {
+              streamKind: "assistant_text",
+              delta: `Devin Cloud session: ${remote.url}`,
+            },
+          });
+          yield* offerRuntimeEvent(input.lifecycleGeneration, {
+            type: "item.completed",
+            ...(yield* makeEventStamp()),
+            provider: PROVIDER,
+            threadId: input.threadId,
+            itemId: urlItemId,
+            payload: { itemType: "assistant_message", status: "completed" },
+          });
+        }
 
         if (resumed) {
-          yield* replayHistory(ctx).pipe(
+          yield* seedSeenEventIds(ctx).pipe(
             Effect.mapError(
               (error) =>
                 new ProviderAdapterRequestError({
@@ -910,7 +918,9 @@ export const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
           const binaryPath =
             providerOptions?.binaryPath?.trim() || devinSettings.binaryPath?.trim() || "devin";
 
-          const acpSupported = yield* acpCloudSupportedFor(binaryPath);
+          // rest mode never uses the ACP leg — skip the `devin acp --help`
+          // subprocess probe entirely.
+          const acpSupported = mode === "rest" ? false : yield* acpCloudSupportedFor(binaryPath);
           if (mode === "acp" && !acpSupported) {
             return yield* new ProviderAdapterValidationError({
               provider: PROVIDER,

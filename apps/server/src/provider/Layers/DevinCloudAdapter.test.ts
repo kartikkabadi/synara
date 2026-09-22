@@ -631,7 +631,11 @@ describe("DevinCloudAdapter", () => {
     expect(states).toContain("ready");
   });
 
-  it("resume replays history (user + devin) and skips createSession", async () => {
+  it("resume seeds dedup without re-emitting history or the link item", async () => {
+    // Resume binds to a thread whose journal already holds the transcript —
+    // re-emitting it would double every message (matches the local adapter's
+    // resume-replay suppression). Stored messages are still drained into
+    // seenEventIds so the live poll doesn't re-project them.
     const scripted = makeScriptedClient({});
     const runtimeEvents: Array<RuntimeEventRecord> = [];
     await Effect.runPromise(
@@ -651,19 +655,26 @@ describe("DevinCloudAdapter", () => {
           resumeCursor: { schemaVersion: 1, sessionId: devinSessionId, cloud: true },
         });
         expect(session.status).toBe("running");
+        // Poll once more — the stored messages must not surface as items.
+        yield* waitFor(
+          () => scripted.calls.filter((call) => call.method === "listMessages").length > 1,
+          "poll after resume",
+        );
         yield* adapter.stopAll();
       }).pipe(Effect.scoped, Effect.provide(makeAdapterLayer(scripted))),
     );
 
-    const oldUser = runtimeEvents.find(
-      (event) => event.itemId === "devincloud:old-u" && event.type === "item.completed",
-    );
-    expect(oldUser?.payload?.detail).toBe("Earlier ask");
-    const oldDevin = runtimeEvents.find(
-      (event) => event.itemId === "devincloud:old-d" && event.type === "content.delta",
-    );
-    expect(oldDevin?.payload).toEqual({ streamKind: "assistant_text", delta: "Earlier answer" });
+    expect(
+      runtimeEvents.some(
+        (event) => event.type === "content.delta" || event.type === "item.started",
+      ),
+    ).toBe(false);
     expect(scripted.createInputs).toEqual([]);
+    const started = runtimeEvents.find((event) => event.type === "session.started");
+    expect(started?.payload?.resume).toEqual({
+      resumed: true,
+      sessionUrl: `https://app.devin.ai/sessions/${devinSessionId}`,
+    });
   });
 
   it("readExternalThread snapshots any Devin session by id and rejects bad ids", async () => {
@@ -761,6 +772,94 @@ describe("DevinCloudAdapter", () => {
     );
   });
 
+  it("closes the session when the remote becomes inaccessible mid-poll (403)", async () => {
+    // The v3 API answers deleted/inaccessible sessions with 403, not 404.
+    const scripted = makeScriptedClient({});
+    const runtimeEvents: Array<RuntimeEventRecord> = [];
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const adapter = yield* DevinCloudAdapter;
+        yield* collectEvents(runtimeEvents, adapter);
+        yield* adapter.startSession({
+          provider: "devin",
+          threadId,
+          runtimeMode: "full-access",
+        });
+        scripted.sessionResponses.push(
+          new DevinRestError({
+            operation: "session.get",
+            status: 403,
+            detail: "Forbidden",
+          }),
+        );
+        yield* waitFor(
+          () => runtimeEvents.some((event) => event.type === "session.exited"),
+          "session.exited on remote 403",
+        );
+        expect(yield* adapter.hasSession(threadId)).toBe(false);
+      }).pipe(Effect.scoped, Effect.provide(makeAdapterLayer(scripted))),
+    );
+    const exited = runtimeEvents.find((event) => event.type === "session.exited");
+    expect(exited?.payload?.recoverable).toBe(true);
+  });
+
+  it("closes the previous session when startSession runs twice for one thread", async () => {
+    const scripted = makeScriptedClient({});
+    const runtimeEvents: Array<RuntimeEventRecord> = [];
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const adapter = yield* DevinCloudAdapter;
+        yield* collectEvents(runtimeEvents, adapter);
+        yield* adapter.startSession({
+          provider: "devin",
+          threadId,
+          runtimeMode: "full-access",
+        });
+        const second = yield* adapter.startSession({
+          provider: "devin",
+          threadId,
+          runtimeMode: "full-access",
+        });
+        expect(second.threadId).toBe(threadId);
+        yield* adapter.stopAll();
+      }).pipe(Effect.scoped, Effect.provide(makeAdapterLayer(scripted))),
+    );
+    // First context was closed before the second bound — one exit, then one new start.
+    const exits = runtimeEvents.filter((event) => event.type === "session.exited");
+    expect(exits.length).toBeGreaterThanOrEqual(1);
+    expect(exits[0]?.payload?.reason).toContain("Superseded");
+    expect(scripted.createInputs.length).toBe(2);
+  });
+
+  it("didResumeSession matches bare and devin- prefixed ids", async () => {
+    const scripted = makeScriptedClient({});
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const adapter = yield* DevinCloudAdapter;
+        const session = yield* adapter.startSession({
+          provider: "devin",
+          threadId,
+          runtimeMode: "full-access",
+        });
+        const didResume = adapter.didResumeSession;
+        expect(didResume).toBeDefined();
+        if (!didResume) return;
+        const input = {
+          provider: "devin" as const,
+          threadId,
+          runtimeMode: "full-access" as const,
+          resumeCursor: {
+            schemaVersion: 1,
+            sessionId: `devin-${devinSessionId}`,
+            cloud: true,
+          },
+        };
+        expect(didResume(input, session)).toBe(true);
+        yield* adapter.stopAll();
+      }).pipe(Effect.scoped, Effect.provide(makeAdapterLayer(scripted))),
+    );
+  });
+
   it("auto mode delegates to the ACP transport when the flag probe succeeds", async () => {
     const scripted = makeScriptedClient({});
     const acp = makeScriptedAcpAdapter();
@@ -801,6 +900,39 @@ describe("DevinCloudAdapter", () => {
     // REST was never touched and ACP events reach the merged stream.
     expect(scripted.createInputs).toEqual([]);
     expect(scripted.sentMessages).toEqual([]);
+  });
+
+  it("rest mode never probes or builds the ACP transport", async () => {
+    const scripted = makeScriptedClient({});
+    const acp = makeScriptedAcpAdapter();
+    let probes = 0;
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const adapter = yield* DevinCloudAdapter;
+        yield* adapter.startSession({
+          provider: "devin",
+          threadId,
+          runtimeMode: "full-access",
+        });
+        yield* adapter.stopAll();
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          makeAdapterLayer(scripted, {
+            acpAdapter: acp,
+            acpCloudSupported: () =>
+              Effect.sync(() => {
+                probes += 1;
+                return true;
+              }),
+            settings: { providers: { devin: { cloudMode: "rest", orgId: "org-test" } } },
+          }),
+        ),
+      ),
+    );
+    expect(probes).toBe(0);
+    expect(acp.startInputs).toEqual([]);
+    expect(scripted.createInputs.length).toBe(1);
   });
 
   it("auto mode falls back to REST when ACP start hits a usage-class error", async () => {
