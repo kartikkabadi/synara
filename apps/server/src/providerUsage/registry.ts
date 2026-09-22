@@ -25,4 +25,6 @@ export const PROVIDER_USAGE_FETCHERS: Partial<Record<ProviderKind, ProviderUsage
   opencode: opencodeUsageFetcher,
   pi: piUsageFetcher,
   devin: devinUsageFetcher,
+  // Devin Cloud sessions bill against the same Devin seat the CLI login reports.
+  devinCloud: devinUsageFetcher,
 };
