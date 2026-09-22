@@ -1848,6 +1848,53 @@ describe("ProviderRuntimeIngestion", () => {
     );
   });
 
+  it("requests a goal retry when the session crashes between turns", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const base = { provider: "codex" as const, threadId, createdAt: new Date().toISOString() };
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("goal-before-idle-crash"),
+        threadId,
+        goal: "Finish the task",
+      }),
+    );
+    // The exit signal reads the projected thread, so wait until the goal
+    // reaches the projection before emitting it.
+    await waitForProjectedThread(
+      harness.readProjectedThread,
+      (thread) => thread.goal === "Finish the task",
+    );
+    // No turn is in flight: the session dies while the goal waits idle, which
+    // would otherwise leave it pursuing forever.
+    harness.emit({
+      ...base,
+      type: "session.exited",
+      eventId: asEventId("idle-crash-exited"),
+      payload: { exitKind: "error" },
+    });
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) => entry.session?.status === "stopped",
+    );
+    expect(thread.goalPausedAt).toBeNull();
+    await harness.drain();
+    const events = Array.from(
+      await Effect.runPromise(Stream.runCollect(harness.engine.readEvents(0))),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "thread.goal-continuation-requested",
+        payload: expect.objectContaining({ trigger: "turn-failed" }),
+      }),
+    );
+    const continuation = events.find(
+      (event) => event.type === "thread.goal-continuation-requested",
+    );
+    expect(continuation?.payload).not.toHaveProperty("sourceTurnId");
+  });
+
   it("does not pause an active goal on a graceful session exit", async () => {
     const harness = await createHarness();
     const threadId = asThreadId("thread-1");

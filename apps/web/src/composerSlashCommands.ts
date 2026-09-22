@@ -461,11 +461,11 @@ export function parseGoalSlashCommandArgs(args: string): GoalSlashCommandAction 
       if (rawBudget === "off" || rawBudget === "none" || rawBudget === "clear") {
         return { action: "budget", budget: null };
       }
-      if (rawBudget === "") {
+      if (!/^\d+$/.test(rawBudget)) {
         return { action: "invalid-budget" };
       }
       const budget = Number(rawBudget);
-      if (!Number.isInteger(budget) || budget < 0) {
+      if (!Number.isSafeInteger(budget)) {
         return { action: "invalid-budget" };
       }
       return { action: "budget", budget };

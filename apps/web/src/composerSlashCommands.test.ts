@@ -190,6 +190,11 @@ describe("composerSlashCommands", () => {
     expect(parseGoalSlashCommandArgs("budget abc")).toEqual({ action: "invalid-budget" });
     expect(parseGoalSlashCommandArgs("budget -5")).toEqual({ action: "invalid-budget" });
     expect(parseGoalSlashCommandArgs("budget 1.5")).toEqual({ action: "invalid-budget" });
+    expect(parseGoalSlashCommandArgs("budget 1e5")).toEqual({ action: "invalid-budget" });
+    expect(parseGoalSlashCommandArgs("budget 0x10")).toEqual({ action: "invalid-budget" });
+    expect(parseGoalSlashCommandArgs("budget 9007199254740993")).toEqual({
+      action: "invalid-budget",
+    });
     // A literal goal that merely starts with the control word is not a budget.
     expect(parseGoalSlashCommandArgs("-- budget 50000")).toEqual({
       action: "set",

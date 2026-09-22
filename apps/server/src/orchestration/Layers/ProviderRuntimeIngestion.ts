@@ -2521,11 +2521,12 @@ const make = Effect.gen(function* () {
           }
 
           // A session-level error ends the in-flight turn without a terminal
-          // turn event, so nothing else would ever move the goal again.
+          // turn event, so nothing else would ever move the goal again. This
+          // also fires when no turn was in flight: an idle error leaves the
+          // pursuit just as dead-ended without the retry.
           if (
             event.type === "session.state.changed" &&
             event.payload.state === "error" &&
-            activeTurnId !== null &&
             activeThreadGoal(thread)?.trim() &&
             thread.goalPausedAt == null
           ) {
@@ -2535,7 +2536,7 @@ const make = Effect.gen(function* () {
               threadId: thread.id,
               goalStartedAt: thread.goalStartedAt ?? null,
               trigger: "turn-failed",
-              sourceTurnId: activeTurnId,
+              ...(activeTurnId !== null ? { sourceTurnId: activeTurnId } : {}),
               createdAt: now,
             });
           }
@@ -2927,11 +2928,13 @@ const make = Effect.gen(function* () {
         }
         yield* clearTurnStateForSession(thread.id);
         // A crashed session emits no terminal turn event, so the goal would
-        // render "pursuing" forever while nothing can run. Retry the pursuit
-        // like a failed turn (bounded) instead of silently abandoning it.
+        // render "pursuing" forever while nothing can run — including a crash
+        // between turns with no turn in flight at all. Retry the pursuit like
+        // a failed turn (bounded): the continuation re-ensures the session,
+        // so a recoverable crash self-heals instead of silently abandoning
+        // the goal.
         if (
           event.payload.exitKind === "error" &&
-          exitedTurnId !== undefined &&
           activeThreadGoal(thread)?.trim() &&
           thread.goalPausedAt == null
         ) {
@@ -2941,7 +2944,7 @@ const make = Effect.gen(function* () {
             threadId: thread.id,
             goalStartedAt: thread.goalStartedAt ?? null,
             trigger: "turn-failed",
-            sourceTurnId: exitedTurnId,
+            ...(exitedTurnId !== undefined ? { sourceTurnId: exitedTurnId } : {}),
             createdAt: now,
           });
         }
@@ -2992,19 +2995,17 @@ const make = Effect.gen(function* () {
           });
           // A provider runtime failure ends the in-flight turn without a
           // terminal turn event; retry the pursuit (bounded) like a failed
-          // turn instead of leaving the goal stuck or silently dead.
-          if (
-            erroredTurnId !== undefined &&
-            activeThreadGoal(thread)?.trim() &&
-            thread.goalPausedAt == null
-          ) {
+          // turn instead of leaving the goal stuck or silently dead. Signalled
+          // even with no turn in flight so an idle fault cannot stall the
+          // pursuit either.
+          if (activeThreadGoal(thread)?.trim() && thread.goalPausedAt == null) {
             yield* orchestrationEngine.dispatch({
               type: "thread.goal.continue",
               commandId: providerCommandId(event, "goal-failure-continue", thread.id),
               threadId: thread.id,
               goalStartedAt: thread.goalStartedAt ?? null,
               trigger: "turn-failed",
-              sourceTurnId: erroredTurnId,
+              ...(erroredTurnId !== undefined ? { sourceTurnId: erroredTurnId } : {}),
               createdAt: now,
             });
           }
