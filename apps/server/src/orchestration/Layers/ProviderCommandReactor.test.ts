@@ -6528,6 +6528,19 @@ describe("ProviderCommandReactor", () => {
     const thread = await readHarnessThread(harness);
     expect(thread?.goalPausedReason).toBe("error");
     expect(harness.sendTurn.mock.calls.length).toBeGreaterThanOrEqual(3);
+    const events = Array.from(
+      await Effect.runPromise(Stream.runCollect(harness.engine.readEvents(0))),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "thread.activity-appended",
+        payload: expect.objectContaining({
+          activity: expect.objectContaining({
+            summary: "Goal paused after repeated provider failures",
+          }),
+        }),
+      }),
+    );
   });
 
   it("interrupts a continuation that races a user stop", async () => {

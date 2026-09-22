@@ -4689,6 +4689,14 @@ const make = Effect.gen(function* () {
                       : attemptsBeforeDispatch) + 1;
                   if (attempts > goalFailureRetryDelays.length) {
                     goalFailureAttempts.delete(thread.id);
+                    yield* appendProviderFailureActivity({
+                      threadId: thread.id,
+                      kind: "provider.turn.start.failed",
+                      summary: "Goal paused after repeated provider failures",
+                      detail: `The last ${attempts - 1} retries to continue the goal also failed.`,
+                      turnId: null,
+                      createdAt,
+                    });
                     yield* pauseActiveThreadGoal({
                       threadId: thread.id,
                       expectedGoalStartedAt: event.payload.goalStartedAt,
