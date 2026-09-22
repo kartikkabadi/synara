@@ -152,7 +152,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.goalPausedAt ?? null},
           ${row.goalPausedReason ?? null},
           ${row.goalTokenBudget ?? null},
-          ${row.goalTokensUsed},
+          ${row.goalTokensUsed ?? 0},
           ${row.goalTokensObserved == null ? null : JSON.stringify(row.goalTokensObserved)},
           ${row.goalBudgetLimitedAt ?? null},
           ${row.goalAchievements == null ? null : JSON.stringify(row.goalAchievements)},
