@@ -1278,6 +1278,9 @@ export const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
           { slug: "cloud/lite", name: "Lite" },
           { slug: "cloud/ultra", name: "Ultra" },
           { slug: "cloud/fusion", name: "Fusion" },
+          { slug: "cloud/swe-2-medium", name: "SWE-2 Medium" },
+          { slug: "cloud/swe-2-high", name: "SWE-2 High" },
+          { slug: "cloud/swe-2-max", name: "SWE-2 Max" },
         ],
         source: "devinCloud.static",
       } satisfies ProviderListModelsResult);

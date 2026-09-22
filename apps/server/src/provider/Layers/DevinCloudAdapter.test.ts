@@ -676,6 +676,9 @@ describe("DevinCloudAdapter", () => {
           "cloud/lite",
           "cloud/ultra",
           "cloud/fusion",
+          "cloud/swe-2-medium",
+          "cloud/swe-2-high",
+          "cloud/swe-2-max",
         ]);
         const getComposerCapabilities = adapter.getComposerCapabilities;
         expect(getComposerCapabilities).toBeDefined();

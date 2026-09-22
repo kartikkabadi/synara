@@ -165,6 +165,9 @@ export const DEVIN_CLOUD_AGENT_MODE_OPTIONS = [
   "lite",
   "ultra",
   "fusion",
+  "swe-2-medium",
+  "swe-2-high",
+  "swe-2-max",
 ] as const;
 export type DevinCloudAgentMode = (typeof DEVIN_CLOUD_AGENT_MODE_OPTIONS)[number];
 
@@ -1199,6 +1202,27 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
     {
       slug: "cloud/fusion",
       name: "Fusion",
+      capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
+    },
+    {
+      slug: "cloud/swe-2-medium",
+      name: "SWE-2 Medium",
+      capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
+    },
+    {
+      slug: "cloud/swe-2-high",
+      name: "SWE-2 High",
+      capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
+    },
+    {
+      slug: "cloud/swe-2-max",
+      name: "SWE-2 Max",
       capabilities: EMPTY_MODEL_CAPABILITIES,
       upstreamProviderId: "devincloud",
       upstreamProviderName: "Devin Cloud",
