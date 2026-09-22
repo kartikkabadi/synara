@@ -142,7 +142,7 @@ function makeScriptedClient(initial: {
         scripted.calls.push({ method: "listMessages", args: [orgId, sessionId, cursor] });
         return nextPage();
       }),
-    uploadAttachment: (input) =>
+    uploadAttachment: (_orgId, input) =>
       Effect.succeed({
         attachment_id: "att-1",
         name: input.name,
@@ -588,6 +588,47 @@ describe("DevinCloudAdapter", () => {
     const completed = runtimeEvents.find((event) => event.type === "turn.completed");
     expect(completed?.payload?.state).toBe("interrupted");
     expect(scripted.terminated).toEqual([]);
+  });
+
+  it("fails the open turn on billing status_details and recovers when they clear", async () => {
+    const scripted = makeScriptedClient({});
+    const runtimeEvents: Array<RuntimeEventRecord> = [];
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const adapter = yield* DevinCloudAdapter;
+        yield* collectEvents(runtimeEvents, adapter);
+        yield* adapter.startSession({
+          provider: "devin",
+          threadId,
+          runtimeMode: "full-access",
+        });
+        scripted.sessionResponses.push(remoteSession({ status_detail: "working" }));
+        yield* adapter.sendTurn({ threadId, input: "Work" });
+        scripted.sessionResponses.push(remoteSession({ status_detail: "out_of_credits" }));
+        yield* waitFor(
+          () => runtimeEvents.some((event) => event.type === "turn.completed"),
+          "turn.completed after out_of_credits",
+        );
+        scripted.sessionResponses.push(remoteSession({ status_detail: "waiting_for_user" }));
+        yield* waitFor(
+          () =>
+            runtimeEvents.some(
+              (event) => event.type === "session.state.changed" && event.payload?.state === "ready",
+            ),
+          "session recovers to ready",
+        );
+        yield* adapter.stopAll();
+      }).pipe(Effect.scoped, Effect.provide(makeAdapterLayer(scripted))),
+    );
+
+    const failed = runtimeEvents.find((event) => event.type === "turn.completed");
+    expect(failed?.payload?.state).toBe("failed");
+    expect(failed?.payload?.errorMessage).toContain("out_of_credits");
+    const states = runtimeEvents
+      .filter((event) => event.type === "session.state.changed")
+      .map((event) => event.payload?.state);
+    expect(states).toContain("error");
+    expect(states).toContain("ready");
   });
 
   it("resume replays history (user + devin) and skips createSession", async () => {

@@ -156,11 +156,14 @@ export interface DevinRestClient {
     sessionId: string,
     cursor?: string,
   ) => Effect.Effect<DevinCloudMessagePage, DevinRestError>;
-  readonly uploadAttachment: (input: {
-    readonly name: string;
-    readonly mimeType?: string;
-    readonly bytes: Uint8Array;
-  }) => Effect.Effect<DevinCloudAttachment, DevinRestError>;
+  readonly uploadAttachment: (
+    orgId: string,
+    input: {
+      readonly name: string;
+      readonly mimeType?: string;
+      readonly bytes: Uint8Array;
+    },
+  ) => Effect.Effect<DevinCloudAttachment, DevinRestError>;
   readonly terminateSession: (
     orgId: string,
     sessionId: string,
@@ -384,7 +387,7 @@ export function makeDevinRestClient(
         decode: decodeWith(DevinCloudMessagePage),
       }),
 
-    uploadAttachment: (input) =>
+    uploadAttachment: (orgId, input) =>
       Effect.flatMap(
         Effect.try({
           try: () =>
@@ -405,7 +408,7 @@ export function makeDevinRestClient(
           requestJson({
             operation: "attachment.upload",
             method: "POST",
-            path: "/v3/attachments",
+            path: `${orgPath(orgId)}/attachments`,
             rawBody: multipart.body,
             maxRequestBytes: MAX_ATTACHMENT_BYTES,
             extraHeaders: { "Content-Type": multipart.contentType },

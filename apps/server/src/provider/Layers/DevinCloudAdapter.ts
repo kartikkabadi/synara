@@ -92,8 +92,29 @@ const POLL_IDLE_MS = 15_000;
 // A turn needs at least a little remote evidence before waiting-style status
 // details may settle it — the first poll can still see the pre-send snapshot.
 const MIN_TURN_POLL_MS = 4_000;
-// status_detail values that mean Devin finished responding and parked.
-const TURN_COMPLETING_STATUS_DETAILS = new Set(["waiting_for_user", "finished", "inactivity"]);
+// status_detail values that mean Devin finished responding and parked
+// ("user_request" is the parked state after a remote-side stop).
+const TURN_COMPLETING_STATUS_DETAILS = new Set([
+  "waiting_for_user",
+  "finished",
+  "inactivity",
+  "user_request",
+]);
+// status_detail values that mean the session cannot do work until the account
+// issue is resolved. The poll keeps running so a later recovery (quota
+// restored, payment fixed) flips the session back to running.
+const SESSION_FAILING_STATUS_DETAILS = new Set([
+  "error",
+  "usage_limit_exceeded",
+  "out_of_credits",
+  "out_of_quota",
+  "no_quota_allocation",
+  "payment_declined",
+  "org_usage_limit_exceeded",
+  "user_usage_limit_exceeded",
+  "total_session_limit_exceeded",
+  "contract_expired",
+]);
 const SESSION_WORKING_STATUS_DETAILS = new Set(["working", "resuming"]);
 // `resuming` shows up as a top-level status on some paths, so treat it as
 // active work in either field.
@@ -335,6 +356,16 @@ export const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
       Effect.gen(function* () {
         if (ctx.lastSessionState === state) return;
         ctx.lastSessionState = state;
+        if (state !== "error" && ctx.session.status === "error") {
+          // A failing status_detail (quota, billing) resolved — restore the
+          // session snapshot so listSessions stops reporting it as errored.
+          ctx.session = {
+            ...ctx.session,
+            status: "running",
+            lastError: undefined,
+            updatedAt: yield* nowIso,
+          };
+        }
         yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
           type: "session.state.changed",
           ...(yield* makeEventStamp()),
@@ -499,6 +530,15 @@ export const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
             );
           } else if (
             remote.status_detail !== null &&
+            SESSION_FAILING_STATUS_DETAILS.has(remote.status_detail)
+          ) {
+            yield* completeActiveTurn(
+              ctx,
+              "failed",
+              `Devin Cloud session stopped: ${remote.status_detail}.`,
+            );
+          } else if (
+            remote.status_detail !== null &&
             TURN_COMPLETING_STATUS_DETAILS.has(remote.status_detail) &&
             (ctx.turnObservedActivity || Date.now() - ctx.turnStartedAtMs >= minTurnPollMs)
           ) {
@@ -518,6 +558,14 @@ export const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
           yield* emitSessionState(ctx, "stopped", "Devin Cloud session is suspended.");
         } else if (SESSION_ACTIVE_STATUSES.has(remote.status)) {
           if (
+            remote.status_detail !== null &&
+            SESSION_FAILING_STATUS_DETAILS.has(remote.status_detail)
+          ) {
+            yield* failSession(
+              ctx,
+              `Devin Cloud session is unavailable (${remote.status_detail}). Resolve it in the Devin org, then send another message.`,
+            );
+          } else if (
             remote.status_detail !== null &&
             TURN_COMPLETING_STATUS_DETAILS.has(remote.status_detail)
           ) {
@@ -751,6 +799,12 @@ export const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
           lastTitle: remote.title,
           lastSessionState: undefined,
         };
+        const previous = sessions.get(input.threadId);
+        if (previous !== undefined && !previous.stopped) {
+          // A second startSession for the same thread (restart-race rebind)
+          // would orphan the first poller and double-emit messages — close it.
+          yield* closeSession(previous, "Superseded by a new Devin Cloud session.", true);
+        }
         sessions.set(input.threadId, ctx);
 
         yield* offerRuntimeEvent(input.lifecycleGeneration, {
@@ -926,8 +980,9 @@ export const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
       },
     ) =>
       Effect.gen(function* () {
-        // Files upload through POST /v3/attachments; the message itself is
-        // text-only. assistant-selection text is already in `input.text`.
+        // Files upload through POST /v3/organizations/{org}/attachments; the
+        // message itself is text-only. assistant-selection text is already in
+        // `input.text`.
         const attachmentUrls: string[] = [];
         const names: string[] = [];
         for (const attachment of input.attachments ?? []) {
@@ -947,7 +1002,7 @@ export const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
             .readFile(storagePath)
             .pipe(Effect.mapError((cause) => toAdapterError(cause)));
           const uploaded = yield* ctx.client
-            .uploadAttachment({
+            .uploadAttachment(ctx.orgId, {
               name: attachment.name,
               ...(attachment.mimeType ? { mimeType: attachment.mimeType } : {}),
               bytes,
@@ -1251,7 +1306,10 @@ export const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
       const wanted = parseDevinCloudResume(input.resumeCursor)?.sessionId;
       if (!wanted) return false;
       const cursor = session.resumeCursor as { sessionId?: unknown } | undefined;
-      return cursor?.sessionId === wanted;
+      const actual = typeof cursor?.sessionId === "string" ? cursor.sessionId : undefined;
+      // Cursors may carry the devin- prefixed id while the API returns bare —
+      // compare the normalized forms.
+      return actual?.replace(/^devin-/u, "") === wanted.replace(/^devin-/u, "");
     };
 
     const getComposerCapabilities: NonNullable<
