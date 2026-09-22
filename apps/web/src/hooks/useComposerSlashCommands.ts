@@ -371,6 +371,7 @@ export function useComposerSlashCommands(input: {
                 title: "Thread goal",
                 description:
                   details.length > 0 ? `${currentGoal} (${details.join(" · ")})` : currentGoal,
+                data: { compactContextual: true },
               }
             : { type: "info", title: "No thread goal is set" },
         );
@@ -409,6 +410,7 @@ export function useComposerSlashCommands(input: {
           type: "warning",
           title: "Invalid goal budget",
           description: "Use /goal budget <non-negative integer> or /goal budget off.",
+          data: { compactContextual: true },
         });
         return;
       }
