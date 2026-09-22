@@ -497,6 +497,13 @@ describe("DevinCloudAdapter", () => {
     const completed = runtimeEvents.find((event) => event.type === "turn.completed");
     expect(completed?.turnId).toBe(turnId);
     expect(completed?.payload?.state).toBe("completed");
+    // Parked status_details (waiting_for_user/finished/inactivity) map to
+    // "ready" — "waiting" would project the thread as still running.
+    const parked = runtimeEvents
+      .filter((event) => event.type === "session.state.changed")
+      .map((event) => event.payload?.state);
+    expect(parked).toContain("ready");
+    expect(parked).not.toContain("waiting");
     expect(
       runtimeEvents.filter(
         (event) => event.itemId === "devincloud:m1" && event.type === "item.completed",

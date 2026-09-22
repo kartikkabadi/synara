@@ -514,7 +514,10 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
             remote.status_detail !== null &&
             TURN_COMPLETING_STATUS_DETAILS.has(remote.status_detail)
           ) {
-            yield* emitSessionState(ctx, "waiting", "Devin is waiting for input.");
+            // "waiting" maps to a running thread status in ingestion, which
+            // would keep the UI busy after the turn already completed. Parked
+            // means ready for the next input.
+            yield* emitSessionState(ctx, "ready", "Devin is waiting for input.");
           } else if (remote.status_detail === "waiting_for_approval") {
             yield* emitSessionState(
               ctx,
