@@ -147,7 +147,7 @@ type PiAnthropicEnsuredModelId = (typeof PI_ANTHROPIC_ENSURED_MODEL_IDS)[number]
 /**
  * Metadata used when an OAuth/extension Anthropic catalog replaced Pi's built-ins
  * and omitted Fable 5.1 / Fable 5 / Opus 4.8. Values mirror `@earendil-works/pi-ai`
- * Anthropic models; Fable 5.1 follows Anthropic's published pricing until pi-ai ships it.
+ * Anthropic models, which ship all three ids as of 0.87.
  */
 const PI_ANTHROPIC_ENSURED_MODEL_TEMPLATES: Record<
   PiAnthropicEnsuredModelId,
@@ -168,7 +168,13 @@ const PI_ANTHROPIC_ENSURED_MODEL_TEMPLATES: Record<
     name: "Claude Fable 5.1",
     reasoning: true,
     thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" },
-    compat: { forceAdaptiveThinking: true },
+    compat: {
+      supportsMidConvoEffort: true,
+      supportsMidConvoSystemMessages: true,
+      supportsMidConvoToolChanges: true,
+      forceAdaptiveThinking: true,
+      supportsStrictTools: true,
+    },
     input: ["text", "image"],
     cost: { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
     contextWindow: 1_000_000,
@@ -179,7 +185,12 @@ const PI_ANTHROPIC_ENSURED_MODEL_TEMPLATES: Record<
     name: "Claude Fable 5",
     reasoning: true,
     thinkingLevelMap: { off: null, xhigh: "xhigh", max: "max" },
-    compat: { forceAdaptiveThinking: true },
+    compat: {
+      supportsMidConvoSystemMessages: true,
+      supportsMidConvoToolChanges: true,
+      forceAdaptiveThinking: true,
+      supportsStrictTools: true,
+    },
     input: ["text", "image"],
     cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 },
     contextWindow: 1_000_000,
@@ -190,7 +201,13 @@ const PI_ANTHROPIC_ENSURED_MODEL_TEMPLATES: Record<
     name: "Claude Opus 4.8",
     reasoning: true,
     thinkingLevelMap: { xhigh: "xhigh", max: "max" },
-    compat: { forceAdaptiveThinking: true, supportsTemperature: false },
+    compat: {
+      supportsMidConvoSystemMessages: true,
+      supportsMidConvoToolChanges: true,
+      forceAdaptiveThinking: true,
+      supportsTemperature: false,
+      supportsStrictTools: true,
+    },
     input: ["text", "image"],
     cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
     contextWindow: 1_000_000,
@@ -2663,6 +2680,18 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           if (!event.success && event.finalError === "Retry cancelled") {
             context.activeTurnErrorMessage = event.finalError;
           }
+          return;
+        }
+        case "summarization_retry_scheduled": {
+          // Compaction/branch-summary calls back off like provider retries;
+          // without this the "Compacting context" item looks stalled.
+          const delaySecs = event.delayMs / 1000;
+          offerPiRetryWarning(context, {
+            message: `Pi retrying context summarization (attempt ${event.attempt}/${event.maxAttempts}, retrying in ${delaySecs.toFixed(delaySecs < 10 ? 1 : 0)}s): ${event.errorMessage}`,
+            method: "prompt/summarization-retry",
+            messageType: event.type,
+            detail: event,
+          });
           return;
         }
         default:

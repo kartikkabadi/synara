@@ -5,6 +5,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import {
   createAssistantMessageEventStream,
+  getCurrentTools,
   type AssistantMessage,
   type Tool,
 } from "@earendil-works/pi-ai";
@@ -81,7 +82,7 @@ type ResponseKind = "success" | "error" | "overflow" | "partial-error" | "until-
 function responses(...kinds: ResponseKind[]) {
   let calls = 0;
   captured.stream = (model, context, options) => {
-    captured.modelTools.push(context.tools ?? []);
+    captured.modelTools.push(getCurrentTools(context.messages));
     const kind = kinds[calls++] ?? "success";
     const stream = createAssistantMessageEventStream();
     const message: AssistantMessage = {
@@ -797,7 +798,9 @@ it("rejects steering into an untracked SDK run instead of orphaning a queued tur
 });
 
 it("keeps the turn alive through SDK overflow compaction and its continuation", async () => {
-  const calls = responses("success", "overflow", "success", "success");
+  // Overflow mid-turn triggers split-turn compaction in the SDK: history summary
+  // + turn-prefix summary, then the retried prompt.
+  const calls = responses("success", "overflow", "success", "success", "success");
   await withAdapter(async (adapter, events) => {
     await send(adapter);
     await waitFor(() => expect(completions(events)).toHaveLength(1));
@@ -808,7 +811,7 @@ it("keeps the turn alive through SDK overflow compaction and its continuation", 
     expect(
       captured.events.some((event) => event.type === "compaction_end" && event.willRetry),
     ).toBe(true);
-    expect(calls()).toBe(4);
+    expect(calls()).toBe(5);
     expect(completions(events)[1]).toMatchObject({
       turnId: turn.turnId,
       payload: { state: "completed" },
