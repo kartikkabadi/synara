@@ -373,11 +373,75 @@ export function paginateThreadMessages(input: {
   };
 }
 
+export interface AgentThreadGoalStatus {
+  readonly status:
+    | "none"
+    | "active"
+    | "paused"
+    | "blocked"
+    | "error-paused"
+    | "budget-limited"
+    | "achieved";
+  readonly startedAt: string | null;
+  readonly pausedAt: string | null;
+  readonly pausedReason: string | null;
+  readonly elapsedMs: number | null;
+  readonly tokenBudget: number | null;
+  readonly tokensUsed: number;
+  readonly tokensRemaining: number | null;
+}
+
+export function summarizeThreadGoalStatus(thread: {
+  readonly goal?: string | undefined;
+  readonly goalStartedAt?: string | null | undefined;
+  readonly goalPausedAt?: string | null | undefined;
+  readonly goalPausedReason?: string | null | undefined;
+  readonly goalTokenBudget?: number | null | undefined;
+  readonly goalTokensUsed?: number | undefined;
+  readonly goalAchievements?: ReadonlyArray<unknown> | null | undefined;
+}): AgentThreadGoalStatus {
+  const goal = (thread.goal ?? "").trim() || null;
+  const pausedReason = thread.goalPausedReason ?? null;
+  const status: AgentThreadGoalStatus["status"] =
+    goal === null
+      ? (thread.goalAchievements?.length ?? 0) > 0
+        ? "achieved"
+        : "none"
+      : (thread.goalPausedAt ?? null) !== null
+        ? pausedReason === "budget"
+          ? "budget-limited"
+          : pausedReason === "blocked"
+            ? "blocked"
+            : pausedReason === "error"
+              ? "error-paused"
+              : "paused"
+        : "active";
+  const startedAt = thread.goalStartedAt ?? null;
+  const pausedAt = thread.goalPausedAt ?? null;
+  const startedMs = startedAt !== null ? Date.parse(startedAt) : Number.NaN;
+  const endMs = pausedAt !== null ? Date.parse(pausedAt) : Date.now();
+  const elapsedMs =
+    Number.isFinite(startedMs) && Number.isFinite(endMs) ? Math.max(0, endMs - startedMs) : null;
+  const tokensUsed = thread.goalTokensUsed ?? 0;
+  const tokenBudget = thread.goalTokenBudget ?? null;
+  return {
+    status,
+    startedAt,
+    pausedAt,
+    pausedReason,
+    elapsedMs,
+    tokenBudget,
+    tokensUsed,
+    tokensRemaining: tokenBudget === null ? null : Math.max(0, tokenBudget - tokensUsed),
+  };
+}
+
 export interface AgentThreadDetail {
   readonly threadId: string;
   readonly projectId: string;
   readonly title: string;
   readonly goal: string | null;
+  readonly goalStatus: AgentThreadGoalStatus;
   readonly provider: string;
   readonly model: string;
   readonly status: AgentThreadStatus;
@@ -426,6 +490,7 @@ export function summarizeThreadDetail(input: {
     projectId: thread.projectId,
     title: thread.title,
     goal: thread.goal?.trim() || null,
+    goalStatus: summarizeThreadGoalStatus(thread),
     provider: thread.modelSelection.provider,
     model: thread.modelSelection.model,
     status: deriveAgentThreadStatus(thread),

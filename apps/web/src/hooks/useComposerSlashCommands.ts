@@ -48,7 +48,11 @@ import { useFeedbackDialogStore } from "../feedbackDialogStore";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useStore } from "../store";
 import { getThreadFromState } from "../threadDerivation";
-import { dispatchThreadGoal, dispatchThreadGoalPaused } from "../threadGoal";
+import {
+  dispatchThreadGoal,
+  dispatchThreadGoalPaused,
+  dispatchThreadGoalTokenBudget,
+} from "../threadGoal";
 import {
   buildDraftThreadRenameCreateInput,
   dispatchThreadRename,
@@ -338,11 +342,74 @@ export function useComposerSlashCommands(input: {
       const action = parseGoalSlashCommandArgs(args);
       if (action.action === "show") {
         const currentGoal = activeThread?.goal?.trim();
+        const details: string[] = [];
+        if ((activeThread?.goalPausedAt ?? null) !== null) {
+          const reason = activeThread?.goalPausedReason ?? "user";
+          details.push(
+            reason === "blocked"
+              ? "blocked"
+              : reason === "error"
+                ? "paused after an error"
+                : reason === "budget"
+                  ? "paused: token budget reached"
+                  : "paused",
+          );
+        } else if (currentGoal) {
+          details.push("active");
+        }
+        const tokenBudget = activeThread?.goalTokenBudget ?? null;
+        if (tokenBudget !== null) {
+          const tokensUsed = activeThread?.goalTokensUsed ?? 0;
+          details.push(
+            `budget ${tokensUsed.toLocaleString()}/${tokenBudget.toLocaleString()} tokens`,
+          );
+        }
         toastManager.add(
           currentGoal
-            ? { type: "info", title: "Thread goal", description: currentGoal }
+            ? {
+                type: "info",
+                title: "Thread goal",
+                description:
+                  details.length > 0 ? `${currentGoal} (${details.join(" · ")})` : currentGoal,
+              }
             : { type: "info", title: "No thread goal is set" },
         );
+        return;
+      }
+      if (action.action === "budget") {
+        if (!isServerThread || !activeThread) {
+          toastManager.add({
+            type: "warning",
+            title: "Thread goal is unavailable",
+            description: "Open a thread before setting a goal budget.",
+          });
+          return;
+        }
+        try {
+          await dispatchThreadGoalTokenBudget(activeThread.id, action.budget);
+          toastManager.add({
+            type: "success",
+            title:
+              action.budget === null
+                ? "Thread goal token budget cleared"
+                : `Thread goal token budget set to ${action.budget.toLocaleString()} tokens`,
+          });
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: "Could not update the thread goal budget",
+            description:
+              error instanceof Error ? error.message : "An error occurred while updating the goal.",
+          });
+        }
+        return;
+      }
+      if (action.action === "invalid-budget") {
+        toastManager.add({
+          type: "warning",
+          title: "Invalid goal budget",
+          description: "Use /goal budget <non-negative integer> or /goal budget off.",
+        });
         return;
       }
       if (action.action === "too-long") {
@@ -377,7 +444,14 @@ export function useComposerSlashCommands(input: {
         toastManager.add({ type: "success", title: "Thread goal updated" });
       }
     },
-    [activeThread?.goal, clearThreadGoal, editorActions, persistThreadGoal, setThreadGoalPaused],
+    [
+      activeThread,
+      clearThreadGoal,
+      editorActions,
+      isServerThread,
+      persistThreadGoal,
+      setThreadGoalPaused,
+    ],
   );
 
   const runRenameSlashCommand = useCallback(

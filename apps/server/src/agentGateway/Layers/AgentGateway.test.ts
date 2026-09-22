@@ -2029,6 +2029,7 @@ describe("AgentGateway", () => {
         "synara_set_thread_title",
         "synara_set_thread_pull_request",
         "synara_set_thread_archived",
+        "synara_get_thread_goal",
         "synara_set_thread_goal",
         "synara_create_automation",
         "synara_list_automations",
@@ -2096,8 +2097,16 @@ describe("AgentGateway", () => {
       );
       assert.property(setThreadGoal?.inputSchema.properties, "achieved");
       assert.property(setThreadGoal?.inputSchema.properties, "blocked");
+      assert.property(setThreadGoal?.inputSchema.properties, "paused");
+      assert.property(setThreadGoal?.inputSchema.properties, "tokenBudget");
       assert.include(setThreadGoal?.description ?? "", "achieved: true");
       assert.include(setThreadGoal?.description ?? "", "blocked: true");
+      assert.include(setThreadGoal?.description ?? "", "paused: true");
+      assert.include(setThreadGoal?.description ?? "", "tokenBudget");
+
+      const getThreadGoal = tools.find((tool) => tool.name === "synara_get_thread_goal");
+      assert.isDefined(getThreadGoal);
+      assert.property(getThreadGoal?.inputSchema.properties, "threadId");
 
       const setThreadPullRequest = tools.find(
         (tool) => tool.name === "synara_set_thread_pull_request",

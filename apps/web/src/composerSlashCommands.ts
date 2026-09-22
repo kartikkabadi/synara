@@ -38,6 +38,8 @@ export type GoalSlashCommandAction =
   | { readonly action: "pause" }
   | { readonly action: "resume" }
   | { readonly action: "edit" }
+  | { readonly action: "budget"; readonly budget: number | null }
+  | { readonly action: "invalid-budget" }
   | { readonly action: "set"; readonly goal: string }
   | { readonly action: "too-long" };
 
@@ -249,7 +251,8 @@ const COMPOSER_SLASH_COMMAND_DEFINITIONS: Record<
   goal: {
     command: "goal",
     label: "/goal",
-    description: "Set, edit, pause, resume, or clear this thread's persistent goal",
+    description:
+      "Set, edit, pause, resume, clear, or budget this thread's persistent goal (e.g. /goal budget 50000)",
     source: "app",
   },
   rename: {
@@ -451,6 +454,21 @@ export function parseGoalSlashCommandArgs(args: string): GoalSlashCommandAction 
     }
     if (control === "pause" || control === "resume" || control === "edit") {
       return { action: control };
+    }
+    const budgetMatch = /^budget(?:\s+(.*))?$/.exec(control);
+    if (budgetMatch) {
+      const rawBudget = (budgetMatch[1] ?? "").trim();
+      if (rawBudget === "off" || rawBudget === "none" || rawBudget === "clear") {
+        return { action: "budget", budget: null };
+      }
+      if (rawBudget === "") {
+        return { action: "invalid-budget" };
+      }
+      const budget = Number(rawBudget);
+      if (!Number.isInteger(budget) || budget < 0) {
+        return { action: "invalid-budget" };
+      }
+      return { action: "budget", budget };
     }
   }
   if (goal.length > THREAD_GOAL_MAX_CHARS) {

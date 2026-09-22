@@ -754,6 +754,21 @@ export function projectEvent(
                 ? { goalStartedAt: payload.goalStartedAt }
                 : {}),
               ...(payload.goalPausedAt !== undefined ? { goalPausedAt: payload.goalPausedAt } : {}),
+              ...(payload.goalPausedReason !== undefined
+                ? { goalPausedReason: payload.goalPausedReason }
+                : {}),
+              ...(payload.goalTokenBudget !== undefined
+                ? { goalTokenBudget: payload.goalTokenBudget }
+                : {}),
+              ...(payload.goalTokensUsed !== undefined
+                ? { goalTokensUsed: payload.goalTokensUsed }
+                : {}),
+              ...(payload.goalTokensObserved !== undefined
+                ? { goalTokensObserved: payload.goalTokensObserved }
+                : {}),
+              ...(payload.goalBudgetLimitedAt !== undefined
+                ? { goalBudgetLimitedAt: payload.goalBudgetLimitedAt }
+                : {}),
               ...(payload.goalAchievements !== undefined
                 ? { goalAchievements: payload.goalAchievements }
                 : {}),

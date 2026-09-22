@@ -76,7 +76,12 @@ import {
   readRecordArg,
   readStringArg,
 } from "../toolInput.ts";
-import { WRITE_TOOL_ANNOTATIONS, type ToolContext, type ToolEntry } from "../toolRuntime.ts";
+import {
+  READ_ONLY_TOOL_ANNOTATIONS,
+  WRITE_TOOL_ANNOTATIONS,
+  type ToolContext,
+  type ToolEntry,
+} from "../toolRuntime.ts";
 import { makeAgentGatewayMcpTransport } from "../mcpTransport.ts";
 import { deliverGatewayCompletions } from "../completionDelivery.ts";
 import { recoverInterruptedAgentGatewayOperations } from "../startupRecovery.ts";
@@ -102,6 +107,7 @@ import { BrowserAutomationHost } from "../../browserAutomation/Services/BrowserA
 import { makeBrowserAutomationHost } from "../../browserAutomation/Layers/BrowserAutomationHost.ts";
 import { makeThreadReadTools } from "../threadReadTools.ts";
 import { makeThreadDiagnosticTools } from "../threadDiagnosticTools.ts";
+import { summarizeThreadGoalStatus } from "../threadSummary.ts";
 import { pruneProjectedArchivedManagedWorktrees } from "../../managedWorktrees.ts";
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 
@@ -743,13 +749,52 @@ export const makeAgentGateway = Effect.gen(function* () {
       }).pipe(Effect.catch((error) => Effect.succeed(mcpToolResultError(errorText(error))))),
   };
 
+  const getThreadGoal: ToolEntry = {
+    requiredCapability: "thread:read",
+    definition: {
+      name: "synara_get_thread_goal",
+      description:
+        "Read a thread's persistent goal state: the objective, whether it is active or paused and why, elapsed pursuit time, processed-token usage against the goal's token budget, and recorded goal achievements. Check this before deciding to mark a goal achieved or blocked with synara_set_thread_goal.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          threadId: {
+            type: "string",
+            description: "Thread to read. Defaults to your own thread when omitted.",
+          },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+      annotations: { title: "Get a Synara thread goal", ...READ_ONLY_TOOL_ANNOTATIONS },
+    },
+    handler: (args, context) =>
+      Effect.gen(function* () {
+        const threadId = readStringArg(args, "threadId") ?? context.callerThreadId;
+        const target = yield* requireThreadShell(threadId);
+        const detail = yield* snapshotQuery.getThreadDetailById(target.id).pipe(
+          Effect.mapError((error) => new ToolInputError(errorText(error))),
+          Effect.map(Option.getOrNull),
+        );
+        return mcpToolResultJson({
+          threadId: target.id,
+          goal: (target.goal ?? "").trim() || null,
+          goalStatus: summarizeThreadGoalStatus({
+            ...target,
+            goalAchievements: detail?.goalAchievements ?? null,
+          }),
+          achievements: detail?.goalAchievements ?? [],
+        });
+      }).pipe(Effect.catch((error) => Effect.succeed(mcpToolResultError(errorText(error))))),
+  };
+
   const setThreadGoal: ToolEntry = {
     requiredCapability: "thread:write",
     requiresActiveTurn: true,
     definition: {
       name: "synara_set_thread_goal",
       description:
-        "Set a persistent goal for a thread. Only set a goal when the user has explicitly asked for one (for example, 'keep working until X' or 'the goal of this thread is Y') or when dispatching a thread explicitly created to pursue a stated objective. Do NOT infer or invent goals from ordinary tasks or set one as a side effect of normal work. Clearing requires the same explicit user intent. When the active goal's objective has been accomplished, pass achieved: true instead of clearing: Synara records the achievement (with the time it took) and clears the goal. If the same external blocker prevents meaningful progress for three consecutive goal turns, pass blocked: true to pause the goal. Do not mark a goal blocked merely because the work is difficult, incomplete, or would benefit from clarification.",
+        "Set a persistent goal for a thread, or update the active goal's state. Only set a goal when the user has explicitly asked for one (for example, 'keep working until X' or 'the goal of this thread is Y') or when dispatching a thread explicitly created to pursue a stated objective. Do NOT infer or invent goals from ordinary tasks or set one as a side effect of normal work. Clearing requires the same explicit user intent. When the active goal's objective has been accomplished, pass achieved: true instead of clearing: Synara records the achievement (with the time it took) and clears the goal. If the same external blocker prevents meaningful progress for three consecutive goal turns, pass blocked: true to pause the goal. Do not mark a goal blocked merely because the work is difficult, incomplete, or would benefit from clarification. Pass paused: true only when the user explicitly asks to pause the goal, paused: false to resume a paused goal, and tokenBudget only when the user asks for a token budget.",
       inputSchema: {
         type: "object",
         properties: {
@@ -761,7 +806,7 @@ export const makeAgentGateway = Effect.gen(function* () {
             type: ["string", "null"],
             maxLength: THREAD_GOAL_MAX_CHARS,
             description:
-              "Persistent objective. Pass null or an empty string to clear it. Ignored when achieved or blocked is true.",
+              "Persistent objective. Pass null or an empty string to clear it. May accompany tokenBudget. Ignored when achieved, blocked, or paused is passed.",
           },
           achieved: {
             type: "boolean",
@@ -771,7 +816,18 @@ export const makeAgentGateway = Effect.gen(function* () {
           blocked: {
             type: "boolean",
             description:
-              "Pass true only after the same external blocker prevents meaningful progress for three consecutive goal turns. Pauses the active goal.",
+              "Pass true only after the same external blocker prevents meaningful progress for three consecutive goal turns. Pauses the active goal with reason 'blocked'.",
+          },
+          paused: {
+            type: "boolean",
+            description:
+              "Pass true only when the user explicitly asks to pause the active goal, false to resume a paused goal.",
+          },
+          tokenBudget: {
+            type: ["integer", "null"],
+            minimum: 0,
+            description:
+              "Processed-token budget for the goal, counting each goal turn's provider-reported usage. Pass null to clear it. When the budget is exhausted, the goal gets one wrap-up turn, then auto-pauses with reason 'budget' until the user resumes or raises the budget.",
           },
         },
         required: [],
@@ -788,22 +844,75 @@ export const makeAgentGateway = Effect.gen(function* () {
         if ("blocked" in args && typeof args.blocked !== "boolean") {
           return yield* Effect.fail(new ToolInputError(`Argument "blocked" must be a boolean.`));
         }
+        if ("paused" in args && typeof args.paused !== "boolean") {
+          return yield* Effect.fail(new ToolInputError(`Argument "paused" must be a boolean.`));
+        }
         const achieved = args.achieved === true;
         const blocked = args.blocked === true;
-        if (achieved && blocked) {
+        const pauseRequested = args.paused === true;
+        const resumeRequested = "paused" in args && args.paused === false;
+        if (
+          [achieved, blocked, pauseRequested].filter(Boolean).length > 1 ||
+          (resumeRequested && (achieved || blocked))
+        ) {
           return yield* Effect.fail(
-            new ToolInputError(`Arguments "achieved" and "blocked" are mutually exclusive.`),
+            new ToolInputError(
+              `Arguments "achieved", "blocked", and "paused" are mutually exclusive.`,
+            ),
           );
         }
-        const goal = achieved || blocked ? "" : readThreadGoalArg(args);
+        let tokenBudget: number | null | undefined;
+        if ("tokenBudget" in args) {
+          const raw = args.tokenBudget;
+          if (raw === null) {
+            tokenBudget = null;
+          } else if (typeof raw === "number" && Number.isInteger(raw) && raw >= 0) {
+            tokenBudget = raw;
+          } else {
+            return yield* Effect.fail(
+              new ToolInputError(`Argument "tokenBudget" must be a non-negative integer or null.`),
+            );
+          }
+        }
+        const stateChange = achieved || blocked || pauseRequested || resumeRequested;
+        const hasGoalArg = !stateChange && "goal" in args;
+        if (!stateChange && !hasGoalArg && tokenBudget === undefined) {
+          return yield* Effect.fail(
+            new ToolInputError(
+              `Provide at least one of "goal", "achieved", "blocked", "paused", or "tokenBudget".`,
+            ),
+          );
+        }
+        if (stateChange && "goal" in args) {
+          return yield* Effect.fail(
+            new ToolInputError(
+              `Argument "goal" cannot accompany "achieved", "blocked", or "paused".`,
+            ),
+          );
+        }
+        const goal = hasGoalArg ? readThreadGoalArg(args) : "";
         const caller = yield* requireThreadShell(context.callerThreadId);
         const target = yield* requireThreadShell(threadId);
         yield* assertCallerMayDriveThread(caller, target);
-        if ((achieved || blocked) && (target.goal ?? "").trim().length === 0) {
+        const hasActiveGoal = (target.goal ?? "").trim().length > 0;
+        if ((achieved || blocked || pauseRequested || resumeRequested) && !hasActiveGoal) {
           return yield* Effect.fail(
             new ToolInputError(
-              `Thread has no active goal to mark ${achieved ? "achieved" : "blocked"}.`,
+              `Thread has no active goal to ${
+                achieved
+                  ? "mark achieved"
+                  : blocked
+                    ? "mark blocked"
+                    : pauseRequested
+                      ? "pause"
+                      : "resume"
+              }.`,
             ),
+          );
+        }
+        if (!stateChange && !hasGoalArg && !hasActiveGoal) {
+          return yield* Effect.fail(
+            new ToolInputError(`Thread has no active goal to set a token budget on.`),
           );
         }
         yield* orchestrationEngine
@@ -811,15 +920,35 @@ export const makeAgentGateway = Effect.gen(function* () {
             type: "thread.meta.update",
             commandId: CommandId.makeUnsafe(`agent:${randomUUID()}:goal`),
             threadId: target.id,
-            ...(achieved ? { goalAchieved: true } : blocked ? { goalPaused: true } : { goal }),
+            ...(achieved
+              ? { goalAchieved: true }
+              : blocked
+                ? { goalPaused: true, goalPausedReason: "blocked" as const }
+                : pauseRequested
+                  ? { goalPaused: true, goalPausedReason: "user" as const }
+                  : resumeRequested
+                    ? { goalPaused: false }
+                    : { ...(hasGoalArg ? { goal } : {}) }),
+            ...(tokenBudget !== undefined ? { goalTokenBudget: tokenBudget ?? null } : {}),
           })
           .pipe(Effect.mapError((error) => new ToolInputError(errorText(error))));
         return mcpToolResultJson(
           achieved
             ? { threadId: target.id, goal: null, achieved: true }
-            : blocked
-              ? { threadId: target.id, goal: target.goal, blocked: true, paused: true }
-              : { threadId: target.id, goal: goal || null },
+            : blocked || pauseRequested
+              ? {
+                  threadId: target.id,
+                  goal: target.goal,
+                  ...(blocked ? { blocked: true } : {}),
+                  paused: true,
+                }
+              : resumeRequested
+                ? { threadId: target.id, goal: target.goal, paused: false }
+                : {
+                    threadId: target.id,
+                    goal: hasGoalArg ? goal || null : target.goal,
+                    ...(tokenBudget !== undefined ? { tokenBudget: tokenBudget ?? null } : {}),
+                  },
         );
       }).pipe(Effect.catch((error) => Effect.succeed(mcpToolResultError(errorText(error))))),
   };
@@ -1187,6 +1316,7 @@ export const makeAgentGateway = Effect.gen(function* () {
     setThreadTitle,
     setThreadPullRequest,
     setThreadArchived,
+    getThreadGoal,
     setThreadGoal,
     ...automationTools,
     ...browserTools,

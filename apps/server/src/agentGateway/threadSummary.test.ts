@@ -2,7 +2,11 @@ import { assert, describe, it } from "@effect/vitest";
 import type { OrchestrationMessage } from "@synara/contracts";
 import { MessageId, ThreadId, TurnId } from "@synara/contracts";
 
-import { deriveAgentThreadStatus, paginateThreadMessages } from "./threadSummary.ts";
+import {
+  deriveAgentThreadStatus,
+  paginateThreadMessages,
+  summarizeThreadGoalStatus,
+} from "./threadSummary.ts";
 
 function makeMessage(index: number, text = `message ${index}`): OrchestrationMessage {
   return {
@@ -277,5 +281,58 @@ describe("paginateThreadMessages", () => {
     const message = { ...makeMessage(0), dispatchOrigin: "agent" as const };
     const page = paginateThreadMessages({ messages: [message] });
     assert.equal(page.messages[0]?.dispatchOrigin, "agent");
+  });
+});
+
+describe("summarizeThreadGoalStatus", () => {
+  it("derives the goal status and budget state", () => {
+    assert.equal(summarizeThreadGoalStatus({}).status, "none");
+    assert.equal(summarizeThreadGoalStatus({ goalAchievements: [{}] }).status, "achieved");
+    assert.equal(summarizeThreadGoalStatus({ goal: "Objective" }).status, "active");
+    assert.equal(
+      summarizeThreadGoalStatus({ goal: "Objective", goalPausedAt: "2026-03-01T00:00:00.000Z" })
+        .status,
+      "paused",
+    );
+    assert.equal(
+      summarizeThreadGoalStatus({
+        goal: "Objective",
+        goalPausedAt: "2026-03-01T00:00:00.000Z",
+        goalPausedReason: "blocked",
+      }).status,
+      "blocked",
+    );
+    assert.equal(
+      summarizeThreadGoalStatus({
+        goal: "Objective",
+        goalPausedAt: "2026-03-01T00:00:00.000Z",
+        goalPausedReason: "error",
+      }).status,
+      "error-paused",
+    );
+    assert.equal(
+      summarizeThreadGoalStatus({
+        goal: "Objective",
+        goalPausedAt: "2026-03-01T00:00:00.000Z",
+        goalPausedReason: "budget",
+      }).status,
+      "budget-limited",
+    );
+  });
+
+  it("computes elapsed time and remaining budget", () => {
+    const status = summarizeThreadGoalStatus({
+      goal: "Objective",
+      goalStartedAt: "2026-03-01T00:00:00.000Z",
+      goalPausedAt: "2026-03-01T00:01:00.000Z",
+      goalTokenBudget: 10_000,
+      goalTokensUsed: 4_000,
+    });
+    assert.equal(status.elapsedMs, 60_000);
+    assert.equal(status.tokensRemaining, 6_000);
+
+    const noBudget = summarizeThreadGoalStatus({ goal: "Objective" });
+    assert.isNull(noBudget.tokenBudget);
+    assert.isNull(noBudget.tokensRemaining);
   });
 });

@@ -5,6 +5,8 @@ import type {
   OrchestrationThread,
   ProjectKind,
   ThreadGoalAchievement,
+  ThreadGoalPauseReason,
+  ThreadGoalTokenObservation,
 } from "@synara/contracts";
 import {
   ASYNC_USER_INPUT_ALREADY_ANSWERED,
@@ -402,15 +404,29 @@ function resolveCreatedThreadWorkspaceMetadata(
   };
 }
 
+/** Full pursuit-state reset applied when a goal is cleared or achieved. */
+const THREAD_GOAL_PURSUIT_RESET = {
+  goalStartedAt: null,
+  goalPausedAt: null,
+  goalPausedReason: null,
+  goalTokenBudget: null,
+  goalTokensUsed: 0,
+  goalTokensObserved: null,
+  goalBudgetLimitedAt: null,
+} as const;
+
 /**
- * Stamps authoritative goal timestamps for `thread.meta.update`. `goalAchieved`
- * takes precedence over everything: it records a ThreadGoalAchievement (with
- * pause-adjusted elapsed time, anchored to the thread's latest turn) and clears
- * the goal in the same event. A goal change takes precedence over `goalPaused`
- * in the same command: a newly set goal starts the pursuit clock, an edit of an
- * existing goal keeps the running clock and pause state, and clearing resets
- * everything. Pause freezes the clock at `goalPausedAt`; resume rebases
- * `goalStartedAt` so the paused span is excluded from the elapsed time.
+ * Stamps authoritative goal timestamps, pause reasons, and token accounting
+ * for `thread.meta.update`. `goalAchieved` takes precedence over everything: it
+ * records a ThreadGoalAchievement (with pause-adjusted elapsed time, anchored
+ * to the thread's latest turn) and clears the goal in the same event. A goal
+ * change takes precedence over `goalPaused` in the same command: a newly set
+ * goal starts the pursuit clock with fresh accounting, an edit of an existing
+ * goal keeps the running clock, pause state, and token budget, and clearing
+ * resets everything. Pause freezes the clock at `goalPausedAt` and stamps the
+ * reason; resume rebases `goalStartedAt` so the paused span is excluded from
+ * the elapsed time and clears the consumed budget wrap-up so a still-exhausted
+ * budget can grant another one.
  */
 function resolveThreadGoalPatch(
   command: Extract<OrchestrationCommand, { type: "thread.meta.update" }>,
@@ -420,6 +436,11 @@ function resolveThreadGoalPatch(
   goal?: string;
   goalStartedAt?: string | null;
   goalPausedAt?: string | null;
+  goalPausedReason?: ThreadGoalPauseReason | null;
+  goalTokenBudget?: number | null;
+  goalTokensUsed?: number;
+  goalTokensObserved?: ThreadGoalTokenObservation | null;
+  goalBudgetLimitedAt?: string | null;
   goalAchievements?: readonly ThreadGoalAchievement[];
 } {
   const activeGoal = (currentThread.goal ?? "").trim();
@@ -438,11 +459,11 @@ function resolveThreadGoalPatch(
       achievedAt: occurredAt,
       elapsedMs,
       turnId: currentThread.latestTurn?.turnId ?? null,
+      tokensUsed: currentThread.goalTokensUsed ?? 0,
     };
     return {
       goal: "",
-      goalStartedAt: null,
-      goalPausedAt: null,
+      ...THREAD_GOAL_PURSUIT_RESET,
       goalAchievements: [...(currentThread.goalAchievements ?? []), achievement].slice(
         -THREAD_GOAL_ACHIEVEMENTS_MAX_COUNT,
       ),
@@ -450,31 +471,90 @@ function resolveThreadGoalPatch(
   }
   if (command.goal !== undefined) {
     if (command.goal.trim().length === 0) {
-      return { goal: command.goal, goalStartedAt: null, goalPausedAt: null };
+      return { goal: command.goal, ...THREAD_GOAL_PURSUIT_RESET };
     }
     if (activeGoal.length > 0) {
-      return { goal: command.goal };
+      // Edit in place: the running clock, pause state, and accounting carry
+      // over; an explicit token budget applies to the same pursuit.
+      return {
+        goal: command.goal,
+        ...(command.goalTokenBudget !== undefined
+          ? { goalTokenBudget: command.goalTokenBudget, goalBudgetLimitedAt: null }
+          : {}),
+      };
     }
-    return { goal: command.goal, goalStartedAt: occurredAt, goalPausedAt: null };
+    return {
+      goal: command.goal,
+      ...THREAD_GOAL_PURSUIT_RESET,
+      goalStartedAt: occurredAt,
+      goalTokenBudget: command.goalTokenBudget ?? null,
+    };
   }
-  if (command.goalPaused === undefined || activeGoal.length === 0) {
+  if (activeGoal.length === 0) {
     return {};
   }
-  const pausedAt = currentThread.goalPausedAt ?? null;
-  if (command.goalPaused) {
-    return pausedAt === null ? { goalPausedAt: occurredAt } : {};
+  const patch: {
+    goalStartedAt?: string | null;
+    goalPausedAt?: string | null;
+    goalPausedReason?: ThreadGoalPauseReason | null;
+    goalTokenBudget?: number | null;
+    goalTokensUsed?: number;
+    goalTokensObserved?: ThreadGoalTokenObservation | null;
+    goalBudgetLimitedAt?: string | null;
+  } = {};
+  if (command.goalTokenBudget !== undefined) {
+    // A raised or cleared budget lifts a consumed wrap-up: pursuit resumes
+    // under the new limit instead of staying budget-limited.
+    patch.goalTokenBudget = command.goalTokenBudget;
+    patch.goalBudgetLimitedAt = null;
   }
-  if (pausedAt === null) {
-    return {};
+  if (command.goalTokensObserved !== undefined) {
+    const observed = command.goalTokensObserved;
+    if (observed === null) {
+      patch.goalTokensObserved = null;
+    } else {
+      const previous = currentThread.goalTokensObserved ?? null;
+      // A new provider session reports a fresh cumulative counter, so only
+      // same-session deltas accrue; a restart never double-counts.
+      const delta =
+        previous !== null && previous.sessionId === observed.sessionId
+          ? Math.max(0, observed.totalProcessedTokens - previous.totalProcessedTokens)
+          : 0;
+      patch.goalTokensObserved = observed;
+      if (delta > 0) {
+        patch.goalTokensUsed = (currentThread.goalTokensUsed ?? 0) + delta;
+      }
+    }
   }
-  const startedMs = Date.parse(currentThread.goalStartedAt ?? "");
-  const pausedMs = Date.parse(pausedAt);
-  const occurredMs = Date.parse(occurredAt);
-  const rebasedStartedAt =
-    Number.isFinite(startedMs) && Number.isFinite(pausedMs) && Number.isFinite(occurredMs)
-      ? new Date(occurredMs - Math.max(0, pausedMs - startedMs)).toISOString()
-      : occurredAt;
-  return { goalStartedAt: rebasedStartedAt, goalPausedAt: null };
+  if (
+    command.goalBudgetLimited === true &&
+    currentThread.goalPausedAt == null &&
+    currentThread.goalBudgetLimitedAt == null
+  ) {
+    patch.goalBudgetLimitedAt = occurredAt;
+  }
+  if (command.goalPaused !== undefined) {
+    const pausedAt = currentThread.goalPausedAt ?? null;
+    if (command.goalPaused) {
+      if (pausedAt === null) {
+        patch.goalPausedAt = occurredAt;
+        patch.goalPausedReason = command.goalPausedReason ?? "user";
+      }
+    } else if (pausedAt !== null) {
+      const startedMs = Date.parse(currentThread.goalStartedAt ?? "");
+      const pausedMs = Date.parse(pausedAt);
+      const occurredMs = Date.parse(occurredAt);
+      const rebasedStartedAt =
+        Number.isFinite(startedMs) && Number.isFinite(pausedMs) && Number.isFinite(occurredMs)
+          ? new Date(occurredMs - Math.max(0, pausedMs - startedMs)).toISOString()
+          : occurredAt;
+      patch.goalStartedAt = rebasedStartedAt;
+      patch.goalPausedAt = null;
+      patch.goalPausedReason = null;
+      patch.goalBudgetLimitedAt = null;
+    }
+  }
+  return patch;
 }
 
 function resolveThreadWorkspaceMetadataPatch(
@@ -2168,6 +2248,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           goalPausedAt: pausedAt,
+          goalPausedReason: "user",
           updatedAt: pausedAt,
         },
       };

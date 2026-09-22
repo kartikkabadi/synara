@@ -6131,6 +6131,75 @@ describe("ProviderCommandReactor", () => {
     );
   });
 
+  it("re-aims pursuit when the active goal's objective is edited in place", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-goal-edit-seed"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        goal: "Finish the original objective",
+        goalStartBehavior: "defer",
+      }),
+    );
+    // Editing the staged text before pursuit has a turn stays silent.
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-goal-edit-while-staged"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        goal: "Finish the staged objective",
+      }),
+    );
+    await harness.drain();
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+
+    // A session carrying a turn id is what lands `latestTurn` in the read
+    // model, i.e. marks that goal pursuit has begun on real turns.
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-goal-edit-live-session"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-goal-edit-live"),
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+    await harness.drain();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-goal-edit-in-place"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        goal: "Ship the revised objective",
+      }),
+    );
+    await harness.drain();
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((collected) => Array.from(collected)),
+      ),
+    );
+    const continuation = events.find(
+      (event) =>
+        event.type === "thread.goal-continuation-requested" &&
+        event.payload.trigger === "goal-objective-updated",
+    );
+    expect(continuation).toBeDefined();
+  });
+
   it("promotes queued user work before an automatic goal continuation", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

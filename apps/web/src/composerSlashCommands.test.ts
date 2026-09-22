@@ -178,6 +178,29 @@ describe("composerSlashCommands", () => {
     });
   });
 
+  it("parses /goal budget actions", () => {
+    expect(parseGoalSlashCommandArgs("budget 50000")).toEqual({
+      action: "budget",
+      budget: 50_000,
+    });
+    expect(parseGoalSlashCommandArgs("  BUDGET   0 ")).toEqual({ action: "budget", budget: 0 });
+    expect(parseGoalSlashCommandArgs("budget off")).toEqual({ action: "budget", budget: null });
+    expect(parseGoalSlashCommandArgs("budget clear")).toEqual({ action: "budget", budget: null });
+    expect(parseGoalSlashCommandArgs("budget")).toEqual({ action: "invalid-budget" });
+    expect(parseGoalSlashCommandArgs("budget abc")).toEqual({ action: "invalid-budget" });
+    expect(parseGoalSlashCommandArgs("budget -5")).toEqual({ action: "invalid-budget" });
+    expect(parseGoalSlashCommandArgs("budget 1.5")).toEqual({ action: "invalid-budget" });
+    // A literal goal that merely starts with the control word is not a budget.
+    expect(parseGoalSlashCommandArgs("-- budget 50000")).toEqual({
+      action: "set",
+      goal: "budget 50000",
+    });
+    expect(parseGoalSlashCommandArgs("budgeting for Q4")).toEqual({
+      action: "set",
+      goal: "budgeting for Q4",
+    });
+  });
+
   it.each([
     "clear",
     "pause",

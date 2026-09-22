@@ -31,6 +31,7 @@ import {
   type OrchestrationSession,
   type OrchestrationProjectShell,
   type OrchestrationThread,
+  type ThreadGoalPauseReason,
   ThreadId,
   type ProviderSession,
   type RuntimeMode,
@@ -96,7 +97,9 @@ import {
 } from "../../provider/debugMode.ts";
 import {
   activeThreadGoal,
+  buildGoalBudgetLimitInput,
   buildGoalContinuationInput,
+  buildGoalObjectiveUpdatedInput,
   providerGoalPromptOverheadChars,
   withProviderGoalPrompt,
 } from "../../provider/goalMode.ts";
@@ -2464,6 +2467,7 @@ const make = Effect.gen(function* () {
           yield* pauseActiveThreadGoal({
             threadId: input.threadId,
             expectedGoalStartedAt: thread.goalStartedAt ?? null,
+            reason: "error",
           });
           yield* appendProviderFailureActivity({
             threadId: input.threadId,
@@ -4459,6 +4463,7 @@ const make = Effect.gen(function* () {
   const pauseActiveThreadGoal = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
     readonly expectedGoalStartedAt: string | null;
+    readonly reason: ThreadGoalPauseReason;
   }) {
     const thread = (yield* orchestrationEngine.getReadModel()).threads.find(
       (candidate) => candidate.id === input.threadId,
@@ -4476,6 +4481,7 @@ const make = Effect.gen(function* () {
       commandId: serverCommandId("goal-auto-pause"),
       threadId: input.threadId,
       goalPaused: true,
+      goalPausedReason: input.reason,
     });
   });
 
@@ -4541,11 +4547,17 @@ const make = Effect.gen(function* () {
           });
         }
 
+        const goalContinuationMessageText =
+          event.payload.trigger === "budget-limit"
+            ? buildGoalBudgetLimitInput({ thread, createdAt })
+            : event.payload.trigger === "goal-objective-updated"
+              ? buildGoalObjectiveUpdatedInput({ thread, createdAt })
+              : buildGoalContinuationInput({ thread, createdAt });
         const startedTurn = yield* dispatchTurnForThread({
           threadId: thread.id,
           sourceEventSequence: event.sequence,
           messageId: MessageId.makeUnsafe(`goal-continuation:${event.eventId}`),
-          messageText: buildGoalContinuationInput(),
+          messageText: goalContinuationMessageText,
           runtimeMode: thread.runtimeMode,
           interactionMode: thread.interactionMode,
           dispatchMode: "queue",
@@ -4574,6 +4586,7 @@ const make = Effect.gen(function* () {
                   yield* pauseActiveThreadGoal({
                     threadId: thread.id,
                     expectedGoalStartedAt: event.payload.goalStartedAt,
+                    reason: "error",
                   });
                 }),
           ),
@@ -5561,6 +5574,7 @@ const make = Effect.gen(function* () {
         yield* pauseActiveThreadGoal({
           threadId: thread.id,
           expectedGoalStartedAt: thread.goalStartedAt ?? null,
+          reason: "user",
         });
       }
       yield* processThreadSessionStop({
@@ -5630,6 +5644,7 @@ const make = Effect.gen(function* () {
     yield* pauseActiveThreadGoal({
       threadId: event.payload.threadId,
       expectedGoalStartedAt: event.payload.goalStartedAt,
+      reason: "error",
     });
   });
 
@@ -5688,6 +5703,13 @@ const make = Effect.gen(function* () {
           const thread = yield* resolveThread(event.payload.threadId);
           const startsOrResumesGoal =
             event.payload.goalPausedAt == null && event.payload.goalStartedAt != null;
+          // An in-place objective edit carries `goal` but no fresh
+          // `goalStartedAt` (the running clock keeps going), which distinguishes
+          // it from a fresh set, a clear, or a resume.
+          const goalEditedInPlace =
+            event.payload.goal !== undefined &&
+            (event.payload.goal ?? "").trim().length > 0 &&
+            event.payload.goalStartedAt === undefined;
           if (
             thread &&
             !isExpiredSidechat(thread) &&
@@ -5702,6 +5724,31 @@ const make = Effect.gen(function* () {
               trigger: "goal-updated",
               createdAt: event.payload.updatedAt,
             });
+          } else if (goalEditedInPlace) {
+            // Gate on the synchronous command read model: the async projection
+            // can lag behind this event and report a stale pursuit state.
+            const currentThread = (yield* orchestrationEngine.getReadModel()).threads.find(
+              (candidate) => candidate.id === event.payload.threadId,
+            );
+            if (
+              currentThread &&
+              !isExpiredSidechat(currentThread) &&
+              currentThread.parentThreadId == null &&
+              currentThread.goalPausedAt == null &&
+              // A staged goal that never began pursuit (e.g. goalStartBehavior
+              // "defer") stays silent; the next real turn picks up the new text.
+              currentThread.latestTurn != null &&
+              activeThreadGoal(currentThread)?.trim()
+            ) {
+              yield* orchestrationEngine.dispatch({
+                type: "thread.goal.continue",
+                commandId: CommandId.makeUnsafe(`server:goal-continue:${event.eventId}`),
+                threadId: event.payload.threadId,
+                goalStartedAt: currentThread.goalStartedAt ?? null,
+                trigger: "goal-objective-updated",
+                createdAt: event.payload.updatedAt,
+              });
+            }
           }
           if (event.payload.modelSelection === undefined) {
             return;

@@ -185,6 +185,10 @@ export function threadShellsEqual(left: ThreadShell | undefined, right: ThreadSh
     (left.goal ?? "") === (right.goal ?? "") &&
     (left.goalStartedAt ?? null) === (right.goalStartedAt ?? null) &&
     (left.goalPausedAt ?? null) === (right.goalPausedAt ?? null) &&
+    (left.goalPausedReason ?? null) === (right.goalPausedReason ?? null) &&
+    (left.goalTokenBudget ?? null) === (right.goalTokenBudget ?? null) &&
+    (left.goalTokensUsed ?? 0) === (right.goalTokensUsed ?? 0) &&
+    (left.goalBudgetLimitedAt ?? null) === (right.goalBudgetLimitedAt ?? null) &&
     deepEqualJson(left.goalAchievements ?? null, right.goalAchievements ?? null) &&
     left.latestUserMessageAt === right.latestUserMessageAt &&
     left.latestHumanMessageAt === right.latestHumanMessageAt &&
@@ -1627,6 +1631,10 @@ export function normalizeThreadFromReadModel(
   const goal = incoming.goal;
   const goalStartedAt = incoming.goalStartedAt;
   const goalPausedAt = incoming.goalPausedAt;
+  const goalPausedReason = incoming.goalPausedReason;
+  const goalTokenBudget = incoming.goalTokenBudget;
+  const goalTokensUsed = incoming.goalTokensUsed;
+  const goalBudgetLimitedAt = incoming.goalBudgetLimitedAt;
   const goalAchievements =
     previous?.goalAchievements &&
     deepEqualJson(previous.goalAchievements, incoming.goalAchievements ?? null)
@@ -1740,6 +1748,10 @@ export function normalizeThreadFromReadModel(
     previous.goal === goal &&
     (previous.goalStartedAt ?? null) === (goalStartedAt ?? null) &&
     (previous.goalPausedAt ?? null) === (goalPausedAt ?? null) &&
+    (previous.goalPausedReason ?? null) === (goalPausedReason ?? null) &&
+    (previous.goalTokenBudget ?? null) === (goalTokenBudget ?? null) &&
+    (previous.goalTokensUsed ?? 0) === (goalTokensUsed ?? 0) &&
+    (previous.goalBudgetLimitedAt ?? null) === (goalBudgetLimitedAt ?? null) &&
     previous.goalAchievements === goalAchievements &&
     previous.turnDiffSummaries === turnDiffSummaries &&
     previous.activities === activities &&
@@ -1795,6 +1807,10 @@ export function normalizeThreadFromReadModel(
     ...(goal !== undefined ? { goal } : {}),
     ...(goalStartedAt !== undefined ? { goalStartedAt } : {}),
     ...(goalPausedAt !== undefined ? { goalPausedAt } : {}),
+    ...(goalPausedReason !== undefined ? { goalPausedReason } : {}),
+    ...(goalTokenBudget !== undefined ? { goalTokenBudget } : {}),
+    ...(goalTokensUsed !== undefined ? { goalTokensUsed } : {}),
+    ...(goalBudgetLimitedAt !== undefined ? { goalBudgetLimitedAt } : {}),
     ...(goalAchievements !== undefined ? { goalAchievements } : {}),
     ...(resolvedLatestHumanMessageAt !== undefined
       ? { latestHumanMessageAt: resolvedLatestHumanMessageAt }
@@ -1864,6 +1880,18 @@ export function normalizeThreadShellSnapshot(
     incoming.goalStartedAt !== undefined ? incoming.goalStartedAt : previous?.goalStartedAt;
   const goalPausedAt =
     incoming.goalPausedAt !== undefined ? incoming.goalPausedAt : previous?.goalPausedAt;
+  const goalPausedReason =
+    incoming.goalPausedReason !== undefined
+      ? incoming.goalPausedReason
+      : previous?.goalPausedReason;
+  const goalTokenBudget =
+    incoming.goalTokenBudget !== undefined ? incoming.goalTokenBudget : previous?.goalTokenBudget;
+  const goalTokensUsed =
+    incoming.goalTokensUsed !== undefined ? incoming.goalTokensUsed : previous?.goalTokensUsed;
+  const goalBudgetLimitedAt =
+    incoming.goalBudgetLimitedAt !== undefined
+      ? incoming.goalBudgetLimitedAt
+      : previous?.goalBudgetLimitedAt;
   const resolvedBranch = resolveThreadBranchRegressionGuard({
     currentBranch: previous?.branch ?? null,
     nextBranch: incoming.branch,
@@ -1928,6 +1956,10 @@ export function normalizeThreadShellSnapshot(
     ...(goal !== undefined ? { goal } : {}),
     ...(goalStartedAt !== undefined ? { goalStartedAt } : {}),
     ...(goalPausedAt !== undefined ? { goalPausedAt } : {}),
+    ...(goalPausedReason !== undefined ? { goalPausedReason } : {}),
+    ...(goalTokenBudget !== undefined ? { goalTokenBudget } : {}),
+    ...(goalTokensUsed !== undefined ? { goalTokensUsed } : {}),
+    ...(goalBudgetLimitedAt !== undefined ? { goalBudgetLimitedAt } : {}),
     ...(incoming.latestHumanMessageAt !== undefined
       ? { latestHumanMessageAt: incoming.latestHumanMessageAt }
       : {}),

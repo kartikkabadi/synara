@@ -696,11 +696,35 @@ export const ThreadGoalStartBehavior = Schema.Literals(["start-if-idle", "defer"
 export type ThreadGoalStartBehavior = typeof ThreadGoalStartBehavior.Type;
 export const ThreadGoalContinuationTrigger = Schema.Literals([
   "goal-updated",
+  // The user edited the objective text of a still-active goal in place, so the
+  // pursuit is re-aimed at the new wording without restarting the clock.
+  "goal-objective-updated",
   "interaction-mode-updated",
   "turn-completed",
   "startup-recovery",
+  // The goal's token budget was exhausted: grants the agent one wrap-up turn
+  // before the goal auto-pauses with reason "budget".
+  "budget-limit",
 ]);
 export type ThreadGoalContinuationTrigger = typeof ThreadGoalContinuationTrigger.Type;
+/**
+ * Why a goal is paused. `user` is the default for user-driven pauses, `blocked`
+ * comes from the agent's `synara_set_thread_goal({blocked: true})`, `error` is
+ * an automatic safety pause after a failed turn/dispatch, and `budget` is the
+ * automatic pause after the token budget's wrap-up turn.
+ */
+export const ThreadGoalPauseReason = Schema.Literals(["user", "blocked", "error", "budget"]);
+export type ThreadGoalPauseReason = typeof ThreadGoalPauseReason.Type;
+/**
+ * The last processed-token total observed for one provider session while the
+ * goal was active. Persisted so goal token accounting survives server restarts:
+ * the decider diffs each newer observation against it.
+ */
+export const ThreadGoalTokenObservation = Schema.Struct({
+  sessionId: TrimmedNonEmptyString,
+  totalProcessedTokens: NonNegativeInt,
+});
+export type ThreadGoalTokenObservation = typeof ThreadGoalTokenObservation.Type;
 /**
  * Goal pursuit timing. `goalStartedAt` is (re)stamped by the decider whenever a
  * non-empty goal is set and rebased on resume so `now - goalStartedAt` is always
@@ -710,6 +734,20 @@ export type ThreadGoalContinuationTrigger = typeof ThreadGoalContinuationTrigger
 export const ThreadGoalTimingFields = {
   goalStartedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   goalPausedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+};
+/**
+ * Remaining goal pursuit state: the pause reason that distinguishes a user
+ * pause from an agent-reported blocker or a safety/budget auto-pause, the
+ * optional processed-token budget with its accumulated usage and last observed
+ * provider-session total, and the timestamp marking an already-granted budget
+ * wrap-up turn.
+ */
+export const ThreadGoalPursuitFields = {
+  goalPausedReason: Schema.optional(Schema.NullOr(ThreadGoalPauseReason)),
+  goalTokenBudget: Schema.optional(Schema.NullOr(NonNegativeInt)),
+  goalTokensUsed: Schema.optional(NonNegativeInt),
+  goalTokensObserved: Schema.optional(Schema.NullOr(ThreadGoalTokenObservation)),
+  goalBudgetLimitedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
 };
 /**
  * A completed goal, recorded when the decider processes a `goalAchieved` intent.
@@ -722,6 +760,8 @@ export const ThreadGoalAchievement = Schema.Struct({
   achievedAt: IsoDateTime,
   elapsedMs: Schema.NullOr(Schema.Number),
   turnId: Schema.NullOr(TurnId),
+  // Processed tokens accrued while the goal was active (0 for legacy goals).
+  tokensUsed: Schema.optional(NonNegativeInt),
 });
 export type ThreadGoalAchievement = typeof ThreadGoalAchievement.Type;
 export const THREAD_GOAL_ACHIEVEMENTS_MAX_COUNT = 20;
@@ -876,6 +916,7 @@ export const OrchestrationThread = Schema.Struct({
   notes: Schema.optional(ThreadNotes),
   goal: Schema.optional(ThreadGoal),
   ...ThreadGoalTimingFields,
+  ...ThreadGoalPursuitFields,
   goalAchievements: Schema.optional(ThreadGoalAchievements),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(Schema.withDecodingDefault(() => [])),
@@ -966,6 +1007,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   handoff: Schema.NullOr(ThreadHandoff).pipe(Schema.withDecodingDefault(() => null)),
   goal: Schema.optional(ThreadGoal),
   ...ThreadGoalTimingFields,
+  ...ThreadGoalPursuitFields,
   session: Schema.NullOr(OrchestrationSession),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
@@ -1284,10 +1326,21 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   goal: Schema.optional(ThreadGoal),
   goalStartBehavior: Schema.optional(ThreadGoalStartBehavior),
   // Desired paused state; the decider stamps the authoritative goal timestamps.
+  // goalPausedReason is stamped alongside goalPausedAt (default "user") and
+  // cleared on resume.
   goalPaused: Schema.optional(Schema.Boolean),
+  goalPausedReason: Schema.optional(ThreadGoalPauseReason),
   // Marks the active goal accomplished: the decider records a ThreadGoalAchievement
   // (with pause-adjusted elapsed time) and clears the goal in the same event.
   goalAchieved: Schema.optional(Schema.Boolean),
+  // Desired processed-token budget for the goal; null clears it.
+  goalTokenBudget: Schema.optional(Schema.NullOr(NonNegativeInt)),
+  // Server-side accounting: latest per-session processed-token total observed
+  // while the goal was active. The decider diffs it into goalTokensUsed.
+  goalTokensObserved: Schema.optional(Schema.NullOr(ThreadGoalTokenObservation)),
+  // Server-side: grants the single budget-exhaustion wrap-up turn by stamping
+  // goalBudgetLimitedAt. Cleared on resume so each crossing can wrap up once.
+  goalBudgetLimited: Schema.optional(Schema.Boolean),
 });
 
 const ThreadPinnedMessageAddCommand = Schema.Struct({
@@ -2017,6 +2070,11 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   goalStartBehavior: Schema.optional(ThreadGoalStartBehavior),
   goalStartedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   goalPausedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  goalPausedReason: Schema.optional(Schema.NullOr(ThreadGoalPauseReason)),
+  goalTokenBudget: Schema.optional(Schema.NullOr(NonNegativeInt)),
+  goalTokensUsed: Schema.optional(NonNegativeInt),
+  goalTokensObserved: Schema.optional(Schema.NullOr(ThreadGoalTokenObservation)),
+  goalBudgetLimitedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   goalAchievements: Schema.optional(ThreadGoalAchievements),
   updatedAt: IsoDateTime,
 });
