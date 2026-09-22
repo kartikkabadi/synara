@@ -413,10 +413,6 @@ export function PluginLibrary() {
       plugins: supportsPluginDiscovery(devinCapabilitiesQuery.data),
       skills: supportsSkillDiscovery(devinCapabilitiesQuery.data),
     },
-    devinCloud: {
-      plugins: false,
-      skills: false,
-    },
     antigravity: {
       plugins: supportsPluginDiscovery(antigravityCapabilitiesQuery.data),
       skills: supportsSkillDiscovery(antigravityCapabilitiesQuery.data),

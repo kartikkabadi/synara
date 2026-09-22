@@ -133,7 +133,6 @@ export function useProviderModelCatalog(input: {
   const openCodeModelDiscoveryEnabled = shouldDiscoverProvider("opencode");
   const piModelDiscoveryEnabled = shouldDiscoverProvider("pi");
   const devinModelDiscoveryEnabled = shouldDiscoverProvider("devin");
-  const devinCloudModelDiscoveryEnabled = shouldDiscoverProvider("devinCloud");
 
   const modelQueryOptionsByProvider = {
     claudeAgent: providerModelsQueryOptions({
@@ -189,12 +188,6 @@ export function useProviderModelCatalog(input: {
       cwd: discoveryCwd,
       enabled: devinModelDiscoveryEnabled,
     }),
-    devinCloud: providerModelsQueryOptions({
-      provider: "devinCloud",
-      binaryPath: settings.devinCloudBinaryPath || null,
-      cwd: discoveryCwd,
-      enabled: devinCloudModelDiscoveryEnabled,
-    }),
   } as const;
 
   const claudeDynamicModelsQuery = useQuery(modelQueryOptionsByProvider.claudeAgent);
@@ -206,7 +199,6 @@ export function useProviderModelCatalog(input: {
   const openCodeDynamicModelsQuery = useQuery(modelQueryOptionsByProvider.opencode);
   const piDynamicModelsQuery = useQuery(modelQueryOptionsByProvider.pi);
   const devinDynamicModelsQuery = useQuery(modelQueryOptionsByProvider.devin);
-  const devinCloudDynamicModelsQuery = useQuery(modelQueryOptionsByProvider.devinCloud);
 
   const [, , modelProvider, modelBinaryPath, modelApiEndpoint, modelAgentDir, modelCwd] =
     modelQueryOptionsByProvider[selectedProvider].queryKey;
@@ -299,8 +291,6 @@ export function useProviderModelCatalog(input: {
     devinModelDiscoveryEnabled &&
     !hasResolvedDevinModelDiscovery &&
     isInitialModelDiscoveryPending(devinDynamicModelsQuery);
-  const devinCloudModelDiscoveryPending =
-    devinCloudModelDiscoveryEnabled && isInitialModelDiscoveryPending(devinCloudDynamicModelsQuery);
   const antigravityModelDiscoveryPending =
     antigravityModelDiscoveryEnabled &&
     !(
@@ -336,11 +326,6 @@ export function useProviderModelCatalog(input: {
       ),
       pi: getAppModelOptions("pi", customModelsByProvider.pi, modelHintByProvider?.pi),
       devin: getAppModelOptions("devin", customModelsByProvider.devin, modelHintByProvider?.devin),
-      devinCloud: getAppModelOptions(
-        "devinCloud",
-        customModelsByProvider.devinCloud,
-        modelHintByProvider?.devinCloud,
-      ),
     };
     const result: Record<
       ProviderKind,
@@ -359,7 +344,6 @@ export function useProviderModelCatalog(input: {
       opencode: openCodeDynamicModelsQuery.data,
       pi: piDynamicModelsQuery.data,
       devin: devinDynamicModelsQuery.data,
-      devinCloud: devinCloudDynamicModelsQuery.data,
     };
     for (const provider of [
       "claudeAgent",
@@ -371,7 +355,6 @@ export function useProviderModelCatalog(input: {
       "opencode",
       "pi",
       "devin",
-      "devinCloud",
     ] as const) {
       const discovery = dynamicSources[provider];
       const dynamicModels = discovery?.models;
@@ -401,7 +384,6 @@ export function useProviderModelCatalog(input: {
     openCodeDynamicModelsQuery.data,
     piDynamicModelsQuery.data,
     devinDynamicModelsQuery.data,
-    devinCloudDynamicModelsQuery.data,
   ]);
 
   const loadingModelProviders = useMemo<Partial<Record<ProviderKind, boolean>>>(
@@ -412,7 +394,6 @@ export function useProviderModelCatalog(input: {
       opencode: openCodeModelDiscoveryPending,
       pi: piModelDiscoveryPending,
       devin: devinModelDiscoveryPending,
-      devinCloud: devinCloudModelDiscoveryPending,
     }),
     [
       antigravityModelDiscoveryPending,
@@ -421,7 +402,6 @@ export function useProviderModelCatalog(input: {
       openCodeModelDiscoveryPending,
       piModelDiscoveryPending,
       devinModelDiscoveryPending,
-      devinCloudModelDiscoveryPending,
     ],
   );
 
@@ -438,7 +418,6 @@ export function useProviderModelCatalog(input: {
       opencode: openCodeDynamicModelsQuery.data?.models ?? [],
       pi: piDynamicModelsQuery.data?.models ?? [],
       devin: devinDynamicModelsQuery.data?.models ?? [],
-      devinCloud: devinCloudDynamicModelsQuery.data?.models ?? [],
     }),
     [
       antigravityModelsQuery.data?.models,
@@ -450,7 +429,6 @@ export function useProviderModelCatalog(input: {
       openCodeDynamicModelsQuery.data?.models,
       piDynamicModelsQuery.data?.models,
       devinDynamicModelsQuery.data?.models,
-      devinCloudDynamicModelsQuery.data?.models,
     ],
   );
 
@@ -548,9 +526,7 @@ export function useProviderModelCatalog(input: {
                   ? openCodeDynamicModelsQuery
                   : selectedProvider === "pi"
                     ? piDynamicModelsQuery
-                    : selectedProvider === "devin"
-                      ? devinDynamicModelsQuery
-                      : devinCloudDynamicModelsQuery;
+                    : devinDynamicModelsQuery;
   const selectedProviderModelsLoading =
     selectedProviderRuntimeModelDiscoveryPending ||
     (loadingModelProviders[selectedProvider] === undefined &&

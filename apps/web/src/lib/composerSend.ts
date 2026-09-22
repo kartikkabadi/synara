@@ -234,10 +234,6 @@ export function resolvePromptEffortFromModelSelection(
       return modelSelection.options?.reasoningEffort ?? null;
     case "pi":
       return modelSelection.options?.thinkingLevel ?? null;
-    case "devinCloud":
-      // Devin Cloud's agent mode is carried by the model slug itself, never a
-      // prompt-injected effort prefix.
-      return null;
     case "devin":
       return (
         modelSelection.options?.reasoningEffort ??

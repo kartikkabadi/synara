@@ -116,7 +116,6 @@ export function useChatProviderModels({
       opencode: resolveHint("opencode"),
       pi: resolveHint("pi"),
       devin: resolveHint("devin"),
-      devinCloud: resolveHint("devinCloud"),
     };
   }, [
     activeProject?.defaultModelSelection,

@@ -157,7 +157,6 @@ const allProvidersDisabledSettings = {
     claudeAgent: { enabled: false },
     cursor: { enabled: false },
     devin: { enabled: false },
-    devinCloud: { enabled: false },
     antigravity: { enabled: false },
     grok: { enabled: false },
     droid: { enabled: false },
@@ -173,7 +172,6 @@ const allProvidersDisabledServerSettings = {
     claudeAgent: { ...DEFAULT_SERVER_SETTINGS.providers.claudeAgent, enabled: false },
     cursor: { ...DEFAULT_SERVER_SETTINGS.providers.cursor, enabled: false },
     devin: { ...DEFAULT_SERVER_SETTINGS.providers.devin, enabled: false },
-    devinCloud: { ...DEFAULT_SERVER_SETTINGS.providers.devinCloud, enabled: false },
     antigravity: { ...DEFAULT_SERVER_SETTINGS.providers.antigravity, enabled: false },
     grok: { ...DEFAULT_SERVER_SETTINGS.providers.grok, enabled: false },
     droid: { ...DEFAULT_SERVER_SETTINGS.providers.droid, enabled: false },
@@ -504,7 +502,7 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
       );
       const codex = statuses.find((status) => status.provider === "codex");
 
-      assert.strictEqual(statuses.length, 10);
+      assert.strictEqual(statuses.length, 9);
       assert.strictEqual(codex?.available, false);
       assert.strictEqual(codex?.message, "Provider is disabled in Synara settings.");
     });
@@ -639,7 +637,7 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
         const providerHealth = yield* ProviderHealth;
         const statuses = yield* providerHealth.refresh;
 
-        assert.strictEqual(statuses.length, 10);
+        assert.strictEqual(statuses.length, 9);
         for (const status of statuses) {
           assert.strictEqual(status.available, false);
           assert.strictEqual(status.message, "Provider is disabled in Synara settings.");
@@ -2353,16 +2351,36 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
       );
     });
 
-    it.effect("returns unavailable when Devin CLI is missing", () =>
-      Effect.gen(function* () {
-        const status = yield* checkDevinProviderStatus;
+    it.effect("returns unavailable when Devin CLI is missing and no credential resolves", () => {
+      const previousWindsurfKey = process.env.WINDSURF_API_KEY;
+      const previousDevinKey = process.env.DEVIN_API_KEY;
+      delete process.env.WINDSURF_API_KEY;
+      delete process.env.DEVIN_API_KEY;
+      return Effect.gen(function* () {
+        const status = yield* makeCheckDevinProviderStatus(undefined, async () => undefined);
         assert.strictEqual(status.provider, "devin");
         assert.strictEqual(status.status, "error");
         assert.strictEqual(status.available, false);
         assert.strictEqual(status.authStatus, "unknown");
         assert.strictEqual(status.message, "Devin CLI (`devin`) is not installed or not on PATH.");
-      }).pipe(Effect.provide(failingSpawnerLayer("spawn devin ENOENT"))),
-    );
+      }).pipe(
+        Effect.provide(failingSpawnerLayer("spawn devin ENOENT")),
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (previousWindsurfKey === undefined) {
+              delete process.env.WINDSURF_API_KEY;
+            } else {
+              process.env.WINDSURF_API_KEY = previousWindsurfKey;
+            }
+            if (previousDevinKey === undefined) {
+              delete process.env.DEVIN_API_KEY;
+            } else {
+              process.env.DEVIN_API_KEY = previousDevinKey;
+            }
+          }),
+        ),
+      );
+    });
 
     it.effect("uses the configured Devin binary for the version probe", () =>
       Effect.gen(function* () {

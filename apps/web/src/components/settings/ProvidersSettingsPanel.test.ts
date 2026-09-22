@@ -65,7 +65,6 @@ describe("createProviderInstallResetPatch", () => {
         "cursorApiEndpoint",
         "cursorBinaryPath",
         "devinBinaryPath",
-        "devinCloudBinaryPath",
         "devinCloudMode",
         "devinCloudOrgId",
         "devinCloudServerPassword",

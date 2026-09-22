@@ -63,11 +63,10 @@ function serverSettings(overrides: Partial<ServerSettings["providers"]> = {}): S
       codex: { ...provider, binaryPath: "codex", homePath: "" },
       claudeAgent: { ...provider, binaryPath: "claude", launchArgs: "", enableArtifacts: false },
       cursor: { ...provider, binaryPath: "cursor-agent", apiEndpoint: "" },
-      devin: { ...provider, binaryPath: "devin" },
-      devinCloud: {
+      devin: {
         ...provider,
         binaryPath: "devin",
-        mode: "auto",
+        cloudMode: "auto",
         orgId: "",
         serverPasswordConfigured: false,
       },

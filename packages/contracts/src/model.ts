@@ -168,20 +168,31 @@ export const DEVIN_CLOUD_AGENT_MODE_OPTIONS = [
 ] as const;
 export type DevinCloudAgentMode = (typeof DEVIN_CLOUD_AGENT_MODE_OPTIONS)[number];
 
-// Devin Cloud's v3 API takes devin_mode, not a model catalog. The model slug
-// (auto|normal|fast|lite|ultra|fusion) is the primary selector; the optional
-// explicit mode overrides it for programmatic (agent-gateway) callers.
-export const DevinCloudModelOptions = Schema.Struct({
-  mode: Schema.optional(Schema.Literals(DEVIN_CLOUD_AGENT_MODE_OPTIONS)),
-});
-export type DevinCloudModelOptions = typeof DevinCloudModelOptions.Type;
+// Devin Cloud sessions ride the `devin` provider: the cloud agent mode is
+// selected through a `cloud/<mode>` model slug ("cloud/auto" = org default).
+export const DEVIN_CLOUD_MODEL_SLUG_PREFIX = "cloud/" as const;
+
+/** Returns the Devin Cloud agent mode for a `cloud/<mode>` slug, else null. */
+export function devinCloudModeFromModelSlug(
+  model: string | null | undefined,
+): DevinCloudAgentMode | "auto" | null {
+  if (typeof model !== "string" || !model.startsWith(DEVIN_CLOUD_MODEL_SLUG_PREFIX)) {
+    return null;
+  }
+  const mode = model.slice(DEVIN_CLOUD_MODEL_SLUG_PREFIX.length).trim();
+  if (mode === "auto") {
+    return "auto";
+  }
+  return (DEVIN_CLOUD_AGENT_MODE_OPTIONS as readonly string[]).includes(mode)
+    ? (mode as DevinCloudAgentMode)
+    : null;
+}
 
 export const ProviderModelOptions = Schema.Struct({
   codex: Schema.optional(CodexModelOptions),
   claudeAgent: Schema.optional(ClaudeModelOptions),
   cursor: Schema.optional(CursorModelOptions),
   devin: Schema.optional(DevinModelOptions),
-  devinCloud: Schema.optional(DevinCloudModelOptions),
   antigravity: Schema.optional(AntigravityModelOptions),
   grok: Schema.optional(GrokModelOptions),
   droid: Schema.optional(DroidModelOptions),
@@ -576,6 +587,9 @@ type ModelDefinition = {
   readonly slug: string;
   readonly name: string;
   readonly capabilities: ModelCapabilities;
+  /** Groups the option under a named section in provider model menus. */
+  readonly upstreamProviderId?: string;
+  readonly upstreamProviderName?: string;
 };
 
 // Static catalog entries that rely on live CLI discovery advertise no
@@ -1144,42 +1158,50 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
         contextWindowOptions: [],
       },
     },
-  ],
-  // Devin Cloud's v3 API takes devin_mode, not a model catalog. "auto" omits
-  // devin_mode so the org default applies.
-  devinCloud: [
+    // Devin Cloud entries: the cloud agent mode is the `cloud/<mode>` slug
+    // ("cloud/auto" omits devin_mode so the org default applies). They group
+    // under a "Devin Cloud" section inside Devin's model menu.
     {
-      slug: "auto",
-      // Keep the display name identical to other providers' `auto` entries:
-      // MODEL_NAME_BY_SLUG is a global slug→name table and later providers
-      // overwrite earlier ones.
+      slug: "cloud/auto",
       name: "Auto",
       capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
     },
     {
-      slug: "normal",
+      slug: "cloud/normal",
       name: "Normal",
       capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
     },
     {
-      slug: "fast",
+      slug: "cloud/fast",
       name: "Fast",
       capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
     },
     {
-      slug: "lite",
+      slug: "cloud/lite",
       name: "Lite",
       capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
     },
     {
-      slug: "ultra",
+      slug: "cloud/ultra",
       name: "Ultra",
       capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
     },
     {
-      slug: "fusion",
+      slug: "cloud/fusion",
       name: "Fusion",
       capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
     },
   ],
 } as const satisfies Record<ProviderKind, readonly ModelDefinition[]>;
@@ -1195,7 +1217,6 @@ export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderWithDefaultModel, ModelSl
   claudeAgent: "claude-sonnet-5",
   cursor: "auto",
   devin: "adaptive",
-  devinCloud: "auto",
   antigravity: "Gemini 3.5 Flash",
   grok: "grok-4.6",
   droid: "claude-opus-4-8",
@@ -1361,15 +1382,6 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
   },
   opencode: {},
   pi: {},
-  devinCloud: {
-    auto: "auto",
-    default: "auto",
-    normal: "normal",
-    fast: "fast",
-    lite: "lite",
-    ultra: "ultra",
-    fusion: "fusion",
-  },
   devin: {
     adaptive: "adaptive",
     auto: "adaptive",
@@ -1421,7 +1433,6 @@ export const PROVIDER_DISPLAY_NAMES: Record<ProviderKind, string> = {
   claudeAgent: "Claude",
   cursor: "Cursor",
   devin: "Devin",
-  devinCloud: "Devin Cloud",
   antigravity: "Antigravity",
   grok: "Grok",
   droid: "Droid",

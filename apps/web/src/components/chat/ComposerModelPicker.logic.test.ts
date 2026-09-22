@@ -30,7 +30,6 @@ const EMPTY_MODEL_OPTIONS: Record<ProviderKind, ReadonlyArray<ProviderModelOptio
   claudeAgent: [],
   cursor: [],
   devin: [],
-  devinCloud: [],
   antigravity: [],
   grok: [],
   droid: [],

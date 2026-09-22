@@ -34,7 +34,6 @@ describe("provider usage metadata", () => {
       "opencode",
       "pi",
       "devin",
-      "devinCloud",
     ]);
   });
 

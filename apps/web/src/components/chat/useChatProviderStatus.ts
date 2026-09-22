@@ -56,8 +56,6 @@ function getProviderStartOptionsCustomBinaryPath(
       return normalizeCustomBinaryPath(providerOptions?.cursor?.binaryPath);
     case "devin":
       return normalizeCustomBinaryPath(providerOptions?.devin?.binaryPath);
-    case "devinCloud":
-      return normalizeCustomBinaryPath(providerOptions?.devinCloud?.binaryPath);
     case "pi":
       return normalizeCustomBinaryPath(providerOptions?.pi?.binaryPath);
   }

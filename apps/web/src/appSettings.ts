@@ -145,7 +145,6 @@ type CustomModelSettingsKey =
   | "customGrokModels"
   | "customDroidModels"
   | "customDevinModels"
-  | "customDevinCloudModels"
   | "customOpenCodeModels"
   | "customPiModels";
 export type ProviderCustomModelConfig = {
@@ -163,7 +162,6 @@ const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>
   claudeAgent: new Set(getModelOptions("claudeAgent").map((option) => option.slug)),
   cursor: new Set(getModelOptions("cursor").map((option) => option.slug)),
   devin: new Set(getModelOptions("devin").map((option) => option.slug)),
-  devinCloud: new Set(getModelOptions("devinCloud").map((option) => option.slug)),
   antigravity: new Set(getModelOptions("antigravity").map((option) => option.slug)),
   grok: new Set(getModelOptions("grok").map((option) => option.slug)),
   droid: new Set(getModelOptions("droid").map((option) => option.slug)),
@@ -204,6 +202,7 @@ const PersistedProviderKind = Schema.Literals([
       decode: (provider) => {
         if (provider === "gemini") return "antigravity";
         if (provider === "kilo") return "opencode";
+        if (provider === "devinCloud") return "devin";
         return provider;
       },
       encode: (provider) => provider,
@@ -217,6 +216,7 @@ const PersistedProviderKind = Schema.Literals([
 // values are dropped too instead of failing the whole settings decode.
 const RENAMED_PROVIDERS: Readonly<Record<string, ProviderKind>> = {
   gemini: "antigravity",
+  devinCloud: "devin",
 };
 
 function resolvePersistedProviderListEntry(provider: string): ProviderKind | undefined {
@@ -280,7 +280,6 @@ export const AppSettingsSchema = Schema.Struct({
   cursorBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   cursorApiEndpoint: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   devinBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
-  devinCloudBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   devinCloudMode: DevinCloudProviderMode.pipe(withDefaults(() => "auto" as const)),
   devinCloudOrgId: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   devinCloudServerPassword: Schema.String.check(Schema.isMaxLength(4096)).pipe(
@@ -398,7 +397,6 @@ export const AppSettingsSchema = Schema.Struct({
   customClaudeModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
   customCursorModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
   customDevinModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
-  customDevinCloudModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
   customAntigravityModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
   customGeminiModels: Schema.optionalKey(Schema.Array(Schema.String)),
   customGrokModels: Schema.Array(Schema.String).pipe(withDefaults(() => [])),
@@ -492,15 +490,6 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
     description: "Save additional Devin model slugs for the picker and provider runtime.",
     placeholder: "devin-model-slug",
     example: "adaptive",
-  },
-  devinCloud: {
-    provider: "devinCloud",
-    settingsKey: "customDevinCloudModels",
-    defaultSettingsKey: "customDevinCloudModels",
-    title: "Devin Cloud",
-    description: "Save additional Devin Cloud mode slugs for the picker and provider runtime.",
-    placeholder: "devin-cloud-mode-slug",
-    example: "ultra",
   },
   antigravity: {
     provider: "antigravity",
@@ -697,10 +686,6 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     codexBinaryPath: normalizeProviderBinaryPathOverride("codex", settings.codexBinaryPath),
     cursorBinaryPath: normalizeProviderBinaryPathOverride("cursor", settings.cursorBinaryPath),
     devinBinaryPath: normalizeProviderBinaryPathOverride("devin", settings.devinBinaryPath),
-    devinCloudBinaryPath: normalizeProviderBinaryPathOverride(
-      "devinCloud",
-      settings.devinCloudBinaryPath,
-    ),
     antigravityBinaryPath: normalizeProviderBinaryPathOverride(
       "antigravity",
       settings.antigravityBinaryPath || legacyGeminiBinaryPath,
@@ -723,10 +708,6 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     customClaudeModels: normalizeCustomModelSlugs(settings.customClaudeModels, "claudeAgent"),
     customCursorModels: normalizeCustomModelSlugs(settings.customCursorModels, "cursor"),
     customDevinModels: normalizeCustomModelSlugs(settings.customDevinModels, "devin"),
-    customDevinCloudModels: normalizeCustomModelSlugs(
-      settings.customDevinCloudModels,
-      "devinCloud",
-    ),
     customAntigravityModels: normalizeCustomModelSlugs(
       [...settings.customAntigravityModels, ...(legacyCustomGeminiModels ?? [])],
       "antigravity",
@@ -782,10 +763,9 @@ function serverSettingsToAppSettings(settings: ServerSettingsView): Partial<AppS
     cursorApiEndpoint: settings.providers.cursor.apiEndpoint,
     cursorBinaryPath: settings.providers.cursor.binaryPath,
     devinBinaryPath: settings.providers.devin.binaryPath,
-    devinCloudBinaryPath: settings.providers.devinCloud.binaryPath,
-    devinCloudMode: settings.providers.devinCloud.mode,
-    devinCloudOrgId: settings.providers.devinCloud.orgId,
-    devinCloudServerPasswordConfigured: settings.providers.devinCloud.serverPasswordConfigured,
+    devinCloudMode: settings.providers.devin.cloudMode,
+    devinCloudOrgId: settings.providers.devin.orgId,
+    devinCloudServerPasswordConfigured: settings.providers.devin.serverPasswordConfigured,
     defaultThreadEnvMode: settings.defaultThreadEnvMode,
     enableAssistantStreaming: settings.enableAssistantStreaming,
     enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
@@ -802,7 +782,6 @@ function serverSettingsToAppSettings(settings: ServerSettingsView): Partial<AppS
     customClaudeModels: settings.providers.claudeAgent.customModels,
     customCursorModels: settings.providers.cursor.customModels,
     customDevinModels: settings.providers.devin.customModels,
-    customDevinCloudModels: settings.providers.devinCloud.customModels,
     customAntigravityModels: settings.providers.antigravity.customModels,
     customGrokModels: settings.providers.grok.customModels,
     customDroidModels: settings.providers.droid.customModels,
@@ -834,7 +813,6 @@ function touchesProviderDiscoverySettings(patch: Partial<AppSettings>): boolean 
   return (
     hasOwn(patch, "claudeEnableArtifacts") ||
     hasOwn(patch, "devinBinaryPath") ||
-    hasOwn(patch, "devinCloudBinaryPath") ||
     hasOwn(patch, "openCodeBinaryPath") ||
     hasOwn(patch, "openCodeExperimentalWebSockets") ||
     hasOwn(patch, "openCodeServerPassword") ||
@@ -948,32 +926,22 @@ export function appSettingsPatchToServerSettingsPatch(
         : {}),
     };
   }
-  if (hasOwn(patch, "devinBinaryPath") || hasOwn(patch, "customDevinModels")) {
-    providers.devin = {
-      ...(hasOwn(patch, "devinBinaryPath") ? { binaryPath: patch.devinBinaryPath ?? "" } : {}),
-      ...(hasOwn(patch, "customDevinModels")
-        ? { customModels: patch.customDevinModels ?? [] }
-        : {}),
-    };
-  }
   if (
-    hasOwn(patch, "devinCloudBinaryPath") ||
+    hasOwn(patch, "devinBinaryPath") ||
     hasOwn(patch, "devinCloudMode") ||
     hasOwn(patch, "devinCloudOrgId") ||
     hasOwn(patch, "devinCloudServerPassword") ||
-    hasOwn(patch, "customDevinCloudModels")
+    hasOwn(patch, "customDevinModels")
   ) {
-    providers.devinCloud = {
-      ...(hasOwn(patch, "devinCloudBinaryPath")
-        ? { binaryPath: patch.devinCloudBinaryPath ?? "" }
-        : {}),
-      ...(hasOwn(patch, "devinCloudMode") ? { mode: patch.devinCloudMode ?? "auto" } : {}),
+    providers.devin = {
+      ...(hasOwn(patch, "devinBinaryPath") ? { binaryPath: patch.devinBinaryPath ?? "" } : {}),
+      ...(hasOwn(patch, "devinCloudMode") ? { cloudMode: patch.devinCloudMode ?? "auto" } : {}),
       ...(hasOwn(patch, "devinCloudOrgId") ? { orgId: patch.devinCloudOrgId ?? "" } : {}),
       ...(hasOwn(patch, "devinCloudServerPassword")
         ? { serverPassword: patch.devinCloudServerPassword ?? "" }
         : {}),
-      ...(hasOwn(patch, "customDevinCloudModels")
-        ? { customModels: patch.customDevinCloudModels ?? [] }
+      ...(hasOwn(patch, "customDevinModels")
+        ? { customModels: patch.customDevinModels ?? [] }
         : {}),
     };
   }
@@ -1079,7 +1047,6 @@ function buildInitialServerSettingsMigrationPatch(settings: AppSettings): Server
     "enableAssistantStreaming",
     "enableProviderUpdateChecks",
     "devinBinaryPath",
-    "devinCloudBinaryPath",
     "devinCloudMode",
     "devinCloudOrgId",
     "antigravityBinaryPath",
@@ -1113,7 +1080,6 @@ function buildInitialServerSettingsMigrationPatch(settings: AppSettings): Server
     "customClaudeModels",
     "customCursorModels",
     "customDevinModels",
-    "customDevinCloudModels",
     "customAntigravityModels",
     "customGrokModels",
     "customDroidModels",
@@ -1185,7 +1151,6 @@ export function getCustomModelsByProvider(
     claudeAgent: getCustomModelsForProvider(settings, "claudeAgent"),
     cursor: getCustomModelsForProvider(settings, "cursor"),
     devin: getCustomModelsForProvider(settings, "devin"),
-    devinCloud: getCustomModelsForProvider(settings, "devinCloud"),
     antigravity: getCustomModelsForProvider(settings, "antigravity"),
     grok: getCustomModelsForProvider(settings, "grok"),
     droid: getCustomModelsForProvider(settings, "droid"),
@@ -1199,10 +1164,16 @@ export function getAppModelOptions(
   customModels: readonly string[],
   selectedModel?: string | null,
 ): AppModelOption[] {
-  const options: AppModelOption[] = getModelOptions(provider).map(({ slug, name }) => ({
+  const options: AppModelOption[] = getModelOptions(provider).map((model) => ({
     provider,
-    slug,
-    name,
+    slug: model.slug,
+    name: model.name,
+    ...("upstreamProviderId" in model && model.upstreamProviderId !== undefined
+      ? { upstreamProviderId: model.upstreamProviderId }
+      : {}),
+    ...("upstreamProviderName" in model && model.upstreamProviderName !== undefined
+      ? { upstreamProviderName: model.upstreamProviderName }
+      : {}),
     isCustom: false,
   }));
   const seen = new Set(options.map((option) => option.slug));
@@ -1320,7 +1291,6 @@ export function getCustomModelOptionsByProvider(
     claudeAgent: getAppModelOptions("claudeAgent", customModelsByProvider.claudeAgent),
     cursor: getAppModelOptions("cursor", customModelsByProvider.cursor),
     devin: getAppModelOptions("devin", customModelsByProvider.devin),
-    devinCloud: getAppModelOptions("devinCloud", customModelsByProvider.devinCloud),
     antigravity: getAppModelOptions("antigravity", customModelsByProvider.antigravity),
     grok: getAppModelOptions("grok", customModelsByProvider.grok),
     droid: getAppModelOptions("droid", customModelsByProvider.droid),
@@ -1338,7 +1308,6 @@ export function getProviderStartOptions(
     | "cursorApiEndpoint"
     | "cursorBinaryPath"
     | "devinBinaryPath"
-    | "devinCloudBinaryPath"
     | "antigravityBinaryPath"
     | "grokBinaryPath"
     | "droidBinaryPath"
@@ -1356,10 +1325,6 @@ export function getProviderStartOptions(
   const codexBinaryPath = normalizeProviderBinaryPathOverride("codex", settings.codexBinaryPath);
   const cursorBinaryPath = normalizeProviderBinaryPathOverride("cursor", settings.cursorBinaryPath);
   const devinBinaryPath = normalizeProviderBinaryPathOverride("devin", settings.devinBinaryPath);
-  const devinCloudBinaryPath = normalizeProviderBinaryPathOverride(
-    "devinCloud",
-    settings.devinCloudBinaryPath,
-  );
   const antigravityBinaryPath = normalizeProviderBinaryPathOverride(
     "antigravity",
     settings.antigravityBinaryPath,
@@ -1402,13 +1367,6 @@ export function getProviderStartOptions(
       ? {
           devin: {
             binaryPath: devinBinaryPath,
-          },
-        }
-      : {}),
-    ...(devinCloudBinaryPath
-      ? {
-          devinCloud: {
-            binaryPath: devinCloudBinaryPath,
           },
         }
       : {}),
@@ -1490,7 +1448,6 @@ export function getCustomBinaryPathForProvider(
     | "codexBinaryPath"
     | "cursorBinaryPath"
     | "devinBinaryPath"
-    | "devinCloudBinaryPath"
     | "antigravityBinaryPath"
     | "grokBinaryPath"
     | "droidBinaryPath"
@@ -1508,8 +1465,6 @@ export function getCustomBinaryPathForProvider(
       return normalizeProviderBinaryPathOverride(provider, settings.cursorBinaryPath);
     case "devin":
       return normalizeProviderBinaryPathOverride(provider, settings.devinBinaryPath);
-    case "devinCloud":
-      return normalizeProviderBinaryPathOverride(provider, settings.devinCloudBinaryPath);
     case "antigravity":
       return normalizeProviderBinaryPathOverride(provider, settings.antigravityBinaryPath);
     case "grok":

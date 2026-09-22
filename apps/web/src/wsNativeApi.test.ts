@@ -372,11 +372,10 @@ describe("wsNativeApi", () => {
             customModels: [],
           },
           cursor: { enabled: false, binaryPath: "agent", apiEndpoint: "", customModels: [] },
-          devin: { enabled: true, binaryPath: "devin", customModels: [] },
-          devinCloud: {
+          devin: {
             enabled: true,
             binaryPath: "devin",
-            mode: "auto",
+            cloudMode: "auto",
             orgId: "",
             serverPasswordConfigured: false,
             customModels: [],

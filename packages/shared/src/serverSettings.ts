@@ -83,9 +83,8 @@ export function providerStartOptionsFromServerSettings(
     },
     devin: {
       ...(providers.devin.binaryPath ? { binaryPath: providers.devin.binaryPath } : {}),
-    },
-    devinCloud: {
-      ...(providers.devinCloud.binaryPath ? { binaryPath: providers.devinCloud.binaryPath } : {}),
+      ...(providers.devin.cloudMode !== "auto" ? { cloudMode: providers.devin.cloudMode } : {}),
+      ...(providers.devin.orgId ? { orgId: providers.devin.orgId } : {}),
     },
   };
 }

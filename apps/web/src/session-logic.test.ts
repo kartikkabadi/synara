@@ -870,7 +870,6 @@ describe("PROVIDER_OPTIONS", () => {
       { value: "opencode", label: "OpenCode", available: true },
       { value: "pi", label: "Pi", available: true },
       { value: "devin", label: "Devin", available: true },
-      { value: "devinCloud", label: "Devin Cloud", available: true },
     ]);
     expect(claude).toEqual({
       value: "claudeAgent",

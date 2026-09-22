@@ -1,13 +1,16 @@
 // FILE: provider/Layers/DevinCloudAdapter.ts
-// Purpose: Devin Cloud provider adapter. Sessions run on Devin's cloud VMs and
-// are driven over the v3 REST API (create session → post messages → poll the
-// message log). When the installed Devin CLI supports `devin acp --cloud`, the
-// ACP transport takes over; REST remains the zero-config fallback that works
-// with the `devin auth login` credential.
+// Purpose: Devin Cloud session runtime behind the `devin` provider adapter.
+// Sessions run on Devin's cloud VMs and are driven over the v3 REST API
+// (create session → post messages → poll the message log). When the installed
+// Devin CLI supports `devin acp --cloud`, the ACP transport takes over; REST
+// remains the zero-config fallback that works with the `devin auth login`
+// credential. Cloud threads are selected by `cloud/<mode>` model slugs and
+// carry `cloud: true` in their resume cursor.
 // Layer: Provider adapter runtime
 
 import {
   type ChatAttachment,
+  devinCloudModeFromModelSlug,
   EventId,
   type ProviderComposerCapabilities,
   type ProviderListModelsResult,
@@ -26,7 +29,6 @@ import {
   Exit,
   Fiber,
   FileSystem,
-  Layer,
   PubSub,
   Random,
   Result,
@@ -61,7 +63,6 @@ import {
   ProviderAdapterValidationError,
 } from "../Errors.ts";
 import { resolveProviderAttachmentPath } from "../providerAttachmentPaths.ts";
-import { DevinCloudAdapter, type DevinCloudAdapterShape } from "../Services/DevinCloudAdapter.ts";
 import {
   PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
   type ProviderAdapterShape,
@@ -69,7 +70,7 @@ import {
 } from "../Services/ProviderAdapter.ts";
 import { snapshotProviderTurns } from "../snapshotProviderTurns.ts";
 
-const PROVIDER = "devinCloud" as const;
+const PROVIDER = "devin" as const;
 
 // Spawn failures that mean the CLI rejected the flag despite the help
 // probe (partial rollout, arg ordering) — auto mode falls back to REST.
@@ -132,13 +133,21 @@ interface DevinCloudSessionContext {
   lastSessionState: DevinCloudSessionState | undefined;
 }
 
+/** Cloud resume cursors carry `cloud: true` so the devin dispatcher routes
+ *  them here instead of to the local ACP adapter (whose cursor shares the
+ *  `{schemaVersion, sessionId}` shape). */
 function parseDevinCloudResume(resumeCursor: unknown): { sessionId: string } | undefined {
   if (typeof resumeCursor !== "object" || resumeCursor === null || Array.isArray(resumeCursor)) {
     return undefined;
   }
-  const cursor = resumeCursor as { schemaVersion?: unknown; sessionId?: unknown };
+  const cursor = resumeCursor as {
+    schemaVersion?: unknown;
+    sessionId?: unknown;
+    cloud?: unknown;
+  };
   if (
     cursor.schemaVersion === RESUME_VERSION &&
+    cursor.cloud === true &&
     typeof cursor.sessionId === "string" &&
     isDevinSessionId(cursor.sessionId)
   ) {
@@ -175,7 +184,7 @@ function restErrorDetail(error: DevinRestError): string {
 }
 
 export interface DevinCloudAdapterLiveOptions {
-  readonly resolveServerPassword?: (provider: "devinCloud") => Effect.Effect<string | undefined>;
+  readonly resolveServerPassword?: (provider: "devin") => Effect.Effect<string | undefined>;
   /** Probe for `devin acp --cloud` support; tests inject the answer. */
   readonly acpCloudSupported?: (binaryPath: string) => Effect.Effect<boolean, never>;
   /** Builds the wrapped ACP adapter (`devin acp --cloud` via DevinAdapter).
@@ -185,7 +194,11 @@ export interface DevinCloudAdapterLiveOptions {
   }) => Effect.Effect<
     ProviderAdapterShape<ProviderAdapterError>,
     ProviderAdapterError,
-    Scope.Scope | FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner | ServerConfig
+    | Scope.Scope
+    | FileSystem.FileSystem
+    | ChildProcessSpawner.ChildProcessSpawner
+    | ServerConfig
+    | ServerSettingsService
   >;
   /** Credential resolution — tests inject a deterministic answer. */
   readonly resolveAuth?: (input: {
@@ -201,7 +214,7 @@ export interface DevinCloudAdapterLiveOptions {
   };
 }
 
-const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
+export const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
   Effect.gen(function* () {
     const serverConfig = yield* ServerConfig;
     const makeClient = options?.makeClient ?? makeDevinRestClient;
@@ -286,6 +299,7 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
             Effect.provideService(FileSystem.FileSystem, fileSystem),
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
             Effect.provideService(ServerConfig, serverConfig),
+            Effect.provideService(ServerSettingsService, serverSettings),
           );
         acpAdapter = adapter;
         // Forward the wrapped adapter's events into the shared PubSub so
@@ -596,7 +610,7 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
 
     const resolveAuthAndOrg = (
       operation: string,
-      devinCloudSettings:
+      devinSettings:
         | { readonly orgId: string; readonly serverPasswordConfigured: boolean }
         | undefined,
     ) =>
@@ -615,10 +629,10 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
             provider: PROVIDER,
             operation,
             issue:
-              "No Devin credentials found. Add a Devin API key in Settings → Providers → Devin Cloud, or run `devin auth login`.",
+              "No Devin credentials found. Add a Devin API key in Settings → Providers → Devin, or run `devin auth login`.",
           });
         }
-        const configuredOrg = devinCloudSettings?.orgId.trim();
+        const configuredOrg = devinSettings?.orgId.trim();
         if (configuredOrg) {
           return { auth, orgId: configuredOrg };
         }
@@ -715,6 +729,7 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
           resumeCursor: {
             schemaVersion: RESUME_VERSION,
             sessionId: remote.session_id,
+            cloud: true,
           },
           createdAt: now,
           updatedAt: now,
@@ -828,7 +843,7 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         return session;
       });
 
-    const startSession: DevinCloudAdapterShape["startSession"] = (input) =>
+    const startSession: ProviderAdapterShape<ProviderAdapterError>["startSession"] = (input) =>
       withThreadLock(
         input.threadId,
         Effect.gen(function* () {
@@ -842,11 +857,11 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
                 }),
             ),
           );
-          const devinCloudSettings = settings.providers.devinCloud;
-          const mode = devinCloudSettings?.mode ?? "auto";
-          const providerOptions = input.providerOptions?.devinCloud;
+          const devinSettings = settings.providers.devin;
+          const mode = devinSettings?.cloudMode ?? "auto";
+          const providerOptions = input.providerOptions?.devin;
           const binaryPath =
-            providerOptions?.binaryPath?.trim() || devinCloudSettings.binaryPath?.trim() || "devin";
+            providerOptions?.binaryPath?.trim() || devinSettings.binaryPath?.trim() || "devin";
 
           const acpSupported = yield* acpCloudSupportedFor(binaryPath);
           if (mode === "acp" && !acpSupported) {
@@ -860,11 +875,8 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
 
           const modelSelection =
             input.modelSelection?.provider === PROVIDER ? input.modelSelection : undefined;
-          const devinMode =
-            modelSelection?.options?.mode ??
-            (modelSelection?.model && modelSelection.model !== "auto"
-              ? modelSelection.model
-              : undefined);
+          const slugMode = devinCloudModeFromModelSlug(modelSelection?.model);
+          const devinMode = slugMode === null || slugMode === "auto" ? undefined : slugMode;
 
           if (mode === "acp" || (mode === "auto" && acpSupported)) {
             if (!options?.makeAcpAdapter) {
@@ -905,7 +917,7 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
             }
           }
 
-          const { auth, orgId } = yield* resolveAuthAndOrg("session/start", devinCloudSettings);
+          const { auth, orgId } = yield* resolveAuthAndOrg("session/start", devinSettings);
           return yield* startRestSession(input, auth, orgId, devinMode);
         }),
       );
@@ -964,7 +976,7 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         return { text, attachmentUrls };
       });
 
-    const sendTurnImpl: DevinCloudAdapterShape["sendTurn"] = (input) =>
+    const sendTurnImpl: ProviderAdapterShape<ProviderAdapterError>["sendTurn"] = (input) =>
       withThreadLock(
         input.threadId,
         Effect.gen(function* () {
@@ -1026,7 +1038,9 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         }),
       );
 
-    const steerTurnImpl: NonNullable<DevinCloudAdapterShape["steerTurn"]> = (input) =>
+    const steerTurnImpl: NonNullable<ProviderAdapterShape<ProviderAdapterError>["steerTurn"]> = (
+      input,
+    ) =>
       withThreadLock(
         input.threadId,
         Effect.gen(function* () {
@@ -1077,7 +1091,10 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         }),
       );
 
-    const interruptTurn: DevinCloudAdapterShape["interruptTurn"] = (threadId, turnId) =>
+    const interruptTurn: ProviderAdapterShape<ProviderAdapterError>["interruptTurn"] = (
+      threadId,
+      turnId,
+    ) =>
       withThreadLock(
         threadId,
         Effect.gen(function* () {
@@ -1090,7 +1107,7 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         }),
       );
 
-    const respondToRequest: DevinCloudAdapterShape["respondToRequest"] = (
+    const respondToRequest: ProviderAdapterShape<ProviderAdapterError>["respondToRequest"] = (
       threadId,
       _requestId,
       _decision,
@@ -1105,7 +1122,7 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         });
       });
 
-    const respondToUserInput: DevinCloudAdapterShape["respondToUserInput"] = (
+    const respondToUserInput: ProviderAdapterShape<ProviderAdapterError>["respondToUserInput"] = (
       threadId,
       _requestId,
       _answers: ProviderUserInputAnswers,
@@ -1120,7 +1137,7 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         });
       });
 
-    const stopSession: DevinCloudAdapterShape["stopSession"] = (threadId) =>
+    const stopSession: ProviderAdapterShape<ProviderAdapterError>["stopSession"] = (threadId) =>
       withThreadLock(
         threadId,
         Effect.gen(function* () {
@@ -1131,20 +1148,20 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         }),
       );
 
-    const listSessions: DevinCloudAdapterShape["listSessions"] = () =>
+    const listSessions: ProviderAdapterShape<ProviderAdapterError>["listSessions"] = () =>
       Effect.sync(() =>
         Array.from(sessions.values())
           .filter((ctx) => !ctx.stopped)
           .map((ctx) => Object.assign({}, ctx.session)),
       );
 
-    const hasSession: DevinCloudAdapterShape["hasSession"] = (threadId) =>
+    const hasSession: ProviderAdapterShape<ProviderAdapterError>["hasSession"] = (threadId) =>
       Effect.sync(() => {
         const ctx = sessions.get(threadId);
         return ctx !== undefined && !ctx.stopped;
       });
 
-    const readThread: DevinCloudAdapterShape["readThread"] = (threadId) =>
+    const readThread: ProviderAdapterShape<ProviderAdapterError>["readThread"] = (threadId) =>
       Effect.gen(function* () {
         const ctx = yield* requireSession(threadId);
         return {
@@ -1154,7 +1171,9 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         } satisfies ProviderThreadSnapshot;
       });
 
-    const readExternalThread: NonNullable<DevinCloudAdapterShape["readExternalThread"]> = (input) =>
+    const readExternalThread: NonNullable<
+      ProviderAdapterShape<ProviderAdapterError>["readExternalThread"]
+    > = (input) =>
       Effect.gen(function* () {
         const bareId = input.externalThreadId.replace(/^devin-/u, "");
         if (!isDevinSessionId(bareId)) {
@@ -1176,7 +1195,7 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         );
         const { auth, orgId } = yield* resolveAuthAndOrg(
           "readExternalThread",
-          settings.providers.devinCloud,
+          settings.providers.devin,
         );
         const client = makeClient(auth);
         yield* client.getSession(orgId, bareId).pipe(
@@ -1217,7 +1236,10 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         } satisfies ProviderThreadSnapshot;
       });
 
-    const rollbackThread: DevinCloudAdapterShape["rollbackThread"] = (threadId, _numTurns) =>
+    const rollbackThread: ProviderAdapterShape<ProviderAdapterError>["rollbackThread"] = (
+      threadId,
+      _numTurns,
+    ) =>
       Effect.gen(function* () {
         yield* requireSession(threadId);
         return yield* new ProviderAdapterValidationError({
@@ -1227,10 +1249,9 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         });
       });
 
-    const didResumeSession: NonNullable<DevinCloudAdapterShape["didResumeSession"]> = (
-      input,
-      session,
-    ) => {
+    const didResumeSession: NonNullable<
+      ProviderAdapterShape<ProviderAdapterError>["didResumeSession"]
+    > = (input, session) => {
       const wanted = parseDevinCloudResume(input.resumeCursor)?.sessionId;
       if (!wanted) return false;
       const cursor = session.resumeCursor as { sessionId?: unknown } | undefined;
@@ -1238,7 +1259,7 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
     };
 
     const getComposerCapabilities: NonNullable<
-      DevinCloudAdapterShape["getComposerCapabilities"]
+      ProviderAdapterShape<ProviderAdapterError>["getComposerCapabilities"]
     > = () =>
       Effect.succeed({
         provider: PROVIDER,
@@ -1252,20 +1273,20 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         supportsThreadImport: false,
       } satisfies ProviderComposerCapabilities);
 
-    const listModels: NonNullable<DevinCloudAdapterShape["listModels"]> = () =>
+    const listModels: NonNullable<ProviderAdapterShape<ProviderAdapterError>["listModels"]> = () =>
       Effect.succeed({
         models: [
-          { slug: "auto", name: "Auto (org default)" },
-          { slug: "normal", name: "Normal" },
-          { slug: "fast", name: "Fast" },
-          { slug: "lite", name: "Lite" },
-          { slug: "ultra", name: "Ultra" },
-          { slug: "fusion", name: "Fusion" },
+          { slug: "cloud/auto", name: "Auto (org default)" },
+          { slug: "cloud/normal", name: "Normal" },
+          { slug: "cloud/fast", name: "Fast" },
+          { slug: "cloud/lite", name: "Lite" },
+          { slug: "cloud/ultra", name: "Ultra" },
+          { slug: "cloud/fusion", name: "Fusion" },
         ],
         source: "devinCloud.static",
       } satisfies ProviderListModelsResult);
 
-    const stopAll: DevinCloudAdapterShape["stopAll"] = () =>
+    const stopAll: ProviderAdapterShape<ProviderAdapterError>["stopAll"] = () =>
       Effect.gen(function* () {
         yield* Effect.forEach(Array.from(sessions.keys()), (threadId) => stopSession(threadId), {
           discard: true,
@@ -1288,10 +1309,12 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
       return adapter ? acpCall(adapter) : rest;
     };
 
-    const routedSendTurn: DevinCloudAdapterShape["sendTurn"] = (input) =>
+    const routedSendTurn: ProviderAdapterShape<ProviderAdapterError>["sendTurn"] = (input) =>
       route(input.threadId, sendTurnImpl(input), (adapter) => adapter.sendTurn(input));
 
-    const routedSteerTurn: NonNullable<DevinCloudAdapterShape["steerTurn"]> = (input) =>
+    const routedSteerTurn: NonNullable<ProviderAdapterShape<ProviderAdapterError>["steerTurn"]> = (
+      input,
+    ) =>
       route(input.threadId, steerTurnImpl(input), (adapter) =>
         adapter.steerTurn !== undefined
           ? adapter.steerTurn(input)
@@ -1304,7 +1327,7 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
             ),
       );
 
-    const routedInterruptTurn: DevinCloudAdapterShape["interruptTurn"] = (
+    const routedInterruptTurn: ProviderAdapterShape<ProviderAdapterError>["interruptTurn"] = (
       threadId,
       turnId,
       providerThreadId,
@@ -1313,7 +1336,7 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         adapter.interruptTurn(threadId, turnId, providerThreadId),
       );
 
-    const routedRespondToRequest: DevinCloudAdapterShape["respondToRequest"] = (
+    const routedRespondToRequest: ProviderAdapterShape<ProviderAdapterError>["respondToRequest"] = (
       threadId,
       requestId,
       decision,
@@ -1322,16 +1345,15 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         adapter.respondToRequest(threadId, requestId, decision),
       );
 
-    const routedRespondToUserInput: DevinCloudAdapterShape["respondToUserInput"] = (
-      threadId,
-      requestId,
-      answers,
-    ) =>
-      route(threadId, respondToUserInput(threadId, requestId, answers), (adapter) =>
-        adapter.respondToUserInput(threadId, requestId, answers),
-      );
+    const routedRespondToUserInput: ProviderAdapterShape<ProviderAdapterError>["respondToUserInput"] =
+      (threadId, requestId, answers) =>
+        route(threadId, respondToUserInput(threadId, requestId, answers), (adapter) =>
+          adapter.respondToUserInput(threadId, requestId, answers),
+        );
 
-    const routedStopSession: DevinCloudAdapterShape["stopSession"] = (threadId) => {
+    const routedStopSession: ProviderAdapterShape<ProviderAdapterError>["stopSession"] = (
+      threadId,
+    ) => {
       const adapter = acpFor(threadId);
       if (adapter) {
         acpThreadIds.delete(threadId);
@@ -1340,32 +1362,34 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
       return stopSession(threadId);
     };
 
-    const routedListSessions: DevinCloudAdapterShape["listSessions"] = () =>
+    const routedListSessions: ProviderAdapterShape<ProviderAdapterError>["listSessions"] = () =>
       Effect.gen(function* () {
         const rest = yield* listSessions();
         const acp = acpAdapter ? yield* acpAdapter.listSessions() : [];
         return [...rest, ...acp];
       });
 
-    const routedHasSession: DevinCloudAdapterShape["hasSession"] = (threadId) =>
+    const routedHasSession: ProviderAdapterShape<ProviderAdapterError>["hasSession"] = (threadId) =>
       Effect.gen(function* () {
         if (yield* hasSession(threadId)) return true;
         const adapter = acpFor(threadId);
         return adapter ? yield* adapter.hasSession(threadId) : false;
       });
 
-    const routedReadThread: DevinCloudAdapterShape["readThread"] = (threadId) =>
+    const routedReadThread: ProviderAdapterShape<ProviderAdapterError>["readThread"] = (threadId) =>
       route(threadId, readThread(threadId), (adapter) => adapter.readThread(threadId));
 
-    const routedRollbackThread: DevinCloudAdapterShape["rollbackThread"] = (threadId, numTurns) =>
+    const routedRollbackThread: ProviderAdapterShape<ProviderAdapterError>["rollbackThread"] = (
+      threadId,
+      numTurns,
+    ) =>
       route(threadId, rollbackThread(threadId, numTurns), (adapter) =>
         adapter.rollbackThread(threadId, numTurns),
       );
 
-    const routedDidResumeSession: NonNullable<DevinCloudAdapterShape["didResumeSession"]> = (
-      input,
-      session,
-    ) => {
+    const routedDidResumeSession: NonNullable<
+      ProviderAdapterShape<ProviderAdapterError>["didResumeSession"]
+    > = (input, session) => {
       const adapter = acpFor(input.threadId);
       if (adapter?.didResumeSession) {
         return adapter.didResumeSession(input, session);
@@ -1396,9 +1420,5 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
       streamEvents: Stream.fromPubSub(runtimeEventPubSub),
       getComposerCapabilities,
       listModels,
-    } satisfies DevinCloudAdapterShape;
+    } satisfies ProviderAdapterShape<ProviderAdapterError>;
   });
-
-export function makeDevinCloudAdapterLive(options?: DevinCloudAdapterLiveOptions) {
-  return Layer.effect(DevinCloudAdapter, makeDevinCloudAdapter(options));
-}

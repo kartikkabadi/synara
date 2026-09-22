@@ -124,7 +124,6 @@ const ANTIGRAVITY_PROVIDER = "antigravity" as const;
 const GROK_PROVIDER = "grok" as const;
 const DROID_PROVIDER = "droid" as const;
 const DEVIN_PROVIDER = "devin" as const;
-const DEVIN_CLOUD_PROVIDER = "devinCloud" as const;
 const OPENCODE_PROVIDER = "opencode" as const;
 const PI_PROVIDER = "pi" as const;
 type ProviderStatuses = ReadonlyArray<ServerProviderStatus>;
@@ -139,7 +138,6 @@ const PROVIDERS = [
   GROK_PROVIDER,
   DROID_PROVIDER,
   DEVIN_PROVIDER,
-  DEVIN_CLOUD_PROVIDER,
   OPENCODE_PROVIDER,
   PI_PROVIDER,
 ] as const satisfies ReadonlyArray<ProviderKind>;
@@ -1791,14 +1789,44 @@ export const checkCursorProviderStatus = makeCheckCursorProviderStatus();
 
 // ── Devin health check ───────────────────────────────────────────────
 
+export interface DevinProviderStatusOptions {
+  readonly binaryPath?: string;
+  readonly cloudMode?: "auto" | "acp" | "rest";
+  readonly serverPasswordConfigured?: boolean;
+}
+
+// Devin covers local `devin acp` sessions and Devin Cloud sessions (`cloud/*`
+// model slugs → `devin acp --cloud` or the v3 REST API). The provider is
+// usable when either leg is: a working CLI for local/ACP, or any resolvable
+// Devin credential for REST.
 export const makeCheckDevinProviderStatus = (
-  binaryPath?: string,
+  options: DevinProviderStatusOptions | string = {},
   readStoredCredentials: typeof readDevinStoredCredentials = readDevinStoredCredentials,
 ): Effect.Effect<ServerProviderStatus, never, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
+    const binaryPath = typeof options === "string" ? options : options.binaryPath;
+    const cloudMode = typeof options === "string" ? "auto" : (options.cloudMode ?? "auto");
+    const serverPasswordConfigured =
+      typeof options === "string" ? false : options.serverPasswordConfigured === true;
     const checkedAt = new Date().toISOString();
     const executable = resolveDevinBinaryPath(binaryPath);
     const env = buildProviderChildEnvironment({ provider: DEVIN_PROVIDER });
+
+    const storedCredentials = yield* Effect.promise(() => readStoredCredentials());
+    const hasCredential =
+      hasDevinApiKeyEnv() || storedCredentials?.apiKey !== undefined || serverPasswordConfigured;
+
+    // Cloud-only path: no usable CLI, but REST credentials resolve.
+    const cloudOnlyStatus = (cliDetail: string): ServerProviderStatus => ({
+      provider: DEVIN_PROVIDER,
+      status: "ready" as const,
+      available: true,
+      authStatus: "authenticated" as const,
+      authType: "apiKey" as const,
+      authLabel: "Devin API Key",
+      checkedAt,
+      message: `${cliDetail} Devin Cloud sessions (cloud/* models) still work via the Devin v3 REST API; install the Devin CLI to run local Devin sessions.`,
+    });
 
     const versionProbe = yield* probeProviderCliVersion(
       runProviderCommand(executable, ["--version"], env),
@@ -1807,6 +1835,13 @@ export const makeCheckDevinProviderStatus = (
 
     if (versionProbe.outcome === "missing" || versionProbe.outcome === "failure") {
       const error = versionProbe.cause;
+      const detail =
+        versionProbe.outcome === "missing"
+          ? "Devin CLI (`devin`) is not installed or not on PATH."
+          : `Failed to execute Devin CLI health check: ${error instanceof Error ? error.message : String(error)}.`;
+      if (hasCredential && cloudMode !== "acp") {
+        return cloudOnlyStatus(detail);
+      }
       return {
         provider: DEVIN_PROVIDER,
         status: "error" as const,
@@ -1814,35 +1849,27 @@ export const makeCheckDevinProviderStatus = (
         authStatus: "unknown" as const,
         checkedAt,
         message:
-          versionProbe.outcome === "missing"
-            ? "Devin CLI (`devin`) is not installed or not on PATH."
-            : `Failed to execute Devin CLI health check: ${error instanceof Error ? error.message : String(error)}.`,
+          cloudMode === "acp"
+            ? `${detail} Devin Cloud ACP mode requires the Devin CLI with \`devin acp --cloud\` support.`
+            : detail,
       } satisfies ServerProviderStatus;
     }
 
-    if (versionProbe.outcome === "timeout") {
+    if (versionProbe.outcome === "timeout" || versionProbe.outcome === "nonzero") {
+      const detail =
+        versionProbe.outcome === "timeout"
+          ? "Devin CLI is installed but failed to run. Timed out while running command."
+          : (detailFromResult(versionProbe.result) ?? "Devin CLI is installed but failed to run.");
+      if (hasCredential && cloudMode !== "acp") {
+        return cloudOnlyStatus(detail);
+      }
       return {
         provider: DEVIN_PROVIDER,
         status: "error" as const,
         available: false,
         authStatus: "unknown" as const,
         checkedAt,
-        message: "Devin CLI is installed but failed to run. Timed out while running command.",
-      } satisfies ServerProviderStatus;
-    }
-
-    if (versionProbe.outcome === "nonzero") {
-      const versionResult = versionProbe.result;
-      const detail = detailFromResult(versionResult);
-      return {
-        provider: DEVIN_PROVIDER,
-        status: "error" as const,
-        available: false,
-        authStatus: "unknown" as const,
-        checkedAt,
-        message: detail
-          ? `Devin CLI is installed but failed to run. ${detail}`
-          : "Devin CLI is installed but failed to run.",
+        message: detail,
       } satisfies ServerProviderStatus;
     }
 
@@ -1850,8 +1877,32 @@ export const makeCheckDevinProviderStatus = (
     const parsedVersion = parseGenericCliVersion(
       `${versionResult.stdout}\n${versionResult.stderr}`,
     );
-    const storedCredentials = yield* Effect.promise(() => readStoredCredentials());
-    const hasApiKey = hasDevinApiKeyEnv() || storedCredentials?.apiKey !== undefined;
+
+    // `--cloud` capability probe only matters when ACP mode is forced; auto
+    // mode falls back to REST silently.
+    if (cloudMode === "acp") {
+      const acpHelpProbe = yield* probeProviderCliVersion(
+        runProviderCommand(executable, ["acp", "--help"], env),
+        DEFAULT_TIMEOUT_MS,
+      );
+      const acpCloudSupported =
+        acpHelpProbe.outcome === "success" &&
+        detectDevinAcpCloudSupport(`${acpHelpProbe.result.stdout}\n${acpHelpProbe.result.stderr}`);
+      if (!acpCloudSupported) {
+        return {
+          provider: DEVIN_PROVIDER,
+          status: "error" as const,
+          available: false,
+          authStatus: "unknown" as const,
+          checkedAt,
+          ...(parsedVersion ? { version: parsedVersion } : {}),
+          message:
+            "This Devin CLI does not support `devin acp --cloud` yet (insiders-only on current stable). Set Devin Cloud mode to REST or auto in Synara settings, or update the Devin CLI.",
+        } satisfies ServerProviderStatus;
+      }
+    }
+
+    const hasApiKey = hasCredential;
 
     return {
       provider: DEVIN_PROVIDER,
@@ -1870,133 +1921,6 @@ export const makeCheckDevinProviderStatus = (
   });
 
 export const checkDevinProviderStatus = makeCheckDevinProviderStatus();
-
-export const makeCheckDevinCloudProviderStatus = (
-  input: {
-    readonly binaryPath?: string;
-    readonly mode?: "auto" | "acp" | "rest";
-    readonly serverPasswordConfigured?: boolean;
-  } = {},
-  readStoredCredentials: typeof readDevinStoredCredentials = readDevinStoredCredentials,
-): Effect.Effect<ServerProviderStatus, never, ChildProcessSpawner.ChildProcessSpawner> =>
-  Effect.gen(function* () {
-    const checkedAt = new Date().toISOString();
-    const mode = input.mode ?? "auto";
-    const storedCredentials = yield* Effect.promise(() => readStoredCredentials());
-    const hasCredential =
-      hasDevinApiKeyEnv() ||
-      storedCredentials?.apiKey !== undefined ||
-      input.serverPasswordConfigured === true;
-
-    const credentialStatus = (path: string): ServerProviderStatus =>
-      hasCredential
-        ? ({
-            provider: DEVIN_CLOUD_PROVIDER,
-            status: "ready" as const,
-            available: true,
-            authStatus: "authenticated" as const,
-            authType: "apiKey" as const,
-            authLabel: "Devin API Key",
-            checkedAt,
-            message: `Devin Cloud will use ${path}.`,
-          } satisfies ServerProviderStatus)
-        : ({
-            provider: DEVIN_CLOUD_PROVIDER,
-            status: "error" as const,
-            available: false,
-            authStatus: "unknown" as const,
-            checkedAt,
-            message: `Devin Cloud would use ${path}, which needs credentials: run \`devin auth login\`, set WINDSURF_API_KEY or DEVIN_API_KEY, or add a Devin API key in Synara settings.`,
-          } satisfies ServerProviderStatus);
-
-    if (mode === "rest") {
-      return credentialStatus("the Devin v3 REST API");
-    }
-
-    const executable = resolveDevinBinaryPath(input.binaryPath);
-    const env = buildProviderChildEnvironment({ provider: DEVIN_CLOUD_PROVIDER });
-    const versionProbe = yield* probeProviderCliVersion(
-      runProviderCommand(executable, ["--version"], env),
-      DEFAULT_TIMEOUT_MS,
-    );
-    const binaryOk = versionProbe.outcome === "success";
-
-    if (!binaryOk) {
-      if (mode === "acp") {
-        return {
-          provider: DEVIN_CLOUD_PROVIDER,
-          status: "error" as const,
-          available: false,
-          authStatus: "unknown" as const,
-          checkedAt,
-          message:
-            versionProbe.outcome === "missing"
-              ? "Devin CLI (`devin`) is not installed or not on PATH. ACP mode requires the Devin CLI with `devin acp --cloud` support."
-              : "Devin CLI failed to run. ACP mode requires a working Devin CLI with `devin acp --cloud` support.",
-        } satisfies ServerProviderStatus;
-      }
-      return credentialStatus("the Devin v3 REST API because the Devin CLI is unavailable");
-    }
-
-    const versionResult = versionProbe.result;
-    const parsedVersion = parseGenericCliVersion(
-      `${versionResult.stdout}\n${versionResult.stderr}`,
-    );
-    const acpHelpProbe = yield* probeProviderCliVersion(
-      runProviderCommand(executable, ["acp", "--help"], env),
-      DEFAULT_TIMEOUT_MS,
-    );
-    const acpCloudSupported =
-      acpHelpProbe.outcome === "success" &&
-      detectDevinAcpCloudSupport(`${acpHelpProbe.result.stdout}\n${acpHelpProbe.result.stderr}`);
-
-    if (!acpCloudSupported) {
-      if (mode === "acp") {
-        return {
-          provider: DEVIN_CLOUD_PROVIDER,
-          status: "error" as const,
-          available: false,
-          authStatus: "unknown" as const,
-          checkedAt,
-          ...(parsedVersion ? { version: parsedVersion } : {}),
-          message:
-            "This Devin CLI does not support `devin acp --cloud` yet (insiders-only on current stable). Switch Devin Cloud mode to REST or auto in Synara settings, or update the Devin CLI.",
-        } satisfies ServerProviderStatus;
-      }
-      return {
-        ...credentialStatus("the Devin v3 REST API"),
-        ...(parsedVersion ? { version: parsedVersion } : {}),
-      } satisfies ServerProviderStatus;
-    }
-
-    if (!hasCredential) {
-      return {
-        provider: DEVIN_CLOUD_PROVIDER,
-        status: "ready" as const,
-        available: true,
-        authStatus: "unknown" as const,
-        checkedAt,
-        ...(parsedVersion ? { version: parsedVersion } : {}),
-        message:
-          "Devin CLI supports `devin acp --cloud`. Run `devin auth login` to authenticate before starting a Devin Cloud session.",
-      } satisfies ServerProviderStatus;
-    }
-
-    return {
-      provider: DEVIN_CLOUD_PROVIDER,
-      status: "ready" as const,
-      available: true,
-      authStatus: "authenticated" as const,
-      authType: "apiKey" as const,
-      authLabel: "Devin API Key",
-      checkedAt,
-      ...(parsedVersion ? { version: parsedVersion } : {}),
-      message:
-        mode === "acp"
-          ? "Devin Cloud will use `devin acp --cloud` (ACP)."
-          : "Devin Cloud will use `devin acp --cloud` (ACP), falling back to the v3 REST API if needed.",
-    } satisfies ServerProviderStatus;
-  });
 
 // ── Snapshot helpers ────────────────────────────────────────────────
 
@@ -2283,8 +2207,6 @@ export function makeProviderHealthLive(options?: { readonly providerUpdateTimeou
             return settings.providers.pi.binaryPath;
           case "devin":
             return settings.providers.devin.binaryPath;
-          case "devinCloud":
-            return settings.providers.devinCloud.binaryPath;
         }
       };
 
@@ -2468,16 +2390,10 @@ export function makeProviderHealthLive(options?: { readonly providerUpdateTimeou
                 checkProviderWhenEnabled(
                   settings,
                   DEVIN_PROVIDER,
-                  makeCheckDevinProviderStatus(settings.providers.devin?.binaryPath),
-                ),
-                checkProviderWhenEnabled(
-                  settings,
-                  DEVIN_CLOUD_PROVIDER,
-                  makeCheckDevinCloudProviderStatus({
-                    binaryPath: settings.providers.devinCloud?.binaryPath,
-                    mode: settings.providers.devinCloud?.mode,
-                    serverPasswordConfigured:
-                      settings.providers.devinCloud?.serverPasswordConfigured,
+                  makeCheckDevinProviderStatus({
+                    binaryPath: settings.providers.devin?.binaryPath,
+                    cloudMode: settings.providers.devin?.cloudMode,
+                    serverPasswordConfigured: settings.providers.devin?.serverPasswordConfigured,
                   }),
                 ),
                 checkProviderWhenEnabled(

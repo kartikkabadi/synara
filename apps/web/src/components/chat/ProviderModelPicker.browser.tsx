@@ -56,14 +56,6 @@ const MODEL_OPTIONS_BY_PROVIDER = {
       upstreamProviderName: "Devin",
     },
   ],
-  devinCloud: [
-    {
-      slug: "devincloud/ultra",
-      name: "Ultra",
-      upstreamProviderId: "devincloud",
-      upstreamProviderName: "Devin Cloud",
-    },
-  ],
   pi: [
     {
       slug: "anthropic/claude-sonnet-4-5",

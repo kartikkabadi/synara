@@ -35,11 +35,13 @@ import {
   type DevinCloudSessionCreateInput,
   type DevinRestClient,
 } from "../devinCloud/DevinRestClient.ts";
-import { DevinCloudAdapter } from "../Services/DevinCloudAdapter.ts";
-import {
-  makeDevinCloudAdapterLive,
-  type DevinCloudAdapterLiveOptions,
-} from "./DevinCloudAdapter.ts";
+import { ServiceMap } from "effect";
+import { makeDevinCloudAdapter, type DevinCloudAdapterLiveOptions } from "./DevinCloudAdapter.ts";
+
+class DevinCloudAdapter extends ServiceMap.Service<
+  DevinCloudAdapter,
+  ProviderAdapterShape<ProviderAdapterError>
+>()("test/DevinCloudAdapter") {}
 
 const threadId = ThreadId.makeUnsafe("devincloud-test-thread");
 const devinSessionId = "abc123abc123abc123abc123abc12345";
@@ -215,13 +217,13 @@ function makeScriptedAcpAdapter(): ScriptedAcpAdapter {
     pubsub,
     startInputs: [],
     startResult: {
-      provider: "devinCloud",
+      provider: "devin",
       status: "running",
       runtimeMode: "full-access",
       threadId,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
-      resumeCursor: { schemaVersion: 1, sessionId: devinSessionId },
+      resumeCursor: { schemaVersion: 1, sessionId: devinSessionId, cloud: true },
     },
     adapter: undefined as unknown as ProviderAdapterShape<ProviderAdapterError>,
   };
@@ -231,7 +233,7 @@ function makeScriptedAcpAdapter(): ScriptedAcpAdapter {
     });
   const activeThreadIds = new Set<ThreadId>();
   scripted.adapter = {
-    provider: "devinCloud",
+    provider: "devin",
     capabilities: { sessionModelSwitch: "unsupported" },
     startSession: (input: ProviderSessionStartInput) =>
       Effect.suspend(() => {
@@ -262,7 +264,7 @@ function makeScriptedAcpAdapter(): ScriptedAcpAdapter {
     listSessions: () =>
       Effect.sync(() =>
         Array.from(activeThreadIds).map((tid) => ({
-          provider: "devinCloud" as const,
+          provider: "devin" as const,
           status: "running" as const,
           runtimeMode: "full-access" as const,
           threadId: tid,
@@ -293,25 +295,29 @@ function makeAdapterLayer(
     readonly settings?: Parameters<typeof ServerSettingsService.layerTest>[0];
   } = {},
 ) {
-  return makeDevinCloudAdapterLive({
-    makeClient: () => scripted.client,
-    resolveServerPassword: () => Effect.succeed(options.serverPassword ?? "test-key"),
-    resolveAuth:
-      options.resolveAuth ??
-      (() => Effect.succeed({ apiKey: "test-key", baseUrl: "https://api.devin.ai" })),
-    ...(options.acpCloudSupported !== undefined
-      ? { acpCloudSupported: options.acpCloudSupported }
-      : {}),
-    ...(options.acpAdapter !== undefined
-      ? {
-          makeAcpAdapter: () => Effect.succeed((options.acpAdapter as ScriptedAcpAdapter).adapter),
-        }
-      : {}),
-    pollIntervals: { activeMs: 5, idleMs: 5, minTurnPollMs: 0 },
-  }).pipe(
+  return Layer.effect(
+    DevinCloudAdapter,
+    makeDevinCloudAdapter({
+      makeClient: () => scripted.client,
+      resolveServerPassword: () => Effect.succeed(options.serverPassword ?? "test-key"),
+      resolveAuth:
+        options.resolveAuth ??
+        (() => Effect.succeed({ apiKey: "test-key", baseUrl: "https://api.devin.ai" })),
+      ...(options.acpCloudSupported !== undefined
+        ? { acpCloudSupported: options.acpCloudSupported }
+        : {}),
+      ...(options.acpAdapter !== undefined
+        ? {
+            makeAcpAdapter: () =>
+              Effect.succeed((options.acpAdapter as ScriptedAcpAdapter).adapter),
+          }
+        : {}),
+      pollIntervals: { activeMs: 5, idleMs: 5, minTurnPollMs: 0 },
+    }),
+  ).pipe(
     Layer.provideMerge(
       ServerSettingsService.layerTest(
-        options.settings ?? { providers: { devinCloud: { mode: "rest", orgId: "org-test" } } },
+        options.settings ?? { providers: { devin: { cloudMode: "rest", orgId: "org-test" } } },
       ),
     ),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "devincloud-test-" })),
@@ -328,16 +334,17 @@ describe("DevinCloudAdapter", () => {
         const adapter = yield* DevinCloudAdapter;
         yield* collectEvents(runtimeEvents, adapter);
         const session = yield* adapter.startSession({
-          provider: "devinCloud",
+          provider: "devin",
           threadId,
           runtimeMode: "full-access",
         });
-        expect(session.provider).toBe("devinCloud");
+        expect(session.provider).toBe("devin");
         expect(session.status).toBe("running");
         expect(session.threadId).toBe(threadId);
         expect(session.resumeCursor).toEqual({
           schemaVersion: 1,
           sessionId: devinSessionId,
+          cloud: true,
         });
         expect(yield* adapter.hasSession(threadId)).toBe(true);
         yield* adapter.stopAll();
@@ -386,7 +393,7 @@ describe("DevinCloudAdapter", () => {
       Effect.gen(function* () {
         const adapter = yield* DevinCloudAdapter;
         yield* adapter.startSession({
-          provider: "devinCloud",
+          provider: "devin",
           threadId,
           runtimeMode: "full-access",
           cwd: dir,
@@ -403,7 +410,7 @@ describe("DevinCloudAdapter", () => {
       Effect.gen(function* () {
         const adapter = yield* DevinCloudAdapter;
         yield* adapter.startSession({
-          provider: "devinCloud",
+          provider: "devin",
           threadId,
           runtimeMode: "full-access",
           cwd: dir,
@@ -420,7 +427,7 @@ describe("DevinCloudAdapter", () => {
         const adapter = yield* DevinCloudAdapter;
         return yield* adapter
           .startSession({
-            provider: "devinCloud",
+            provider: "devin",
             threadId,
             runtimeMode: "full-access",
           })
@@ -440,7 +447,7 @@ describe("DevinCloudAdapter", () => {
         const adapter = yield* DevinCloudAdapter;
         return yield* adapter
           .startSession({
-            provider: "devinCloud",
+            provider: "devin",
             threadId,
             runtimeMode: "full-access",
           })
@@ -450,7 +457,7 @@ describe("DevinCloudAdapter", () => {
         Effect.provide(
           makeAdapterLayer(scripted, {
             acpCloudSupported: () => Effect.succeed(false),
-            settings: { providers: { devinCloud: { mode: "acp", orgId: "org-test" } } },
+            settings: { providers: { devin: { cloudMode: "acp", orgId: "org-test" } } },
           }),
         ),
       ),
@@ -468,7 +475,7 @@ describe("DevinCloudAdapter", () => {
         const adapter = yield* DevinCloudAdapter;
         yield* collectEvents(runtimeEvents, adapter);
         yield* adapter.startSession({
-          provider: "devinCloud",
+          provider: "devin",
           threadId,
           runtimeMode: "full-access",
         });
@@ -530,7 +537,7 @@ describe("DevinCloudAdapter", () => {
         const adapter = yield* DevinCloudAdapter;
         yield* collectEvents(runtimeEvents, adapter);
         yield* adapter.startSession({
-          provider: "devinCloud",
+          provider: "devin",
           threadId,
           runtimeMode: "full-access",
         });
@@ -567,7 +574,7 @@ describe("DevinCloudAdapter", () => {
         const adapter = yield* DevinCloudAdapter;
         yield* collectEvents(runtimeEvents, adapter);
         yield* adapter.startSession({
-          provider: "devinCloud",
+          provider: "devin",
           threadId,
           runtimeMode: "full-access",
         });
@@ -597,10 +604,10 @@ describe("DevinCloudAdapter", () => {
           ]),
         );
         const session = yield* adapter.startSession({
-          provider: "devinCloud",
+          provider: "devin",
           threadId,
           runtimeMode: "full-access",
-          resumeCursor: { schemaVersion: 1, sessionId: devinSessionId },
+          resumeCursor: { schemaVersion: 1, sessionId: devinSessionId, cloud: true },
         });
         expect(session.status).toBe("running");
         yield* adapter.stopAll();
@@ -648,7 +655,7 @@ describe("DevinCloudAdapter", () => {
         const adapter = yield* DevinCloudAdapter;
         yield* collectEvents(runtimeEvents, adapter);
         yield* adapter.startSession({
-          provider: "devinCloud",
+          provider: "devin",
           threadId,
           runtimeMode: "full-access",
         });
@@ -661,20 +668,20 @@ describe("DevinCloudAdapter", () => {
         const listModels = adapter.listModels;
         expect(listModels).toBeDefined();
         if (!listModels) return;
-        const models = yield* listModels({ provider: "devinCloud" });
+        const models = yield* listModels({ provider: "devin" });
         expect(models.models.map((model) => model.slug)).toEqual([
-          "auto",
-          "normal",
-          "fast",
-          "lite",
-          "ultra",
-          "fusion",
+          "cloud/auto",
+          "cloud/normal",
+          "cloud/fast",
+          "cloud/lite",
+          "cloud/ultra",
+          "cloud/fusion",
         ]);
         const getComposerCapabilities = adapter.getComposerCapabilities;
         expect(getComposerCapabilities).toBeDefined();
         if (getComposerCapabilities) {
           const composer = yield* getComposerCapabilities();
-          expect(composer.provider).toBe("devinCloud");
+          expect(composer.provider).toBe("devin");
         }
         yield* adapter.stopAll();
         expect(yield* adapter.hasSession(threadId)).toBe(false);
@@ -696,7 +703,7 @@ describe("DevinCloudAdapter", () => {
         const adapter = yield* DevinCloudAdapter;
         yield* collectEvents(runtimeEvents, adapter);
         yield* adapter.startSession({
-          provider: "devinCloud",
+          provider: "devin",
           threadId,
           runtimeMode: "full-access",
         });
@@ -719,15 +726,15 @@ describe("DevinCloudAdapter", () => {
         const adapter = yield* DevinCloudAdapter;
         yield* collectEvents(runtimeEvents, adapter);
         const session = yield* adapter.startSession({
-          provider: "devinCloud",
+          provider: "devin",
           threadId,
           runtimeMode: "full-access",
-          providerOptions: { devinCloud: { binaryPath: "/opt/devin/bin/devin" } },
+          providerOptions: { devin: { binaryPath: "/opt/devin/bin/devin" } },
         });
-        expect(session.provider).toBe("devinCloud");
+        expect(session.provider).toBe("devin");
         // The wrapped adapter receives the provider-stamped input with the
         // resolved binary forwarded under providerOptions.devin.
-        expect(acp.startInputs[0]?.provider).toBe("devinCloud");
+        expect(acp.startInputs[0]?.provider).toBe("devin");
         expect(acp.startInputs[0]?.providerOptions).toEqual({
           devin: { binaryPath: "/opt/devin/bin/devin" },
         });
@@ -742,7 +749,7 @@ describe("DevinCloudAdapter", () => {
           makeAdapterLayer(scripted, {
             acpAdapter: acp,
             acpCloudSupported: () => Effect.succeed(true),
-            settings: { providers: { devinCloud: { mode: "auto", orgId: "org-test" } } },
+            settings: { providers: { devin: { cloudMode: "auto", orgId: "org-test" } } },
           }),
         ),
       ),
@@ -756,7 +763,7 @@ describe("DevinCloudAdapter", () => {
     const scripted = makeScriptedClient({});
     const acp = makeScriptedAcpAdapter();
     acp.startResult = new ProviderAdapterRequestError({
-      provider: "devinCloud",
+      provider: "devin",
       method: "session/new",
       detail: "devin: unexpected argument '--cloud' found",
     });
@@ -764,13 +771,14 @@ describe("DevinCloudAdapter", () => {
       Effect.gen(function* () {
         const adapter = yield* DevinCloudAdapter;
         const session = yield* adapter.startSession({
-          provider: "devinCloud",
+          provider: "devin",
           threadId,
           runtimeMode: "full-access",
         });
         expect(session.resumeCursor).toEqual({
           schemaVersion: 1,
           sessionId: devinSessionId,
+          cloud: true,
         });
         yield* adapter.stopAll();
       }).pipe(
@@ -779,7 +787,7 @@ describe("DevinCloudAdapter", () => {
           makeAdapterLayer(scripted, {
             acpAdapter: acp,
             acpCloudSupported: () => Effect.succeed(true),
-            settings: { providers: { devinCloud: { mode: "auto", orgId: "org-test" } } },
+            settings: { providers: { devin: { cloudMode: "auto", orgId: "org-test" } } },
           }),
         ),
       ),
@@ -792,7 +800,7 @@ describe("DevinCloudAdapter", () => {
     const scripted = makeScriptedClient({});
     const acp = makeScriptedAcpAdapter();
     acp.startResult = new ProviderAdapterRequestError({
-      provider: "devinCloud",
+      provider: "devin",
       method: "session/new",
       detail: "devin acp exited: authentication required",
     });
@@ -801,7 +809,7 @@ describe("DevinCloudAdapter", () => {
         const adapter = yield* DevinCloudAdapter;
         return yield* adapter
           .startSession({
-            provider: "devinCloud",
+            provider: "devin",
             threadId,
             runtimeMode: "full-access",
           })
@@ -812,7 +820,7 @@ describe("DevinCloudAdapter", () => {
           makeAdapterLayer(scripted, {
             acpAdapter: acp,
             acpCloudSupported: () => Effect.succeed(true),
-            settings: { providers: { devinCloud: { mode: "auto", orgId: "org-test" } } },
+            settings: { providers: { devin: { cloudMode: "auto", orgId: "org-test" } } },
           }),
         ),
       ),
@@ -830,13 +838,13 @@ describe("DevinCloudAdapter", () => {
         const adapter = yield* DevinCloudAdapter;
         yield* collectEvents(runtimeEvents, adapter);
         yield* adapter.startSession({
-          provider: "devinCloud",
+          provider: "devin",
           threadId,
           runtimeMode: "full-access",
         });
         yield* PubSub.publish(acp.pubsub, {
           eventId: EventId.makeUnsafe("acp-e1"),
-          provider: "devinCloud",
+          provider: "devin",
           threadId,
           createdAt: "2026-01-01T00:00:00.000Z",
           type: "session.state.changed",
@@ -854,7 +862,7 @@ describe("DevinCloudAdapter", () => {
           makeAdapterLayer(scripted, {
             acpAdapter: acp,
             acpCloudSupported: () => Effect.succeed(true),
-            settings: { providers: { devinCloud: { mode: "auto", orgId: "org-test" } } },
+            settings: { providers: { devin: { cloudMode: "auto", orgId: "org-test" } } },
           }),
         ),
       ),

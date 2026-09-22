@@ -10,7 +10,6 @@ import {
   ClaudeModelOptions,
   CodexModelOptions,
   CursorModelOptions,
-  DevinCloudModelOptions,
   DevinModelOptions,
   DroidModelOptions,
   GrokModelOptions,
@@ -76,7 +75,6 @@ export const ProviderKind = Schema.Literals([
   "opencode",
   "pi",
   "devin",
-  "devinCloud",
 ]);
 export type ProviderKind = typeof ProviderKind.Type;
 
@@ -89,6 +87,8 @@ export type ProviderKind = typeof ProviderKind.Type;
 export const LEGACY_PROVIDER_MIGRATIONS: Readonly<Record<string, ProviderKind>> = {
   gemini: "antigravity",
   kilo: "opencode",
+  // Devin Cloud folded into the `devin` provider (cloud/<mode> model slugs).
+  devinCloud: "devin",
 };
 
 /**
@@ -184,19 +184,11 @@ export const DevinModelSelection = Schema.Struct({
 });
 export type DevinModelSelection = typeof DevinModelSelection.Type;
 
-export const DevinCloudModelSelection = Schema.Struct({
-  provider: Schema.Literal("devinCloud"),
-  model: TrimmedNonEmptyString,
-  options: Schema.optional(DevinCloudModelOptions),
-});
-export type DevinCloudModelSelection = typeof DevinCloudModelSelection.Type;
-
 export const ModelSelection = Schema.Union([
   CodexModelSelection,
   ClaudeModelSelection,
   CursorModelSelection,
   DevinModelSelection,
-  DevinCloudModelSelection,
   AntigravityModelSelection,
   GrokModelSelection,
   DroidModelSelection,
@@ -247,10 +239,11 @@ export const PiProviderStartOptions = Schema.Struct({
 
 export const DevinProviderStartOptions = Schema.Struct({
   binaryPath: Schema.optional(TrimmedNonEmptyString),
-});
-
-export const DevinCloudProviderStartOptions = Schema.Struct({
-  binaryPath: Schema.optional(TrimmedNonEmptyString),
+  // Devin Cloud transport: "auto" prefers `devin acp --cloud` and falls back
+  // to the v3 REST API; "acp"/"rest" pin one transport.
+  cloudMode: Schema.optional(Schema.Literals(["auto", "acp", "rest"])),
+  // Devin Cloud org id override; auto-resolves through GET /v3/self.
+  orgId: Schema.optional(TrimmedNonEmptyString),
 });
 
 export const ProviderStartOptions = Schema.Struct({
@@ -258,7 +251,6 @@ export const ProviderStartOptions = Schema.Struct({
   claudeAgent: Schema.optional(ClaudeProviderStartOptions),
   cursor: Schema.optional(CursorProviderStartOptions),
   devin: Schema.optional(DevinProviderStartOptions),
-  devinCloud: Schema.optional(DevinCloudProviderStartOptions),
   antigravity: Schema.optional(AntigravityProviderStartOptions),
   grok: Schema.optional(GrokProviderStartOptions),
   droid: Schema.optional(DroidProviderStartOptions),

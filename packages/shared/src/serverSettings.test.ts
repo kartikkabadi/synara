@@ -49,10 +49,7 @@ describe("providerStartOptionsFromServerSettings", () => {
         devin: {
           ...DEFAULT_SERVER_SETTINGS.providers.devin,
           binaryPath: "",
-        },
-        devinCloud: {
-          ...DEFAULT_SERVER_SETTINGS.providers.devinCloud,
-          binaryPath: "",
+          orgId: "",
         },
       },
     };
@@ -76,7 +73,6 @@ describe("providerStartOptionsFromServerSettings", () => {
     expect(providerOptions.opencode).toEqual({ experimentalWebSockets: false });
     expect(providerOptions.pi).toEqual({});
     expect(providerOptions.devin).toEqual({});
-    expect(providerOptions.devinCloud).toEqual({});
   });
 
   it("preserves configured launch settings", () => {
@@ -98,10 +94,8 @@ describe("providerStartOptionsFromServerSettings", () => {
         devin: {
           ...DEFAULT_SERVER_SETTINGS.providers.devin,
           binaryPath: "/custom/bin/devin",
-        },
-        devinCloud: {
-          ...DEFAULT_SERVER_SETTINGS.providers.devinCloud,
-          binaryPath: "/custom/bin/devin",
+          cloudMode: "rest" as const,
+          orgId: "org-example",
         },
       },
     };
@@ -117,7 +111,10 @@ describe("providerStartOptionsFromServerSettings", () => {
       serverUrl: "http://127.0.0.1:4096",
       experimentalWebSockets: true,
     });
-    expect(providerOptions.devin).toEqual({ binaryPath: "/custom/bin/devin" });
-    expect(providerOptions.devinCloud).toEqual({ binaryPath: "/custom/bin/devin" });
+    expect(providerOptions.devin).toEqual({
+      binaryPath: "/custom/bin/devin",
+      cloudMode: "rest",
+      orgId: "org-example",
+    });
   });
 });

@@ -10,6 +10,7 @@ import { snapshotProviderTurns } from "../snapshotProviderTurns.ts";
 import {
   ApprovalRequestId,
   type ChatAttachment,
+  devinCloudModeFromModelSlug,
   type DevinModelOptions,
   EventId,
   MODEL_OPTIONS_BY_PROVIDER,
@@ -151,10 +152,12 @@ import { type AcpSessionRuntimeShape } from "../acp/AcpSessionRuntime.ts";
 import { makeEventNdjsonLogger, type EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import {
   PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
+  type ProviderAdapterShape,
   type ProviderThreadSnapshot,
   type ProviderThreadTurnSnapshot,
 } from "../Services/ProviderAdapter.ts";
 import { DevinAdapter, type DevinAdapterShape } from "../Services/DevinAdapter.ts";
+import type { ServerSettingsService } from "../../serverSettings.ts";
 
 const PROVIDER = "devin" as const;
 
@@ -366,11 +369,15 @@ interface DevinAdapterLiveOptions {
   readonly onSessionUpdateProcessed?: () => void;
   readonly timeouts?: DevinAdapterTimeouts;
   readonly wedgeRecovery?: DevinWedgeRecoveryOptions;
-  /** Provider label stamped on sessions/events — "devinCloud" reuses this
-   *  adapter for `devin acp --cloud` threads. */
-  readonly provider?: "devin" | "devinCloud";
-  /** Spawn `devin acp --cloud` instead of the local ACP server. */
+  /** Spawn `devin acp --cloud` instead of the local ACP server. Used by the
+   *  cloud runtime's ACP transport — callers select it internally, never
+   *  directly. */
   readonly cloud?: boolean;
+  /** A pre-built Devin Cloud runtime (REST + `devin acp --cloud`). When set,
+   *  the returned adapter dispatches `cloud/<mode>` model selections and
+   *  `cloud: true` resume cursors to it; when absent the adapter is the
+   *  local ACP implementation only. */
+  readonly cloudAdapter?: ProviderAdapterShape<ProviderAdapterError>;
 }
 
 interface PendingApproval {
@@ -1330,7 +1337,7 @@ export function makeDevinAdapter(
   devinSettings: DevinAcpRuntimeSettings = {},
   options?: DevinAdapterLiveOptions,
 ) {
-  const adapterProvider = options?.provider ?? PROVIDER;
+  const adapterProvider = PROVIDER;
   const timeouts = options?.timeouts ?? resolveDevinAdapterTimeouts();
   const watchdogIntervalMs = Math.min(5_000, timeouts.turnIdleMs, timeouts.toolIdleMs);
   const wedge = options?.wedgeRecovery ?? resolveDevinWedgeRecoveryOptions();
@@ -1781,8 +1788,8 @@ export function makeDevinAdapter(
             });
           }
 
-          // devinCloud model selections carry {options.mode}, not the devin
-          // CLI option set — keep this narrowed to the local-devin shape.
+          // Cloud selections (`cloud/*` slugs) never reach this branch — the
+          // dispatcher routes them away first.
           const devinModelSelection =
             input.modelSelection?.provider === "devin" ? input.modelSelection : undefined;
 
@@ -3462,7 +3469,7 @@ export function makeDevinAdapter(
 
     const streamEvents = Stream.fromPubSub(runtimeEventPubSub);
 
-    return {
+    const localAdapter = {
       provider: adapterProvider,
       capabilities: {
         sessionModelSwitch: "restart-session",
@@ -3486,7 +3493,138 @@ export function makeDevinAdapter(
       stopAll,
       streamEvents,
     } satisfies DevinAdapterShape;
+
+    // No cloud runtime injected → pure local ACP adapter (also the shape the
+    // cloud runtime's own ACP transport wraps, so this must not recurse).
+    return options?.cloudAdapter === undefined
+      ? localAdapter
+      : dispatchDevinAdapter(localAdapter, options.cloudAdapter);
   });
+}
+
+/** Cloud starts carry either a `cloud/<mode>` model slug or a cloud resume
+ *  cursor (`cloud: true`; the local cursor shares `{schemaVersion, sessionId}`
+ *  so the discriminator is required). */
+function isDevinCloudStart(input: ProviderSessionStartInput): boolean {
+  const cursor = input.resumeCursor;
+  if (isRecord(cursor) && cursor.cloud === true) {
+    return true;
+  }
+  return devinCloudModeFromModelSlug(input.modelSelection?.model) !== null;
+}
+
+/**
+ * One `devin` adapter dispatching between the local ACP runtime and the Devin
+ * Cloud runtime. Cloud ownership is tracked per thread; every session-scoped
+ * method routes by threadId, provider-scoped calls stay local (the cloud
+ * REST surface cannot answer catalog/skills/plugins), and lifecycle methods
+ * fan out to both.
+ */
+function dispatchDevinAdapter(
+  local: DevinAdapterShape,
+  cloud: ProviderAdapterShape<ProviderAdapterError>,
+): DevinAdapterShape {
+  const cloudThreadIds = new Set<ThreadId>();
+  const forThread = (threadId: ThreadId) => (cloudThreadIds.has(threadId) ? cloud : local);
+  const methodUnsupported = (method: string) =>
+    Effect.fail(
+      new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method,
+        detail: "This Devin thread does not support that operation.",
+      }),
+    );
+
+  const startSessionDispatch: DevinAdapterShape["startSession"] = (input) =>
+    isDevinCloudStart(input)
+      ? cloud
+          .startSession(input)
+          .pipe(Effect.tap(() => Effect.sync(() => cloudThreadIds.add(input.threadId))))
+      : local.startSession(input);
+
+  return {
+    provider: PROVIDER,
+    capabilities: {
+      ...local.capabilities,
+      ...(cloud.capabilities.supportsTurnSteering === true
+        ? { supportsTurnSteering: true as const }
+        : {}),
+    },
+    startSession: startSessionDispatch,
+    didResumeSession: (input, session) =>
+      cloudThreadIds.has(input.threadId) && cloud.didResumeSession !== undefined
+        ? cloud.didResumeSession(input, session)
+        : (local.didResumeSession?.(input, session) ?? false),
+    sendTurn: (input) => forThread(input.threadId).sendTurn(input),
+    ...(cloud.steerTurn === undefined
+      ? {}
+      : {
+          steerTurn: (input: Parameters<NonNullable<DevinAdapterShape["steerTurn"]>>[0]) => {
+            const fn = forThread(input.threadId).steerTurn;
+            return fn === undefined ? methodUnsupported("steerTurn") : fn(input);
+          },
+        }),
+    interruptTurn: (threadId, turnId, providerThreadId) =>
+      forThread(threadId).interruptTurn(threadId, turnId, providerThreadId),
+    respondToRequest: (threadId, requestId, decision) =>
+      forThread(threadId).respondToRequest(threadId, requestId, decision),
+    respondToUserInput: (threadId, requestId, answers) =>
+      forThread(threadId).respondToUserInput(threadId, requestId, answers),
+    stopSession: (threadId) => {
+      if (cloudThreadIds.delete(threadId)) {
+        return cloud.stopSession(threadId);
+      }
+      return local.stopSession(threadId);
+    },
+    listSessions: () =>
+      Effect.map(
+        Effect.all([local.listSessions(), cloud.listSessions()]),
+        ([localSessions, cloudSessions]) => [...localSessions, ...cloudSessions],
+      ),
+    hasSession: (threadId) =>
+      Effect.gen(function* () {
+        if (yield* local.hasSession(threadId)) return true;
+        return yield* cloud.hasSession(threadId);
+      }),
+    readThread: (threadId) => forThread(threadId).readThread(threadId),
+    ...(cloud.readExternalThread === undefined && local.readExternalThread === undefined
+      ? {}
+      : {
+          readExternalThread: (
+            input: Parameters<NonNullable<DevinAdapterShape["readExternalThread"]>>[0],
+          ) => {
+            const cloudRead = cloud.readExternalThread;
+            const read = (
+              local.readExternalThread ??
+              (() =>
+                Effect.fail(
+                  new ProviderAdapterRequestError({
+                    provider: PROVIDER,
+                    method: "readExternalThread",
+                    detail: "Thread not found locally.",
+                  }),
+                ))
+            )(input);
+            return cloudRead === undefined ? read : read.pipe(Effect.catch(() => cloudRead(input)));
+          },
+        }),
+    rollbackThread: (threadId, numTurns) => forThread(threadId).rollbackThread(threadId, numTurns),
+    ...(local.compactThread === undefined
+      ? {}
+      : {
+          compactThread: (...args: Parameters<NonNullable<DevinAdapterShape["compactThread"]>>) => {
+            const fn = forThread(args[0]).compactThread;
+            return fn === undefined ? methodUnsupported("compactThread") : fn(...args);
+          },
+        }),
+    stopAll: () => Effect.all([local.stopAll(), cloud.stopAll()]).pipe(Effect.asVoid),
+    streamEvents: Stream.merge(local.streamEvents, cloud.streamEvents),
+    ...(local.getComposerCapabilities === undefined
+      ? {}
+      : { getComposerCapabilities: local.getComposerCapabilities }),
+    ...(local.listCommands === undefined ? {} : { listCommands: local.listCommands }),
+    ...(local.listModels === undefined ? {} : { listModels: local.listModels }),
+  } satisfies DevinAdapterShape;
 }
 
 export const DevinAdapterLive = Layer.effect(DevinAdapter, makeDevinAdapter());

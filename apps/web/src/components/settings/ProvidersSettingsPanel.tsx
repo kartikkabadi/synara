@@ -84,7 +84,6 @@ type ProviderInstallTextKey =
   | "cursorBinaryPath"
   | "cursorApiEndpoint"
   | "devinBinaryPath"
-  | "devinCloudBinaryPath"
   | "devinCloudOrgId"
   | "antigravityBinaryPath"
   | "grokBinaryPath"
@@ -306,6 +305,8 @@ const PROVIDER_INSTALL_SETTINGS: readonly ProviderInstallSettings[] = [
       { label: "Install", href: "https://docs.devin.ai/cli" },
       { label: "Commands", href: "https://docs.devin.ai/cli/reference/commands" },
       { label: "Config", href: "https://docs.devin.ai/cli/reference/configuration/config-file" },
+      { label: "API", href: "https://docs.devin.ai/api-reference/v3/usage-examples" },
+      { label: "API keys", href: "https://docs.devin.ai/api-reference/authentication" },
     ],
     fields: [
       {
@@ -315,25 +316,16 @@ const PROVIDER_INSTALL_SETTINGS: readonly ProviderInstallSettings[] = [
         placeholder: "devin",
         description: (
           <>
-            Leave blank to use <code>devin</code> from your PATH. Authenticate with{" "}
+            Leave blank to use <code>devin</code> from your PATH. Used for local sessions and to
+            probe <code>devin acp --cloud</code> support. Authenticate with{" "}
             <code>devin auth login</code> or set WINDSURF_API_KEY.
           </>
         ),
       },
-    ],
-  },
-  {
-    provider: "devinCloud",
-    docs: [
-      { label: "API", href: "https://docs.devin.ai/api-reference/v3/usage-examples" },
-      { label: "API keys", href: "https://docs.devin.ai/api-reference/authentication" },
-      { label: "CLI", href: "https://docs.devin.ai/cli" },
-    ],
-    fields: [
       {
         kind: "select",
         settingsKey: "devinCloudMode",
-        label: "Transport",
+        label: "Cloud transport",
         options: [
           { value: "auto", label: "Auto (ACP when available, else REST)" },
           { value: "acp", label: "ACP (devin acp --cloud)" },
@@ -341,21 +333,10 @@ const PROVIDER_INSTALL_SETTINGS: readonly ProviderInstallSettings[] = [
         ],
         description: (
           <>
-            Auto prefers streaming over <code>devin acp --cloud</code> when the installed Devin CLI
-            supports it, and falls back to the Devin v3 REST API. REST works for any user signed in
-            with <code>devin auth login</code>; ACP currently requires a Devin Insiders build.
-          </>
-        ),
-      },
-      {
-        kind: "text",
-        settingsKey: "devinCloudBinaryPath",
-        label: "Devin CLI binary path",
-        placeholder: "devin",
-        description: (
-          <>
-            Devin CLI used to probe <code>devin acp --cloud</code> support. Leave blank to use{" "}
-            <code>devin</code> from your PATH.
+            Used by the Devin Cloud models in Devin's model menu. Auto prefers streaming over{" "}
+            <code>devin acp --cloud</code> when the installed Devin CLI supports it, and falls back
+            to the Devin v3 REST API. REST works for any user signed in with{" "}
+            <code>devin auth login</code>; ACP currently requires a Devin Insiders build.
           </>
         ),
       },
@@ -367,9 +348,9 @@ const PROVIDER_INSTALL_SETTINGS: readonly ProviderInstallSettings[] = [
         placeholder: "cog_…",
         description: (
           <>
-            Optional REST credential override. When blank, Synara uses DEVIN_API_KEY /
-            WINDSURF_API_KEY or the token from <code>devin auth login</code>. For a dedicated key,
-            create a service user in Devin → Settings → Service users with{" "}
+            Optional REST credential override for Devin Cloud sessions. When blank, Synara uses
+            DEVIN_API_KEY / WINDSURF_API_KEY or the token from <code>devin auth login</code>. For a
+            dedicated key, create a service user in Devin → Settings → Service users with{" "}
             <code>ManageOrgSessions</code> and paste the <code>cog_</code> key here.
           </>
         ),
@@ -381,8 +362,8 @@ const PROVIDER_INSTALL_SETTINGS: readonly ProviderInstallSettings[] = [
         placeholder: "org-…",
         description: (
           <>
-            Optional org override for REST sessions. Leave blank to use the org tied to your API
-            credential (shown on Settings → Service users in Devin).
+            Optional org override for Devin Cloud sessions over REST. Leave blank to use the org
+            tied to your API credential (shown on Settings → Service users in Devin).
           </>
         ),
       },

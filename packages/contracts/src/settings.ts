@@ -74,26 +74,23 @@ export const PiServerProviderSettings = Schema.Struct({
 });
 export type PiServerProviderSettings = typeof PiServerProviderSettings.Type;
 
-export const DevinServerProviderSettings = Schema.Struct({
-  ...ProviderSettingsBase,
-  binaryPath: StringSetting.pipe(Schema.withDecodingDefault(() => "devin")),
-});
-export type DevinServerProviderSettings = typeof DevinServerProviderSettings.Type;
-
+// Devin Cloud transport preference: "auto" prefers `devin acp --cloud` and
+// falls back to the v3 REST API; "acp"/"rest" pin one transport.
 export const DevinCloudProviderMode = Schema.Literals(["auto", "acp", "rest"]);
 export type DevinCloudProviderMode = typeof DevinCloudProviderMode.Type;
 
-// Devin Cloud: binaryPath is only used to probe `devin acp --cloud` support;
-// REST auth resolves the Devin CLI credential chain (env -> credentials.toml)
+// Devin Cloud rides the `devin` provider. binaryPath is shared with local ACP
+// sessions (the same `devin` CLI is probed for `acp --cloud` support); REST
+// auth resolves the Devin CLI credential chain (env -> credentials.toml)
 // unless a serverPassword override is stored.
-export const DevinCloudServerProviderSettings = Schema.Struct({
+export const DevinServerProviderSettings = Schema.Struct({
   ...ProviderSettingsBase,
   binaryPath: StringSetting.pipe(Schema.withDecodingDefault(() => "devin")),
-  mode: DevinCloudProviderMode.pipe(Schema.withDecodingDefault(() => "auto")),
+  cloudMode: DevinCloudProviderMode.pipe(Schema.withDecodingDefault(() => "auto")),
   orgId: StringSetting.pipe(Schema.withDecodingDefault(() => "")),
   serverPasswordConfigured: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
 });
-export type DevinCloudServerProviderSettings = typeof DevinCloudServerProviderSettings.Type;
+export type DevinServerProviderSettings = typeof DevinServerProviderSettings.Type;
 
 const DisabledSkillNames = Schema.Array(Schema.String.check(Schema.isMaxLength(256))).pipe(
   Schema.withDecodingDefault(() => []),
@@ -122,7 +119,6 @@ export const ServerSettings = Schema.Struct({
     claudeAgent: ClaudeServerProviderSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     cursor: CursorServerProviderSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     devin: DevinServerProviderSettings.pipe(Schema.withDecodingDefault(() => ({}))),
-    devinCloud: DevinCloudServerProviderSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     antigravity: AntigravityServerProviderSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     grok: GrokServerProviderSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     droid: DroidServerProviderSettings.pipe(Schema.withDecodingDefault(() => ({}))),
@@ -204,11 +200,10 @@ export const ServerSettingsPatch = Schema.Struct({
           agentDir: Schema.optionalKey(StringSetting),
         }),
       ),
-      devin: Schema.optionalKey(Schema.Struct(ProviderSettingsBasePatch)),
-      devinCloud: Schema.optionalKey(
+      devin: Schema.optionalKey(
         Schema.Struct({
           ...ProviderSettingsBasePatch,
-          mode: Schema.optionalKey(DevinCloudProviderMode),
+          cloudMode: Schema.optionalKey(DevinCloudProviderMode),
           orgId: Schema.optionalKey(StringSetting),
           serverPassword: Schema.optionalKey(StringSetting),
         }),
