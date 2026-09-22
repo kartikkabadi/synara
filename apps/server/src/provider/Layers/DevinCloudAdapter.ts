@@ -349,8 +349,7 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         const itemId = RuntimeItemId.makeUnsafe(`devincloud:${message.event_id}`);
         const isUser = message.source === "user";
         const itemType = isUser ? "user_message" : "assistant_message";
-        const base = {
-          ...(yield* makeEventStamp()),
+        const itemBase = {
           provider: PROVIDER,
           threadId: ctx.threadId,
           itemId,
@@ -358,25 +357,29 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
         };
         yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
           type: "item.started",
-          ...base,
+          ...itemBase,
+          ...(yield* makeEventStamp()),
           payload: { itemType, status: "inProgress" },
         });
         if (isUser) {
           yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
             type: "item.completed",
-            ...base,
+            ...itemBase,
+            ...(yield* makeEventStamp()),
             payload: { itemType, status: "completed", detail: message.message },
           });
           return;
         }
         yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
           type: "content.delta",
-          ...base,
+          ...itemBase,
+          ...(yield* makeEventStamp()),
           payload: { streamKind: "assistant_text", delta: message.message },
         });
         yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
           type: "item.completed",
-          ...base,
+          ...itemBase,
+          ...(yield* makeEventStamp()),
           payload: { itemType, status: "completed" },
         });
       });
@@ -766,6 +769,37 @@ const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
           provider: PROVIDER,
           threadId: input.threadId,
           payload: { metadata: { sessionUrl: remote.url } },
+        });
+        // The cloud session URL is the only place approvals can be answered
+        // (REST can't), so it must be reachable from the transcript. No UI
+        // consumes the sessionUrl metadata fields yet — emit one link item.
+        const urlItemId = RuntimeItemId.makeUnsafe(`devincloud:session-url:${remote.session_id}`);
+        yield* offerRuntimeEvent(input.lifecycleGeneration, {
+          type: "item.started",
+          ...(yield* makeEventStamp()),
+          provider: PROVIDER,
+          threadId: input.threadId,
+          itemId: urlItemId,
+          payload: { itemType: "assistant_message", status: "inProgress" },
+        });
+        yield* offerRuntimeEvent(input.lifecycleGeneration, {
+          type: "content.delta",
+          ...(yield* makeEventStamp()),
+          provider: PROVIDER,
+          threadId: input.threadId,
+          itemId: urlItemId,
+          payload: {
+            streamKind: "assistant_text",
+            delta: `Devin Cloud session: ${remote.url}`,
+          },
+        });
+        yield* offerRuntimeEvent(input.lifecycleGeneration, {
+          type: "item.completed",
+          ...(yield* makeEventStamp()),
+          provider: PROVIDER,
+          threadId: input.threadId,
+          itemId: urlItemId,
+          payload: { itemType: "assistant_message", status: "completed" },
         });
 
         if (resumed) {

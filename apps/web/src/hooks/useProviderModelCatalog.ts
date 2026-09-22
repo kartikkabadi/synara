@@ -548,7 +548,9 @@ export function useProviderModelCatalog(input: {
                   ? openCodeDynamicModelsQuery
                   : selectedProvider === "pi"
                     ? piDynamicModelsQuery
-                    : devinDynamicModelsQuery;
+                    : selectedProvider === "devin"
+                      ? devinDynamicModelsQuery
+                      : devinCloudDynamicModelsQuery;
   const selectedProviderModelsLoading =
     selectedProviderRuntimeModelDiscoveryPending ||
     (loadingModelProviders[selectedProvider] === undefined &&

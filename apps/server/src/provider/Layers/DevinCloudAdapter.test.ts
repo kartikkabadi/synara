@@ -157,6 +157,7 @@ function makeScriptedClient(initial: {
 
 interface RuntimeEventRecord {
   readonly type: string;
+  readonly eventId?: string | undefined;
   readonly turnId?: string | undefined;
   readonly itemId?: string | undefined;
   readonly payload?: Record<string, unknown> | undefined;
@@ -172,6 +173,7 @@ const collectEvents = (
         Effect.sync(() =>
           events.push({
             type: event.type,
+            eventId: String(event.eventId),
             ...(event.turnId !== undefined ? { turnId: String(event.turnId) } : {}),
             ...(event.itemId !== undefined ? { itemId: String(event.itemId) } : {}),
             payload: event.payload as Record<string, unknown> | undefined,
@@ -359,6 +361,15 @@ describe("DevinCloudAdapter", () => {
     });
     const threadStarted = runtimeEvents.find((event) => event.type === "thread.started");
     expect(threadStarted?.payload?.providerThreadId).toBe(devinSessionId);
+    const urlDelta = runtimeEvents.find(
+      (event) =>
+        event.type === "content.delta" &&
+        event.itemId === `devincloud:session-url:${devinSessionId}`,
+    );
+    expect(urlDelta?.payload).toEqual({
+      streamKind: "assistant_text",
+      delta: `Devin Cloud session: https://app.devin.ai/sessions/${devinSessionId}`,
+    });
     expect(scripted.createInputs[0]?.bypassApproval).toBe(true);
     expect(scripted.createInputs[0]?.tags).toEqual(["synara"]);
     expect(scripted.createInputs[0]?.devinMode).toBeUndefined();
@@ -496,6 +507,12 @@ describe("DevinCloudAdapter", () => {
         (event) => event.payload?.itemType === "user_message" && event.type === "item.started",
       ),
     ).toBe(false);
+    // Every event in an item's started → delta → completed burst needs its own
+    // eventId — the journal quarantines reused ids as content collisions.
+    const burstIds = runtimeEvents
+      .filter((event) => event.itemId === "devincloud:m1")
+      .map((event) => event.eventId);
+    expect(new Set(burstIds).size).toBe(burstIds.length);
   });
 
   it("sendTurn rejects while a turn is open; steerTurn forwards the message", async () => {
