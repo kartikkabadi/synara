@@ -796,7 +796,44 @@ describe("DevinCloudAdapter", () => {
     expect(scripted.createInputs).toHaveLength(1);
   });
 
-  it("auto mode rethrows non-usage ACP failures without REST fallback", async () => {
+  it("auto mode falls back to REST when the ACP relay cannot authenticate", async () => {
+    const scripted = makeScriptedClient({});
+    const acp = makeScriptedAcpAdapter();
+    acp.startResult = new ProviderAdapterRequestError({
+      provider: "devin",
+      method: "session/new",
+      detail: "Devin ACP advertised no supported headless authentication method (advertised: none)",
+    });
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const adapter = yield* DevinCloudAdapter;
+        const session = yield* adapter.startSession({
+          provider: "devin",
+          threadId,
+          runtimeMode: "full-access",
+        });
+        expect(session.resumeCursor).toEqual({
+          schemaVersion: 1,
+          sessionId: devinSessionId,
+          cloud: true,
+        });
+        yield* adapter.stopAll();
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          makeAdapterLayer(scripted, {
+            acpAdapter: acp,
+            acpCloudSupported: () => Effect.succeed(true),
+            settings: { providers: { devin: { cloudMode: "auto", orgId: "org-test" } } },
+          }),
+        ),
+      ),
+    );
+    expect(acp.startInputs).toHaveLength(1);
+    expect(scripted.createInputs).toHaveLength(1);
+  });
+
+  it("acp mode rethrows ACP start failures without REST fallback", async () => {
     const scripted = makeScriptedClient({});
     const acp = makeScriptedAcpAdapter();
     acp.startResult = new ProviderAdapterRequestError({
@@ -820,7 +857,7 @@ describe("DevinCloudAdapter", () => {
           makeAdapterLayer(scripted, {
             acpAdapter: acp,
             acpCloudSupported: () => Effect.succeed(true),
-            settings: { providers: { devin: { cloudMode: "auto", orgId: "org-test" } } },
+            settings: { providers: { devin: { cloudMode: "acp", orgId: "org-test" } } },
           }),
         ),
       ),

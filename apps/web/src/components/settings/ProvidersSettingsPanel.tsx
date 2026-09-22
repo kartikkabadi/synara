@@ -333,10 +333,10 @@ const PROVIDER_INSTALL_SETTINGS: readonly ProviderInstallSettings[] = [
         ],
         description: (
           <>
-            Used by the Devin Cloud models in Devin's model menu. Auto prefers streaming over{" "}
-            <code>devin acp --cloud</code> when the installed Devin CLI supports it, and falls back
-            to the Devin v3 REST API. REST works for any user signed in with{" "}
-            <code>devin auth login</code>; ACP currently requires a Devin Insiders build.
+            Used by the Devin Cloud models in Devin's model menu. Auto tries streaming over{" "}
+            <code>devin acp --cloud</code> first and falls back to the Devin v3 REST API whenever
+            the ACP relay can't start (older CLI, or a build whose --cloud auth isn't headless).
+            REST works for any user signed in with <code>devin auth login</code>.
           </>
         ),
       },

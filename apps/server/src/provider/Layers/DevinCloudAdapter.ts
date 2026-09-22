@@ -72,11 +72,6 @@ import { snapshotProviderTurns } from "../snapshotProviderTurns.ts";
 
 const PROVIDER = "devin" as const;
 
-// Spawn failures that mean the CLI rejected the flag despite the help
-// probe (partial rollout, arg ordering) — auto mode falls back to REST.
-const ACP_USAGE_ERROR_PATTERN =
-  /unexpected argument|unknown option|unrecognized|invalid flag|no such option|not supported|insiders/iu;
-
 const describeAdapterError = (error: unknown): string => {
   if (error instanceof Error) return error.message;
   if (typeof error === "object" && error !== null) {
@@ -88,8 +83,6 @@ const describeAdapterError = (error: unknown): string => {
   return String(error);
 };
 
-const isAcpUsageError = (error: unknown) =>
-  ACP_USAGE_ERROR_PATTERN.test(describeAdapterError(error));
 const RESUME_VERSION = 1;
 
 // Poll cadence: tight while a turn is open or the remote session reports work,
@@ -907,10 +900,13 @@ export const makeDevinCloudAdapter = (options?: DevinCloudAdapterLiveOptions) =>
                 acpThreadIds.add(input.threadId);
                 return startResult.success;
               }
-              if (mode === "acp" || !isAcpUsageError(startResult.failure)) {
+              // `acp` is an explicit choice — surface the failure. `auto` means
+              // "use whatever works": any ACP start failure (flag rejected,
+              // relay without headless auth, spawn error) falls back to REST.
+              if (mode === "acp") {
                 return yield* Effect.fail(startResult.failure);
               }
-              yield* Effect.logWarning("devinCloud.acp_usage_fallback", {
+              yield* Effect.logWarning("devinCloud.acp_fallback_to_rest", {
                 threadId: input.threadId,
                 detail: describeAdapterError(startResult.failure),
               });
