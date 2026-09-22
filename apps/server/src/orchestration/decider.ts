@@ -2623,6 +2623,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           goalStartedAt: command.goalStartedAt,
           trigger: command.trigger,
           ...(command.sourceTurnId !== undefined ? { sourceTurnId: command.sourceTurnId } : {}),
+          ...(command.retryAttempt !== undefined ? { retryAttempt: command.retryAttempt } : {}),
           createdAt: command.createdAt,
         },
       };

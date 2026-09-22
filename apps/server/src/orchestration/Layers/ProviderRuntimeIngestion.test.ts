@@ -1515,6 +1515,106 @@ describe("ProviderRuntimeIngestion", () => {
     );
   });
 
+  it("requests a goal retry instead of pausing after a failed completion", async () => {
+    const harness = await createHarness();
+    const turnId = asTurnId("turn-failed-goal");
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-failed-goal"),
+        threadId: asThreadId("thread-1"),
+        goal: "Retry after a provider failure",
+      }),
+    );
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-failed-goal-started"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: new Date().toISOString(),
+      turnId,
+    });
+    await waitForThread(harness.engine, (thread) => thread.session?.activeTurnId === turnId);
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-failed-goal-completed"),
+      provider: "codex",
+      threadId: asThreadId("thread-1"),
+      createdAt: new Date().toISOString(),
+      turnId,
+      payload: { state: "failed", errorMessage: "provider blew up" },
+    });
+
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) => entry.session?.status === "error",
+    );
+    expect(thread.goalPausedAt).toBeNull();
+    await harness.drain();
+    const events = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((collected) => Array.from(collected)),
+      ),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "thread.goal-continuation-requested",
+        payload: expect.objectContaining({
+          trigger: "turn-failed",
+          sourceTurnId: turnId,
+        }),
+      }),
+    );
+  });
+
+  it("requests a goal retry when the session errors mid-turn", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const turnId = asTurnId("session-error-turn");
+    const base = { provider: "codex" as const, threadId, createdAt: new Date().toISOString() };
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("goal-before-session-error"),
+        threadId,
+        goal: "Survive a session-level failure",
+      }),
+    );
+    harness.emit({
+      ...base,
+      type: "turn.started",
+      eventId: asEventId("session-error-started"),
+      turnId,
+    });
+    await waitForThread(harness.engine, (thread) => thread.session?.activeTurnId === turnId);
+
+    harness.emit({
+      ...base,
+      type: "session.state.changed",
+      eventId: asEventId("session-error-changed"),
+      payload: { state: "error", reason: "connection lost" },
+    });
+    const thread = await waitForThread(
+      harness.engine,
+      (entry) => entry.session?.status === "error",
+    );
+    expect(thread.goalPausedAt).toBeNull();
+    await harness.drain();
+    const events = Array.from(
+      await Effect.runPromise(Stream.runCollect(harness.engine.readEvents(0))),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "thread.goal-continuation-requested",
+        payload: expect.objectContaining({
+          trigger: "turn-failed",
+          sourceTurnId: turnId,
+        }),
+      }),
+    );
+  });
+
   it("pauses an active goal instead of continuing after an interrupted completion", async () => {
     const harness = await createHarness();
     const turnId = asTurnId("turn-interrupted-goal");
@@ -1646,18 +1746,22 @@ describe("ProviderRuntimeIngestion", () => {
             detail: { reason: "synara.devin.wedge-recovery" },
           },
         });
-        thread = await waitForThread(
-          harness.engine,
-          (entry) => entry.session?.status === "error" && entry.goalPausedAt != null,
-        );
+        thread = await waitForThread(harness.engine, (entry) => entry.session?.status === "error");
         expect(thread.session?.lastError).toBe("Arbitrary failure message");
-        expect(thread.latestTurn?.state).not.toBe("running");
+        expect(thread.goalPausedAt).toBeNull();
         await harness.drain();
         const events = Array.from(
           await Effect.runPromise(Stream.runCollect(harness.engine.readEvents(0))),
         );
-        expect(events.some((event) => event.type === "thread.goal-continuation-requested")).toBe(
-          false,
+        // A failed recovery asks for a bounded goal retry instead of pausing.
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: "thread.goal-continuation-requested",
+            payload: expect.objectContaining({
+              trigger: "turn-failed",
+              sourceTurnId: turnId,
+            }),
+          }),
         );
         return;
       }
@@ -1702,7 +1806,7 @@ describe("ProviderRuntimeIngestion", () => {
     },
   );
 
-  it("error-pauses an active goal when the session crashes mid-turn", async () => {
+  it("requests a goal retry when the session crashes mid-turn", async () => {
     const harness = await createHarness();
     const threadId = asThreadId("thread-1");
     const turnId = asTurnId("crash-turn");
@@ -1726,14 +1830,22 @@ describe("ProviderRuntimeIngestion", () => {
     });
     const thread = await waitForThread(
       harness.engine,
-      (entry) => entry.session?.status === "stopped" && entry.goalPausedAt != null,
+      (entry) => entry.session?.status === "stopped",
     );
-    expect(thread.goalPausedReason).toBe("error");
+    expect(thread.goalPausedAt).toBeNull();
     await harness.drain();
     const events = Array.from(
       await Effect.runPromise(Stream.runCollect(harness.engine.readEvents(0))),
     );
-    expect(events.some((event) => event.type === "thread.goal-continuation-requested")).toBe(false);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "thread.goal-continuation-requested",
+        payload: expect.objectContaining({
+          trigger: "turn-failed",
+          sourceTurnId: turnId,
+        }),
+      }),
+    );
   });
 
   it("does not pause an active goal on a graceful session exit", async () => {

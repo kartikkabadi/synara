@@ -705,6 +705,11 @@ export const ThreadGoalContinuationTrigger = Schema.Literals([
   // The goal's token budget was exhausted: grants the agent one wrap-up turn
   // before the goal auto-pauses with reason "budget".
   "budget-limit",
+  // A provider-side failure (a failed turn, a session error, or a crash that
+  // ended the live turn without a terminal turn event) asks for the pursuit
+  // to be retried with backoff. The reactor bounds consecutive retries and
+  // pauses the goal with reason "error" once they run out.
+  "turn-failed",
 ]);
 export type ThreadGoalContinuationTrigger = typeof ThreadGoalContinuationTrigger.Type;
 /**
@@ -1706,6 +1711,9 @@ const ThreadGoalContinueCommand = Schema.Struct({
   goalStartedAt: Schema.NullOr(IsoDateTime),
   trigger: ThreadGoalContinuationTrigger,
   sourceTurnId: Schema.optional(TurnId),
+  // Present only on a deferred retry re-dispatch (attempt count, starting at
+  // 1); absent on a fresh failure signal so the reactor can tell them apart.
+  retryAttempt: Schema.optional(NonNegativeInt),
   createdAt: IsoDateTime,
 });
 
@@ -2189,6 +2197,7 @@ export const ThreadGoalContinuationRequestedPayload = Schema.Struct({
   goalStartedAt: Schema.NullOr(IsoDateTime),
   trigger: ThreadGoalContinuationTrigger,
   sourceTurnId: Schema.optional(TurnId),
+  retryAttempt: Schema.optional(NonNegativeInt),
   createdAt: IsoDateTime,
 });
 

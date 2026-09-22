@@ -2489,8 +2489,22 @@ const make = Effect.gen(function* () {
                     createdAt: now,
                   });
                 }
+              } else if (event.type === "turn.completed" && runtimeTurnState(event) === "failed") {
+                // A provider-side failure is usually transient: retry the
+                // pursuit with a bounded backoff instead of stopping the
+                // goal outright. The reactor pauses it with reason "error"
+                // once the retries run out.
+                yield* orchestrationEngine.dispatch({
+                  type: "thread.goal.continue",
+                  commandId: providerCommandId(event, "goal-continue", thread.id),
+                  threadId: thread.id,
+                  goalStartedAt: accountedThread.goalStartedAt ?? null,
+                  trigger: "turn-failed",
+                  ...(eventTurnId !== undefined ? { sourceTurnId: eventTurnId } : {}),
+                  createdAt: now,
+                });
               } else {
-                // A failed, aborted, cancelled, or interrupted turn must stop
+                // An aborted, cancelled, or interrupted turn must stop
                 // autonomous resurrection until the user explicitly resumes.
                 yield* orchestrationEngine.dispatch({
                   type: "thread.meta.update",
@@ -2504,6 +2518,26 @@ const make = Effect.gen(function* () {
                 });
               }
             }
+          }
+
+          // A session-level error ends the in-flight turn without a terminal
+          // turn event, so nothing else would ever move the goal again.
+          if (
+            event.type === "session.state.changed" &&
+            event.payload.state === "error" &&
+            activeTurnId !== null &&
+            activeThreadGoal(thread)?.trim() &&
+            thread.goalPausedAt == null
+          ) {
+            yield* orchestrationEngine.dispatch({
+              type: "thread.goal.continue",
+              commandId: providerCommandId(event, "goal-failure-continue", thread.id),
+              threadId: thread.id,
+              goalStartedAt: thread.goalStartedAt ?? null,
+              trigger: "turn-failed",
+              sourceTurnId: activeTurnId,
+              createdAt: now,
+            });
           }
         }
       }
@@ -2893,7 +2927,8 @@ const make = Effect.gen(function* () {
         }
         yield* clearTurnStateForSession(thread.id);
         // A crashed session emits no terminal turn event, so the goal would
-        // render "pursuing" forever while nothing can run.
+        // render "pursuing" forever while nothing can run. Retry the pursuit
+        // like a failed turn (bounded) instead of silently abandoning it.
         if (
           event.payload.exitKind === "error" &&
           exitedTurnId !== undefined &&
@@ -2901,11 +2936,13 @@ const make = Effect.gen(function* () {
           thread.goalPausedAt == null
         ) {
           yield* orchestrationEngine.dispatch({
-            type: "thread.meta.update",
-            commandId: providerCommandId(event, "goal-error-exit-pause", thread.id),
+            type: "thread.goal.continue",
+            commandId: providerCommandId(event, "goal-failure-continue", thread.id),
             threadId: thread.id,
-            goalPaused: true,
-            goalPausedReason: "error",
+            goalStartedAt: thread.goalStartedAt ?? null,
+            trigger: "turn-failed",
+            sourceTurnId: exitedTurnId,
+            createdAt: now,
           });
         }
       }
@@ -2953,30 +2990,23 @@ const make = Effect.gen(function* () {
             },
             createdAt: now,
           });
-          // The old turn was technically cancelled, so only the failed
-          // recovery can now pause its goal. Never pause a different turn.
+          // A provider runtime failure ends the in-flight turn without a
+          // terminal turn event; retry the pursuit (bounded) like a failed
+          // turn instead of leaving the goal stuck or silently dead.
           if (
-            event.provider === "devin" &&
-            asObject(event.payload.detail)?.reason === "synara.devin.wedge-recovery" &&
-            eventTurnId !== undefined &&
-            thread.latestTurn?.turnId === eventTurnId
+            erroredTurnId !== undefined &&
+            activeThreadGoal(thread)?.trim() &&
+            thread.goalPausedAt == null
           ) {
-            const failedThread = (yield* orchestrationEngine.getReadModel()).threads.find(
-              (candidate) => candidate.id === thread.id,
-            );
-            if (
-              failedThread &&
-              activeThreadGoal(failedThread)?.trim() &&
-              failedThread.goalPausedAt == null
-            ) {
-              yield* orchestrationEngine.dispatch({
-                type: "thread.meta.update",
-                commandId: providerCommandId(event, "goal-recovery-failed-pause", thread.id),
-                threadId: thread.id,
-                goalPaused: true,
-                goalPausedReason: "error",
-              });
-            }
+            yield* orchestrationEngine.dispatch({
+              type: "thread.goal.continue",
+              commandId: providerCommandId(event, "goal-failure-continue", thread.id),
+              threadId: thread.id,
+              goalStartedAt: thread.goalStartedAt ?? null,
+              trigger: "turn-failed",
+              sourceTurnId: erroredTurnId,
+              createdAt: now,
+            });
           }
         }
       }

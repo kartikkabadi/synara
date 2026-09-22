@@ -501,6 +501,14 @@ const PROVIDER_COMMAND_INTERRUPT_TIMEOUT = Duration.seconds(10);
 const PROVIDER_COMMAND_STOP_TIMEOUT = Duration.seconds(15);
 const PROVIDER_COMMAND_EVENT_TIMEOUT = Duration.seconds(120);
 const GATEWAY_OPERATION_COMPLETION_WAIT_TIMEOUT = Duration.seconds(120);
+// Consecutive provider-side failures to advance a goal back off before each
+// retry and give up after the last delay: the goal then pauses with reason
+// "error" instead of silently stalling or spinning on a dead provider.
+const GOAL_FAILURE_RETRY_DELAYS = [
+  Duration.seconds(5),
+  Duration.seconds(15),
+  Duration.seconds(45),
+] as const;
 const PROVIDER_INPUT_SAFETY_MARGIN_CHARS = 1_000;
 const THREAD_MENTION_CONTEXT_SUFFIX_PREFIX_CHARS = 2;
 const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
@@ -729,10 +737,12 @@ function buildGeneratedWorktreeBranchName(raw: string): string {
 
 export interface ProviderCommandReactorLiveOptions {
   readonly commandEventTimeout?: Duration.Duration;
+  readonly goalFailureRetryDelays?: readonly Duration.Duration[];
 }
 
 interface ProviderCommandReactorConfigShape {
   readonly commandEventTimeout: Duration.Duration;
+  readonly goalFailureRetryDelays: readonly Duration.Duration[];
 }
 
 class ProviderCommandReactorConfig extends ServiceMap.Service<
@@ -741,7 +751,7 @@ class ProviderCommandReactorConfig extends ServiceMap.Service<
 >()("synara/orchestration/Layers/ProviderCommandReactorConfig") {}
 
 const make = Effect.gen(function* () {
-  const { commandEventTimeout } = yield* ProviderCommandReactorConfig;
+  const { commandEventTimeout, goalFailureRetryDelays } = yield* ProviderCommandReactorConfig;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const deliveryRepository = yield* OrchestrationEventDeliveryRepository;
   const turnCheckpointCoordinator = yield* TurnCheckpointCoordinator;
@@ -862,12 +872,22 @@ const make = Effect.gen(function* () {
   type BlockedGoalContinuation = Pick<
     Extract<ProviderIntentEvent, { type: "thread.goal-continuation-requested" }>["payload"],
     "goalStartedAt" | "trigger" | "sourceTurnId"
-  >;
+  > & {
+    readonly attempts: number;
+    readonly notBefore?: number;
+  };
   // A blocked continuation cannot keep its durable delivery open: approval,
   // input, and queued-work intents behind it may be the only way to clear the
   // blocker. Retry outside the single delivery lock; startup recovery recreates
   // the request if the process exits while this transient retry is pending.
   const blockedGoalContinuations = new Map<string, BlockedGoalContinuation>();
+  // Consecutive failure count per in-flight goal, reset whenever a non-retry
+  // continuation arrives or the goal restarts. Startup recovery re-arms a
+  // still-active goal after a restart, so the count may live in memory.
+  const goalFailureAttempts = new Map<
+    string,
+    { readonly goalStartedAt: string | null; readonly attempts: number }
+  >();
   const queuedGoalContinuationRetries = new Set<string>();
   const goalContinuationRetryQueue = yield* Queue.unbounded<ThreadId>();
   // Provider sessions with a drained queued turn whose promotion is in flight.
@@ -1483,6 +1503,7 @@ const make = Effect.gen(function* () {
       }
       quarantinedThreads.delete(threadId);
       blockedGoalContinuations.delete(threadId);
+      goalFailureAttempts.delete(threadId);
       queuedGoalContinuationRetries.delete(threadId);
       // NOTE: `drainingQueuedTurns` is intentionally NOT cleared here. It is a
       // turn-scoped in-flight guard that each drain self-clears when it settles;
@@ -4348,11 +4369,19 @@ const make = Effect.gen(function* () {
   const deferGoalContinuation = Effect.fnUntraced(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.goal-continuation-requested" }>,
   ) {
+    const prior = blockedGoalContinuations.get(event.payload.threadId);
+    const samePending =
+      prior?.goalStartedAt === event.payload.goalStartedAt &&
+      prior?.trigger === event.payload.trigger;
     blockedGoalContinuations.set(event.payload.threadId, {
       goalStartedAt: event.payload.goalStartedAt,
       trigger: event.payload.trigger,
       ...(event.payload.sourceTurnId !== undefined
         ? { sourceTurnId: event.payload.sourceTurnId }
+        : {}),
+      attempts: samePending === true ? (prior?.attempts ?? 0) : 0,
+      ...(samePending === true && prior?.notBefore !== undefined
+        ? { notBefore: prior.notBefore }
         : {}),
     });
     yield* scheduleBlockedGoalContinuationRetry(event.payload.threadId);
@@ -4361,6 +4390,10 @@ const make = Effect.gen(function* () {
   const retryBlockedGoalContinuation = Effect.fnUntraced(function* (threadId: ThreadId) {
     const pending = blockedGoalContinuations.get(threadId);
     if (!pending) {
+      return;
+    }
+    if (pending.notBefore !== undefined && Date.now() < pending.notBefore) {
+      yield* scheduleBlockedGoalContinuationRetry(threadId);
       return;
     }
 
@@ -4412,6 +4445,7 @@ const make = Effect.gen(function* () {
         goalStartedAt: pending.goalStartedAt,
         trigger: pending.trigger,
         ...(pending.sourceTurnId !== undefined ? { sourceTurnId: pending.sourceTurnId } : {}),
+        ...(pending.attempts > 0 ? { retryAttempt: pending.attempts } : {}),
         createdAt: new Date().toISOString(),
       })
       .pipe(
@@ -4476,6 +4510,7 @@ const make = Effect.gen(function* () {
     ) {
       return;
     }
+    goalFailureAttempts.delete(input.threadId);
     yield* orchestrationEngine.dispatch({
       type: "thread.meta.update",
       commandId: serverCommandId("goal-auto-pause"),
@@ -4505,6 +4540,68 @@ const make = Effect.gen(function* () {
           (thread.goalStartedAt ?? null) !== event.payload.goalStartedAt
         ) {
           blockedGoalContinuations.delete(event.payload.threadId);
+          goalFailureAttempts.delete(event.payload.threadId);
+          return;
+        }
+
+        if (event.payload.trigger !== "turn-failed" && event.payload.retryAttempt === undefined) {
+          // Any non-retry continuation (a completed turn, a user resume, a
+          // fresh goal) means the pursuit advanced again: drop the failure
+          // streak recorded for the previous one. A re-dispatched retry keeps
+          // its budget.
+          goalFailureAttempts.delete(event.payload.threadId);
+        }
+        if (event.payload.trigger === "turn-failed" && event.payload.retryAttempt === undefined) {
+          const pending = blockedGoalContinuations.get(event.payload.threadId);
+          const isDuplicateFailureSignal =
+            pending !== undefined &&
+            pending.trigger === "turn-failed" &&
+            pending.goalStartedAt === event.payload.goalStartedAt &&
+            (pending.sourceTurnId ?? null) === (event.payload.sourceTurnId ?? null);
+          // A crash can report the same lost turn twice (terminal event plus
+          // session exit); only the first signal counts as a new attempt.
+          if (!isDuplicateFailureSignal) {
+            const priorAttempts = goalFailureAttempts.get(event.payload.threadId);
+            const attempts =
+              priorAttempts !== undefined &&
+              priorAttempts.goalStartedAt === event.payload.goalStartedAt
+                ? priorAttempts.attempts + 1
+                : 1;
+            if (attempts > goalFailureRetryDelays.length) {
+              goalFailureAttempts.delete(event.payload.threadId);
+              blockedGoalContinuations.delete(event.payload.threadId);
+              yield* appendProviderFailureActivity({
+                threadId: event.payload.threadId,
+                kind: "provider.turn.start.failed",
+                summary: "Goal paused after repeated provider failures",
+                detail: `The last ${attempts - 1} retries to continue the goal also failed.`,
+                turnId: null,
+                createdAt: event.payload.createdAt,
+              });
+              yield* pauseActiveThreadGoal({
+                threadId: event.payload.threadId,
+                expectedGoalStartedAt: event.payload.goalStartedAt,
+                reason: "error",
+              });
+              return;
+            }
+            goalFailureAttempts.set(event.payload.threadId, {
+              goalStartedAt: event.payload.goalStartedAt,
+              attempts,
+            });
+            blockedGoalContinuations.set(event.payload.threadId, {
+              goalStartedAt: event.payload.goalStartedAt,
+              trigger: "turn-failed",
+              ...(event.payload.sourceTurnId !== undefined
+                ? { sourceTurnId: event.payload.sourceTurnId }
+                : {}),
+              attempts,
+              notBefore:
+                Date.now() +
+                Duration.toMillis(goalFailureRetryDelays[attempts - 1] ?? Duration.zero),
+            });
+          }
+          yield* scheduleBlockedGoalContinuationRetry(event.payload.threadId);
           return;
         }
 
@@ -4529,6 +4626,7 @@ const make = Effect.gen(function* () {
         }
 
         blockedGoalContinuations.delete(thread.id);
+        const attemptsBeforeDispatch = event.payload.retryAttempt ?? 0;
 
         const createdAt = event.payload.createdAt;
         const providerName = thread.session?.providerName ?? thread.modelSelection.provider;
@@ -4583,11 +4681,37 @@ const make = Effect.gen(function* () {
                     detail,
                     createdAt,
                   });
-                  yield* pauseActiveThreadGoal({
-                    threadId: thread.id,
-                    expectedGoalStartedAt: event.payload.goalStartedAt,
-                    reason: "error",
+                  const priorAttempts = goalFailureAttempts.get(thread.id);
+                  const attempts =
+                    (priorAttempts !== undefined &&
+                    priorAttempts.goalStartedAt === event.payload.goalStartedAt
+                      ? priorAttempts.attempts
+                      : attemptsBeforeDispatch) + 1;
+                  if (attempts > goalFailureRetryDelays.length) {
+                    goalFailureAttempts.delete(thread.id);
+                    yield* pauseActiveThreadGoal({
+                      threadId: thread.id,
+                      expectedGoalStartedAt: event.payload.goalStartedAt,
+                      reason: "error",
+                    });
+                    return;
+                  }
+                  goalFailureAttempts.set(thread.id, {
+                    goalStartedAt: event.payload.goalStartedAt,
+                    attempts,
                   });
+                  blockedGoalContinuations.set(thread.id, {
+                    goalStartedAt: event.payload.goalStartedAt,
+                    trigger: event.payload.trigger,
+                    ...(event.payload.sourceTurnId !== undefined
+                      ? { sourceTurnId: event.payload.sourceTurnId }
+                      : {}),
+                    attempts,
+                    notBefore:
+                      Date.now() +
+                      Duration.toMillis(goalFailureRetryDelays[attempts - 1] ?? Duration.zero),
+                  });
+                  yield* scheduleBlockedGoalContinuationRetry(thread.id);
                 }),
           ),
         );
@@ -6057,6 +6181,23 @@ const make = Effect.gen(function* () {
         eventSequence: event.sequence,
         threadId: event.payload.threadId,
       });
+      // A skipped goal continuation can never be delivered while the thread is
+      // quarantined; pause the goal so it surfaces as resumable instead of
+      // rendering "pursuing" forever.
+      if (event.type === "thread.goal-continuation-requested") {
+        yield* pauseActiveThreadGoal({
+          threadId: event.payload.threadId,
+          expectedGoalStartedAt: event.payload.goalStartedAt,
+          reason: "error",
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("failed to pause goal on quarantined continuation", {
+              threadId: event.payload.threadId,
+              cause: Cause.pretty(cause),
+            }),
+          ),
+        );
+      }
       // A skipped turn start is a user-visible dead end: the projector has
       // already shown the thread as "starting", so silence here reads as an
       // infinite "Thinking". Surface the block and settle the session.
@@ -6087,6 +6228,25 @@ const make = Effect.gen(function* () {
             detail: formatProviderDeliveryBlockDetail(blockerDetail),
             createdAt,
           });
+          // While quarantined every send (including goal continuations) is
+          // skipped, so an active goal could never advance. Pause it so it
+          // reads as resumable instead of pursuing into a dead end.
+          const skippedThread = (yield* orchestrationEngine.getReadModel()).threads.find(
+            (candidate) => candidate.id === event.payload.threadId,
+          );
+          if (
+            skippedThread &&
+            activeThreadGoal(skippedThread)?.trim() &&
+            skippedThread.goalPausedAt == null
+          ) {
+            yield* orchestrationEngine.dispatch({
+              type: "thread.meta.update",
+              commandId: serverCommandId("goal-quarantine-pause"),
+              threadId: event.payload.threadId,
+              goalPaused: true,
+              goalPausedReason: "error",
+            });
+          }
         }).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning("failed to surface quarantined-thread skip", {
@@ -7070,6 +7230,7 @@ export const makeProviderCommandReactorLive = (options?: ProviderCommandReactorL
     Layer.provide(
       Layer.succeed(ProviderCommandReactorConfig, {
         commandEventTimeout: options?.commandEventTimeout ?? PROVIDER_COMMAND_EVENT_TIMEOUT,
+        goalFailureRetryDelays: options?.goalFailureRetryDelays ?? GOAL_FAILURE_RETRY_DELAYS,
       }),
     ),
     Layer.provideMerge(OrchestrationEventDeliveryRepositoryLive),
