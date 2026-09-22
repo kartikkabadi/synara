@@ -1150,7 +1150,10 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
   devinCloud: [
     {
       slug: "auto",
-      name: "Auto (org default)",
+      // Keep the display name identical to other providers' `auto` entries:
+      // MODEL_NAME_BY_SLUG is a global slug→name table and later providers
+      // overwrite earlier ones.
+      name: "Auto",
       capabilities: EMPTY_MODEL_CAPABILITIES,
     },
     {
