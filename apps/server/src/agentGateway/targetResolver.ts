@@ -2,6 +2,7 @@ import {
   CLAUDE_CODE_EFFORT_OPTIONS,
   CODEX_REASONING_EFFORT_OPTIONS,
   DEFAULT_MODEL_BY_PROVIDER,
+  DEVIN_CLOUD_AGENT_MODE_OPTIONS,
   DROID_REASONING_EFFORT_OPTIONS,
   GROK_REASONING_EFFORT_OPTIONS,
   PI_THINKING_LEVEL_OPTIONS,
@@ -225,6 +226,12 @@ const PROVIDER_TARGET_OPTION_RULES = {
         validation: { kind: "non-empty-string" },
         allowsCustomValue: true,
       }),
+    },
+  }),
+  devinCloud: defineProviderOptionConfig<"devinCloud">({
+    primaryOptionKey: "mode",
+    options: {
+      mode: providerOptionRule("string", DEVIN_CLOUD_AGENT_MODE_OPTIONS),
     },
   }),
   devin: defineProviderOptionConfig<"devin">({

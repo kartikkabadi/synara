@@ -50,6 +50,10 @@ describe("providerStartOptionsFromServerSettings", () => {
           ...DEFAULT_SERVER_SETTINGS.providers.devin,
           binaryPath: "",
         },
+        devinCloud: {
+          ...DEFAULT_SERVER_SETTINGS.providers.devinCloud,
+          binaryPath: "",
+        },
       },
     };
 
@@ -72,6 +76,7 @@ describe("providerStartOptionsFromServerSettings", () => {
     expect(providerOptions.opencode).toEqual({ experimentalWebSockets: false });
     expect(providerOptions.pi).toEqual({});
     expect(providerOptions.devin).toEqual({});
+    expect(providerOptions.devinCloud).toEqual({});
   });
 
   it("preserves configured launch settings", () => {
@@ -94,6 +99,10 @@ describe("providerStartOptionsFromServerSettings", () => {
           ...DEFAULT_SERVER_SETTINGS.providers.devin,
           binaryPath: "/custom/bin/devin",
         },
+        devinCloud: {
+          ...DEFAULT_SERVER_SETTINGS.providers.devinCloud,
+          binaryPath: "/custom/bin/devin",
+        },
       },
     };
 
@@ -109,5 +118,6 @@ describe("providerStartOptionsFromServerSettings", () => {
       experimentalWebSockets: true,
     });
     expect(providerOptions.devin).toEqual({ binaryPath: "/custom/bin/devin" });
+    expect(providerOptions.devinCloud).toEqual({ binaryPath: "/custom/bin/devin" });
   });
 });

@@ -65,11 +65,16 @@ import { ELEVATED_HOVER_SURFACE_RAISED_TEXT_CLASS_NAME } from "~/surfaceStyles";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { DisclosureChevron } from "../ui/DisclosureChevron";
+import { SelectItem } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { ProviderIcon } from "../ProviderIcon";
 import { DebouncedSettingTextInput } from "./DebouncedSettingTextInput";
-import { SettingResetButton, useSettingsRestoreSignal } from "./SettingControls";
+import {
+  SettingResetButton,
+  SettingsSelectControl,
+  useSettingsRestoreSignal,
+} from "./SettingControls";
 import { SettingsListRow, SettingsRow, SettingsSection } from "./SettingsPanelPrimitives";
 
 type ProviderInstallTextKey =
@@ -79,6 +84,8 @@ type ProviderInstallTextKey =
   | "cursorBinaryPath"
   | "cursorApiEndpoint"
   | "devinBinaryPath"
+  | "devinCloudBinaryPath"
+  | "devinCloudOrgId"
   | "antigravityBinaryPath"
   | "grokBinaryPath"
   | "droidBinaryPath"
@@ -86,9 +93,12 @@ type ProviderInstallTextKey =
   | "openCodeServerUrl"
   | "piBinaryPath"
   | "piAgentDir";
-type ProviderInstallPasswordKey = "openCodeServerPassword";
-type ProviderInstallPasswordConfiguredKey = "openCodeServerPasswordConfigured";
+type ProviderInstallPasswordKey = "openCodeServerPassword" | "devinCloudServerPassword";
+type ProviderInstallPasswordConfiguredKey =
+  | "openCodeServerPasswordConfigured"
+  | "devinCloudServerPasswordConfigured";
 type ProviderInstallBooleanKey = "claudeEnableArtifacts" | "openCodeExperimentalWebSockets";
+type ProviderInstallSelectKey = "devinCloudMode";
 
 type ProviderInstallTextField = {
   readonly kind: "text";
@@ -111,10 +121,18 @@ type ProviderInstallBooleanField = {
   readonly label: string;
   readonly description: ReactNode;
 };
+type ProviderInstallSelectField = {
+  readonly kind: "select";
+  readonly settingsKey: ProviderInstallSelectKey;
+  readonly label: string;
+  readonly options: ReadonlyArray<{ readonly value: string; readonly label: string }>;
+  readonly description: ReactNode;
+};
 type ProviderInstallField =
   | ProviderInstallTextField
   | ProviderInstallPasswordField
-  | ProviderInstallBooleanField;
+  | ProviderInstallBooleanField
+  | ProviderInstallSelectField;
 type ProviderInstallSettings = {
   readonly provider: ProviderKind;
   readonly docs: ReadonlyArray<{ readonly label: string; readonly href: string }>;
@@ -299,6 +317,72 @@ const PROVIDER_INSTALL_SETTINGS: readonly ProviderInstallSettings[] = [
           <>
             Leave blank to use <code>devin</code> from your PATH. Authenticate with{" "}
             <code>devin auth login</code> or set WINDSURF_API_KEY.
+          </>
+        ),
+      },
+    ],
+  },
+  {
+    provider: "devinCloud",
+    docs: [
+      { label: "API", href: "https://docs.devin.ai/api-reference/v3/usage-examples" },
+      { label: "API keys", href: "https://docs.devin.ai/api-reference/authentication" },
+      { label: "CLI", href: "https://docs.devin.ai/cli" },
+    ],
+    fields: [
+      {
+        kind: "select",
+        settingsKey: "devinCloudMode",
+        label: "Transport",
+        options: [
+          { value: "auto", label: "Auto (ACP when available, else REST)" },
+          { value: "acp", label: "ACP (devin acp --cloud)" },
+          { value: "rest", label: "REST (v3 API)" },
+        ],
+        description: (
+          <>
+            Auto prefers streaming over <code>devin acp --cloud</code> when the installed Devin CLI
+            supports it, and falls back to the Devin v3 REST API. REST works for any user signed in
+            with <code>devin auth login</code>; ACP currently requires a Devin Insiders build.
+          </>
+        ),
+      },
+      {
+        kind: "text",
+        settingsKey: "devinCloudBinaryPath",
+        label: "Devin CLI binary path",
+        placeholder: "devin",
+        description: (
+          <>
+            Devin CLI used to probe <code>devin acp --cloud</code> support. Leave blank to use{" "}
+            <code>devin</code> from your PATH.
+          </>
+        ),
+      },
+      {
+        kind: "password",
+        settingsKey: "devinCloudServerPassword",
+        configuredKey: "devinCloudServerPasswordConfigured",
+        label: "Devin API key",
+        placeholder: "cog_…",
+        description: (
+          <>
+            Optional REST credential override. When blank, Synara uses DEVIN_API_KEY /
+            WINDSURF_API_KEY or the token from <code>devin auth login</code>. For a dedicated key,
+            create a service user in Devin → Settings → Service users with{" "}
+            <code>ManageOrgSessions</code> and paste the <code>cog_</code> key here.
+          </>
+        ),
+      },
+      {
+        kind: "text",
+        settingsKey: "devinCloudOrgId",
+        label: "Devin organization ID",
+        placeholder: "org-…",
+        description: (
+          <>
+            Optional org override for REST sessions. Leave blank to use the org tied to your API
+            credential (shown on Settings → Service users in Devin).
           </>
         ),
       },
@@ -612,6 +696,38 @@ function ProviderInstallFieldControl(props: {
   updateSettings: (patch: Partial<AppSettings>) => void;
 }) {
   const id = `provider-install-${props.field.settingsKey}`;
+  if (props.field.kind === "select") {
+    const selectedOption =
+      props.field.options.find(
+        (option) => option.value === props.settings[props.field.settingsKey],
+      ) ?? props.field.options[0];
+    return (
+      <div className="flex items-start justify-between gap-3 rounded-md border border-border/70 bg-background/60 px-3 py-2">
+        <div className="min-w-0">
+          <div className="text-ui leading-snug font-medium text-foreground">
+            {props.field.label}
+          </div>
+          <div className="mt-1 text-ui leading-snug text-muted-foreground">
+            {props.field.description}
+          </div>
+        </div>
+        <SettingsSelectControl
+          value={String(props.settings[props.field.settingsKey])}
+          onValueChange={(value) =>
+            props.updateSettings({ [props.field.settingsKey]: value } as Partial<AppSettings>)
+          }
+          ariaLabel={props.field.label}
+          valueContent={selectedOption?.label}
+        >
+          {props.field.options.map((option) => (
+            <SelectItem hideIndicator key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SettingsSelectControl>
+      </div>
+    );
+  }
   if (props.field.kind === "boolean") {
     return (
       <label

@@ -80,6 +80,21 @@ export const DevinServerProviderSettings = Schema.Struct({
 });
 export type DevinServerProviderSettings = typeof DevinServerProviderSettings.Type;
 
+export const DevinCloudProviderMode = Schema.Literals(["auto", "acp", "rest"]);
+export type DevinCloudProviderMode = typeof DevinCloudProviderMode.Type;
+
+// Devin Cloud: binaryPath is only used to probe `devin acp --cloud` support;
+// REST auth resolves the Devin CLI credential chain (env -> credentials.toml)
+// unless a serverPassword override is stored.
+export const DevinCloudServerProviderSettings = Schema.Struct({
+  ...ProviderSettingsBase,
+  binaryPath: StringSetting.pipe(Schema.withDecodingDefault(() => "devin")),
+  mode: DevinCloudProviderMode.pipe(Schema.withDecodingDefault(() => "auto")),
+  orgId: StringSetting.pipe(Schema.withDecodingDefault(() => "")),
+  serverPasswordConfigured: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+});
+export type DevinCloudServerProviderSettings = typeof DevinCloudServerProviderSettings.Type;
+
 const DisabledSkillNames = Schema.Array(Schema.String.check(Schema.isMaxLength(256))).pipe(
   Schema.withDecodingDefault(() => []),
 );
@@ -107,6 +122,7 @@ export const ServerSettings = Schema.Struct({
     claudeAgent: ClaudeServerProviderSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     cursor: CursorServerProviderSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     devin: DevinServerProviderSettings.pipe(Schema.withDecodingDefault(() => ({}))),
+    devinCloud: DevinCloudServerProviderSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     antigravity: AntigravityServerProviderSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     grok: GrokServerProviderSettings.pipe(Schema.withDecodingDefault(() => ({}))),
     droid: DroidServerProviderSettings.pipe(Schema.withDecodingDefault(() => ({}))),
@@ -189,6 +205,14 @@ export const ServerSettingsPatch = Schema.Struct({
         }),
       ),
       devin: Schema.optionalKey(Schema.Struct(ProviderSettingsBasePatch)),
+      devinCloud: Schema.optionalKey(
+        Schema.Struct({
+          ...ProviderSettingsBasePatch,
+          mode: Schema.optionalKey(DevinCloudProviderMode),
+          orgId: Schema.optionalKey(StringSetting),
+          serverPassword: Schema.optionalKey(StringSetting),
+        }),
+      ),
     }),
   ),
   skills: Schema.optionalKey(

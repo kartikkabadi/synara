@@ -9,7 +9,9 @@ import type { ProviderAdapterError } from "../Errors.ts";
 import type { ProviderAdapterShape } from "./ProviderAdapter.ts";
 
 export interface DevinAdapterShape extends ProviderAdapterShape<ProviderAdapterError> {
-  readonly provider: "devin";
+  // "devinCloud" reuses this adapter for `devin acp --cloud` sessions; the
+  // concrete instance always carries exactly one of the two.
+  readonly provider: "devin" | "devinCloud";
 }
 
 export class DevinAdapter extends ServiceMap.Service<DevinAdapter, DevinAdapterShape>()(

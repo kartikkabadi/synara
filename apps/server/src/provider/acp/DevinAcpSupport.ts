@@ -33,6 +33,11 @@ import {
 export interface DevinAcpRuntimeSettings {
   readonly binaryPath?: string;
   readonly model?: string;
+  /**
+   * Relay the ACP connection to Devin Cloud (`devin acp --cloud`).
+   * Insiders-gated — gate on {@link detectDevinAcpCloudSupport} first.
+   */
+  readonly cloud?: boolean;
 }
 
 export interface DevinAcpRuntimeInput extends Omit<
@@ -156,6 +161,15 @@ export function getDevinApiServerUrlEnv(env: NodeJS.ProcessEnv = process.env): s
     }
   }
   return undefined;
+}
+
+/**
+ * True when `devin acp --help` output advertises the cloud relay flag. The flag
+ * is insiders-gated on stable builds, so it must be detected from help text
+ * rather than assumed from the CLI version.
+ */
+export function detectDevinAcpCloudSupport(output: string): boolean {
+  return /(?:^|\s)--cloud\b/u.test(output);
 }
 
 function parseDevinTomlString(rawValue: string): string | undefined {
@@ -339,6 +353,9 @@ export function buildDevinAcpSpawnInput(
   // the session itself needs no permission-mode flag to keep that flow intact.
   void runtimeMode;
   const args = ["acp"];
+  if (devinSettings?.cloud === true) {
+    args.push("--cloud");
+  }
   const model = devinSettings?.model?.trim();
   if (model) {
     args.push("--model", model);

@@ -186,6 +186,14 @@ export function makeModelSelection(
           ? { options: options as Extract<ModelSelection, { provider: "devin" }>["options"] }
           : {}),
       };
+    case "devinCloud":
+      return {
+        provider,
+        model,
+        ...(options
+          ? { options: options as Extract<ModelSelection, { provider: "devinCloud" }>["options"] }
+          : {}),
+      };
     case "grok":
       return {
         provider,

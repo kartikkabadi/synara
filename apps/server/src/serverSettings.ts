@@ -199,7 +199,7 @@ function normalizeSettings(
   );
 }
 
-const EXTERNAL_SERVER_PROVIDERS = ["opencode"] as const;
+const EXTERNAL_SERVER_PROVIDERS = ["opencode", "devinCloud"] as const;
 
 function readLegacyProviderPasswords(raw: string): ReadonlyMap<ExternalProviderServer, string> {
   try {
@@ -222,11 +222,13 @@ function readLegacyProviderPasswords(raw: string): ReadonlyMap<ExternalProviderS
 function omitProviderPasswords(patch: ServerSettingsPatch): ServerSettingsPatch {
   if (!patch.providers) return patch;
   const { serverPassword: _openCodePassword, ...opencode } = patch.providers.opencode ?? {};
+  const { serverPassword: _devinCloudPassword, ...devinCloud } = patch.providers.devinCloud ?? {};
   return {
     ...patch,
     providers: {
       ...patch.providers,
       ...(patch.providers.opencode ? { opencode } : {}),
+      ...(patch.providers.devinCloud ? { devinCloud } : {}),
     },
   };
 }
@@ -352,6 +354,7 @@ const makeServerSettings = Effect.gen(function* () {
   const withCredentialState = (settings: ServerSettings) =>
     Effect.all({
       opencode: providerCredentials.isServerPasswordConfigured("opencode"),
+      devinCloud: providerCredentials.isServerPasswordConfigured("devinCloud"),
     }).pipe(
       Effect.map(
         (configured): ServerSettings => ({
@@ -361,6 +364,10 @@ const makeServerSettings = Effect.gen(function* () {
             opencode: {
               ...settings.providers.opencode,
               serverPasswordConfigured: configured.opencode,
+            },
+            devinCloud: {
+              ...settings.providers.devinCloud,
+              serverPasswordConfigured: configured.devinCloud,
             },
           },
         }),

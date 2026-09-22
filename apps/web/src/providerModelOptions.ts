@@ -17,6 +17,8 @@ import {
   type CursorModelSelection,
   type DroidModelOptions,
   type DroidModelSelection,
+  type DevinCloudModelOptions,
+  type DevinCloudModelSelection,
   type DevinModelOptions,
   type DevinModelSelection,
   type GrokModelOptions,
@@ -366,6 +368,12 @@ export function buildNextProviderOptions(
       ...patch,
     } as DevinModelOptions;
   }
+  if (provider === "devinCloud") {
+    return {
+      ...(modelOptions as DevinCloudModelOptions | undefined),
+      ...patch,
+    } as DevinCloudModelOptions;
+  }
   if (provider === "opencode") {
     return {
       ...(modelOptions as OpenCodeModelOptions | undefined),
@@ -433,6 +441,11 @@ export function buildModelSelection(
   options?: DevinModelOptions | null | undefined,
 ): DevinModelSelection;
 export function buildModelSelection(
+  provider: "devinCloud",
+  model: string,
+  options?: DevinCloudModelOptions | null | undefined,
+): DevinCloudModelSelection;
+export function buildModelSelection(
   provider: ProviderKind,
   model: string,
   options?: ProviderOptions | null | undefined,
@@ -482,6 +495,14 @@ export function buildModelSelection(
             provider,
             model,
             options: options as DevinModelOptions,
+          }
+        : { provider, model };
+    case "devinCloud":
+      return options
+        ? {
+            provider,
+            model,
+            options: options as DevinCloudModelOptions,
           }
         : { provider, model };
     case "grok":

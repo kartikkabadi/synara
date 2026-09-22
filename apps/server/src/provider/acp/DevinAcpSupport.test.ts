@@ -471,6 +471,26 @@ describe("buildDevinAcpSpawnInput", () => {
     });
   });
 
+  it("appends --cloud when the cloud flag is set", () => {
+    const spawn = buildDevinAcpSpawnInput(
+      { binaryPath: "/usr/local/bin/devin", cloud: true },
+      "/tmp/project",
+      "approval-required",
+    );
+
+    expect(spawn.args).toEqual(["acp", "--cloud"]);
+  });
+
+  it("keeps --cloud before --model so cloud sessions carry the mode", () => {
+    const spawn = buildDevinAcpSpawnInput(
+      { binaryPath: "/usr/local/bin/devin", cloud: true, model: "ultra" },
+      "/tmp/project",
+      "approval-required",
+    );
+
+    expect(spawn.args).toEqual(["acp", "--cloud", "--model", "ultra"]);
+  });
+
   it("uses the scoped config environment without placing secrets in args", () => {
     const spawn = buildDevinAcpSpawnInput(undefined, "/tmp/project", "approval-required", {
       HOME: "/real/home",

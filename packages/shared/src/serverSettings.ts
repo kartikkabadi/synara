@@ -84,5 +84,8 @@ export function providerStartOptionsFromServerSettings(
     devin: {
       ...(providers.devin.binaryPath ? { binaryPath: providers.devin.binaryPath } : {}),
     },
+    devinCloud: {
+      ...(providers.devinCloud.binaryPath ? { binaryPath: providers.devinCloud.binaryPath } : {}),
+    },
   };
 }
