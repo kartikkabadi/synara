@@ -16,6 +16,7 @@ import * as AcpErrors from "./AcpErrors.ts";
 
 import { ProviderAdapterRequestError, type ProviderAdapterError } from "../Errors.ts";
 import { shouldAllowSynaraComputerProviderTool } from "../../agentGateway/computerToolPermission.ts";
+import { shouldAllowSynaraUnattendedProviderTool } from "../../agentGateway/synaraToolPermission.ts";
 
 // Synara-internal ACP tool kind for provider-native subagent runs. ACP's ToolKind has
 // no subagent variant (Cursor sends `kind: "other"` + `rawInput._toolName: "task"`), so
@@ -168,6 +169,15 @@ export function resolveAcpPermissionPolicy(input: {
   if (
     shouldAllowSynaraComputerProviderTool({
       computerControlEnabled: input.computerControlEnabled === true,
+      activeTurn: input.activeTurn === true,
+      interactionMode: input.interactionMode,
+      runtimeMode: input.runtimeMode,
+      permission: {
+        title: input.toolCall?.title,
+        rawInput: input.toolCall?.rawInput,
+      },
+    }) ||
+    shouldAllowSynaraUnattendedProviderTool({
       activeTurn: input.activeTurn === true,
       interactionMode: input.interactionMode,
       runtimeMode: input.runtimeMode,

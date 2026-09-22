@@ -63,6 +63,7 @@ import {
   SYNARA_MCP_SERVER_NAME,
 } from "./agentGateway/mcpInjection.ts";
 import { shouldAllowSynaraComputerProviderTool } from "./agentGateway/computerToolPermission.ts";
+import { shouldAllowSynaraUnattendedProviderTool } from "./agentGateway/synaraToolPermission.ts";
 import {
   SYNARA_GATEWAY_HARNESS_POLICY,
   renderSynaraHarnessPolicy,
@@ -3691,7 +3692,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       context.gatewayCredentialRetired !== true &&
       !context.stopping &&
       context.activeInteractionMode === "default" &&
-      shouldAllowSynaraComputerProviderTool({
+      (shouldAllowSynaraComputerProviderTool({
         computerControlEnabled: context.enableComputerControl === true,
         activeTurn:
           context.session.status === "running" &&
@@ -3703,7 +3704,19 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         permission: {
           name: this.readSynaraMcpApprovalToolName(request.params),
         },
-      })
+      }) ||
+        shouldAllowSynaraUnattendedProviderTool({
+          activeTurn:
+            context.session.status === "running" &&
+            rawRoute.turnId !== undefined &&
+            rawRoute.turnId === context.session.activeTurnId &&
+            providerThreadId === readResumeCursorThreadId(context.session.resumeCursor),
+          interactionMode: context.activeInteractionMode,
+          runtimeMode: context.session.runtimeMode,
+          permission: {
+            name: this.readSynaraMcpApprovalToolName(request.params),
+          },
+        }))
     ) {
       // This exact call still passes through the gateway's task consent and
       // revocation checks. Never grant persistence to unrelated MCP tools.

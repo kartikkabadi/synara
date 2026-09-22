@@ -1065,6 +1065,7 @@ function decodeGitHubJson<S extends Schema.Top>(
     | "getPullRequestListItem"
     | "listReviewRequestedPullRequestNumbers"
     | "getRepositoryMergeCapabilities"
+    | "listRepositoryIssues"
     | "runPullRequestAction",
   invalidDetail: string,
 ): Effect.Effect<S["Type"], GitHubCliError, S["DecodingServices"]> {
@@ -1591,7 +1592,7 @@ const makeGitHubCli = Effect.gen(function* () {
       );
     },
     listRepositoryIssues: (input) =>
-      validateRepository(input.repository, "listRepositoryPullRequests").pipe(
+      validateRepository(input.repository, "listRepositoryIssues").pipe(
         Effect.flatMap((repository) =>
           execute({
             cwd: input.cwd,
@@ -1612,7 +1613,7 @@ const makeGitHubCli = Effect.gen(function* () {
               decodeGitHubJson(
                 result.stdout.trim(),
                 Schema.Array(Schema.Unknown),
-                "listRepositoryPullRequests",
+                "listRepositoryIssues",
                 "GitHub CLI returned invalid issue list JSON.",
               ),
             ),

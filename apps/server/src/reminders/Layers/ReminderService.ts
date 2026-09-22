@@ -36,17 +36,29 @@ export const ReminderServiceLive = Layer.effect(
       );
 
     const set: ReminderServiceShape["set"] = (input) =>
-      automationRepository
-        .upsertThreadReminder({
-          threadId: input.threadId,
-          dueAt: input.dueAt,
-          note: input.note ?? null,
-          now: new Date().toISOString(),
-        })
-        .pipe(
-          Effect.mapError(toReminderError("set")),
-          Effect.tap((reminder) => publish({ type: "reminder-upserted", reminder })),
-        );
+      projectionQuery.getThreadShellById(input.threadId).pipe(
+        Effect.mapError(toReminderError("set")),
+        Effect.flatMap(
+          Option.match({
+            onNone: () =>
+              Effect.fail(
+                new ReminderServiceError({ operation: "set", message: "Thread not found." }),
+              ),
+            onSome: () =>
+              automationRepository
+                .upsertThreadReminder({
+                  threadId: input.threadId,
+                  dueAt: input.dueAt,
+                  note: input.note ?? null,
+                  now: new Date().toISOString(),
+                })
+                .pipe(
+                  Effect.mapError(toReminderError("set")),
+                  Effect.tap((reminder) => publish({ type: "reminder-upserted", reminder })),
+                ),
+          }),
+        ),
+      );
 
     const cancel: ReminderServiceShape["cancel"] = (input) =>
       automationRepository.deleteThreadReminder({ threadId: input.threadId }).pipe(
@@ -69,31 +81,29 @@ export const ReminderServiceLive = Layer.effect(
                 projectionQuery.getThreadShellById(reminder.threadId).pipe(
                   Effect.catch(() => Effect.succeed(Option.none())),
                   Effect.flatMap((threadOption) =>
-                    publish({
-                      type: "reminder-fired",
-                      reminder: fired,
-                      ...(Option.isSome(threadOption)
-                        ? {
-                            threadTitle: threadOption.value.title,
-                            projectId: threadOption.value.projectId,
-                          }
-                        : {}),
-                    }),
+                    Option.isSome(threadOption)
+                      ? publish({
+                          type: "reminder-fired",
+                          reminder: fired,
+                          threadTitle: threadOption.value.title,
+                          projectId: threadOption.value.projectId,
+                        })
+                      : Effect.void,
                   ),
                 ),
             }),
           ),
         );
 
-    const fireDueReminders = automationRepository
-      .listDueThreadReminders({
+    const fireDueReminders = Effect.suspend(() =>
+      automationRepository.listDueThreadReminders({
         now: new Date().toISOString(),
         limit: REMINDER_DUE_BATCH_LIMIT,
-      })
-      .pipe(
-        Effect.flatMap((due) => Effect.forEach(due, fireReminder, { concurrency: 3 })),
-        Effect.asVoid,
-      );
+      }),
+    ).pipe(
+      Effect.flatMap((due) => Effect.forEach(due, fireReminder, { concurrency: 3 })),
+      Effect.asVoid,
+    );
 
     const start: ReminderServiceShape["start"] = () =>
       Effect.forkScoped(

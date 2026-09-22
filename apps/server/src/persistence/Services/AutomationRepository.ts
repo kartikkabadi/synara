@@ -334,6 +334,7 @@ export type AcquireAutomationSchedulerLeaseInput = typeof AcquireAutomationSched
 
 export const ListEventTriggeredAutomationDefinitionsInput = Schema.Struct({
   limit: Schema.Number,
+  includeDisabled: Schema.optional(Schema.Boolean),
 });
 export type ListEventTriggeredAutomationDefinitionsInput =
   typeof ListEventTriggeredAutomationDefinitionsInput.Type;
@@ -352,6 +353,12 @@ export const AttachAutomationEventRunInput = Schema.Struct({
   runId: AutomationRunId,
 });
 export type AttachAutomationEventRunInput = typeof AttachAutomationEventRunInput.Type;
+
+export const DeleteAutomationEventClaimInput = Schema.Struct({
+  automationId: AutomationId,
+  eventKey: Schema.String,
+});
+export type DeleteAutomationEventClaimInput = typeof DeleteAutomationEventClaimInput.Type;
 
 export const ListAutomationSeenEventKeysInput = Schema.Struct({
   source: Schema.String,
@@ -594,6 +601,13 @@ export interface AutomationRepositoryShape {
   /** Records the run a claimed event produced so the ledger links claims to runs. */
   readonly attachAutomationEventRun: (
     input: AttachAutomationEventRunInput,
+  ) => Effect.Effect<void, AutomationRepositoryError>;
+  /**
+   * Releases an event claim a run dispatch could not consume (provider disabled, run slot
+   * busy), so a later poll may retry it instead of dropping the event permanently.
+   */
+  readonly deleteAutomationEventClaim: (
+    input: DeleteAutomationEventClaimInput,
   ) => Effect.Effect<void, AutomationRepositoryError>;
   /** Event keys the watcher has already observed for one source+repository feed. */
   readonly listAutomationSeenEventKeys: (

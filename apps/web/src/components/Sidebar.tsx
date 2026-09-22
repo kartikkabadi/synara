@@ -39,6 +39,7 @@ import { ThreadPrStatusBadge } from "~/components/pullRequest/ThreadPrStatusBadg
 import { PinStatusIcon, pinActionLabel } from "~/lib/pin";
 import { THREAD_CONTEXT_MENU_ICONS } from "~/lib/contextMenuIcons";
 import { ensureNativeApi } from "~/nativeApi";
+import { pendingReminderForThread } from "~/notifications/reminderStore";
 import { autoAnimate } from "@formkit/auto-animate";
 import { FiGitBranch } from "react-icons/fi";
 import { IoIosGitCompare } from "react-icons/io";
@@ -3033,15 +3034,7 @@ export default function Sidebar() {
         envMode: thread.envMode,
         worktreePath: thread.worktreePath,
       });
-      const pendingReminder = await api.reminder
-        .list()
-        .then(
-          (result) =>
-            result.reminders.find(
-              (reminder) => reminder.threadId === threadId && reminder.firedAt === null,
-            ) ?? null,
-        )
-        .catch(() => null);
+      const pendingReminder = pendingReminderForThread(threadId);
       const reminderItems = pendingReminder
         ? [
             {

@@ -201,6 +201,21 @@ export function automationMissedRunGraceLabel(value: string): string {
   );
 }
 
+/** Preset options plus the current value when it isn't a preset (kept so a saved custom
+ *  grace still round-trips through a select). */
+export function automationMissedRunGraceOptions(
+  graceSeconds: number | string | null | undefined,
+): readonly { readonly value: string; readonly label: string }[] {
+  const value = graceSeconds == null ? "" : String(graceSeconds).trim();
+  if (value === "" || AUTOMATION_MISSED_RUN_GRACE_OPTIONS.some((o) => o.value === value)) {
+    return AUTOMATION_MISSED_RUN_GRACE_OPTIONS;
+  }
+  return [
+    ...AUTOMATION_MISSED_RUN_GRACE_OPTIONS,
+    { value, label: automationMissedRunGraceLabel(value) },
+  ];
+}
+
 function missedRunGraceSecondsFromForm(
   form: Pick<AutomationFormState, "missedRunGraceSeconds">,
 ): number | null {
@@ -776,6 +791,7 @@ export function buildAutomationFormWarnings(form: AutomationFormState) {
     generatedConfidence: null,
     generatedNeedsConfirmation: false,
     prompt: form.prompt,
+    hasEventTriggers: form.eventTriggers.length > 0,
   });
 }
 

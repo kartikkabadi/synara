@@ -73,7 +73,9 @@ export const makeAutomationEventWatcherLive = (options?: AutomationEventWatcherL
       const intervalMs = Math.max(5_000, options?.intervalMs ?? DEFAULT_EVENT_POLL_INTERVAL_MS);
 
       const resolveWatchedRepositories = Effect.fn(function* () {
-        const definitions = yield* automationService.listEventTriggeredDefinitions();
+        const definitions = yield* automationService.listEventTriggeredDefinitions({
+          includeDisabled: true,
+        });
         const watched = new Map<string, WatchedRepository>();
         for (const definition of definitions) {
           const project = yield* projectionQuery
@@ -104,6 +106,12 @@ export const makeAutomationEventWatcherLive = (options?: AutomationEventWatcherL
         return [...watched.values()];
       });
 
+      /**
+       * Dispatches one event to every matching trigger. "consumed" marks the event seen —
+       * either a run was created or every trigger skipped it (disabled, pending proposal,
+       * already claimed). "retry" leaves it unseen so the next poll re-attempts it; the
+       * idempotent per-automation claim keeps already-dispatched triggers from re-running.
+       */
       const dispatchEvent = (
         watchedRepository: WatchedRepository,
         context: AutomationEventRunContext,
@@ -120,12 +128,23 @@ export const makeAutomationEventWatcherLive = (options?: AutomationEventWatcherL
                       automationId,
                       eventKey: context.key,
                       error: error instanceof Error ? error.message : String(error),
-                    }),
+                    }).pipe(
+                      Effect.as({
+                        status: "retry" as const,
+                        reason: error instanceof Error ? error.message : String(error),
+                      }),
+                    ),
                   ),
                 )
-              : Effect.void,
+              : Effect.succeed({ status: "skipped" as const }),
           { concurrency: 3 },
-        ).pipe(Effect.asVoid);
+        ).pipe(
+          Effect.map((outcomes) =>
+            outcomes.some((outcome) => outcome.status === "retry")
+              ? ("retry" as const)
+              : ("consumed" as const),
+          ),
+        );
 
       const markSeen = (repository: string, eventKeys: ReadonlyArray<string>, seenAt: string) =>
         automationRepository.insertAutomationSeenEvents({
@@ -139,7 +158,10 @@ export const makeAutomationEventWatcherLive = (options?: AutomationEventWatcherL
 
       const pollRepository = (watchedRepository: WatchedRepository) =>
         Effect.gen(function* () {
-          const { repository, cwd } = watchedRepository;
+          // Keys and seen rows use the canonical lowercase owner/name so differently
+          // cased trigger entries share one dedup ledger.
+          const repository = watchedRepository.repository.toLowerCase();
+          const { cwd } = watchedRepository;
           const wantsPullRequests = watchedRepository.triggers.some(
             ({ trigger }) => trigger.event !== "issue_opened",
           );
@@ -194,12 +216,10 @@ export const makeAutomationEventWatcherLive = (options?: AutomationEventWatcherL
               repository,
             }),
           );
-          const newKeys: Array<string> = [];
           const events: AutomationEventRunContext[] = [];
           for (const pr of pullRequests) {
             const eventKey = prEventKey(repository, pr.number);
             if (seenKeys.has(eventKey)) continue;
-            newKeys.push(eventKey);
             events.push({
               source: "github",
               event: pr.isDraft ? "draft_opened" : "pull_request_opened",
@@ -215,7 +235,6 @@ export const makeAutomationEventWatcherLive = (options?: AutomationEventWatcherL
           for (const issue of issues) {
             const eventKey = issueEventKey(repository, issue.number);
             if (seenKeys.has(eventKey)) continue;
-            newKeys.push(eventKey);
             events.push({
               source: "github",
               event: "issue_opened",
@@ -228,11 +247,18 @@ export const makeAutomationEventWatcherLive = (options?: AutomationEventWatcherL
             });
           }
 
-          if (newKeys.length > 0) {
-            yield* markSeen(repository, newKeys, now);
-          }
+          // Mark seen only after dispatch: events every trigger consumed go on the
+          // ledger; an event any trigger failed or deferred on stays unseen and retries
+          // on the next poll (its successful triggers are idempotent via their claims).
+          const consumedKeys: Array<string> = [];
           for (const event of events) {
-            yield* dispatchEvent(watchedRepository, event);
+            const outcome = yield* dispatchEvent(watchedRepository, event);
+            if (outcome === "consumed") {
+              consumedKeys.push(event.key);
+            }
+          }
+          if (consumedKeys.length > 0) {
+            yield* markSeen(repository, consumedKeys, now);
           }
         }).pipe(
           Effect.catch((error) =>

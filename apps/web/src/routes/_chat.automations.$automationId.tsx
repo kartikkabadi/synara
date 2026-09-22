@@ -81,8 +81,7 @@ import { ensureNativeApi } from "~/nativeApi";
 import { useStore } from "~/store";
 import { createAllThreadsSelector } from "~/storeSelectors";
 import {
-  AUTOMATION_MISSED_RUN_GRACE_OPTIONS,
-  automationMissedRunGraceLabel,
+  automationMissedRunGraceOptions,
   AutomationApprovalBanner,
   AutomationEventTriggersEditor,
   AutomationModelPicker,
@@ -126,17 +125,7 @@ const selectAllThreads = createAllThreadsSelector();
 const trimDraft = (value: string) => value.trim();
 
 function missedRunGraceOptions(graceSeconds: number | null | undefined) {
-  if (
-    graceSeconds == null ||
-    AUTOMATION_MISSED_RUN_GRACE_OPTIONS.some((option) => option.value === String(graceSeconds))
-  ) {
-    return AUTOMATION_MISSED_RUN_GRACE_OPTIONS;
-  }
-  const value = String(graceSeconds);
-  return [
-    ...AUTOMATION_MISSED_RUN_GRACE_OPTIONS,
-    { value, label: automationMissedRunGraceLabel(value) },
-  ];
+  return automationMissedRunGraceOptions(graceSeconds);
 }
 
 function lastFinishedRun(runs: readonly AutomationRun[]): AutomationRun | null {
@@ -1380,7 +1369,7 @@ function RunRow({
         openable ? "cursor-pointer hover:bg-foreground/[0.03]" : undefined,
       )}
     >
-      <span className="flex w-32 shrink-0 items-center gap-1.5 text-muted-foreground/80">
+      <span className="flex w-32 shrink items-center gap-1.5 text-muted-foreground/80">
         <CentralIcon
           name={automationRunTriggerLabel(run).icon}
           className="size-3.5 shrink-0"

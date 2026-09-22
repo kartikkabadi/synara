@@ -1,7 +1,12 @@
 // FILE: runEnvelope.ts
 // Purpose: Builds the single canonical synthetic message sent to automation runs.
 
-import type { AutomationDefinition, AutomationRun } from "@synara/contracts";
+import type {
+  AutomationDefinition,
+  AutomationEventRunContext,
+  AutomationRun,
+  AutomationTrigger,
+} from "@synara/contracts";
 import { automationContinuesThread, automationOwnsItsThread } from "@synara/shared/automationMode";
 
 export const AUTOMATION_MEMORY_INJECTION_MAX_BYTES = 8 * 1_024;
@@ -59,6 +64,36 @@ function threadScopeLine(definition: AutomationDefinition): string | null {
   return null;
 }
 
+// Event triggers substitute `{{placeholder}}` tokens in the stored prompt with the
+// dispatching event's fields. Unknown tokens stay literal so prose braces survive.
+const AUTOMATION_EVENT_PLACEHOLDER_PATTERN = /\{\{\s*([A-Za-z]+)\s*\}\}/g;
+
+function renderAutomationPromptTemplate(prompt: string, trigger: AutomationTrigger): string {
+  if (trigger.type !== "event") return prompt;
+  const { event } = trigger;
+  const values: Record<string, string> = {
+    repository: event.repository,
+    title: event.title,
+    url: event.url,
+    author: event.author ?? "",
+    itemNumber: String(event.itemNumber),
+    baseBranch: event.baseBranch ?? "",
+    event: event.event,
+    key: event.key,
+  };
+  return prompt.replace(AUTOMATION_EVENT_PLACEHOLDER_PATTERN, (match, name: string) =>
+    Object.prototype.hasOwnProperty.call(values, name) ? values[name]! : match,
+  );
+}
+
+function eventContextLine(event: AutomationEventRunContext): string {
+  return [
+    `Event: ${event.event} — ${event.repository}#${event.itemNumber} "${event.title}" (${event.url})`,
+    ...(event.author ? [`by ${event.author}`] : []),
+    ...(event.baseBranch ? [`on branch ${event.baseBranch}`] : []),
+  ].join(" ");
+}
+
 export function buildAutomationRunEnvelope(input: {
   readonly definition: AutomationDefinition;
   readonly run: AutomationRun;
@@ -73,6 +108,7 @@ export function buildAutomationRunEnvelope(input: {
     `Run: ${run.trigger.type}, scheduled for ${run.scheduledFor} (last run: ${
       input.lastRunAt ?? "never"
     }, iteration ${iterationLabel(definition, run)})`,
+    ...(run.trigger.type === "event" ? [eventContextLine(run.trigger.event)] : []),
     "Turn scope: this user message is the automation-dispatched turn. These automation-only completion duties do not carry into later manual follow-up turns.",
     ...(threadScope ? [threadScope] : []),
     'Memory (persistent across runs — replace it via synara_update_automation_memory {"memory": "..."} before finishing):',
@@ -82,6 +118,6 @@ export function buildAutomationRunEnvelope(input: {
     "",
     "---",
     "",
-    definition.prompt,
+    renderAutomationPromptTemplate(definition.prompt, run.trigger),
   ].join("\n");
 }

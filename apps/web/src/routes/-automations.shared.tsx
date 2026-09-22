@@ -64,6 +64,7 @@ import {
   automationFormSubmitBlockReason,
   automationIntervalPresetOptions,
   automationMissedRunGraceLabel,
+  automationMissedRunGraceOptions,
   buildAutomationFormWarnings,
   createInputFromForm,
   datetimeLocalFromIso,
@@ -156,6 +157,7 @@ export {
   automationFormSubmitBlockReason,
   automationIntervalPresetOptions,
   automationMissedRunGraceLabel,
+  automationMissedRunGraceOptions,
   buildAutomationFormWarnings,
   createInputFromForm,
   datetimeLocalFromIso,
@@ -1718,14 +1720,18 @@ export function AutomationDialog({
             >
               Missed-run grace
             </label>
-            <input
+            <select
               id="automation-missed-run-grace"
               value={form.missedRunGraceSeconds}
               onChange={(event) => setField("missedRunGraceSeconds", event.target.value)}
-              placeholder="seconds (empty = policy default)"
-              inputMode="numeric"
-              className="w-full min-w-0 rounded-md border border-border bg-transparent px-2 py-1.5 text-ui leading-snug outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            />
+              className={cn(EVENT_TRIGGER_INPUT_CLASS, "w-auto min-w-0")}
+            >
+              {automationMissedRunGraceOptions(form.missedRunGraceSeconds).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </div>
 
           {warnings.length > 0 ? (

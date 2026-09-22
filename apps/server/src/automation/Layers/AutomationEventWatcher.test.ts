@@ -140,7 +140,7 @@ it.effect("seeds on first poll, then fires runEvent only for new matching items"
       runEvent: (input: { automationId: AutomationId; event: AutomationEventRunContext }) =>
         Effect.sync(() => {
           dispatched.push({ automationId: input.automationId, event: input.event });
-          return null;
+          return { status: "dispatched", run: {} as never };
         }),
     } as unknown as AutomationServiceShape;
 
@@ -245,7 +245,7 @@ it.effect("routes drafts to draft_opened and applies branch filters", () =>
       runEvent: (input: { event: AutomationEventRunContext }) =>
         Effect.sync(() => {
           dispatched.push(input.event);
-          return null;
+          return { status: "dispatched", run: {} as never };
         }),
     } as unknown as AutomationServiceShape;
 
@@ -291,6 +291,94 @@ it.effect("routes drafts to draft_opened and applies branch filters", () =>
         dispatched.map((event) => `${event.event}:${event.itemNumber}`),
         ["draft_opened:11"],
       );
+    }).pipe(Effect.provide(layer), Effect.scoped);
+  }),
+);
+
+it.effect("leaves retried events unseen and redispatches them on the next poll", () =>
+  Effect.gen(function* () {
+    const pullRequests: GitHubPullRequestListItem[] = [makePr(1)];
+    const dispatched: AutomationEventRunContext[] = [];
+    let retrying = true;
+
+    const definition = {
+      id: AUTOMATION_ID,
+      projectId: PROJECT_ID,
+      eventTriggers: [
+        {
+          id: "trigger-prs",
+          source: "github",
+          event: "pull_request_opened",
+          repositories: ["acme/widgets"],
+        },
+      ],
+    } as unknown as AutomationDefinition;
+
+    const automationService = {
+      listEventTriggeredDefinitions: () => Effect.succeed([definition]),
+      runEvent: (input: { event: AutomationEventRunContext }) =>
+        Effect.sync(() => {
+          dispatched.push(input.event);
+          return retrying
+            ? { status: "retry", reason: "provider disabled" }
+            : { status: "dispatched", run: {} as never };
+        }),
+    } as unknown as AutomationServiceShape;
+
+    const { repository: automationRepository, seen } = makeSeenEventStore();
+    const github = {
+      getViewerLogin: () => Effect.succeed("octocat"),
+      listRepositoryPullRequests: () =>
+        Effect.succeed({ entries: pullRequests, rawCount: pullRequests.length }),
+      listRepositoryIssues: () => Effect.succeed([]),
+    } as unknown as GitHubCliShape;
+    const git = {
+      execute: () => Effect.succeed({ code: 1, stdout: "", stderr: "not a repository" }),
+    } as unknown as GitCoreShape;
+    const projectionQuery = {
+      getProjectShellById: () => Effect.succeed(Option.some({ workspaceRoot: "/repo" })),
+    } as unknown as ProjectionSnapshotQueryShape;
+
+    const layer = makeAutomationEventWatcherLive({ intervalMs: 60_000 }).pipe(
+      Layer.provide(Layer.succeed(AutomationService, automationService)),
+      Layer.provide(Layer.succeed(AutomationRepository, automationRepository)),
+      Layer.provide(Layer.succeed(GitHubCli, github)),
+      Layer.provide(Layer.succeed(GitCore, git)),
+      Layer.provide(Layer.succeed(ProjectionSnapshotQuery, projectionQuery)),
+    );
+
+    yield* Effect.gen(function* () {
+      const watcher = yield* AutomationEventWatcher;
+      yield* watcher.start();
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+
+      // First poll seeds PR#1. Second poll sees PR#2 but the dispatch is retried:
+      // the event stays unseen and re-fires once the retry clears.
+      pullRequests.push(makePr(2));
+      yield* TestClock.adjust(Duration.seconds(61));
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+
+      assert.deepStrictEqual(
+        dispatched.map((event) => event.key),
+        ["github:pr:acme/widgets:2"],
+      );
+      assert.isFalse(seen.get("github:acme/widgets")?.has("github:pr:acme/widgets:2") ?? false);
+
+      retrying = false;
+      yield* TestClock.adjust(Duration.seconds(61));
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+
+      assert.deepStrictEqual(
+        dispatched.map((event) => event.key),
+        ["github:pr:acme/widgets:2", "github:pr:acme/widgets:2"],
+      );
+      assert.isTrue(seen.get("github:acme/widgets")?.has("github:pr:acme/widgets:2") ?? false);
     }).pipe(Effect.provide(layer), Effect.scoped);
   }),
 );

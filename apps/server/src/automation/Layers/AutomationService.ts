@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   AutomationId,
   AutomationRunId,
+  AUTOMATION_EVENT_TRIGGER_MAX_COUNT,
   CommandId,
   DEFAULT_AUTOMATION_FAST_INTERVAL_MAX_ITERATIONS,
   DEFAULT_AUTOMATION_HEARTBEAT_COOLDOWN_SECONDS,
@@ -59,7 +60,11 @@ import { runWorktreeSetupScript } from "../../worktreeSetup.ts";
 import type { ProjectionTurn } from "../../persistence/Services/ProjectionTurns.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { AutomationServiceError } from "../Errors.ts";
-import { AutomationService, type AutomationServiceShape } from "../Services/AutomationService.ts";
+import {
+  AutomationService,
+  type AutomationEventDispatchResult,
+  type AutomationServiceShape,
+} from "../Services/AutomationService.ts";
 import { buildAutomationProposalActivity } from "../proposalActivity.ts";
 import {
   type AutomationCompletionEvaluation,
@@ -885,6 +890,13 @@ export const AutomationServiceLive = Layer.effect(
     const validateEventTriggers = (
       eventTriggers: ReadonlyArray<AutomationEventTrigger> | undefined,
     ): Effect.Effect<void, AutomationServiceError> => {
+      if ((eventTriggers?.length ?? 0) > AUTOMATION_EVENT_TRIGGER_MAX_COUNT) {
+        return Effect.fail(
+          new AutomationServiceError({
+            message: `Automation supports at most ${AUTOMATION_EVENT_TRIGGER_MAX_COUNT} event triggers`,
+          }),
+        );
+      }
       const seenIds = new Set<string>();
       for (const trigger of eventTriggers ?? []) {
         if (seenIds.has(trigger.id)) {
@@ -3155,11 +3167,14 @@ export const AutomationServiceLive = Layer.effect(
     const runEvent: AutomationServiceShape["runEvent"] = (input) =>
       Effect.gen(function* () {
         const definition = yield* requireDefinition(input.automationId);
-        if (definition.proposalState === "pending") {
-          return null;
+        if (definition.proposalState === "pending" || !definition.enabled) {
+          return { status: "skipped" } as const;
         }
-        if (!definition.enabled) {
-          return null;
+        // A disabled provider is transient: leave the event unseen (and unclaimed) so the
+        // next poll retries it instead of permanently consuming the item.
+        const disabledReason = yield* providerDisabledReason(definition);
+        if (disabledReason) {
+          return { status: "retry", reason: disabledReason } as const;
         }
         const now = isoNow();
         // Idempotent claim: INSERT OR IGNORE wins once, so retried polls and competing
@@ -3173,84 +3188,114 @@ export const AutomationServiceLive = Layer.effect(
           })
           .pipe(Effect.mapError(toServiceError("Failed to claim automation event.")));
         if (!claimed) {
-          return null;
+          return { status: "skipped" } as const;
         }
-        const disabledReason = yield* providerDisabledReason(definition);
-        if (disabledReason) {
-          return null;
-        }
-        const runnableDefinition = yield* restartExhaustedBoundedDefinition(definition, now);
-        const trigger: AutomationRun["trigger"] = { type: "event", event: input.event };
-        const continuationThreadId = automationContinuationThreadId(runnableDefinition);
-        if (continuationThreadId) {
-          const runState = yield* heartbeatThreadRunState(continuationThreadId);
-          const eligibility =
-            runState.activeRuns > 0
-              ? ({
-                  eligible: false as const,
-                  reason: "Target thread has an active automation run.",
-                } as const)
-              : runState.pendingCompletionEvaluations > 0
-                ? ({
-                    eligible: false as const,
-                    reason: "Target thread has a pending automation stop evaluation.",
-                  } as const)
-                : yield* continuationEligibility(runnableDefinition, now);
-          if (!eligibility.eligible) {
-            const deferState = heartbeatDeferState(now, now);
-            const deferredRun = yield* claimPendingRun(
-              runnableDefinition,
-              trigger,
-              now,
-              now,
-              undefined,
-              deferState.deferredUntil,
-              null,
-            );
-            if (Option.isSome(deferredRun)) {
-              yield* automationRepository
-                .attachAutomationEventRun({
-                  automationId: definition.id,
-                  eventKey: input.event.key,
-                  runId: deferredRun.value.id,
-                })
-                .pipe(Effect.catch(() => Effect.void));
-              return { run: deferredRun.value };
-            }
-            return null;
-          }
-        }
-        const claimedRun = yield* claimPendingRun(runnableDefinition, trigger, now, now);
-        if (Option.isNone(claimedRun)) {
-          return null;
-        }
-        yield* automationRepository
-          .attachAutomationEventRun({
+        const releaseClaim = automationRepository
+          .deleteAutomationEventClaim({
             automationId: definition.id,
             eventKey: input.event.key,
-            runId: claimedRun.value.id,
           })
-          .pipe(Effect.catch(() => Effect.void));
-        return yield* dispatchRun(runnableDefinition, claimedRun.value, now).pipe(
-          Effect.catch(() =>
-            automationRepository.getRunById({ id: claimedRun.value.id }).pipe(
-              Effect.mapError(toServiceError("Failed to load automation run.")),
-              Effect.map((runOption) =>
-                Option.match(runOption, {
-                  onNone: (): AutomationRunNowResult => ({ run: claimedRun.value }),
-                  onSome: (failed): AutomationRunNowResult => ({ run: failed }),
-                }),
+          .pipe(Effect.ignore);
+        const trigger: AutomationRun["trigger"] = { type: "event", event: input.event };
+        // Any failure past this point that does not create a run releases the claim so the
+        // event retries on the next poll; a created run keeps its claim either way.
+        const finish = Effect.gen(function* () {
+          const runnableDefinition = yield* restartExhaustedBoundedDefinition(definition, now);
+          const continuationThreadId = automationContinuationThreadId(runnableDefinition);
+          if (continuationThreadId) {
+            const runState = yield* heartbeatThreadRunState(continuationThreadId);
+            const eligibility =
+              runState.activeRuns > 0
+                ? ({
+                    eligible: false as const,
+                    reason: "Target thread has an active automation run.",
+                  } as const)
+                : runState.pendingCompletionEvaluations > 0
+                  ? ({
+                      eligible: false as const,
+                      reason: "Target thread has a pending automation stop evaluation.",
+                    } as const)
+                  : yield* continuationEligibility(runnableDefinition, now);
+            if (!eligibility.eligible) {
+              const deferState = heartbeatDeferState(now, now);
+              const deferredRun = yield* claimPendingRun(
+                runnableDefinition,
+                trigger,
+                now,
+                now,
+                undefined,
+                deferState.deferredUntil,
+                null,
+              );
+              if (Option.isSome(deferredRun)) {
+                yield* automationRepository
+                  .attachAutomationEventRun({
+                    automationId: definition.id,
+                    eventKey: input.event.key,
+                    runId: deferredRun.value.id,
+                  })
+                  .pipe(Effect.catch(() => Effect.void));
+                return { status: "dispatched", run: deferredRun.value } as const;
+              }
+              yield* releaseClaim;
+              return { status: "retry", reason: eligibility.reason } as const;
+            }
+          }
+          const claimedRun = yield* claimPendingRun(runnableDefinition, trigger, now, now);
+          if (Option.isNone(claimedRun)) {
+            yield* releaseClaim;
+            return {
+              status: "retry",
+              reason: "Automation run slot is busy.",
+            } as const;
+          }
+          yield* automationRepository
+            .attachAutomationEventRun({
+              automationId: definition.id,
+              eventKey: input.event.key,
+              runId: claimedRun.value.id,
+            })
+            .pipe(Effect.catch(() => Effect.void));
+          return yield* dispatchRun(runnableDefinition, claimedRun.value, now).pipe(
+            Effect.map(
+              (result): AutomationEventDispatchResult => ({
+                status: "dispatched",
+                run: result.run,
+              }),
+            ),
+            Effect.catch(() =>
+              automationRepository.getRunById({ id: claimedRun.value.id }).pipe(
+                Effect.mapError(toServiceError("Failed to load automation run.")),
+                Effect.map((runOption) =>
+                  Option.match(runOption, {
+                    onNone: (): AutomationEventDispatchResult => ({
+                      status: "dispatched",
+                      run: claimedRun.value,
+                    }),
+                    onSome: (failed): AutomationEventDispatchResult => ({
+                      status: "dispatched",
+                      run: failed,
+                    }),
+                  }),
+                ),
               ),
             ),
-          ),
+          );
+        });
+        return yield* finish.pipe(
+          Effect.catch((error) => releaseClaim.pipe(Effect.andThen(Effect.fail(error)))),
         );
       });
 
-    const listEventTriggeredDefinitions: AutomationServiceShape["listEventTriggeredDefinitions"] =
-      () =>
-        automationRepository
-          .listEventTriggeredDefinitions({ limit: AUTOMATION_EVENT_DEFINITION_LIST_LIMIT })
-          .pipe(Effect.mapError(toServiceError("Failed to load event-triggered automations.")));
+    const listEventTriggeredDefinitions: AutomationServiceShape["listEventTriggeredDefinitions"] = (
+      input,
+    ) =>
+      automationRepository
+        .listEventTriggeredDefinitions({
+          limit: AUTOMATION_EVENT_DEFINITION_LIST_LIMIT,
+          includeDisabled: input?.includeDisabled,
+        })
+        .pipe(Effect.mapError(toServiceError("Failed to load event-triggered automations.")));
 
     const cancelRun: AutomationServiceShape["cancelRun"] = (input) =>
       cancelRunById(input).pipe(Effect.map((run) => ({ run })));

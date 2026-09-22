@@ -158,6 +158,7 @@ export function useChatAutomationSetup({
           generatedConfidence: automationDraftWarningContext.generatedConfidence,
           generatedNeedsConfirmation: automationDraftWarningContext.generatedNeedsConfirmation,
           prompt: nextForm.prompt,
+          hasEventTriggers: nextForm.eventTriggers.length > 0,
         }),
       );
     },

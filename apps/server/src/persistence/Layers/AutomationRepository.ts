@@ -180,6 +180,9 @@ const decodeRun = Schema.decodeUnknownEffect(AutomationRun);
 /** Upper bound on how many run rows the list query returns to a client snapshot. */
 const MAX_RUN_LIST_ROWS = 500;
 
+/** Newest seen keys retained per repository; older keys are trimmed on each insert batch. */
+const AUTOMATION_EVENT_SEEN_RETENTION_PER_REPOSITORY = 5_000;
+
 class AutomationRunClaimRejected extends Error {}
 
 const ClaimAutomationIterationInput = Schema.Struct({
@@ -2235,7 +2238,7 @@ const makeAutomationRepository = Effect.gen(function* () {
   const listEventTriggeredDefinitionRows = SqlSchema.findAll({
     Request: ListEventTriggeredAutomationDefinitionsInput,
     Result: AutomationDefinitionDbRow,
-    execute: ({ limit }) =>
+    execute: ({ limit, includeDisabled }) =>
       sql`
         SELECT
           automation_id AS "id",
@@ -2282,7 +2285,7 @@ const makeAutomationRepository = Effect.gen(function* () {
           updated_at AS "updatedAt",
           archived_at AS "archivedAt"
         FROM automation_definitions
-        WHERE enabled = 1
+        WHERE (${includeDisabled === true ? sql`1` : sql`enabled = 1`})
           AND archived_at IS NULL
           AND proposal_state IS NOT 'pending'
           AND json_array_length(COALESCE(event_triggers_json, '[]')) > 0
@@ -2335,6 +2338,20 @@ const makeAutomationRepository = Effect.gen(function* () {
     })(input).pipe(
       Effect.mapError(
         toPersistenceSqlError("AutomationRepository.attachAutomationEventRun:update"),
+      ),
+    );
+
+  const deleteAutomationEventClaim: AutomationRepositoryShape["deleteAutomationEventClaim"] = (
+    input,
+  ) =>
+    sql`
+      DELETE FROM automation_event_claims
+      WHERE automation_id = ${input.automationId}
+        AND event_key = ${input.eventKey}
+    `.pipe(
+      Effect.asVoid,
+      Effect.mapError(
+        toPersistenceSqlError("AutomationRepository.deleteAutomationEventClaim:delete"),
       ),
     );
 
@@ -2403,6 +2420,32 @@ const makeAutomationRepository = Effect.gen(function* () {
       Effect.mapError(
         toPersistenceSqlError("AutomationRepository.insertAutomationSeenEvents:insert"),
       ),
+      Effect.andThen(
+        Effect.forEach(
+          [
+            ...new Map(
+              input.events.map((event) => [`${event.source}\t${event.repository}`, event] as const),
+            ).values(),
+          ],
+          (event) => sql`
+            DELETE FROM automation_event_seen
+            WHERE source = ${event.source}
+              AND repository = ${event.repository}
+              AND event_key NOT IN (
+                SELECT event_key
+                FROM automation_event_seen
+                WHERE source = ${event.source}
+                  AND repository = ${event.repository}
+                ORDER BY seen_at DESC, event_key DESC
+                LIMIT ${AUTOMATION_EVENT_SEEN_RETENTION_PER_REPOSITORY}
+              )
+          `,
+          { discard: true },
+        ),
+      ),
+      Effect.mapError(
+        toPersistenceSqlError("AutomationRepository.insertAutomationSeenEvents:trim"),
+      ),
     );
 
   const trimAutomationRunHistory: AutomationRepositoryShape["trimAutomationRunHistory"] = (input) =>
@@ -2418,7 +2461,16 @@ const makeAutomationRepository = Effect.gen(function* () {
           ORDER BY finished_at DESC, run_id DESC
           LIMIT ${input.keepTerminalRuns}
         )
+        AND run_id NOT IN (SELECT run_id FROM automation_pending_completion_evaluations)
     `.pipe(
+      Effect.andThen(
+        sql`
+          DELETE FROM automation_event_claims
+          WHERE automation_id = ${input.automationId}
+            AND run_id IS NOT NULL
+            AND run_id NOT IN (SELECT run_id FROM automation_runs)
+        `,
+      ),
       Effect.asVoid,
       Effect.mapError(
         toPersistenceSqlError("AutomationRepository.trimAutomationRunHistory:delete"),
@@ -2637,6 +2689,7 @@ const makeAutomationRepository = Effect.gen(function* () {
     listEventTriggeredDefinitions,
     claimAutomationEvent,
     attachAutomationEventRun,
+    deleteAutomationEventClaim,
     listAutomationSeenEventKeys,
     hasAutomationSeenEventsForRepository,
     insertAutomationSeenEvents,

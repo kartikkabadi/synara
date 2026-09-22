@@ -88,6 +88,26 @@ function projectMuteSelectValue(prefs: ProjectNotificationPrefs): string {
   return preset?.value ?? "86400";
 }
 
+function projectMuteDescription(prefs: ProjectNotificationPrefs): string {
+  if (prefs.mutedUntil !== null) {
+    const mutedUntilMs = Date.parse(prefs.mutedUntil);
+    if (Number.isFinite(mutedUntilMs) && mutedUntilMs > Date.now()) {
+      return `All alerts muted until ${new Date(mutedUntilMs).toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })}`;
+    }
+  }
+  if (
+    NOTIFICATION_CATEGORY_IDS.every((category) => projectNotificationCategoryMuted(prefs, category))
+  ) {
+    return "All alerts muted for this project";
+  }
+  return "Choose which alerts this project can send.";
+}
+
 function PerProjectNotificationRows({
   settings,
   updateSettings,
@@ -110,13 +130,7 @@ function PerProjectNotificationRows({
           <SettingsRow
             key={project.id}
             title={project.name}
-            description={
-              projectNotificationCategoryMuted(prefs, "task-finished") &&
-              projectNotificationCategoryMuted(prefs, "needs-input") &&
-              projectNotificationCategoryMuted(prefs, "reminders")
-                ? "All alerts muted for this project"
-                : "Choose which alerts this project can send."
-            }
+            description={projectMuteDescription(prefs)}
             control={
               <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
                 <select

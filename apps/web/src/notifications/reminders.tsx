@@ -20,6 +20,7 @@ import {
   showThreadToast,
   type ThreadNotificationCopy,
 } from "./taskCompletion";
+import { useReminderStore } from "./reminderStore";
 
 function reminderCopy(event: Extract<ReminderStreamEvent, { type: "reminder-fired" }>) {
   const title = "Reminder";
@@ -43,6 +44,7 @@ export function ReminderNotifications() {
     const api = readNativeApi();
     if (!api) return;
     const unsubscribe = api.reminder.onEvent((event) => {
+      useReminderStore.getState().applyReminderEvent(event);
       if (event.type !== "reminder-fired") return;
       // A replayed snapshot (reconnect) must not re-notify reminders that fired
       // before this runtime started; only genuinely fresh fires notify.
