@@ -1,11 +1,13 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import {
   createAssistantMessageEventStream,
+  getCurrentTools,
   type AssistantMessage,
+  type JsonObject,
   type Tool,
 } from "@earendil-works/pi-ai";
 import type {
@@ -78,11 +80,18 @@ afterEach(() => {
 });
 
 type ResponseKind = "success" | "error" | "overflow" | "partial-error" | "until-abort";
-function responses(...kinds: ResponseKind[]) {
+// A toolCall step produces a real tool call through the agent loop, so the
+// SDK's beforeToolCall gate and real tool execution run.
+type ScriptedStep =
+  | ResponseKind
+  | {
+      readonly toolCall: { readonly name: string; readonly arguments: JsonObject };
+    };
+function responses(...steps: ScriptedStep[]) {
   let calls = 0;
   captured.stream = (model, context, options) => {
-    captured.modelTools.push(context.tools ?? []);
-    const kind = kinds[calls++] ?? "success";
+    captured.modelTools.push(getCurrentTools(context.messages));
+    const step = steps[calls++] ?? "success";
     const stream = createAssistantMessageEventStream();
     const message: AssistantMessage = {
       role: "assistant",
@@ -102,6 +111,32 @@ function responses(...kinds: ResponseKind[]) {
       timestamp: Date.now(),
     };
     stream.push({ type: "start", partial: message });
+    if (typeof step !== "string") {
+      const call = {
+        type: "toolCall" as const,
+        id: `scripted-${calls}`,
+        name: step.toolCall.name,
+        arguments: step.toolCall.arguments,
+      };
+      message.content.push(call);
+      stream.push({ type: "toolcall_start", contentIndex: 0, partial: { ...message } });
+      stream.push({
+        type: "toolcall_delta",
+        contentIndex: 0,
+        delta: JSON.stringify(step.toolCall.arguments),
+        partial: { ...message },
+      });
+      stream.push({
+        type: "toolcall_end",
+        contentIndex: 0,
+        toolCall: call,
+        partial: { ...message },
+      });
+      message.stopReason = "toolUse";
+      stream.push({ type: "done", reason: "toolUse", message });
+      return stream;
+    }
+    const kind = step;
     if (kind === "error" || kind === "overflow") {
       message.stopReason = "error";
       message.errorMessage =
@@ -149,7 +184,10 @@ async function withAdapter(
   run: (adapter: PiAdapterShape, events: ProviderRuntimeEvent[], cwd: string) => Promise<void>,
   delayMs = 100,
   credentials?: AgentGatewayCredentialsShape,
-  startSessionOverrides?: { readonly enableComputerControl?: boolean },
+  startSessionOverrides?: {
+    readonly enableComputerControl?: boolean;
+    readonly runtimeMode?: "approval-required" | "auto" | "full-access";
+  },
   gatewayFetchOverride?: AgentGatewayMcpFetch,
 ) {
   vi.stubEnv("PI_OFFLINE", "1");
@@ -210,7 +248,7 @@ async function withAdapter(
       yield* adapter.startSession({
         threadId,
         cwd,
-        runtimeMode: "full-access",
+        runtimeMode: startSessionOverrides?.runtimeMode ?? "full-access",
         providerOptions: { pi: { agentDir: cwd } },
         modelSelection: { provider: "pi", model: "openai/gpt-4o" },
         ...(startSessionOverrides?.enableComputerControl !== undefined
@@ -555,7 +593,7 @@ it("waits for prompt rejection even when the SDK has finished its agent cycle", 
   });
 });
 
-it("keeps steering during backoff inside the same logical turn", async () => {
+it("interrupts a retrying turn and redispatches steering as a fresh turn", async () => {
   responses("error", "success", "success");
   await withAdapter(async (adapter, events) => {
     const turn = await send(adapter);
@@ -564,10 +602,16 @@ it("keeps steering during backoff inside the same logical turn", async () => {
     const steered = await Effect.runPromise(
       adapter.steerTurn!({ threadId, input: "Also check this" }),
     );
-    expect(steered.turnId).toBe(turn.turnId);
-    await waitFor(() => expect(completions(events)).toHaveLength(1));
+    // Steering is an urgent redirect: the retrying turn is interrupted and the
+    // steered text starts its own turn.
+    expect(steered.turnId).not.toBe(turn.turnId);
+    await waitFor(() => expect(completions(events)).toHaveLength(2));
     expect(completions(events)[0]).toMatchObject({
       turnId: turn.turnId,
+      payload: { state: "interrupted" },
+    });
+    expect(completions(events)[1]).toMatchObject({
+      turnId: steered.turnId,
       payload: { state: "completed" },
     });
     expect(
@@ -576,6 +620,131 @@ it("keeps steering during backoff inside the same logical turn", async () => {
           message.role === "user" && JSON.stringify(message.content).includes("Also check this"),
       ),
     ).toBe(true);
+  });
+});
+
+it("requests approval for a gated tool and executes it once accepted", async () => {
+  responses({ toolCall: { name: "bash", arguments: { command: "echo approved" } } }, "success");
+  await withAdapter(
+    async (adapter, events) => {
+      await send(adapter);
+      await waitFor(() =>
+        expect(events.some((event) => event.type === "request.opened")).toBe(true),
+      );
+      const opened = events.find((event) => event.type === "request.opened")!;
+      expect(opened.payload).toMatchObject({
+        requestType: "command_execution_approval",
+        detail: "echo approved",
+      });
+      await Effect.runPromise(
+        adapter.respondToRequest(
+          threadId,
+          ApprovalRequestId.makeUnsafe(opened.requestId!),
+          "accept",
+        ),
+      );
+      await waitFor(() => expect(completions(events)).toHaveLength(1));
+      expect(completions(events)[0]).toMatchObject({ payload: { state: "completed" } });
+      const resolved = events.find((event) => event.type === "request.resolved");
+      expect(resolved?.payload).toMatchObject({
+        requestType: "command_execution_approval",
+        decision: "accept",
+      });
+    },
+    100,
+    undefined,
+    { runtimeMode: "approval-required" },
+  );
+});
+
+it("blocks a gated tool when the approval is declined", async () => {
+  responses(
+    { toolCall: { name: "write", arguments: { path: "out.txt", content: "x" } } },
+    "success",
+  );
+  await withAdapter(
+    async (adapter, events, cwd) => {
+      await send(adapter);
+      await waitFor(() =>
+        expect(events.some((event) => event.type === "request.opened")).toBe(true),
+      );
+      const opened = events.find((event) => event.type === "request.opened")!;
+      expect(opened.payload).toMatchObject({
+        requestType: "file_change_approval",
+        detail: "out.txt",
+      });
+      await Effect.runPromise(
+        adapter.respondToRequest(
+          threadId,
+          ApprovalRequestId.makeUnsafe(opened.requestId!),
+          "decline",
+        ),
+      );
+      await waitFor(() => expect(completions(events)).toHaveLength(1));
+      const session = captured.sessions[0]!;
+      expect(
+        session.messages.some(
+          (message) =>
+            message.role === "toolResult" && JSON.stringify(message.content).includes("declined"),
+        ),
+      ).toBe(true);
+      expect(existsSync(path.join(cwd, "out.txt"))).toBe(false);
+    },
+    100,
+    undefined,
+    { runtimeMode: "approval-required" },
+  );
+});
+
+it("auto-allows subsequent gated calls after an always-allow decision", async () => {
+  responses(
+    { toolCall: { name: "bash", arguments: { command: "echo one" } } },
+    { toolCall: { name: "bash", arguments: { command: "echo two" } } },
+    "success",
+  );
+  await withAdapter(
+    async (adapter, events) => {
+      await send(adapter);
+      await waitFor(() =>
+        expect(events.some((event) => event.type === "request.opened")).toBe(true),
+      );
+      const opened = events.find((event) => event.type === "request.opened")!;
+      await Effect.runPromise(
+        adapter.respondToRequest(
+          threadId,
+          ApprovalRequestId.makeUnsafe(opened.requestId!),
+          "acceptForSession",
+        ),
+      );
+      await waitFor(() => expect(completions(events)).toHaveLength(1));
+      expect(events.filter((event) => event.type === "request.opened")).toHaveLength(1);
+      expect(completions(events)[0]).toMatchObject({ payload: { state: "completed" } });
+    },
+    100,
+    undefined,
+    { runtimeMode: "approval-required" },
+  );
+});
+
+it("does not prompt for read-only builtins or in full-access mode", async () => {
+  const calls = responses({ toolCall: { name: "bash", arguments: { command: "echo free" } } });
+  await withAdapter(async (adapter, events) => {
+    await send(adapter);
+    await waitFor(() => expect(completions(events)).toHaveLength(1));
+    expect(events.some((event) => event.type === "request.opened")).toBe(false);
+    expect(calls()).toBe(2);
+  });
+});
+
+it("rejects an unknown approval request id", async () => {
+  responses("success");
+  await withAdapter(async (adapter) => {
+    const failure = await Effect.runPromise(
+      adapter
+        .respondToRequest(threadId, ApprovalRequestId.makeUnsafe("missing-request"), "accept")
+        .pipe(Effect.flip),
+    );
+    expect(failure).toMatchObject({ method: "request/respond" });
   });
 });
 
@@ -797,7 +966,9 @@ it("rejects steering into an untracked SDK run instead of orphaning a queued tur
 });
 
 it("keeps the turn alive through SDK overflow compaction and its continuation", async () => {
-  const calls = responses("success", "overflow", "success", "success");
+  // Overflow mid-turn triggers split-turn compaction in the SDK: history summary
+  // + turn-prefix summary, then the retried prompt.
+  const calls = responses("success", "overflow", "success", "success", "success");
   await withAdapter(async (adapter, events) => {
     await send(adapter);
     await waitFor(() => expect(completions(events)).toHaveLength(1));
@@ -808,7 +979,7 @@ it("keeps the turn alive through SDK overflow compaction and its continuation", 
     expect(
       captured.events.some((event) => event.type === "compaction_end" && event.willRetry),
     ).toBe(true);
-    expect(calls()).toBe(4);
+    expect(calls()).toBe(5);
     expect(completions(events)[1]).toMatchObject({
       turnId: turn.turnId,
       payload: { state: "completed" },
@@ -881,7 +1052,9 @@ it.each(["adapter", "extension"] as const)(
       const turn = await send(adapter);
       const session = captured.sessions[0]!;
       await waitFor(() => expect(session.isRetrying).toBe(true));
-      await Effect.runPromise(adapter.steerTurn!({ threadId, input: "Queued steering" }));
+      // Queue steering below the adapter: adapter.steerTurn interrupts and
+      // redispatches, while the SDK queue path must still be droppable by abort.
+      await session.steer("Queued steering");
       let resumed!: (result: string) => void;
       const resumedRun = new Promise<string>((resolve) => {
         resumed = resolve;
@@ -1109,9 +1282,7 @@ it("cancels retry and queued steering before awaiting gateway teardown drainage"
       const turn = await send(adapter);
       const session = captured.sessions[0]!;
       await waitFor(() => expect(session.isRetrying).toBe(true));
-      await Effect.runPromise(
-        adapter.steerTurn!({ threadId, input: "Do not restart this queued work" }),
-      );
+      await session.steer("Do not restart this queued work");
       const stopped = Effect.runPromise(adapter.stopSession(threadId));
       try {
         await waitFor(() => expect(credentials.cancelSessionTurnRequests).toHaveBeenCalled());
