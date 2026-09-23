@@ -681,6 +681,84 @@ describe("AcpSessionRuntime initialize validation", () => {
   });
 });
 
+describe("AcpSessionRuntime authPolicy never", () => {
+  const makeRuntimeLayer = (agentApp: OfficialAcp.AgentApp) => {
+    const clientToAgent = Effect.runSync(Queue.unbounded<Uint8Array>());
+    const agentToClient = Effect.runSync(Queue.unbounded<Uint8Array>());
+    const agentInput = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        return Effect.runPromise(Queue.take(clientToAgent)).then((chunk) =>
+          controller.enqueue(chunk),
+        );
+      },
+    });
+    const agentOutput = new WritableStream<Uint8Array>({
+      write(chunk) {
+        return Effect.runPromise(Queue.offer(agentToClient, chunk)).then(() => undefined);
+      },
+    });
+    const spawnerLayer = Layer.succeed(
+      ChildProcessSpawner.ChildProcessSpawner,
+      ChildProcessSpawner.make(() =>
+        Effect.sync(() => {
+          agentApp.connect(OfficialAcp.ndJsonStream(agentOutput, agentInput));
+          return ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(0x7ff_f_fffe),
+            exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+            isRunning: Effect.succeed(true),
+            kill: () => Effect.void,
+            stdin: Sink.forEach((chunk: Uint8Array) => Queue.offer(clientToAgent, chunk)),
+            stdout: Stream.fromQueue(agentToClient),
+            stderr: Stream.never,
+            all: Stream.never,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.never,
+          });
+        }),
+      ),
+    );
+    return AcpSessionRuntime.layer({
+      spawn: { command: "in-memory-acp-agent", args: [] },
+      cwd: process.cwd(),
+      clientInfo: { name: "synara-test", version: "0.0.0" },
+      authPolicy: "never",
+      authMethodId: "test-auth",
+      teardownProcessTree: async () => ({ escalated: false, signalErrors: [] }),
+    }).pipe(Layer.provide(spawnerLayer));
+  };
+
+  it("starts with session/new and never sends authenticate", async () => {
+    const calls: string[] = [];
+    const agentApp = OfficialAcp.agent({ name: "never-auth-agent" })
+      .onRequest(OfficialAcp.methods.agent.initialize, () => {
+        calls.push("initialize");
+        return {
+          protocolVersion: 1,
+          agentCapabilities: {},
+          authMethods: [{ id: "test-auth", name: "Test auth" }],
+        };
+      })
+      .onRequest(OfficialAcp.methods.agent.authenticate, () => {
+        calls.push("authenticate");
+        return {};
+      })
+      .onRequest(OfficialAcp.methods.agent.session.new, () => {
+        calls.push("session/new");
+        return { sessionId: "never-auth-session" };
+      });
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const runtime = yield* AcpSessionRuntime;
+        return yield* runtime.start();
+      }).pipe(Effect.provide(makeRuntimeLayer(agentApp)), Effect.scoped),
+    );
+
+    expect(result.sessionId).toBe("never-auth-session");
+    expect(calls).toEqual(["initialize", "session/new"]);
+  });
+});
+
 describe("AcpSessionRuntime startup timeouts", () => {
   // Per-step budget; the aggregate handshake budget stays far above it so the
   // step timeout is what fires first.

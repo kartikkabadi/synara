@@ -130,6 +130,11 @@ export const makeCursorAcpRuntime = (
         ...input,
         spawn: buildCursorAcpSpawnInput(input.cursorSettings, input.cwd),
         authMethodId: "cursor_login",
+        // Cursor's only advertised auth method is interactive OAuth — calling
+        // authenticate unconditionally opened a login browser on every runtime
+        // start. Authenticate only when session setup reports auth required;
+        // callers may still pass authPolicy (e.g. "never" for passive probes).
+        authPolicy: input.authPolicy ?? "on-demand",
         authenticateMeta: { headless: true },
         clientCapabilities: CURSOR_PARAMETERIZED_MODEL_PICKER_CAPABILITIES,
       }).pipe(
