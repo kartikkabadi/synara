@@ -14,13 +14,19 @@ import type {
   ExtensionUIContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { AgentToolResult, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type {
+  AgentToolResult,
+  BeforeToolCallResult,
+  ThinkingLevel,
+} from "@earendil-works/pi-agent-core";
 import type { Api, ImageContent, Model, TextContent } from "@earendil-works/pi-ai";
 import {
   ApprovalRequestId,
+  type CanonicalRequestType,
   type ChatAttachment,
   EventId,
   type PiModelSelection,
+  type ProviderApprovalDecision,
   type ProviderComposerCapabilities,
   type ProviderListCommandsResult,
   type ProviderListModelsResult,
@@ -435,6 +441,15 @@ interface PiSessionContext {
   activeReasoningItemId: RuntimeItemId | undefined;
   activeToolItems: Map<string, PiTrackedToolCall>;
   pendingUserInputs: Map<ApprovalRequestId, PiPendingUserInput>;
+  // In-flight Synara approvals, resolved by respondToRequest. The resolver
+  // settles the pi beforeToolCall promise for that call.
+  pendingApprovals: Map<ApprovalRequestId, PiPendingApproval>;
+  // Tool names the user auto-allows for the rest of the session after an
+  // "always allow" on a scoped tool approval.
+  sessionGrantedTools: Set<string>;
+  // Blanket session grant from an "always allow" on a command or file-change
+  // approval — the same widening the client persists as full-access.
+  approvalsAlwaysAllowedForSession: boolean;
   stopped: boolean;
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
   unsubscribe: (() => void) | undefined;
@@ -467,6 +482,8 @@ interface PiStoredTurn {
   readonly items: unknown[];
   readonly toolItemIndexes: Map<string, number>;
   leafId?: string | null;
+  completionEmitted?: boolean;
+  errorMessage?: string;
 }
 
 interface PiTrackedToolCall {
@@ -480,6 +497,44 @@ interface PiTrackedToolCall {
 interface PiPendingUserInput {
   readonly resolve: (answers: ProviderUserInputAnswers) => void;
 }
+
+interface PiPendingApproval {
+  readonly resolve: (decision: ProviderApprovalDecision) => void;
+}
+
+// Pi builtin tools that only inspect state — approvals gate mutations and
+// execution, not the read-only inspection calls a turn needs constantly.
+const PI_READ_ONLY_TOOL_NAMES = new Set(["read", "grep", "find", "ls"]);
+
+const PI_APPROVAL_DETAIL_MAX_LENGTH = 160;
+
+const piApprovalRequestType = (toolName: string): CanonicalRequestType => {
+  switch (toolName) {
+    case "bash":
+    case "powershell":
+      return "command_execution_approval";
+    case "edit":
+    case "write":
+      return "file_change_approval";
+    default:
+      return "tool_approval";
+  }
+};
+
+const summarizePiToolApprovalDetail = (toolName: string, args: unknown): string => {
+  const record = isRecord(args) ? args : undefined;
+  const candidate =
+    record && typeof record.command === "string"
+      ? record.command
+      : record && typeof record.path === "string"
+        ? record.path
+        : toolName;
+  const trimmed = candidate.trim();
+  const value = trimmed.length > 0 ? trimmed : toolName;
+  return value.length > PI_APPROVAL_DETAIL_MAX_LENGTH
+    ? `${value.slice(0, PI_APPROVAL_DETAIL_MAX_LENGTH - 1)}…`
+    : value;
+};
 
 export interface PiUserInputOptionMapping {
   readonly value: string;
@@ -1672,6 +1727,118 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       });
     };
 
+    const requestPiToolApproval = (
+      context: PiSessionContext,
+      input: {
+        readonly toolName: string;
+        readonly args: unknown;
+        readonly signal?: AbortSignal | undefined;
+      },
+    ): Promise<ProviderApprovalDecision> => {
+      if (context.stopped || input.signal?.aborted) {
+        return Promise.resolve("cancel");
+      }
+
+      const requestId = ApprovalRequestId.makeUnsafe(crypto.randomUUID());
+      const runtimeRequestId = RuntimeRequestId.makeUnsafe(requestId);
+      const requestType = piApprovalRequestType(input.toolName);
+
+      return new Promise((resolve) => {
+        let settled = false;
+        let abort: () => void = () => undefined;
+
+        const finish = (decision: ProviderApprovalDecision) => {
+          if (settled) return;
+          settled = true;
+          input.signal?.removeEventListener("abort", abort);
+          context.pendingApprovals.delete(requestId);
+          offerRuntimeEvent({
+            ...makeEventBase(context),
+            type: "request.resolved",
+            requestId: runtimeRequestId,
+            payload: { requestType, decision },
+            raw: {
+              source: "pi.sdk.event",
+              method: "tool/approvalAnswered",
+              payload: { requestId, decision },
+            },
+          } satisfies ProviderRuntimeEvent);
+          resolve(decision);
+        };
+        abort = () => finish("cancel");
+
+        context.pendingApprovals.set(requestId, { resolve: finish });
+        input.signal?.addEventListener("abort", abort, { once: true });
+
+        offerRuntimeEvent({
+          ...makeEventBase(context),
+          type: "request.opened",
+          requestId: runtimeRequestId,
+          payload: {
+            requestType,
+            detail: summarizePiToolApprovalDetail(input.toolName, input.args),
+            args: { toolName: input.toolName, input: input.args },
+          },
+          raw: {
+            source: "pi.sdk.event",
+            method: "tool/approvalRequested",
+            payload: { requestId, toolName: input.toolName, input: input.args },
+          },
+        } satisfies ProviderRuntimeEvent);
+      });
+    };
+
+    // AgentSession installs its own beforeToolCall to bridge the extension
+    // tool_call event. Chain after it so extension handlers still observe and
+    // mutate the call first — the approval prompt then sees post-mutation
+    // args — and keep its result whenever Synara allows the call.
+    const installPiApprovalGate = (context: PiSessionContext) => {
+      const agent = context.runtime.session.agent;
+      const base = agent.beforeToolCall;
+      agent.beforeToolCall = async (toolContext, signal) => {
+        const baseResult = await base?.(toolContext, signal);
+        if (baseResult?.block === true || context.stopped) return baseResult;
+        const toolName = toolContext.toolCall.name;
+        if (
+          context.session.runtimeMode === "full-access" ||
+          context.approvalsAlwaysAllowedForSession ||
+          context.sessionGrantedTools.has(toolName) ||
+          PI_READ_ONLY_TOOL_NAMES.has(toolName) ||
+          // Synara gateway tools carry their own permission scopes.
+          context.gatewayTools.some((tool) => tool.name === toolName)
+        ) {
+          return baseResult;
+        }
+        const requestType = piApprovalRequestType(toolName);
+        const decision = await requestPiToolApproval(context, {
+          toolName,
+          args: toolContext.args,
+          signal,
+        });
+        if (decision === "accept" || decision === "acceptForSession") {
+          if (decision === "acceptForSession") {
+            // Scoped tool approvals grant only that tool; command/file-change
+            // grants widen the whole session, matching the durable mode flip
+            // the client persists for those request kinds.
+            if (requestType === "tool_approval") {
+              context.sessionGrantedTools.add(toolName);
+            } else {
+              context.approvalsAlwaysAllowedForSession = true;
+            }
+          }
+          return baseResult;
+        }
+        return {
+          block: true,
+          reason:
+            decision === "cancel"
+              ? "User cancelled tool execution."
+              : "User declined tool execution.",
+          ...(decision === "cancel" ? { terminate: true } : {}),
+        } satisfies BeforeToolCallResult;
+      };
+    };
+
     // Bridges the common Pi extension UI primitives onto Synara's existing
     // pending user-input flow; terminal/TUI-only APIs remain no-op by design.
     const makePiExtensionUIContext = (context: PiSessionContext): ExtensionUIContext => {
@@ -1968,7 +2135,17 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       errorMessage: string | undefined,
       cause?: unknown,
     ) => {
-      if (context.stopped || context.activeTurnId !== turnId) return;
+      // A prompt may settle after its turn was superseded (interrupt-and-
+      // redispatch steer hands activeTurnId to the new turn while the aborted
+      // prompt is still unwinding). Its completion must still be reported for
+      // the turn it belongs to, or the interrupted turn never terminates in
+      // the UI. Settlement for a turn this context never dispatched is noise.
+      if (context.stopped) return;
+      const superseded = context.activeTurnId !== turnId;
+      const turn = context.turns.find((candidate) => candidate.id === turnId);
+      // A turn reports exactly one completion: the prompt settle and a
+      // dispatch-time close can both reach here for the same turn.
+      if (turn === undefined ? superseded : turn.completionEmitted === true) return;
       if (context.pendingAbortTurnId === turnId) context.pendingAbortTurnId = undefined;
       const raw = {
         source: "pi.sdk.event" as const,
@@ -1978,31 +2155,33 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       const stats = context.runtime.session.getSessionStats();
       const usage = normalizeTokenUsage(stats, context.runtime.session.model?.contextWindow);
       context.lastKnownTokenUsage = usage;
-      const failure = errorMessage ? classifyPiTurnFailure(errorMessage) : undefined;
+      // The shared error slot may already have rotated to the successor turn;
+      // the per-turn record keeps this turn's own outcome.
+      const effectiveError = turn?.errorMessage ?? errorMessage;
+      const failure = effectiveError ? classifyPiTurnFailure(effectiveError) : undefined;
       const leafId = context.runtime.session.sessionManager.getLeafId();
-      const turn = context.turns.find((candidate) => candidate.id === turnId);
       if (turn) turn.leafId = leafId;
-      if (context.activeAssistantItemId) {
+      if (!superseded && context.activeAssistantItemId) {
         offerRuntimeEvent({
           ...makeEventBase(context),
           itemId: context.activeAssistantItemId,
           type: "item.completed",
           payload: {
             itemType: "assistant_message",
-            status: errorMessage ? "failed" : "completed",
+            status: effectiveError ? "failed" : "completed",
             title: "Assistant",
           },
           raw,
         } satisfies ProviderRuntimeEvent);
       }
-      if (context.activeReasoningItemId) {
+      if (!superseded && context.activeReasoningItemId) {
         offerRuntimeEvent({
           ...makeEventBase(context),
           itemId: context.activeReasoningItemId,
           type: "item.completed",
           payload: {
             itemType: "reasoning",
-            status: errorMessage ? "failed" : "completed",
+            status: effectiveError ? "failed" : "completed",
             title: "Reasoning",
           },
           raw,
@@ -2010,15 +2189,16 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       }
       if (usage) {
         offerRuntimeEvent({
-          ...makeEventBase(context),
+          ...makeEventBase(context, { includeTurnId: false }),
+          turnId,
           type: "thread.token-usage.updated",
           payload: { usage },
           raw,
         } satisfies ProviderRuntimeEvent);
       }
-      if (errorMessage && failure?.state === "failed") {
+      if (effectiveError && failure?.state === "failed") {
         offerRuntimeError(context, {
-          message: errorMessage,
+          message: effectiveError,
           method: "prompt",
           cause,
         });
@@ -2075,21 +2255,28 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           ),
         );
       }
-      context.activeTurnId = undefined;
-      delete context.activeTurnErrorMessage;
-      context.activeAssistantItemId = undefined;
-      context.activeReasoningItemId = undefined;
-      context.activeToolItems.clear();
+      // A newer turn may already own these slots (interrupt-then-redispatch
+      // settles the old prompt() after the next dispatch) — only clear the
+      // fields that still belong to this completing turn.
+      if (context.activeTurnId === turnId) {
+        context.activeTurnId = undefined;
+        delete context.activeTurnErrorMessage;
+        context.activeAssistantItemId = undefined;
+        context.activeReasoningItemId = undefined;
+        context.activeToolItems.clear();
+      }
+      if (turn) turn.completionEmitted = true;
       context.session = makeSessionSnapshot(context);
       offerRuntimeEvent({
         ...completionBase,
+        turnId,
         type: "turn.completed",
         payload:
-          errorMessage && failure
+          effectiveError && failure
             ? {
                 state: failure.state,
                 stopReason: failure.stopReason,
-                errorMessage,
+                errorMessage: effectiveError,
                 usage: stats,
               }
             : { state: "completed", stopReason: null, usage: stats },
@@ -2230,18 +2417,6 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           }),
       });
 
-    const steerPiTurn = (context: PiSessionContext, text: string, images: ImageContent[]) =>
-      Effect.tryPromise({
-        try: () => context.runtime.session.steer(text, images),
-        catch: (cause) =>
-          new ProviderAdapterRequestError({
-            provider: PROVIDER,
-            method: "turn/steer",
-            detail: toMessage(cause, "Failed to steer Pi turn."),
-            cause,
-          }),
-      });
-
     const runPiReload = (context: PiSessionContext, command: string) =>
       Effect.gen(function* () {
         offerRuntimeEvent({
@@ -2372,6 +2547,10 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           pending.resolve({});
         }
         context.pendingUserInputs.clear();
+        for (const pending of Array.from(context.pendingApprovals.values())) {
+          pending.resolve("cancel");
+        }
+        context.pendingApprovals.clear();
         context.stopped = true;
         let runtimeFailure: unknown;
         try {
@@ -2660,8 +2839,16 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           // Capture this run's outcome without settling its retries/continuations.
           // A handled extension command may resolve without running the agent.
           const errorMessage = context.runtime.session.agent.state.errorMessage;
-          if (errorMessage) context.activeTurnErrorMessage = errorMessage;
-          else delete context.activeTurnErrorMessage;
+          const activeTurn = context.turns.find(
+            (candidate) => candidate.id === context.activeTurnId,
+          );
+          if (errorMessage) {
+            context.activeTurnErrorMessage = errorMessage;
+            if (activeTurn) activeTurn.errorMessage = errorMessage;
+          } else {
+            delete context.activeTurnErrorMessage;
+            if (activeTurn) delete activeTurn.errorMessage;
+          }
           return;
         }
         case "auto_retry_start": {
@@ -2679,6 +2866,10 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           // while agent.state.errorMessage still contains the provider error.
           if (!event.success && event.finalError === "Retry cancelled") {
             context.activeTurnErrorMessage = event.finalError;
+            const activeTurn = context.turns.find(
+              (candidate) => candidate.id === context.activeTurnId,
+            );
+            if (activeTurn) activeTurn.errorMessage = event.finalError;
           }
           return;
         }
@@ -2942,6 +3133,9 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           activeReasoningItemId: undefined,
           activeToolItems: new Map(),
           pendingUserInputs: new Map(),
+          pendingApprovals: new Map(),
+          sessionGrantedTools: new Set(),
+          approvalsAlwaysAllowedForSession: false,
           stopped: false,
           lastKnownTokenUsage: undefined,
           unsubscribe: undefined,
@@ -2991,6 +3185,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             }),
           ),
         );
+        installPiApprovalGate(context);
         const loadedExtensions = runtime.session.resourceLoader.getExtensions().extensions;
         if (loadedExtensions.length > 0) {
           const extensionNames = loadedExtensions.map(extensionDisplayName);
@@ -3199,19 +3394,53 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
             });
           }
           const providerText = buildProviderText(context, payload.text);
-          const turnId = joinedTurnId ?? TurnId.makeUnsafe(crypto.randomUUID());
-          if (joinedTurnId === undefined) {
-            context.activeTurnId = turnId;
-            context.turns.push({ id: turnId, items: [], toolItemIndexes: new Map() });
-          }
+          const turnId = TurnId.makeUnsafe(crypto.randomUUID());
           if (
             joinedTurnId !== undefined &&
-            (context.runtime.session.isStreaming || context.promptCommitting === joinedTurnId)
+            (!context.runtime.session.isIdle || context.promptCommitting === joinedTurnId)
           ) {
-            yield* steerPiTurn(context, providerText, payload.images);
-          } else {
-            startPrompt(context, turnId, providerText, payload.images);
+            // Steering is an urgent redirect: stop the live run outright —
+            // session.steer() would only queue the text behind the current
+            // tool batch — then dispatch it as a fresh turn. The aborted
+            // turn's own prompt() settlement emits its turn.completed.
+            yield* withAgentGatewayTurnCancellation(
+              context.gatewaySessionLease,
+              joinedTurnId,
+              Effect.tryPromise({
+                try: () => interruptActiveTurn(context),
+                catch: (cause) =>
+                  new ProviderAdapterRequestError({
+                    provider: PROVIDER,
+                    method: "turn/interrupt",
+                    detail: toMessage(cause, "Failed to interrupt Pi turn."),
+                    cause,
+                  }),
+              }),
+            );
+            // The interrupted turn's open items close here under its own id;
+            // the superseded prompt settlement still emits its turn.completed.
+            for (const [itemId, itemType, title] of [
+              [context.activeAssistantItemId, "assistant_message", "Assistant"],
+              [context.activeReasoningItemId, "reasoning", "Reasoning"],
+            ] as const) {
+              if (itemId === undefined) continue;
+              offerRuntimeEvent({
+                ...makeEventBase(context, { includeTurnId: false }),
+                turnId: joinedTurnId,
+                itemId,
+                type: "item.completed",
+                payload: { itemType, status: "failed", title },
+                raw: { source: "pi.sdk.event", method: "prompt", payload: {} },
+              } satisfies ProviderRuntimeEvent);
+            }
+            context.activeAssistantItemId = undefined;
+            context.activeReasoningItemId = undefined;
+            context.activeToolItems.clear();
           }
+          context.activeTurnId = turnId;
+          context.turns.push({ id: turnId, items: [], toolItemIndexes: new Map() });
+          context.session = makeSessionSnapshot(context);
+          startPrompt(context, turnId, providerText, payload.images);
           return dispatchResult(context, turnId);
         }),
       );
@@ -3244,14 +3473,19 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         );
       });
 
-    const respondUnsupported = (threadId: ThreadId, method: string) =>
-      Effect.fail(
-        new ProviderAdapterRequestError({
-          provider: PROVIDER,
-          method,
-          detail: `Pi does not expose Synara approval/user-input requests for thread ${threadId}.`,
-        }),
-      );
+    const respondToRequest: PiAdapterShape["respondToRequest"] = (threadId, requestId, decision) =>
+      Effect.gen(function* () {
+        const context = yield* requireSession(threadId);
+        const pending = context.pendingApprovals.get(requestId);
+        if (!pending) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "request/respond",
+            detail: `Unknown pending Pi approval request: ${requestId}`,
+          });
+        }
+        pending.resolve(decision);
+      });
 
     const respondToUserInput: PiAdapterShape["respondToUserInput"] = (
       threadId,
@@ -3569,7 +3803,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       sendTurn,
       steerTurn,
       interruptTurn,
-      respondToRequest: (threadId) => respondUnsupported(threadId, "request/respond"),
+      respondToRequest,
       respondToUserInput,
       stopSession,
       listSessions,
