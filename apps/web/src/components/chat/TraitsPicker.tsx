@@ -10,7 +10,7 @@ import {
   type ProviderModelDescriptor,
   type ThreadId,
 } from "@synara/contracts";
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDownIcon, FastModeIcon, FastModeOutlineIcon, SettingsIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
@@ -380,7 +380,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   return (
     <>
       {extraSelects.map((extraSelect, index) => (
-        <span key={extraSelect.id} className="contents">
+        <Fragment key={extraSelect.id}>
           {index > 0 ? <MenuDivider /> : null}
           <TraitRadioSection
             label={extraSelect.label}
@@ -389,7 +389,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
             onValueChange={(value) => commitTrait({ [extraSelect.id]: value })}
             onSelectionComplete={onSelectionComplete}
           />
-        </span>
+        </Fragment>
       ))}
       {thinkingEnabled !== null ? (
         <>
