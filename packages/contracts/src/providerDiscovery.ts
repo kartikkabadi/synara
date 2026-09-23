@@ -277,6 +277,8 @@ export type ProviderContextWindowDescriptor = typeof ProviderContextWindowDescri
 // effort/context/fast controls separate from the provider's opaque model UID.
 export const ProviderModelVariantDescriptor = Schema.Struct({
   model: TrimmedNonEmptyString,
+  leadModel: Schema.optional(TrimmedNonEmptyString),
+  sidekick: Schema.optional(TrimmedNonEmptyString),
   reasoningEffort: Schema.optional(TrimmedNonEmptyString),
   contextWindow: Schema.optional(TrimmedNonEmptyString),
   fastMode: Schema.optional(Schema.Boolean),

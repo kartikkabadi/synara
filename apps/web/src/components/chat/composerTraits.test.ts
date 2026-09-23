@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   getComposerTraitSelection,
+  hasVisibleComposerTraitControls,
   planComposerEffortChange,
   resolveComposerEffortLadderIndex,
 } from "./composerTraits";
@@ -94,5 +95,78 @@ describe("resolveComposerEffortLadderIndex", () => {
     expect(resolveComposerEffortLadderIndex(selection)).toBe(
       selection.effortLevels.findIndex((level) => level.value === "ultrathink"),
     );
+  });
+});
+
+describe("getComposerTraitSelection Fusion controls", () => {
+  it("keeps reasoning primary and exposes lead and sidekick selects", () => {
+    const runtimeModel = {
+      slug: "fusion",
+      name: "Fusion",
+      optionDescriptors: [
+        {
+          id: "reasoningEffort",
+          label: "Reasoning",
+          type: "select" as const,
+          options: [
+            { id: "medium", label: "Medium", isDefault: true as const },
+            { id: "high", label: "High" },
+          ],
+        },
+        {
+          id: "leadModel",
+          label: "Lead model",
+          type: "select" as const,
+          options: [
+            { id: "claude-fable-5-1", label: "Claude Fable 5.1", isDefault: true as const },
+            { id: "gpt-6-sol", label: "GPT-6 Sol" },
+          ],
+        },
+        {
+          id: "sidekick",
+          label: "Sidekick",
+          type: "select" as const,
+          options: [
+            { id: "swe-2-medium", label: "SWE-2 Medium", isDefault: true as const },
+            { id: "glm-5-2", label: "GLM-5.2 High" },
+          ],
+        },
+        { id: "fastMode", label: "Fast Mode", type: "boolean" as const },
+      ],
+      reasoningEffortLevels: [],
+      supportsFastMode: true,
+      supportsThinkingToggle: false,
+      promptInjectedEffortLevels: [],
+      contextWindowOptions: [],
+    };
+    const selection = getComposerTraitSelection(
+      "devin",
+      "fusion",
+      "",
+      { sidekick: "glm-5-2" },
+      runtimeModel,
+    );
+    expect(selection.effortLevels.map((level) => level.value)).toEqual(["medium", "high"]);
+    expect(selection.extraSelects).toEqual([
+      {
+        id: "leadModel",
+        label: "Lead model",
+        value: "claude-fable-5-1",
+        options: [
+          { value: "claude-fable-5-1", label: "Claude Fable 5.1", isDefault: true },
+          { value: "gpt-6-sol", label: "GPT-6 Sol" },
+        ],
+      },
+      {
+        id: "sidekick",
+        label: "Sidekick",
+        value: "glm-5-2",
+        options: [
+          { value: "swe-2-medium", label: "SWE-2 Medium", isDefault: true },
+          { value: "glm-5-2", label: "GLM-5.2 High" },
+        ],
+      },
+    ]);
+    expect(hasVisibleComposerTraitControls(selection)).toBe(true);
   });
 });

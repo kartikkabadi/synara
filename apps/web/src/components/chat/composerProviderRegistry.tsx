@@ -21,6 +21,7 @@ import {
   normalizeOpenCodeModelOptions,
   normalizePiModelOptions,
   resolveDevinModelVariant,
+  getProviderOptionDescriptors,
   resolveLabeledOptionValue,
   trimOrNull,
 } from "@synara/shared/model";
@@ -163,11 +164,43 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
         caps.supportsThinkingToggle && providerOptions?.thinking !== undefined
           ? providerOptions.thinking
           : undefined;
+      const optionDescriptors = getProviderOptionDescriptors({
+        provider,
+        caps,
+      });
+      const validSelectValue = (id: string, value: string | undefined): string | undefined => {
+        const descriptor = optionDescriptors.find((candidate) => candidate.id === id);
+        if (descriptor?.type !== "select") return undefined;
+        return descriptor?.options.some((option) => option.id === value) ? value : undefined;
+      };
+      const defaultSelectValue = (id: string): string | undefined => {
+        const descriptor = optionDescriptors.find((candidate) => candidate.id === id);
+        if (descriptor?.type !== "select") return undefined;
+        return (
+          descriptor?.options.find((option) => option.isDefault)?.id ?? descriptor?.currentValue
+        );
+      };
+      const leadModel = (() => {
+        const value = validSelectValue(
+          "leadModel",
+          trimOrNull(providerOptions?.leadModel) ?? undefined,
+        );
+        return value && value !== defaultSelectValue("leadModel") ? value : undefined;
+      })();
+      const sidekick = (() => {
+        const value = validSelectValue(
+          "sidekick",
+          trimOrNull(providerOptions?.sidekick) ?? undefined,
+        );
+        return value && value !== defaultSelectValue("sidekick") ? value : undefined;
+      })();
       const modelVariant = resolveDevinModelVariant({
         model,
         runtimeModel,
         modelVariant: providerOptions?.modelVariant,
         reasoningEffort: rawEffort && hasEffortLevel(caps, rawEffort) ? rawEffort : undefined,
+        leadModel,
+        sidekick,
         fastMode: caps.supportsFastMode ? providerOptions?.fastMode : undefined,
         thinking: requestedThinking,
         contextWindow:
@@ -180,11 +213,15 @@ export function getComposerProviderState(input: ComposerProviderStateInput): Com
         ...(fastModeEnabled ? { fastMode: true } : {}),
         ...(requestedThinking !== undefined ? { thinking: requestedThinking } : {}),
         ...(contextWindow ? { contextWindow } : {}),
+        ...(leadModel ? { leadModel } : {}),
+        ...(sidekick ? { sidekick } : {}),
         ...(modelVariant &&
         (Boolean(reasoningEffort) ||
           fastModeEnabled ||
           requestedThinking !== undefined ||
           Boolean(contextWindow) ||
+          Boolean(leadModel) ||
+          Boolean(sidekick) ||
           Boolean(providerOptions?.modelVariant))
           ? { modelVariant }
           : {}),

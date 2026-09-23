@@ -149,6 +149,9 @@ export type DroidModelOptions = typeof DroidModelOptions.Type;
 
 export const DevinModelOptions = Schema.Struct({
   reasoningEffort: Schema.optional(TrimmedNonEmptyString),
+  // Fusion pairs a lead model with a sidekick; both select the concrete variant.
+  leadModel: Schema.optional(TrimmedNonEmptyString),
+  sidekick: Schema.optional(TrimmedNonEmptyString),
   fastMode: Schema.optional(Schema.Boolean),
   thinking: Schema.optional(Schema.Boolean),
   contextWindow: Schema.optional(TrimmedNonEmptyString),

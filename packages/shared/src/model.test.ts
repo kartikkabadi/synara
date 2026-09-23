@@ -128,6 +128,71 @@ describe("resolveDevinModelVariant", () => {
       }),
     ).toBeUndefined();
   });
+
+  it("resolves Fusion variants from explicit and descriptor-default lead and sidekick", () => {
+    const runtimeModel = {
+      slug: "fusion",
+      name: "Fusion",
+      defaultReasoningEffort: "high",
+      optionDescriptors: [
+        {
+          id: "leadModel",
+          label: "Lead model",
+          type: "select" as const,
+          options: [
+            { id: "claude-fable-5-1", label: "Claude Fable 5.1", isDefault: true as const },
+            { id: "gpt-6-sol", label: "GPT-6 Sol" },
+          ],
+        },
+        {
+          id: "sidekick",
+          label: "Sidekick",
+          type: "select" as const,
+          options: [
+            { id: "swe-2-medium", label: "SWE-2 Medium", isDefault: true as const },
+            { id: "glm-5-2", label: "GLM-5.2 High" },
+          ],
+        },
+      ],
+      modelVariants: [
+        {
+          model: "fusion-claude-fable-5-1-high-sidekick-swe-2-medium",
+          leadModel: "claude-fable-5-1",
+          sidekick: "swe-2-medium",
+          reasoningEffort: "high",
+          fastMode: false,
+        },
+        {
+          model: "fusion-gpt-6-sol-high-sidekick-glm-5-2",
+          leadModel: "gpt-6-sol",
+          sidekick: "glm-5-2",
+          reasoningEffort: "high",
+          fastMode: false,
+        },
+      ],
+    };
+    expect(
+      resolveDevinModelVariant({
+        runtimeModel,
+        reasoningEffort: "high",
+        leadModel: "gpt-6-sol",
+        sidekick: "glm-5-2",
+        fastMode: false,
+      }),
+    ).toBe("fusion-gpt-6-sol-high-sidekick-glm-5-2");
+    expect(
+      resolveDevinModelVariant({ runtimeModel, reasoningEffort: "high", fastMode: false }),
+    ).toBe("fusion-claude-fable-5-1-high-sidekick-swe-2-medium");
+    expect(
+      resolveDevinModelVariant({
+        runtimeModel,
+        reasoningEffort: "high",
+        leadModel: "gpt-6-sol",
+        sidekick: "swe-2-medium",
+        fastMode: false,
+      }),
+    ).toBeUndefined();
+  });
 });
 
 describe("normalizeModelSlug", () => {

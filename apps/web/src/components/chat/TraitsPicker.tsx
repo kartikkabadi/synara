@@ -317,12 +317,13 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     contextWindow,
     defaultContextWindow,
     contextWindowDescriptor,
+    extraSelects,
     ultrathinkPromptControlled,
     fastModeDescriptor,
   } = selection;
   const effortLevels = excludeEffort ? [] : selection.effortLevels;
   const hasVisibleControls = hasVisibleComposerTraitControls(
-    { caps, effortLevels, thinkingEnabled, contextWindowOptions, fastModeDescriptor },
+    { caps, effortLevels, thinkingEnabled, contextWindowOptions, fastModeDescriptor, extraSelects },
     { includeFastMode },
   );
   const supportsFastModeControl = supportsComposerFastModeControl({ caps, fastModeDescriptor });
@@ -342,6 +343,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   const hasPriorEffortSection = thinkingEnabled !== null || contextWindowOptions.length > 1;
   const hasPriorFastModeSection =
     thinkingEnabled !== null || effortLevels.length > 0 || contextWindowOptions.length > 1;
+  const hasPriorExtraSelectSection = extraSelects.length > 0;
 
   const commitTraitOptions = useComposerTraitCommit({ threadId, provider, model, modelOptions });
   // Commit a trait change and close the menu. Every section funnels here; the
@@ -377,21 +379,36 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
 
   return (
     <>
+      {extraSelects.map((extraSelect, index) => (
+        <span key={extraSelect.id} className="contents">
+          {index > 0 ? <MenuDivider /> : null}
+          <TraitRadioSection
+            label={extraSelect.label}
+            value={extraSelect.value}
+            options={extraSelect.options}
+            onValueChange={(value) => commitTrait({ [extraSelect.id]: value })}
+            onSelectionComplete={onSelectionComplete}
+          />
+        </span>
+      ))}
       {thinkingEnabled !== null ? (
-        <TraitRadioSection
-          label="Thinking"
-          value={thinkingEnabled ? "on" : "off"}
-          options={[
-            { value: "on", label: "On (default)" },
-            { value: "off", label: "Off" },
-          ]}
-          onValueChange={(value) => commitTrait({ thinking: value === "on" })}
-          onSelectionComplete={onSelectionComplete}
-        />
+        <>
+          {hasPriorExtraSelectSection ? <MenuDivider /> : null}
+          <TraitRadioSection
+            label="Thinking"
+            value={thinkingEnabled ? "on" : "off"}
+            options={[
+              { value: "on", label: "On (default)" },
+              { value: "off", label: "Off" },
+            ]}
+            onValueChange={(value) => commitTrait({ thinking: value === "on" })}
+            onSelectionComplete={onSelectionComplete}
+          />
+        </>
       ) : null}
       {contextWindowOptions.length > 1 ? (
         <>
-          {hasPriorContextWindowSection ? <MenuDivider /> : null}
+          {hasPriorContextWindowSection || hasPriorExtraSelectSection ? <MenuDivider /> : null}
           <TraitRadioSection
             label={contextWindowDescriptor?.label ?? "Context"}
             value={contextWindow ?? defaultContextWindow ?? ""}
@@ -407,7 +424,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
       ) : null}
       {effortLevels.length > 0 ? (
         <>
-          {hasPriorEffortSection ? <MenuDivider /> : null}
+          {hasPriorEffortSection || hasPriorExtraSelectSection ? <MenuDivider /> : null}
           <TraitRadioSection
             label={provider === "opencode" ? "Variant" : "Effort"}
             labelTrailing={
@@ -442,7 +459,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
       ) : null}
       {includeFastMode && supportsFastModeControl && !showsFastModeEffortToggle ? (
         <>
-          {hasPriorFastModeSection ? <MenuDivider /> : null}
+          {hasPriorFastModeSection || hasPriorExtraSelectSection ? <MenuDivider /> : null}
           <TraitRadioSection
             label="Speed"
             value={fastModeEnabled ? "on" : "off"}
@@ -538,10 +555,16 @@ export const TraitsPicker = memo(function TraitsPicker({
     setMenuOpen(false);
     scheduleSelectionCommitted();
   }, [scheduleSelectionCommitted, setMenuOpen]);
-  const { caps, effortLevels, thinkingEnabled, contextWindowOptions, fastModeDescriptor } =
-    getComposerTraitSelection(provider, model, prompt, modelOptions, runtimeModel);
+  const {
+    caps,
+    effortLevels,
+    thinkingEnabled,
+    contextWindowOptions,
+    fastModeDescriptor,
+    extraSelects,
+  } = getComposerTraitSelection(provider, model, prompt, modelOptions, runtimeModel);
   const hasVisibleControls = hasVisibleComposerTraitControls(
-    { caps, effortLevels, thinkingEnabled, contextWindowOptions, fastModeDescriptor },
+    { caps, effortLevels, thinkingEnabled, contextWindowOptions, fastModeDescriptor, extraSelects },
     { includeFastMode },
   );
   const agentOptions = getAgentOptions(provider, runtimeAgents);

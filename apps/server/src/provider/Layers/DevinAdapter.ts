@@ -748,6 +748,62 @@ interface DevinModelVariantSeed {
   readonly maxContextTokens?: number;
 }
 
+export function parseDevinFusionVariant(variant: DevinModelVariantSeed): {
+  leadModel: string;
+  reasoningEffort: string;
+  fastMode: boolean;
+  sidekick: string;
+  leadLabel?: string;
+  sidekickLabel?: string;
+} | null {
+  const match =
+    /^fusion-(.+?)-(none|minimal|low|medium|high|xhigh|max)(-fast)?-sidekick-(.+?)(-priority)?$/iu.exec(
+      variant.model.trim().toLowerCase(),
+    );
+  if (!match) return null;
+  const [, leadModel, reasoningEffort, fastMarker, sidekick] = match;
+  if (!leadModel || !reasoningEffort || !sidekick) return null;
+  const labelMatch = /^Fusion \((.+) \+ (.+)\)$/u.exec(variant.label?.trim() ?? "");
+  const stripLeadLabelSuffixes = (value: string): string => {
+    let result = value.trim();
+    const suffixes = [
+      / Fast$/u,
+      / Thinking$/u,
+      / (?:Low|Medium|High|Extra High|Max|Minimal|None)$/u,
+    ];
+    let stripped = true;
+    while (stripped) {
+      stripped = false;
+      for (const suffix of suffixes) {
+        const next = result.replace(suffix, "");
+        if (next !== result) {
+          result = next.trim();
+          stripped = true;
+          break;
+        }
+      }
+    }
+    return result;
+  };
+  const labels =
+    labelMatch?.[1] && labelMatch[2]
+      ? {
+          leadLabel: stripLeadLabelSuffixes(labelMatch[1]),
+          sidekickLabel: labelMatch[2].replace(/ Fast$/u, "").trim(),
+        }
+      : {
+          leadLabel: humanizeModelSlug(leadModel),
+          sidekickLabel: humanizeModelSlug(sidekick),
+        };
+  return {
+    leadModel,
+    reasoningEffort,
+    fastMode: Boolean(fastMarker),
+    sidekick,
+    ...labels,
+  };
+}
+
 function readDevinModelString(
   model: Record<string, unknown>,
   keys: ReadonlyArray<string>,
@@ -921,6 +977,8 @@ function formatDevinContextWindow(value: number | undefined, model: string): str
 }
 
 function inferDevinReasoningEffort(variant: DevinModelVariantSeed): string | undefined {
+  const fusion = parseDevinFusionVariant(variant);
+  if (fusion) return fusion.reasoningEffort;
   const haystack = `${variant.model} ${variant.label ?? ""}`.toLowerCase().replace(/[_.-]+/gu, " ");
   if (/\b(?:no thinking|none|off)\b/u.test(haystack)) return "none";
   if (/\bminimal\b/u.test(haystack)) return "minimal";
@@ -933,6 +991,8 @@ function inferDevinReasoningEffort(variant: DevinModelVariantSeed): string | und
 }
 
 function isDevinFastVariant(variant: DevinModelVariantSeed): boolean {
+  const fusion = parseDevinFusionVariant(variant);
+  if (fusion) return fusion.fastMode;
   const haystack = `${variant.model} ${variant.label ?? ""}`.toLowerCase();
   return (
     /\b(?:fast|lightning)\b/u.test(haystack) || /(?:^|[-_])priority(?:$|[-_])/u.test(variant.model)
@@ -1016,10 +1076,17 @@ export function mergeDevinModelDescriptors(
       );
       const hasThinkingToggle = hasThinkingVariant && hasPlainThinkingVariant;
       const modelVariants = rawVariants.map((variant) => {
+        const fusion = parseDevinFusionVariant(variant);
         const reasoningEffort = inferDevinReasoningEffort(variant);
         const contextWindow = formatDevinContextWindow(variant.maxContextTokens, variant.model);
         return {
           model: variant.model,
+          ...(fusion
+            ? {
+                leadModel: fusion.leadModel,
+                sidekick: fusion.sidekick,
+              }
+            : {}),
           ...(reasoningEffort ? { reasoningEffort } : {}),
           ...(contextWindowValues.length > 0 && contextWindow ? { contextWindow } : {}),
           ...(hasFastMode ? { fastMode: isDevinFastVariant(variant) } : {}),
@@ -1034,7 +1101,7 @@ export function mergeDevinModelDescriptors(
             formatDevinContextWindow(variant.maxContextTokens, variant.model) ===
               defaultContextWindow),
       );
-      const defaultReasoningEffort =
+      const legacyDefaultReasoningEffort =
         inferDevinReasoningEffort(defaultVariant ?? rawVariants[0] ?? { model: "" }) ??
         effortValues[0];
       const contextWindowOptions = contextWindowValues.map((value) =>
@@ -1042,6 +1109,90 @@ export function mergeDevinModelDescriptors(
           ? { value, label: value.toUpperCase(), isDefault: true as const }
           : { value, label: value.toUpperCase() },
       );
+      const fusionVariants = rawVariants
+        .map((variant) => ({ variant, parsed: parseDevinFusionVariant(variant) }))
+        .filter(
+          (
+            entry,
+          ): entry is {
+            variant: DevinModelVariantSeed;
+            parsed: NonNullable<ReturnType<typeof parseDevinFusionVariant>>;
+          } => entry.parsed !== null,
+        );
+      const isFusionFamily = fusionVariants.length > 0;
+      const defaultReasoningEffort =
+        isFusionFamily && effortValues.includes("high") ? "high" : legacyDefaultReasoningEffort;
+      const fusionLeadOptions = uniqueStrings(
+        fusionVariants.map(({ parsed }) => parsed.leadModel),
+      ).map((id) => {
+        const parsed = fusionVariants.find((entry) => entry.parsed.leadModel === id)?.parsed;
+        return {
+          id,
+          label: parsed?.leadLabel ?? humanizeModelSlug(id),
+          ...(id === fusionVariants[0]?.parsed.leadModel ? { isDefault: true as const } : {}),
+        };
+      });
+      const fusionSidekickOptions = uniqueStrings(
+        fusionVariants.map(({ parsed }) => parsed.sidekick),
+      ).map((id) => {
+        const parsed = fusionVariants.find((entry) => entry.parsed.sidekick === id)?.parsed;
+        return {
+          id,
+          label: parsed?.sidekickLabel ?? humanizeModelSlug(id),
+          ...(id === fusionVariants[0]?.parsed.sidekick ? { isDefault: true as const } : {}),
+        };
+      });
+      const optionDescriptors = isFusionFamily
+        ? [
+            ...(effortValues.length > 0
+              ? [
+                  {
+                    id: "reasoningEffort",
+                    label: "Reasoning",
+                    type: "select" as const,
+                    options: effortValues.map((value) => ({
+                      id: value,
+                      label: DEVIN_EFFORT_LABELS[value] ?? humanizeModelSlug(value),
+                      ...(value === defaultReasoningEffort ? { isDefault: true as const } : {}),
+                    })),
+                    ...(defaultReasoningEffort ? { currentValue: defaultReasoningEffort } : {}),
+                  },
+                ]
+              : []),
+            {
+              id: "leadModel",
+              label: "Lead model",
+              type: "select" as const,
+              options: fusionLeadOptions,
+              currentValue: fusionLeadOptions[0]?.id,
+            },
+            {
+              id: "sidekick",
+              label: "Sidekick",
+              type: "select" as const,
+              options: fusionSidekickOptions,
+              currentValue: fusionSidekickOptions[0]?.id,
+            },
+            ...(hasFastMode
+              ? [{ id: "fastMode", label: "Fast Mode", type: "boolean" as const }]
+              : []),
+            ...(contextWindowOptions.length > 1
+              ? [
+                  {
+                    id: "contextWindow",
+                    label: "Context Window",
+                    type: "select" as const,
+                    options: contextWindowOptions.map((option) => ({
+                      id: option.value,
+                      label: option.label,
+                      ...(option.isDefault ? { isDefault: true as const } : {}),
+                    })),
+                    ...(defaultContextWindow ? { currentValue: defaultContextWindow } : {}),
+                  },
+                ]
+              : []),
+          ]
+        : undefined;
       models.push({
         slug,
         name,
@@ -1063,6 +1214,7 @@ export function mergeDevinModelDescriptors(
               ...(defaultContextWindow ? { defaultContextWindow } : {}),
             }
           : {}),
+        ...(optionDescriptors ? { optionDescriptors } : {}),
         ...(modelVariants.length > 0 ? { modelVariants } : {}),
       });
     }
@@ -1175,12 +1327,16 @@ export function resolveDevinStartModel<E, R>(input: {
     trimOrNull(options?.reasoningEffort) !== null ||
     options?.fastMode !== undefined ||
     options?.thinking !== undefined ||
-    trimOrNull(options?.contextWindow) !== null;
+    trimOrNull(options?.contextWindow) !== null ||
+    trimOrNull(options?.leadModel) !== null ||
+    trimOrNull(options?.sidekick) !== null;
   const resolveVariant = (runtimeModel?: ProviderModelDescriptor) =>
     resolveDevinModelVariant({
       model: modelSelection?.model,
       modelVariant: options?.modelVariant,
       reasoningEffort: options?.reasoningEffort,
+      leadModel: options?.leadModel,
+      sidekick: options?.sidekick,
       fastMode: options?.fastMode,
       thinking: options?.thinking,
       contextWindow: options?.contextWindow,
