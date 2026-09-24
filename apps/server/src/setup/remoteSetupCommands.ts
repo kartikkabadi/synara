@@ -398,7 +398,7 @@ export const runRemoteSetup = (
 
     const mode = yield* resolveMode({
       requested: Option.getOrUndefined(flags.access),
-      tailscaleReady: tailscale.running && Boolean(tailscale.dnsName),
+      tailscaleReady: tailscale.running && tailscale.httpsCerts,
       interactive,
     });
 
@@ -412,6 +412,12 @@ export const runRemoteSetup = (
         return yield* new RemoteSetupError({
           message:
             "Tailscale is installed but not connected. Run `sudo tailscale up`, log in, then re-run `synara setup`.",
+        });
+      }
+      if (!tailscale.httpsCerts) {
+        return yield* new RemoteSetupError({
+          message:
+            "Tailscale is connected but HTTPS certificates aren't enabled for this tailnet (MagicDNS/CertDomains). Enable HTTPS certificates in the Tailscale admin console, or pick another access mode.",
         });
       }
     }
@@ -473,6 +479,8 @@ export const runRemoteSetup = (
         envFilePath,
         executablePath,
         entrypointPath: entrypoint!,
+        workingDirectory: config.baseDir,
+        logFilePath: path.join(derivedPaths.logsDir, "server.log"),
       });
       const linger = yield* enableUserLinger();
       serviceSummary = `systemd --user unit ${installed.unitPath}${linger.enabled ? "; linger enabled (survives logout)" : ""}`;
@@ -544,16 +552,18 @@ export const runServerPair = (
 ): Effect.Effect<void, RemoteSetupError, FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function* () {
     const baseDir = resolveExternalMcpBaseDir(Option.getOrUndefined(parent.synaraHome));
+    const running = yield* detectRunningInstance(baseDir);
+    if (running.running) {
+      return yield* new RemoteSetupError({
+        message: `A Synara server is already running for ${baseDir}${running.origin ? ` at ${running.origin}` : ""}. Stop it first — a running server holds the database lock, so a pairing credential can't be minted.`,
+      });
+    }
     let baseUrl: string | undefined = Option.getOrUndefined(flags.url);
     if (!baseUrl && Option.isSome(parent.publicUrl)) {
       baseUrl = parent.publicUrl.value.toString();
     }
     if (!baseUrl) {
       baseUrl = process.env.SYNARA_PUBLIC_URL;
-    }
-    if (!baseUrl) {
-      const running = yield* detectRunningInstance(baseDir);
-      if (running.origin) baseUrl = running.origin;
     }
     if (!baseUrl) {
       const port = Option.isSome(parent.port) ? parent.port.value : DEFAULT_PORT;

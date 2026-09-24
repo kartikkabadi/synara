@@ -107,6 +107,23 @@ describe("renderSystemdUserService", () => {
     expect(unit).toContain("[Install]");
     expect(unit).not.toContain("tok");
   });
+
+  it("self-heals without letting a crashed child take down the unit", () => {
+    const unit = renderSystemdUserService({
+      serviceName: "synara",
+      envFilePath: "/e/synara.env",
+      executablePath: "/n",
+      entrypointPath: "/s/dist/index.mjs",
+      workingDirectory: "/d",
+      logFilePath: "/d/logs/server.log",
+    });
+    expect(unit).toContain("Restart=always");
+    expect(unit).toContain("OOMPolicy=continue");
+    expect(unit).toContain("StartLimitIntervalSec=300");
+    expect(unit).toContain("StartLimitBurst=5");
+    expect(unit).toContain("WorkingDirectory=/d");
+    expect(unit).toContain("StandardOutput=append:/d/logs/server.log");
+  });
 });
 
 describe("parseTailscaleStatus", () => {
@@ -114,13 +131,46 @@ describe("parseTailscaleStatus", () => {
     const raw = JSON.stringify({
       BackendState: "Running",
       TailscaleIPs: ["100.64.1.5", "fd7a:115c:a1e0::1"],
-      Self: { DNSName: "vps.tail-abc.ts.net." },
+      CertDomains: ["vps.tail-abc.ts.net"],
+      Self: { DNSName: "vps.tail-abc.ts.net.", Online: true },
     });
     expect(parseTailscaleStatus(raw)).toEqual({
       dnsName: "vps.tail-abc.ts.net",
       ipv4: "100.64.1.5",
       backendState: "Running",
+      online: true,
+      httpsCerts: true,
     });
+  });
+
+  it("reports httpsCerts=false when the tailnet can't issue certs", () => {
+    const raw = JSON.stringify({
+      BackendState: "Running",
+      TailscaleIPs: ["100.64.1.5"],
+      Self: { DNSName: "vps.tail-abc.ts.net.", Online: true },
+    });
+    const parsed = parseTailscaleStatus(raw);
+    expect(parsed?.dnsName).toBe("vps.tail-abc.ts.net");
+    expect(parsed?.httpsCerts).toBe(false);
+  });
+
+  it("reports online=false for an offline node", () => {
+    const raw = JSON.stringify({
+      BackendState: "Running",
+      TailscaleIPs: ["100.64.1.5"],
+      CertDomains: ["vps.tail-abc.ts.net"],
+      Self: { DNSName: "vps.tail-abc.ts.net.", Online: false },
+    });
+    expect(parseTailscaleStatus(raw)?.online).toBe(false);
+  });
+
+  it("rejects non-CGNAT IPv4s", () => {
+    const raw = JSON.stringify({
+      BackendState: "Running",
+      TailscaleIPs: ["192.168.1.5", "100.100.9.9"],
+      Self: { DNSName: "x.ts.net." },
+    });
+    expect(parseTailscaleStatus(raw)?.ipv4).toBe("100.100.9.9");
   });
 
   it("handles a logged-out node", () => {
@@ -129,6 +179,7 @@ describe("parseTailscaleStatus", () => {
     expect(parsed?.backendState).toBe("NeedsLogin");
     expect(parsed?.dnsName).toBeUndefined();
     expect(parsed?.ipv4).toBeUndefined();
+    expect(parsed?.httpsCerts).toBe(false);
   });
 
   it("returns null on malformed output", () => {

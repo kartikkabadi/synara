@@ -84,6 +84,8 @@ export interface SystemdUserServiceOptions {
   /** Absolute path to the server entrypoint (`dist/index.mjs`). */
   readonly entrypointPath: string;
   readonly workingDirectory?: string | undefined;
+  /** Optional path to append stdout/stderr to, alongside the journal. */
+  readonly logFilePath?: string | undefined;
 }
 
 export function renderSystemdUserService(options: SystemdUserServiceOptions): string {
@@ -93,6 +95,9 @@ export function renderSystemdUserService(options: SystemdUserServiceOptions): st
     "Documentation=https://github.com/Emanuele-web04/synara",
     "After=network-online.target",
     "Wants=network-online.target",
+    // Bound restart storms from a config that always crashes on boot.
+    "StartLimitIntervalSec=300",
+    "StartLimitBurst=5",
     "",
     "[Service]",
     "Type=simple",
@@ -100,11 +105,19 @@ export function renderSystemdUserService(options: SystemdUserServiceOptions): st
     // unit's world-readable ExecStart/process list.
     `EnvironmentFile=${options.envFilePath}`,
     `ExecStart=${options.executablePath} ${options.entrypointPath}`,
-    "Restart=on-failure",
+    // A provider/agent child OOMing must not take down the control plane.
+    "OOMPolicy=continue",
+    "Restart=always",
     "RestartSec=5s",
   ];
   if (options.workingDirectory) {
     lines.push(`WorkingDirectory=${options.workingDirectory}`);
+  }
+  if (options.logFilePath) {
+    // Journald covers most hosts; append-file keeps logs reachable where the
+    // user journal isn't (minimal systemd, containers).
+    lines.push(`StandardOutput=append:${options.logFilePath}`);
+    lines.push(`StandardError=append:${options.logFilePath}`);
   }
   lines.push("", "[Install]", "WantedBy=default.target", "");
   return lines.join("\n");
@@ -114,6 +127,10 @@ export interface TailscaleStatusSummary {
   readonly dnsName: string | undefined;
   readonly ipv4: string | undefined;
   readonly backendState: string | undefined;
+  /** Self.Online — false means the node can't accept tailnet traffic right now. */
+  readonly online: boolean;
+  /** dnsName is present in CertDomains — required for `serve` to mint HTTPS certs. */
+  readonly httpsCerts: boolean;
 }
 
 /**
@@ -135,13 +152,30 @@ export function parseTailscaleStatus(rawJson: string): TailscaleStatusSummary | 
     typeof selfRecord?.DNSName === "string" ? selfRecord.DNSName.replace(/\.$/, "") : undefined;
   const ips = Array.isArray(record.TailscaleIPs) ? record.TailscaleIPs : undefined;
   const ipv4 = ips?.find(
-    (entry): entry is string => typeof entry === "string" && entry.includes("."),
+    (entry): entry is string => typeof entry === "string" && isTailscaleCgnatIpv4(entry),
   );
+  const certDomains = Array.isArray(record.CertDomains) ? record.CertDomains : [];
+  const dnsName = rawDnsName && rawDnsName.length > 0 ? rawDnsName : undefined;
   return {
-    dnsName: rawDnsName && rawDnsName.length > 0 ? rawDnsName : undefined,
+    dnsName,
     ipv4,
     backendState: typeof record.BackendState === "string" ? record.BackendState : undefined,
+    online: selfRecord?.Online !== false,
+    httpsCerts:
+      dnsName !== undefined &&
+      certDomains.some(
+        (domain) => typeof domain === "string" && domain.replace(/\.$/, "") === dnsName,
+      ),
   };
+}
+
+/** Tailscale nodes always carry an address inside 100.64.0.0/10. */
+export function isTailscaleCgnatIpv4(ip: string): boolean {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return false;
+  const first = Number(parts[0]);
+  const second = Number(parts[1]);
+  return first === 100 && second >= 64 && second <= 127;
 }
 
 /**

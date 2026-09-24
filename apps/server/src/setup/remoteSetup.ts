@@ -126,6 +126,10 @@ export interface TailscaleDetection {
   readonly dnsName: string | undefined;
   readonly ipv4: string | undefined;
   readonly backendState: string | undefined;
+  /** Self.Online — false means the node is registered but not reachable. */
+  readonly online: boolean;
+  /** The node's DNSName is present in CertDomains — required for serve HTTPS. */
+  readonly httpsCerts: boolean;
   readonly detail?: string | undefined;
 }
 
@@ -141,6 +145,8 @@ export const detectTailscale: Effect.Effect<
     dnsName: undefined,
     ipv4: undefined,
     backendState: undefined,
+    online: false,
+    httpsCerts: false,
   };
   if (!(yield* commandExists("tailscale"))) return notInstalled;
   const status = yield* runCommand("tailscale", ["status", "--json"], { timeoutMs: 5_000 });
@@ -158,15 +164,19 @@ export const detectTailscale: Effect.Effect<
       dnsName: undefined,
       ipv4: undefined,
       backendState: undefined,
+      online: false,
+      httpsCerts: false,
       detail: status.output,
     };
   }
   return {
     installed: true,
-    running: parsed.backendState === "Running",
+    running: parsed.backendState === "Running" && parsed.online,
     dnsName: parsed.dnsName,
     ipv4: parsed.ipv4,
     backendState: parsed.backendState,
+    online: parsed.online,
+    httpsCerts: parsed.httpsCerts,
   };
 });
 
@@ -301,7 +311,10 @@ export const writeEnvironmentFile = (
     try: () => {
       ensurePrivateDirectorySync(config.baseDir);
       const envFilePath = environmentFilePath(config.baseDir);
-      fs.writeFileSync(envFilePath, renderEnvironmentFile(config), { mode: 0o600 });
+      // Temp+rename so an interrupted write never leaves a truncated env file.
+      const tmpPath = `${envFilePath}.tmp-${process.pid}`;
+      fs.writeFileSync(tmpPath, renderEnvironmentFile(config), { mode: 0o600 });
+      fs.renameSync(tmpPath, envFilePath);
       ensurePrivateFileSync(envFilePath);
       return envFilePath;
     },
@@ -330,6 +343,8 @@ export const installSystemdUserService = (input: {
   readonly envFilePath: string;
   readonly executablePath: string;
   readonly entrypointPath: string;
+  readonly workingDirectory?: string | undefined;
+  readonly logFilePath?: string | undefined;
 }): Effect.Effect<
   ServiceInstallResult,
   RemoteSetupError,
@@ -343,13 +358,20 @@ export const installSystemdUserService = (input: {
       envFilePath: input.envFilePath,
       executablePath: input.executablePath,
       entrypointPath: input.entrypointPath,
+      workingDirectory: input.workingDirectory,
+      logFilePath: input.logFilePath,
     });
     yield* Effect.try({
       try: () => fs.mkdirSync(unitDir, { recursive: true }),
       catch: (cause) => new RemoteSetupError({ message: `Failed to create ${unitDir}.`, cause }),
     });
     yield* Effect.try({
-      try: () => fs.writeFileSync(unitPath, unitContents),
+      try: () => {
+        // Temp+rename so a crash mid-write can't leave a half unit systemd loads.
+        const tmpPath = `${unitPath}.tmp-${process.pid}`;
+        fs.writeFileSync(tmpPath, unitContents);
+        fs.renameSync(tmpPath, unitPath);
+      },
       catch: (cause) => new RemoteSetupError({ message: `Failed to write ${unitPath}.`, cause }),
     });
 

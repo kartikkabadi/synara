@@ -132,6 +132,13 @@ fi
 
 if [ -z "${SYNARA_TARBALL:-}" ]; then
   [ -n "${SYNARA_VERSION:-}" ] || die "could not resolve the latest Synara release — set SYNARA_VERSION explicitly (e.g. SYNARA_VERSION=0.9.1)"
+  # Preflight: fail early with a clear message when a pinned release doesn't exist.
+  if [ -n "${SYNARA_VERSION:-}" ] && command -v curl >/dev/null 2>&1; then
+    http_code="$(curl -sS -o /dev/null -w '%{http_code}' "https://github.com/${SYNARA_REPO}/releases/tag/v${SYNARA_VERSION}" 2>/dev/null || true)"
+    if [ "$http_code" = "404" ]; then
+      die "release v${SYNARA_VERSION} not found on ${SYNARA_REPO} — see https://github.com/${SYNARA_REPO}/releases"
+    fi
+  fi
 fi
 if [ -n "${SYNARA_TARBALL:-}" ]; then
   log "Installing Synara server from local tarball ${SYNARA_TARBALL}…"
@@ -170,6 +177,10 @@ exec "$NODE_BIN" "$APP_DIR/dist/index.mjs" "\$@"
 EOF
 chmod +x "$INSTALL_DIR/bin/synara"
 log "Installed $INSTALL_DIR/bin/synara"
+case ":${PATH}:" in
+  *":$INSTALL_DIR/bin:"*) ;;
+  *) log "Note: $INSTALL_DIR/bin is not on PATH — add it with: export PATH=\"$INSTALL_DIR/bin:\$PATH\"" ;;
+esac
 
 if [ "${SYNARA_NO_SETUP:-0}" = "1" ]; then
   log "Skipping setup (SYNARA_NO_SETUP=1). Run: $INSTALL_DIR/bin/synara setup"
