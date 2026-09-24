@@ -73,6 +73,16 @@ import {
   embeddedMigrationRuntimeSourceDigest,
   verifyMigrationRuntimeIdentity,
 } from "./migrationBundleIdentity";
+import {
+  pairTtlFlag,
+  pairUrlFlag,
+  runRemoteSetup,
+  runServerPair,
+  setupAccessFlag,
+  setupServiceFlag,
+  setupYesFlag,
+} from "./setup/remoteSetupCommands";
+import { RemoteSetupError } from "./setup/remoteSetup";
 
 export class StartupError extends Data.TaggedError("StartupError")<{
   readonly message: string;
@@ -710,9 +720,53 @@ const serverStatusCommand = Command.make(
     }),
 ).pipe(Command.withDescription("Check whether a Synara server is reachable and ready."));
 
+const setupCommand = Command.make(
+  "setup",
+  {
+    access: setupAccessFlag,
+    service: setupServiceFlag,
+    yes: setupYesFlag,
+  },
+  (flags) =>
+    Effect.gen(function* () {
+      const parent = yield* baseServerCommand;
+      yield* runRemoteSetup(flags, parent).pipe(
+        Effect.mapError((cause) =>
+          cause instanceof RemoteSetupError
+            ? new StartupError({ message: cause.message, cause: cause.cause })
+            : cause,
+        ),
+      );
+    }),
+).pipe(
+  Command.withDescription(
+    "Interactive remote-access setup: configures Tailscale serve, an HTTPS proxy, or LAN mode; writes config and prints the pairing URL.",
+  ),
+);
+
+const serverPairCommand = Command.make(
+  "pair",
+  { url: pairUrlFlag, ttlMinutes: pairTtlFlag },
+  (flags) =>
+    Effect.gen(function* () {
+      const parent = yield* baseServerCommand;
+      yield* runServerPair(flags, parent).pipe(
+        Effect.mapError((cause) =>
+          cause instanceof RemoteSetupError
+            ? new StartupError({ message: cause.message, cause: cause.cause })
+            : cause,
+        ),
+      );
+    }),
+).pipe(
+  Command.withDescription(
+    "Mint a one-time owner pairing URL for remote access (requires the server to be stopped — it holds the database lock while running).",
+  ),
+);
+
 const serverToolsCommand = Command.make("server").pipe(
   Command.withDescription("Inspect and manage a running Synara server."),
-  Command.withSubcommands([serverStatusCommand]),
+  Command.withSubcommands([serverStatusCommand, serverPairCommand]),
 );
 
 const mcpCommand = Command.make("mcp").pipe(
@@ -722,7 +776,7 @@ const mcpCommand = Command.make("mcp").pipe(
 
 const serverCommand = baseServerCommand.pipe(
   Command.withHandler((input) => makeServerProgram(input)),
-  Command.withSubcommands([serverToolsCommand, mcpCommand]),
+  Command.withSubcommands([serverToolsCommand, mcpCommand, setupCommand]),
 );
 
 export const synaraCli = serverCommand;

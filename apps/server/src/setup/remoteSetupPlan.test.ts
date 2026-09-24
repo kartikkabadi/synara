@@ -1,0 +1,267 @@
+// FILE: remoteSetupPlan.test.ts
+// Purpose: Unit coverage for the pure `synara setup` plan builders — env-file
+//          and systemd-unit rendering, Tailscale status parsing, public-URL
+//          validation, and pairing URL construction.
+// Layer: Server remote-setup planner tests
+
+import { describe, expect, it } from "vitest";
+
+import {
+  buildPairingUrl,
+  buildSetupEnvironment,
+  detectPrimaryLanIpv4,
+  environmentFilePath,
+  generateRemoteAuthToken,
+  isPermissionFailure,
+  isUnknownFlagFailure,
+  isWildcardHost,
+  localProbeOrigin,
+  parseTailscaleServeStatus,
+  parseTailscaleStatus,
+  publicFacingOrigin,
+  renderEnvironmentAssignment,
+  renderEnvironmentFile,
+  renderManualStartInstructions,
+  renderSystemdUserService,
+  systemdUserUnitDirectory,
+  validatePublicOrigin,
+  type RemoteSetupConfig,
+} from "./remoteSetupPlan";
+
+const baseConfig = (overrides: Partial<RemoteSetupConfig> = {}): RemoteSetupConfig => ({
+  mode: "tailscale",
+  baseDir: "/home/u/.synara",
+  port: 3773,
+  host: "127.0.0.1",
+  publicUrl: "https://vps.example.ts.net",
+  authToken: "tok_123",
+  allowInsecureRemote: false,
+  ...overrides,
+});
+
+describe("renderEnvironmentAssignment", () => {
+  it("leaves shell-safe values unquoted", () => {
+    expect(renderEnvironmentAssignment("SYNARA_HOST", "127.0.0.1")).toBe("SYNARA_HOST=127.0.0.1");
+    expect(renderEnvironmentAssignment("SYNARA_PUBLIC_URL", "https://a.b.ts.net")).toBe(
+      "SYNARA_PUBLIC_URL=https://a.b.ts.net",
+    );
+  });
+
+  it("single-quotes values with spaces", () => {
+    expect(renderEnvironmentAssignment("X", "a b")).toBe("X='a b'");
+  });
+
+  it("escapes embedded single quotes POSIX-style", () => {
+    expect(renderEnvironmentAssignment("X", "it's")).toBe("X='it'\\''s'");
+  });
+});
+
+describe("buildSetupEnvironment / renderEnvironmentFile", () => {
+  it("emits all remote-mode entries", () => {
+    const env = buildSetupEnvironment(baseConfig());
+    expect(env).toContainEqual(["SYNARA_HOME", "/home/u/.synara"]);
+    expect(env).toContainEqual(["SYNARA_HOST", "127.0.0.1"]);
+    expect(env).toContainEqual(["SYNARA_PORT", "3773"]);
+    expect(env).toContainEqual(["SYNARA_AUTH_TOKEN", "tok_123"]);
+    expect(env).toContainEqual(["SYNARA_PUBLIC_URL", "https://vps.example.ts.net"]);
+    expect(env).toContainEqual(["SYNARA_NO_BROWSER", "1"]);
+    expect(env.some(([k]) => k === "SYNARA_ALLOW_INSECURE_REMOTE")).toBe(false);
+  });
+
+  it("omits public URL and adds allow-insecure for LAN mode", () => {
+    const env = buildSetupEnvironment(
+      baseConfig({
+        mode: "insecure-lan",
+        host: "0.0.0.0",
+        publicUrl: undefined,
+        allowInsecureRemote: true,
+      }),
+    );
+    expect(env.some(([k]) => k === "SYNARA_PUBLIC_URL")).toBe(false);
+    expect(env).toContainEqual(["SYNARA_ALLOW_INSECURE_REMOTE", "1"]);
+  });
+
+  it("never writes an empty auth token entry for loopback", () => {
+    const env = buildSetupEnvironment(
+      baseConfig({ mode: "loopback", publicUrl: undefined, authToken: "" }),
+    );
+    expect(env.some(([k]) => k === "SYNARA_AUTH_TOKEN")).toBe(false);
+    const rendered = renderEnvironmentFile(baseConfig({ authToken: "tok with space" }));
+    expect(rendered).toContain("SYNARA_AUTH_TOKEN='tok with space'");
+    expect(rendered.startsWith("# Synara remote setup")).toBe(true);
+  });
+});
+
+describe("renderSystemdUserService", () => {
+  it("keeps the token out of ExecStart and points at the env file", () => {
+    const unit = renderSystemdUserService({
+      serviceName: "synara",
+      envFilePath: "/home/u/.synara/synara.env",
+      executablePath: "/opt/node/bin/node",
+      entrypointPath: "/opt/synara/dist/index.mjs",
+    });
+    expect(unit).toContain("EnvironmentFile=/home/u/.synara/synara.env");
+    expect(unit).toContain("ExecStart=/opt/node/bin/node /opt/synara/dist/index.mjs");
+    expect(unit).toContain("WantedBy=default.target");
+    expect(unit).toContain("[Install]");
+    expect(unit).not.toContain("tok");
+  });
+});
+
+describe("parseTailscaleStatus", () => {
+  it("extracts DNS name, IPv4, and backend state", () => {
+    const raw = JSON.stringify({
+      BackendState: "Running",
+      TailscaleIPs: ["100.64.1.5", "fd7a:115c:a1e0::1"],
+      Self: { DNSName: "vps.tail-abc.ts.net." },
+    });
+    expect(parseTailscaleStatus(raw)).toEqual({
+      dnsName: "vps.tail-abc.ts.net",
+      ipv4: "100.64.1.5",
+      backendState: "Running",
+    });
+  });
+
+  it("handles a logged-out node", () => {
+    const raw = JSON.stringify({ BackendState: "NeedsLogin" });
+    const parsed = parseTailscaleStatus(raw);
+    expect(parsed?.backendState).toBe("NeedsLogin");
+    expect(parsed?.dnsName).toBeUndefined();
+    expect(parsed?.ipv4).toBeUndefined();
+  });
+
+  it("returns null on malformed output", () => {
+    expect(parseTailscaleStatus("not json")).toBeNull();
+    expect(parseTailscaleStatus("[]")).toBeNull();
+  });
+});
+
+describe("parseTailscaleServeStatus", () => {
+  it("detects serving via JSON Web block", () => {
+    expect(
+      parseTailscaleServeStatus(JSON.stringify({ Web: { "host:443": { Handlers: {} } } })).serving,
+    ).toBe(true);
+    expect(parseTailscaleServeStatus(JSON.stringify({ Web: {} })).serving).toBe(false);
+  });
+
+  it("detects serving via text output", () => {
+    expect(
+      parseTailscaleServeStatus(
+        "https://vps.tail.ts.net (tailnet only)\n|-- / proxy http://127.0.0.1:3773",
+      ).serving,
+    ).toBe(true);
+    expect(parseTailscaleServeStatus("").serving).toBe(false);
+  });
+});
+
+describe("failure classification", () => {
+  it("detects permission failures", () => {
+    expect(
+      isPermissionFailure({ ok: false, exitCode: 1, output: "Permission denied (os error 13)" }),
+    ).toBe(true);
+    expect(isPermissionFailure({ ok: true, exitCode: 0, output: "" })).toBe(false);
+    expect(isPermissionFailure({ ok: false, exitCode: 1, output: "invalid port" })).toBe(false);
+  });
+
+  it("detects unknown-flag failures only for the named flag", () => {
+    const failure = { ok: false, exitCode: 1, output: "flag provided but not defined: -yes" };
+    expect(isUnknownFlagFailure(failure, "--yes")).toBe(true);
+    expect(isUnknownFlagFailure(failure, "--bg")).toBe(false);
+  });
+});
+
+describe("buildPairingUrl", () => {
+  it("builds /pair#token=<credential> on the origin", () => {
+    expect(buildPairingUrl("https://vps.ts.net", "cred1")).toBe(
+      "https://vps.ts.net/pair#token=cred1",
+    );
+  });
+
+  it("strips existing path, query, and fragment", () => {
+    expect(buildPairingUrl("http://100.1.2.3:3773/x?token=abc#frag", "cred1")).toBe(
+      "http://100.1.2.3:3773/pair#token=cred1",
+    );
+  });
+});
+
+describe("origin helpers", () => {
+  it("rewrites wildcard bind hosts to loopback for probes", () => {
+    expect(localProbeOrigin({ host: "0.0.0.0", port: 3773 })).toBe("http://127.0.0.1:3773");
+    expect(localProbeOrigin({ host: "127.0.0.1", port: 3773 })).toBe("http://127.0.0.1:3773");
+    expect(localProbeOrigin({ host: "::1", port: 9 })).toBe("http://127.0.0.1:9");
+    expect(localProbeOrigin({ host: "fd7a::1", port: 9 })).toBe("http://[fd7a::1]:9");
+  });
+
+  it("prefers the public URL for the browser-facing origin", () => {
+    expect(publicFacingOrigin(baseConfig({ publicUrl: "https://vps.ts.net" }))).toBe(
+      "https://vps.ts.net",
+    );
+    expect(
+      publicFacingOrigin(baseConfig({ publicUrl: undefined, host: "0.0.0.0", port: 3773 })),
+    ).toBe("http://127.0.0.1:3773");
+  });
+});
+
+describe("validatePublicOrigin", () => {
+  it("accepts an https root origin", () => {
+    expect(validatePublicOrigin("https://synara.example.com")).toEqual({
+      ok: true,
+      origin: "https://synara.example.com",
+    });
+    expect(validatePublicOrigin("https://vps.tail-abc.ts.net/").ok).toBe(true);
+  });
+
+  it("rejects http, credentials, and non-root URLs", () => {
+    expect(validatePublicOrigin("http://example.com").ok).toBe(false);
+    expect(validatePublicOrigin("https://u:p@example.com").ok).toBe(false);
+    expect(validatePublicOrigin("https://example.com/app").ok).toBe(false);
+    expect(validatePublicOrigin("https://example.com?q=1").ok).toBe(false);
+    expect(validatePublicOrigin("not a url").ok).toBe(false);
+  });
+});
+
+describe("host helpers", () => {
+  it("detects wildcard bind hosts", () => {
+    expect(isWildcardHost("0.0.0.0")).toBe(true);
+    expect(isWildcardHost("::")).toBe(true);
+    expect(isWildcardHost("127.0.0.1")).toBe(false);
+  });
+
+  it("detects the primary non-internal IPv4", () => {
+    const interfaces = {
+      lo0: [{ family: "IPv4", address: "127.0.0.1", internal: true }] as never[],
+      en0: [
+        { family: "IPv6", address: "fe80::1", internal: false },
+        { family: "IPv4", address: "192.168.1.9", internal: false },
+      ] as never[],
+    };
+    expect(detectPrimaryLanIpv4(interfaces)).toBe("192.168.1.9");
+    expect(detectPrimaryLanIpv4({ lo0: interfaces.lo0 })).toBeUndefined();
+  });
+});
+
+describe("paths and manual instructions", () => {
+  it("places the env file and unit dir deterministically", () => {
+    expect(environmentFilePath("/home/u/.synara")).toBe("/home/u/.synara/synara.env");
+    expect(systemdUserUnitDirectory("/home/u")).toBe("/home/u/.config/systemd/user");
+    expect(systemdUserUnitDirectory("/home/u", "/xdg")).toBe("/xdg/systemd/user");
+  });
+
+  it("renders a two-line manual start that sources the env file", () => {
+    const lines = renderManualStartInstructions({
+      envFilePath: "/d/synara.env",
+      executablePath: "/opt/node/node",
+      entrypointPath: "/opt/synara/dist/index.mjs",
+    });
+    expect(lines[0]).toBe("set -a; . /d/synara.env; set +a");
+    expect(lines[1]).toBe("exec /opt/node/node /opt/synara/dist/index.mjs --no-browser");
+  });
+});
+
+describe("generateRemoteAuthToken", () => {
+  it("produces URL-safe tokens", () => {
+    const token = generateRemoteAuthToken();
+    expect(token).toMatch(/^[A-Za-z0-9_-]{40,}$/);
+    expect(generateRemoteAuthToken()).not.toBe(token);
+  });
+});
