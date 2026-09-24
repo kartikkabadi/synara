@@ -33,3 +33,19 @@ export async function dispatchThreadGoalPaused(threadId: ThreadId, paused: boole
     goalPaused: paused,
   });
 }
+
+export async function dispatchThreadGoalTokenBudget(
+  threadId: ThreadId,
+  budget: number | null,
+): Promise<void> {
+  const api = readNativeApi();
+  if (!api) {
+    throw new Error("Synara API is unavailable.");
+  }
+  await api.orchestration.dispatchCommand({
+    type: "thread.meta.update",
+    commandId: newCommandId(),
+    threadId,
+    goalTokenBudget: budget,
+  });
+}

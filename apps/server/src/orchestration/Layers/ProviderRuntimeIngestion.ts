@@ -1927,6 +1927,14 @@ const make = Effect.gen(function* () {
     ReadonlyArray<{ readonly sequence: number; readonly startedAt: string; readonly text: string }>
   >();
   const bufferedTextSpilledByMessageKey = new Set<string>();
+  // Latest cumulative processed-token snapshot per provider session, keyed by
+  // resolved thread. Read at turn-terminal events to charge the thread goal's
+  // token accounting durably (the decider stores the observation and diffs
+  // same-session counters so restarts never double-count).
+  const goalTokenObservationsByThreadId = new Map<
+    ThreadId,
+    { readonly sessionId: string; readonly totalProcessedTokens: number }
+  >();
 
   const processRuntimeEvent = (event: ProviderRuntimeEvent, runtimeSequence: number) =>
     Effect.gen(function* () {
@@ -2155,6 +2163,48 @@ const make = Effect.gen(function* () {
         return;
       }
       const thread = targetThreadResolution.thread;
+      if (event.type === "thread.token-usage.updated") {
+        const usageSessionProviderThreadId = normalizeNonEmptyString(
+          event.providerRefs?.providerThreadId,
+        );
+        const totalProcessedTokens = event.payload.usage.totalProcessedTokens;
+        if (
+          usageSessionProviderThreadId !== undefined &&
+          typeof totalProcessedTokens === "number" &&
+          Number.isFinite(totalProcessedTokens)
+        ) {
+          const observation = {
+            sessionId: `${usageSessionProviderThreadId}${event.lifecycleGeneration ? `:${event.lifecycleGeneration}` : ""}`,
+            totalProcessedTokens,
+          };
+          goalTokenObservationsByThreadId.set(thread.id, observation);
+          // Seed the baseline counter as soon as an active goal sees its first
+          // usage event. A goal's observation is null only before any accounting
+          // (fresh pursuit or after a reset), so the first event pins "tokens
+          // processed so far" as the zero mark; the terminal-turn dispatch then
+          // counts this turn's usage instead of dropping it.
+          if (
+            Boolean(thread.goal?.trim()) &&
+            thread.parentThreadId == null &&
+            (thread.goalTokensObserved ?? null) === null
+          ) {
+            yield* orchestrationEngine
+              .dispatch({
+                type: "thread.meta.update",
+                commandId: providerCommandId(event, "goal-tokens-baseline", thread.id),
+                threadId: thread.id,
+                goalTokensObserved: observation,
+              })
+              .pipe(
+                Effect.catch((dispatchError) =>
+                  Effect.logDebug("goal token baseline dispatch failed", {
+                    error: dispatchError,
+                  }),
+                ),
+              );
+          }
+        }
+      }
       if (isRowMakingProviderRuntimeEvent(event)) {
         for (const state of segmentStateByThreadId.get(thread.id)?.values() ?? []) {
           if (state.hasText) {
@@ -2373,27 +2423,122 @@ const make = Effect.gen(function* () {
               Boolean(activeThreadGoal(settledThread)?.trim()) &&
               settledThread.goalPausedAt == null
             ) {
+              // Charge the turn's token usage to the goal before deciding what
+              // follows it. The observation is persisted so accounting survives
+              // restarts; only same-session deltas accrue (see the decider).
+              const goalTokenObservation = goalTokenObservationsByThreadId.get(thread.id);
+              const accountedThread =
+                goalTokenObservation === undefined
+                  ? settledThread
+                  : yield* orchestrationEngine
+                      .dispatch({
+                        type: "thread.meta.update",
+                        commandId: providerCommandId(event, "goal-tokens-observed", thread.id),
+                        threadId: thread.id,
+                        goalTokensObserved: goalTokenObservation,
+                      })
+                      .pipe(
+                        Effect.andThen(orchestrationEngine.getReadModel()),
+                        Effect.map(
+                          (readModel) =>
+                            readModel.threads.find((candidate) => candidate.id === thread.id) ??
+                            settledThread,
+                        ),
+                      );
               if (event.type === "turn.completed" && runtimeTurnState(event) === "completed") {
+                if ((accountedThread.goalBudgetLimitedAt ?? null) !== null) {
+                  // The budget wrap-up turn just ended: pause the goal with the
+                  // budget reason instead of looping another continuation.
+                  yield* orchestrationEngine.dispatch({
+                    type: "thread.meta.update",
+                    commandId: providerCommandId(event, "goal-auto-pause", thread.id),
+                    threadId: thread.id,
+                    goalPaused: true,
+                    goalPausedReason: "budget",
+                  });
+                } else if (
+                  (accountedThread.goalTokenBudget ?? null) !== null &&
+                  (accountedThread.goalTokensUsed ?? 0) >=
+                    (accountedThread.goalTokenBudget ?? Number.POSITIVE_INFINITY)
+                ) {
+                  // Budget exhausted: grant one wrap-up turn, mirroring Codex's
+                  // budget_limited flow, then auto-pause with reason "budget".
+                  yield* orchestrationEngine.dispatch({
+                    type: "thread.meta.update",
+                    commandId: providerCommandId(event, "goal-budget-limited", thread.id),
+                    threadId: thread.id,
+                    goalBudgetLimited: true,
+                  });
+                  yield* orchestrationEngine.dispatch({
+                    type: "thread.goal.continue",
+                    commandId: providerCommandId(event, "goal-continue", thread.id),
+                    threadId: thread.id,
+                    goalStartedAt: accountedThread.goalStartedAt ?? null,
+                    trigger: "budget-limit",
+                    ...(eventTurnId !== undefined ? { sourceTurnId: eventTurnId } : {}),
+                    createdAt: now,
+                  });
+                } else {
+                  yield* orchestrationEngine.dispatch({
+                    type: "thread.goal.continue",
+                    commandId: providerCommandId(event, "goal-continue", thread.id),
+                    threadId: thread.id,
+                    goalStartedAt: accountedThread.goalStartedAt ?? null,
+                    trigger: "turn-completed",
+                    ...(eventTurnId !== undefined ? { sourceTurnId: eventTurnId } : {}),
+                    createdAt: now,
+                  });
+                }
+              } else if (event.type === "turn.completed" && runtimeTurnState(event) === "failed") {
+                // A provider-side failure is usually transient: retry the
+                // pursuit with a bounded backoff instead of stopping the
+                // goal outright. The reactor pauses it with reason "error"
+                // once the retries run out.
                 yield* orchestrationEngine.dispatch({
                   type: "thread.goal.continue",
                   commandId: providerCommandId(event, "goal-continue", thread.id),
                   threadId: thread.id,
-                  goalStartedAt: settledThread.goalStartedAt ?? null,
-                  trigger: "turn-completed",
+                  goalStartedAt: accountedThread.goalStartedAt ?? null,
+                  trigger: "turn-failed",
                   ...(eventTurnId !== undefined ? { sourceTurnId: eventTurnId } : {}),
                   createdAt: now,
                 });
               } else {
-                // A failed, aborted, cancelled, or interrupted turn must stop
+                // An aborted, cancelled, or interrupted turn must stop
                 // autonomous resurrection until the user explicitly resumes.
                 yield* orchestrationEngine.dispatch({
                   type: "thread.meta.update",
                   commandId: providerCommandId(event, "goal-auto-pause", thread.id),
                   threadId: thread.id,
                   goalPaused: true,
+                  goalPausedReason:
+                    event.type === "turn.completed" && runtimeTurnState(event) === "cancelled"
+                      ? "user"
+                      : "error",
                 });
               }
             }
+          }
+
+          // A session-level error ends the in-flight turn without a terminal
+          // turn event, so nothing else would ever move the goal again. This
+          // also fires when no turn was in flight: an idle error leaves the
+          // pursuit just as dead-ended without the retry.
+          if (
+            event.type === "session.state.changed" &&
+            event.payload.state === "error" &&
+            activeThreadGoal(thread)?.trim() &&
+            thread.goalPausedAt == null
+          ) {
+            yield* orchestrationEngine.dispatch({
+              type: "thread.goal.continue",
+              commandId: providerCommandId(event, "goal-failure-continue", thread.id),
+              threadId: thread.id,
+              goalStartedAt: thread.goalStartedAt ?? null,
+              trigger: "turn-failed",
+              ...(activeTurnId !== null ? { sourceTurnId: activeTurnId } : {}),
+              createdAt: now,
+            });
           }
         }
       }
@@ -2782,6 +2927,27 @@ const make = Effect.gen(function* () {
           yield* clearProviderDiffPlaceholder(thread.id, exitedTurnId);
         }
         yield* clearTurnStateForSession(thread.id);
+        // A crashed session emits no terminal turn event, so the goal would
+        // render "pursuing" forever while nothing can run — including a crash
+        // between turns with no turn in flight at all. Retry the pursuit like
+        // a failed turn (bounded): the continuation re-ensures the session,
+        // so a recoverable crash self-heals instead of silently abandoning
+        // the goal.
+        if (
+          event.payload.exitKind === "error" &&
+          activeThreadGoal(thread)?.trim() &&
+          thread.goalPausedAt == null
+        ) {
+          yield* orchestrationEngine.dispatch({
+            type: "thread.goal.continue",
+            commandId: providerCommandId(event, "goal-failure-continue", thread.id),
+            threadId: thread.id,
+            goalStartedAt: thread.goalStartedAt ?? null,
+            trigger: "turn-failed",
+            ...(exitedTurnId !== undefined ? { sourceTurnId: exitedTurnId } : {}),
+            createdAt: now,
+          });
+        }
       }
 
       if (event.type === "runtime.error") {
@@ -2827,29 +2993,21 @@ const make = Effect.gen(function* () {
             },
             createdAt: now,
           });
-          // The old turn was technically cancelled, so only the failed
-          // recovery can now pause its goal. Never pause a different turn.
-          if (
-            event.provider === "devin" &&
-            asObject(event.payload.detail)?.reason === "synara.devin.wedge-recovery" &&
-            eventTurnId !== undefined &&
-            thread.latestTurn?.turnId === eventTurnId
-          ) {
-            const failedThread = (yield* orchestrationEngine.getReadModel()).threads.find(
-              (candidate) => candidate.id === thread.id,
-            );
-            if (
-              failedThread &&
-              activeThreadGoal(failedThread)?.trim() &&
-              failedThread.goalPausedAt == null
-            ) {
-              yield* orchestrationEngine.dispatch({
-                type: "thread.meta.update",
-                commandId: providerCommandId(event, "goal-recovery-failed-pause", thread.id),
-                threadId: thread.id,
-                goalPaused: true,
-              });
-            }
+          // A provider runtime failure ends the in-flight turn without a
+          // terminal turn event; retry the pursuit (bounded) like a failed
+          // turn instead of leaving the goal stuck or silently dead. Signalled
+          // even with no turn in flight so an idle fault cannot stall the
+          // pursuit either.
+          if (activeThreadGoal(thread)?.trim() && thread.goalPausedAt == null) {
+            yield* orchestrationEngine.dispatch({
+              type: "thread.goal.continue",
+              commandId: providerCommandId(event, "goal-failure-continue", thread.id),
+              threadId: thread.id,
+              goalStartedAt: thread.goalStartedAt ?? null,
+              trigger: "turn-failed",
+              ...(erroredTurnId !== undefined ? { sourceTurnId: erroredTurnId } : {}),
+              createdAt: now,
+            });
           }
         }
       }

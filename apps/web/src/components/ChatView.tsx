@@ -5256,6 +5256,10 @@ export default function ChatView({
                   goal={activeThreadGoalText}
                   goalStartedAt={activeThread.goalStartedAt}
                   goalPausedAt={activeThread.goalPausedAt}
+                  goalPausedReason={activeThread.goalPausedReason}
+                  goalTokenBudget={activeThread.goalTokenBudget}
+                  goalTokensUsed={activeThread.goalTokensUsed}
+                  goalBudgetLimitedAt={activeThread.goalBudgetLimitedAt}
                   canPause={isServerThread}
                   onEdit={editThreadGoalInComposer}
                   onSetPaused={async (paused) => {

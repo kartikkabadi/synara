@@ -15,6 +15,8 @@ import {
   ThreadNotes,
   ThreadGoal,
   ThreadGoalAchievements,
+  ThreadGoalPauseReason,
+  ThreadGoalTokenObservation,
   ThreadPinnedMessages,
   ThreadHandoff,
   ProjectId,
@@ -86,6 +88,19 @@ export const ProjectionThread = Schema.Struct({
     Schema.withDecodingDefault(() => null),
   ),
   goalPausedAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  goalPausedReason: Schema.optional(Schema.NullOr(ThreadGoalPauseReason)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  goalTokenBudget: Schema.optional(Schema.NullOr(NonNegativeInt)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  goalTokensUsed: Schema.optional(NonNegativeInt).pipe(Schema.withDecodingDefault(() => 0)),
+  goalTokensObserved: Schema.optional(Schema.NullOr(ThreadGoalTokenObservation)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
+  goalBudgetLimitedAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
     Schema.withDecodingDefault(() => null),
   ),
   goalAchievements: Schema.optional(Schema.NullOr(ThreadGoalAchievements)).pipe(

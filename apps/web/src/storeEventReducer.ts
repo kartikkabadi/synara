@@ -989,6 +989,15 @@ function applyOrchestrationEvent(
               (event.payload.goalStartedAt ?? null) === (thread.goalStartedAt ?? null)) &&
             (event.payload.goalPausedAt === undefined ||
               (event.payload.goalPausedAt ?? null) === (thread.goalPausedAt ?? null)) &&
+            (event.payload.goalPausedReason === undefined ||
+              (event.payload.goalPausedReason ?? null) === (thread.goalPausedReason ?? null)) &&
+            (event.payload.goalTokenBudget === undefined ||
+              (event.payload.goalTokenBudget ?? null) === (thread.goalTokenBudget ?? null)) &&
+            (event.payload.goalTokensUsed === undefined ||
+              (event.payload.goalTokensUsed ?? null) === (thread.goalTokensUsed ?? null)) &&
+            (event.payload.goalBudgetLimitedAt === undefined ||
+              (event.payload.goalBudgetLimitedAt ?? null) ===
+                (thread.goalBudgetLimitedAt ?? null)) &&
             (event.payload.goalAchievements === undefined ||
               deepEqualJson(event.payload.goalAchievements, thread.goalAchievements ?? null)) &&
             nextUpdatedAt === thread.updatedAt
@@ -1043,6 +1052,18 @@ function applyOrchestrationEvent(
               : {}),
             ...(event.payload.goalPausedAt !== undefined
               ? { goalPausedAt: event.payload.goalPausedAt }
+              : {}),
+            ...(event.payload.goalPausedReason !== undefined
+              ? { goalPausedReason: event.payload.goalPausedReason }
+              : {}),
+            ...(event.payload.goalTokenBudget !== undefined
+              ? { goalTokenBudget: event.payload.goalTokenBudget }
+              : {}),
+            ...(event.payload.goalTokensUsed !== undefined
+              ? { goalTokensUsed: event.payload.goalTokensUsed }
+              : {}),
+            ...(event.payload.goalBudgetLimitedAt !== undefined
+              ? { goalBudgetLimitedAt: event.payload.goalBudgetLimitedAt }
               : {}),
             ...(event.payload.goalAchievements !== undefined
               ? {

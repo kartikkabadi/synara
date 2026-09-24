@@ -20,6 +20,7 @@ import {
   PendingClaudeCacheReview,
   ThreadPinnedMessages,
   ThreadGoalAchievements,
+  ThreadGoalTokenObservation,
   ProjectScript,
   ProjectId,
   ProjectKind,
@@ -117,6 +118,9 @@ const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
     ),
     lastKnownPr: Schema.NullOr(Schema.fromJsonString(OrchestrationThreadPullRequest)),
     pinnedMessages: Schema.NullOr(Schema.fromJsonString(ThreadPinnedMessages)),
+    goalTokensObserved: Schema.optional(
+      Schema.NullOr(Schema.fromJsonString(ThreadGoalTokenObservation)),
+    ).pipe(Schema.withDecodingDefault(() => null)),
     goalAchievements: Schema.optional(
       Schema.NullOr(Schema.fromJsonString(ThreadGoalAchievements)),
     ).pipe(Schema.withDecodingDefault(() => null)),
@@ -138,6 +142,9 @@ const ProjectionThreadShellDbRowSchema = Schema.Struct(ProjectionThreadShellFiel
       Schema.NullOr(Schema.fromJsonString(PendingClaudeCacheReview)),
     ),
     lastKnownPr: Schema.NullOr(Schema.fromJsonString(OrchestrationThreadPullRequest)),
+    goalTokensObserved: Schema.optional(
+      Schema.NullOr(Schema.fromJsonString(ThreadGoalTokenObservation)),
+    ).pipe(Schema.withDecodingDefault(() => null)),
     modelSelection: ModelSelectionJsonUnknown,
   }),
 );
@@ -712,6 +719,11 @@ function toProjectedThreadShellFromStoredSummary(input: {
     goal: threadRow.goal ?? "",
     goalStartedAt: threadRow.goalStartedAt ?? null,
     goalPausedAt: threadRow.goalPausedAt ?? null,
+    goalPausedReason: threadRow.goalPausedReason ?? null,
+    goalTokenBudget: threadRow.goalTokenBudget ?? null,
+    goalTokensUsed: threadRow.goalTokensUsed,
+    goalTokensObserved: threadRow.goalTokensObserved ?? null,
+    goalBudgetLimitedAt: threadRow.goalBudgetLimitedAt ?? null,
     session: input.session,
   };
 }
@@ -784,6 +796,17 @@ function toProjectedThread(input: {
     ...(threadRow.goal !== null ? { goal: threadRow.goal } : {}),
     ...(threadRow.goalStartedAt !== null ? { goalStartedAt: threadRow.goalStartedAt } : {}),
     ...(threadRow.goalPausedAt !== null ? { goalPausedAt: threadRow.goalPausedAt } : {}),
+    ...(threadRow.goalPausedReason !== null
+      ? { goalPausedReason: threadRow.goalPausedReason }
+      : {}),
+    ...(threadRow.goalTokenBudget !== null ? { goalTokenBudget: threadRow.goalTokenBudget } : {}),
+    goalTokensUsed: threadRow.goalTokensUsed,
+    ...(threadRow.goalTokensObserved !== null
+      ? { goalTokensObserved: threadRow.goalTokensObserved }
+      : {}),
+    ...(threadRow.goalBudgetLimitedAt !== null
+      ? { goalBudgetLimitedAt: threadRow.goalBudgetLimitedAt }
+      : {}),
     ...(threadRow.goalAchievements !== null
       ? { goalAchievements: threadRow.goalAchievements }
       : {}),
@@ -918,6 +941,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           goal,
           goal_started_at AS "goalStartedAt",
           goal_paused_at AS "goalPausedAt",
+          goal_paused_reason AS "goalPausedReason",
+          goal_token_budget AS "goalTokenBudget",
+          goal_tokens_used AS "goalTokensUsed",
+          goal_tokens_observed_json AS "goalTokensObserved",
+          goal_budget_limited_at AS "goalBudgetLimitedAt",
           goal_achievements_json AS "goalAchievements",
           parent_thread_id AS "parentThreadId",
           creation_source AS "creationSource",
@@ -992,6 +1020,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           goal,
           goal_started_at AS "goalStartedAt",
           goal_paused_at AS "goalPausedAt",
+          goal_paused_reason AS "goalPausedReason",
+          goal_token_budget AS "goalTokenBudget",
+          goal_tokens_used AS "goalTokensUsed",
+          goal_tokens_observed_json AS "goalTokensObserved",
+          goal_budget_limited_at AS "goalBudgetLimitedAt",
           latest_user_message_at AS "latestUserMessageAt",
           latest_human_message_at AS "latestHumanMessageAt",
           pending_approval_count AS "pendingApprovalCount",
@@ -1613,6 +1646,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           goal,
           goal_started_at AS "goalStartedAt",
           goal_paused_at AS "goalPausedAt",
+          goal_paused_reason AS "goalPausedReason",
+          goal_token_budget AS "goalTokenBudget",
+          goal_tokens_used AS "goalTokensUsed",
+          goal_tokens_observed_json AS "goalTokensObserved",
+          goal_budget_limited_at AS "goalBudgetLimitedAt",
           goal_achievements_json AS "goalAchievements",
           parent_thread_id AS "parentThreadId",
           creation_source AS "creationSource",
@@ -1674,6 +1712,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           goal,
           goal_started_at AS "goalStartedAt",
           goal_paused_at AS "goalPausedAt",
+          goal_paused_reason AS "goalPausedReason",
+          goal_token_budget AS "goalTokenBudget",
+          goal_tokens_used AS "goalTokensUsed",
+          goal_tokens_observed_json AS "goalTokensObserved",
+          goal_budget_limited_at AS "goalBudgetLimitedAt",
           goal_achievements_json AS "goalAchievements",
           parent_thread_id AS "parentThreadId",
           creation_source AS "creationSource",

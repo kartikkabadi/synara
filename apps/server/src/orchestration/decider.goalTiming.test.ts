@@ -89,7 +89,11 @@ async function decideGoalUpdate(
     commandId: string;
     goal?: string;
     goalPaused?: boolean;
+    goalPausedReason?: "user" | "blocked" | "error" | "budget";
     goalAchieved?: boolean;
+    goalTokenBudget?: number | null;
+    goalTokensObserved?: { sessionId: string; totalProcessedTokens: number } | null;
+    goalBudgetLimited?: boolean;
   },
 ) {
   const result = await Effect.runPromise(
@@ -100,7 +104,17 @@ async function decideGoalUpdate(
         threadId: THREAD_ID,
         ...(input.goal !== undefined ? { goal: input.goal } : {}),
         ...(input.goalPaused !== undefined ? { goalPaused: input.goalPaused } : {}),
+        ...(input.goalPausedReason !== undefined
+          ? { goalPausedReason: input.goalPausedReason }
+          : {}),
         ...(input.goalAchieved !== undefined ? { goalAchieved: input.goalAchieved } : {}),
+        ...(input.goalTokenBudget !== undefined ? { goalTokenBudget: input.goalTokenBudget } : {}),
+        ...(input.goalTokensObserved !== undefined
+          ? { goalTokensObserved: input.goalTokensObserved }
+          : {}),
+        ...(input.goalBudgetLimited !== undefined
+          ? { goalBudgetLimited: input.goalBudgetLimited }
+          : {}),
       },
       readModel,
     }),
@@ -281,6 +295,7 @@ describe("decider thread goal timing", () => {
       achievedAt: achieveEvent.occurredAt,
       elapsedMs: Date.parse(achieveEvent.occurredAt) - Date.parse(setEvent.occurredAt),
       turnId: null,
+      tokensUsed: 0,
     });
 
     readModel = await applyEvent(readModel, achieveEvent, 4);
@@ -397,6 +412,212 @@ describe("decider thread goal timing", () => {
     expect(achievements).toHaveLength(20);
     expect(achievements?.[0]?.goal).toBe("Objective 1");
     expect(achievements?.[19]?.goal).toBe("Objective 20");
+  });
+
+  it("stamps the pause reason and clears it on resume", async () => {
+    const now = new Date().toISOString();
+    let readModel = await createThreadReadModel(now);
+    readModel = await applyEvent(
+      readModel,
+      await decideGoalUpdate(readModel, { commandId: "cmd-goal-set", goal: "Objective" }),
+      3,
+    );
+
+    const defaultPause = await decideGoalUpdate(readModel, {
+      commandId: "cmd-goal-pause-default",
+      goalPaused: true,
+    });
+    expect(defaultPause.payload.goalPausedReason).toBe("user");
+    readModel = await applyEvent(readModel, defaultPause, 4);
+
+    const resume = await decideGoalUpdate(readModel, {
+      commandId: "cmd-goal-resume",
+      goalPaused: false,
+    });
+    expect(resume.payload.goalPausedReason).toBeNull();
+    readModel = await applyEvent(readModel, resume, 5);
+    expect(readModel.threads[0]?.goalPausedReason).toBeNull();
+
+    const blockedPause = await decideGoalUpdate(readModel, {
+      commandId: "cmd-goal-pause-blocked",
+      goalPaused: true,
+      goalPausedReason: "blocked",
+    });
+    expect(blockedPause.payload.goalPausedReason).toBe("blocked");
+    readModel = await applyEvent(readModel, blockedPause, 6);
+    expect(readModel.threads[0]?.goalPausedReason).toBe("blocked");
+  });
+
+  it("accrues same-session token deltas and ignores cross-session totals", async () => {
+    const now = new Date().toISOString();
+    let readModel = await createThreadReadModel(now);
+    readModel = await applyEvent(
+      readModel,
+      await decideGoalUpdate(readModel, { commandId: "cmd-goal-set", goal: "Objective" }),
+      3,
+    );
+
+    const first = await decideGoalUpdate(readModel, {
+      commandId: "cmd-obs-1",
+      goalTokensObserved: { sessionId: "session-1", totalProcessedTokens: 500 },
+    });
+    // The first observation for a session establishes the baseline only.
+    expect(first.payload.goalTokensObserved).toEqual({
+      sessionId: "session-1",
+      totalProcessedTokens: 500,
+    });
+    expect("goalTokensUsed" in first.payload).toBe(false);
+    readModel = await applyEvent(readModel, first, 4);
+
+    const second = await decideGoalUpdate(readModel, {
+      commandId: "cmd-obs-2",
+      goalTokensObserved: { sessionId: "session-1", totalProcessedTokens: 1250 },
+    });
+    expect(second.payload.goalTokensUsed).toBe(750);
+    readModel = await applyEvent(readModel, second, 5);
+    expect(readModel.threads[0]?.goalTokensUsed).toBe(750);
+
+    // A regression inside one session clamps at zero rather than refunding.
+    const regression = await decideGoalUpdate(readModel, {
+      commandId: "cmd-obs-3",
+      goalTokensObserved: { sessionId: "session-1", totalProcessedTokens: 900 },
+    });
+    expect("goalTokensUsed" in regression.payload).toBe(false);
+    readModel = await applyEvent(readModel, regression, 6);
+
+    // A new provider session reports a fresh cumulative counter: restart-proof.
+    const newSession = await decideGoalUpdate(readModel, {
+      commandId: "cmd-obs-4",
+      goalTokensObserved: { sessionId: "session-2", totalProcessedTokens: 100 },
+    });
+    expect("goalTokensUsed" in newSession.payload).toBe(false);
+    readModel = await applyEvent(readModel, newSession, 7);
+    expect(readModel.threads[0]?.goalTokensUsed).toBe(750);
+  });
+
+  it("tracks the token budget through set, raise, wrap-up grant, resume, and clear", async () => {
+    const now = new Date().toISOString();
+    let readModel = await createThreadReadModel(now);
+    const setEvent = await decideGoalUpdate(readModel, {
+      commandId: "cmd-goal-set",
+      goal: "Objective",
+      goalTokenBudget: 10_000,
+    });
+    expect(setEvent.payload.goalTokenBudget).toBe(10_000);
+    readModel = await applyEvent(readModel, setEvent, 3);
+
+    const limited = await decideGoalUpdate(readModel, {
+      commandId: "cmd-budget-limited",
+      goalBudgetLimited: true,
+    });
+    expect(limited.payload.goalBudgetLimitedAt).toBe(limited.occurredAt);
+    readModel = await applyEvent(readModel, limited, 4);
+
+    // The wrap-up grant stamps once.
+    const relimited = await decideGoalUpdate(readModel, {
+      commandId: "cmd-budget-limited-2",
+      goalBudgetLimited: true,
+    });
+    expect("goalBudgetLimitedAt" in relimited.payload).toBe(false);
+
+    // Raising the budget lifts a consumed wrap-up so pursuit can resume.
+    const raised = await decideGoalUpdate(readModel, {
+      commandId: "cmd-budget-raise",
+      goalTokenBudget: 50_000,
+    });
+    expect(raised.payload.goalTokenBudget).toBe(50_000);
+    expect(raised.payload.goalBudgetLimitedAt).toBeNull();
+    readModel = await applyEvent(readModel, raised, 5);
+    expect(readModel.threads[0]?.goalTokenBudget).toBe(50_000);
+
+    // Clearing the budget explicitly works too.
+    const cleared = await decideGoalUpdate(readModel, {
+      commandId: "cmd-budget-clear",
+      goalTokenBudget: null,
+    });
+    expect(cleared.payload.goalTokenBudget).toBeNull();
+    readModel = await applyEvent(readModel, cleared, 6);
+    expect(readModel.threads[0]?.goalTokenBudget).toBeNull();
+  });
+
+  it("clears a consumed wrap-up grant on resume so a still-exhausted budget can grant again", async () => {
+    const now = new Date().toISOString();
+    let readModel = await createThreadReadModel(now);
+    readModel = await applyEvent(
+      readModel,
+      await decideGoalUpdate(readModel, {
+        commandId: "cmd-goal-set",
+        goal: "Objective",
+        goalTokenBudget: 10_000,
+      }),
+      3,
+    );
+    readModel = await applyEvent(
+      readModel,
+      await decideGoalUpdate(readModel, {
+        commandId: "cmd-budget-limited",
+        goalBudgetLimited: true,
+      }),
+      4,
+    );
+    readModel = await applyEvent(
+      readModel,
+      await decideGoalUpdate(readModel, {
+        commandId: "cmd-pause",
+        goalPaused: true,
+        goalPausedReason: "budget",
+      }),
+      5,
+    );
+    const resume = await decideGoalUpdate(readModel, {
+      commandId: "cmd-resume",
+      goalPaused: false,
+    });
+    expect(resume.payload.goalBudgetLimitedAt).toBeNull();
+    readModel = await applyEvent(readModel, resume, 6);
+    expect(readModel.threads[0]?.goalBudgetLimitedAt).toBeNull();
+  });
+
+  it("records tokens used on the achievement and resets accounting on achieve/clear", async () => {
+    const now = new Date().toISOString();
+    let readModel = await createThreadReadModel(now);
+    readModel = await applyEvent(
+      readModel,
+      await decideGoalUpdate(readModel, {
+        commandId: "cmd-goal-set",
+        goal: "Objective",
+        goalTokenBudget: 10_000,
+      }),
+      3,
+    );
+    readModel = await applyEvent(
+      readModel,
+      await decideGoalUpdate(readModel, {
+        commandId: "cmd-obs-1",
+        goalTokensObserved: { sessionId: "session-1", totalProcessedTokens: 100 },
+      }),
+      4,
+    );
+    readModel = await applyEvent(
+      readModel,
+      await decideGoalUpdate(readModel, {
+        commandId: "cmd-obs-2",
+        goalTokensObserved: { sessionId: "session-1", totalProcessedTokens: 2_500 },
+      }),
+      5,
+    );
+
+    const achieveEvent = await decideGoalUpdate(readModel, {
+      commandId: "cmd-goal-achieve",
+      goalAchieved: true,
+    });
+    expect(achieveEvent.payload.goalAchievements?.[0]?.tokensUsed).toBe(2_400);
+    expect(achieveEvent.payload.goalTokenBudget).toBeNull();
+    expect(achieveEvent.payload.goalTokensUsed).toBe(0);
+    expect(achieveEvent.payload.goalTokensObserved).toBeNull();
+    readModel = await applyEvent(readModel, achieveEvent, 6);
+    expect(readModel.threads[0]?.goalTokensUsed).toBe(0);
+    expect(readModel.threads[0]?.goalTokenBudget).toBeNull();
   });
 
   it("pauses an active goal atomically before interrupting its turn", async () => {

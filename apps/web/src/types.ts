@@ -14,6 +14,7 @@ import type {
   PinnedMessage,
   PendingClaudeCacheReview,
   ThreadGoalAchievement,
+  ThreadGoalPauseReason,
   OrchestrationSessionStatus,
   OrchestrationThreadActivity,
   ThreadHandoff,
@@ -254,6 +255,10 @@ export interface Thread extends ThreadWorkspaceState {
   goal?: string;
   goalStartedAt?: string | null;
   goalPausedAt?: string | null;
+  goalPausedReason?: ThreadGoalPauseReason | null;
+  goalTokenBudget?: number | null;
+  goalTokensUsed?: number;
+  goalBudgetLimitedAt?: string | null;
   goalAchievements?: ThreadGoalAchievement[];
   latestTurn: OrchestrationLatestTurn | null;
   pendingSourceProposedPlan?: OrchestrationLatestTurn["sourceProposedPlan"];
@@ -306,6 +311,10 @@ export interface ThreadShell extends ThreadWorkspaceState {
   goal?: string;
   goalStartedAt?: string | null;
   goalPausedAt?: string | null;
+  goalPausedReason?: ThreadGoalPauseReason | null;
+  goalTokenBudget?: number | null;
+  goalTokensUsed?: number;
+  goalBudgetLimitedAt?: string | null;
   goalAchievements?: ThreadGoalAchievement[];
   parentThreadId?: ThreadId | null;
   creationSource?: ThreadCreationSource | null;

@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { goalElapsedMs } from "./ComposerGoalHeader";
+import { formatGoalTokenCount, goalElapsedMs, goalHeaderLabel } from "./ComposerGoalHeader";
 
 const STARTED_AT = "2026-08-13T10:00:00.000Z";
 const STARTED_AT_MS = Date.parse(STARTED_AT);
@@ -32,5 +32,35 @@ describe("goalElapsedMs", () => {
 
   it("clamps clock skew to zero instead of going negative", () => {
     expect(goalElapsedMs({ goalStartedAt: STARTED_AT }, STARTED_AT_MS - 5_000)).toBe(0);
+  });
+});
+
+describe("goalHeaderLabel", () => {
+  it("labels the pursuit state and pause reasons", () => {
+    expect(goalHeaderLabel({ paused: false })).toBe("Pursuing goal");
+    expect(goalHeaderLabel({ paused: true })).toBe("Goal paused");
+    expect(goalHeaderLabel({ paused: true, goalPausedReason: "blocked" })).toBe("Goal blocked");
+    expect(goalHeaderLabel({ paused: true, goalPausedReason: "error" })).toBe(
+      "Goal paused after error",
+    );
+    expect(goalHeaderLabel({ paused: true, goalPausedReason: "budget" })).toBe(
+      "Goal budget reached",
+    );
+  });
+
+  it("labels an in-flight wrap-up turn after the budget is exhausted", () => {
+    expect(
+      goalHeaderLabel({ paused: false, goalBudgetLimitedAt: "2026-08-13T10:01:00.000Z" }),
+    ).toBe("Goal: wrapping up");
+  });
+});
+
+describe("formatGoalTokenCount", () => {
+  it("compacts token counts for the header", () => {
+    expect(formatGoalTokenCount(0)).toBe("0");
+    expect(formatGoalTokenCount(999)).toBe("999");
+    expect(formatGoalTokenCount(2_500)).toBe("2.5k");
+    expect(formatGoalTokenCount(50_000)).toBe("50k");
+    expect(formatGoalTokenCount(1_250_000)).toBe("1.3M");
   });
 });

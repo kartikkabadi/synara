@@ -118,6 +118,12 @@ function toThreadShell(thread: Thread): ThreadShell {
     ...(thread.goal !== undefined ? { goal: thread.goal } : {}),
     ...(thread.goalStartedAt !== undefined ? { goalStartedAt: thread.goalStartedAt } : {}),
     ...(thread.goalPausedAt !== undefined ? { goalPausedAt: thread.goalPausedAt } : {}),
+    ...(thread.goalPausedReason !== undefined ? { goalPausedReason: thread.goalPausedReason } : {}),
+    ...(thread.goalTokenBudget !== undefined ? { goalTokenBudget: thread.goalTokenBudget } : {}),
+    ...(thread.goalTokensUsed !== undefined ? { goalTokensUsed: thread.goalTokensUsed } : {}),
+    ...(thread.goalBudgetLimitedAt !== undefined
+      ? { goalBudgetLimitedAt: thread.goalBudgetLimitedAt }
+      : {}),
     ...(thread.goalAchievements !== undefined ? { goalAchievements: thread.goalAchievements } : {}),
     ...(thread.latestHumanMessageAt !== undefined
       ? { latestHumanMessageAt: thread.latestHumanMessageAt }

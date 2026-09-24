@@ -594,6 +594,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           settledAt: null,
           deletedAt: null,
           handoff: null,
+          goalTokensUsed: 0,
           messages: [
             {
               id: asMessageId("message-0"),
@@ -2021,6 +2022,11 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           goal: "",
           goalStartedAt: null,
           goalPausedAt: null,
+          goalPausedReason: null,
+          goalTokenBudget: null,
+          goalTokensUsed: 0,
+          goalTokensObserved: null,
+          goalBudgetLimitedAt: null,
           latestTurn: {
             turnId: asTurnId("turn-shell"),
             state: "completed",

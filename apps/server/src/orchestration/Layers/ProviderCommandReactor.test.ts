@@ -287,6 +287,7 @@ describe("ProviderCommandReactor", () => {
     readonly startReactor?: boolean;
     readonly interruptTurn?: ProviderServiceShape["interruptTurn"];
     readonly commandEventTimeout?: Duration.Duration;
+    readonly goalFailureRetryDelays?: readonly Duration.Duration[];
     readonly gatewayOperationId?: string;
     readonly gitWritingModelSelection?: ModelSelection;
     readonly omitStopRuntimeSession?: boolean;
@@ -653,11 +654,14 @@ describe("ProviderCommandReactor", () => {
       Layer.provide(OrchestrationEventStoreLive),
       Layer.provide(OrchestrationCommandReceiptRepositoryLive),
     );
-    const layer = makeProviderCommandReactorLive(
-      input?.commandEventTimeout === undefined
-        ? undefined
-        : { commandEventTimeout: input.commandEventTimeout },
-    ).pipe(
+    const layer = makeProviderCommandReactorLive({
+      ...(input?.commandEventTimeout === undefined
+        ? {}
+        : { commandEventTimeout: input.commandEventTimeout }),
+      ...(input?.goalFailureRetryDelays === undefined
+        ? {}
+        : { goalFailureRetryDelays: input.goalFailureRetryDelays }),
+    }).pipe(
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
       Layer.provideMerge(TurnCheckpointCoordinatorLive),
@@ -6131,6 +6135,75 @@ describe("ProviderCommandReactor", () => {
     );
   });
 
+  it("re-aims pursuit when the active goal's objective is edited in place", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-goal-edit-seed"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        goal: "Finish the original objective",
+        goalStartBehavior: "defer",
+      }),
+    );
+    // Editing the staged text before pursuit has a turn stays silent.
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-goal-edit-while-staged"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        goal: "Finish the staged objective",
+      }),
+    );
+    await harness.drain();
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+
+    // A session carrying a turn id is what lands `latestTurn` in the read
+    // model, i.e. marks that goal pursuit has begun on real turns.
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-goal-edit-live-session"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: asTurnId("turn-goal-edit-live"),
+          lastError: null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+    await harness.drain();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-goal-edit-in-place"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        goal: "Ship the revised objective",
+      }),
+    );
+    await harness.drain();
+
+    const events = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((collected) => Array.from(collected)),
+      ),
+    );
+    const continuation = events.find(
+      (event) =>
+        event.type === "thread.goal-continuation-requested" &&
+        event.payload.trigger === "goal-objective-updated",
+    );
+    expect(continuation).toBeDefined();
+  });
+
   it("promotes queued user work before an automatic goal continuation", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
@@ -6253,6 +6326,220 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
     expect(harness.sendTurn.mock.calls[0]?.[0].input).toContain(
       "Continue working toward the active thread goal",
+    );
+  });
+
+  it("retries a failed goal turn after a backoff instead of pausing", async () => {
+    const harness = await createHarness({
+      goalFailureRetryDelays: [Duration.millis(50), Duration.millis(50), Duration.millis(50)],
+    });
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-goal-failure-retry"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        goal: "Keep pursuing across transient failures",
+        goalStartBehavior: "defer",
+      }),
+    );
+    harness.setRuntimeSessionTurnState({ threadId: "thread-1", status: "ready" });
+    const goalStartedAt = (await readHarnessThread(harness))?.goalStartedAt;
+    expect(goalStartedAt).toBeTruthy();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.goal.continue",
+        commandId: CommandId.makeUnsafe("cmd-goal-turn-failed"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        goalStartedAt: goalStartedAt!,
+        trigger: "turn-failed",
+        sourceTurnId: asTurnId("turn-goal-failed"),
+        createdAt: now,
+      }),
+    );
+    await harness.drain();
+    // The retry backs off instead of dispatching immediately.
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    expect((await readHarnessThread(harness))?.goalPausedAt ?? null).toBeNull();
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.sendTurn.mock.calls[0]?.[0].input).toContain(
+      "Continue working toward the active thread goal",
+    );
+    const events = Array.from(
+      await Effect.runPromise(Stream.runCollect(harness.engine.readEvents(0))),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "thread.goal-continuation-requested",
+        payload: expect.objectContaining({ trigger: "turn-failed", retryAttempt: 1 }),
+      }),
+    );
+  });
+
+  it("counts duplicate failure signals for the same lost turn only once", async () => {
+    const harness = await createHarness({
+      goalFailureRetryDelays: [Duration.millis(50), Duration.millis(50), Duration.millis(50)],
+    });
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-goal-failure-dedup"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        goal: "Retry each failure only once",
+        goalStartBehavior: "defer",
+      }),
+    );
+    harness.setRuntimeSessionTurnState({ threadId: "thread-1", status: "ready" });
+    const goalStartedAt = (await readHarnessThread(harness))?.goalStartedAt;
+    expect(goalStartedAt).toBeTruthy();
+
+    for (const [index, commandTag] of ["first", "second"].entries()) {
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.goal.continue",
+          commandId: CommandId.makeUnsafe(`cmd-goal-turn-failed-${commandTag}-${index}`),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          goalStartedAt: goalStartedAt!,
+          trigger: "turn-failed",
+          sourceTurnId: asTurnId("turn-goal-failed-same"),
+          createdAt: now,
+        }),
+      );
+    }
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    const events = Array.from(
+      await Effect.runPromise(Stream.runCollect(harness.engine.readEvents(0))),
+    );
+    const retriedContinuations = events.filter(
+      (
+        event,
+      ): event is Extract<OrchestrationEvent, { type: "thread.goal-continuation-requested" }> =>
+        event.type === "thread.goal-continuation-requested" &&
+        event.payload.retryAttempt !== undefined,
+    );
+    expect(retriedContinuations).toHaveLength(1);
+    expect(retriedContinuations[0]?.payload.retryAttempt).toBe(1);
+    expect((await readHarnessThread(harness))?.goalPausedAt ?? null).toBeNull();
+  });
+
+  it("pauses an active goal once the failure retry budget runs out", async () => {
+    const harness = await createHarness({
+      goalFailureRetryDelays: [Duration.minutes(1), Duration.minutes(1), Duration.minutes(1)],
+    });
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-goal-failure-exhausted"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        goal: "Stop after repeated provider failures",
+        goalStartBehavior: "defer",
+      }),
+    );
+    harness.setRuntimeSessionTurnState({ threadId: "thread-1", status: "ready" });
+    const goalStartedAt = (await readHarnessThread(harness))?.goalStartedAt;
+    expect(goalStartedAt).toBeTruthy();
+
+    for (const [index, turnId] of [
+      "turn-goal-failed-1",
+      "turn-goal-failed-2",
+      "turn-goal-failed-3",
+      "turn-goal-failed-4",
+    ].entries()) {
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.goal.continue",
+          commandId: CommandId.makeUnsafe(`cmd-goal-turn-failed-exhausted-${index}`),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          goalStartedAt: goalStartedAt!,
+          trigger: "turn-failed",
+          sourceTurnId: asTurnId(turnId),
+          createdAt: now,
+        }),
+      );
+    }
+
+    await waitFor(async () => (await readHarnessThread(harness))?.goalPausedAt != null);
+    const thread = await readHarnessThread(harness);
+    expect(thread?.goalPausedReason).toBe("error");
+    // No retry ever dispatched: each new failure signal re-armed the backoff.
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    const events = Array.from(
+      await Effect.runPromise(Stream.runCollect(harness.engine.readEvents(0))),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "thread.activity-appended",
+        payload: expect.objectContaining({
+          activity: expect.objectContaining({
+            summary: "Goal paused after repeated provider failures",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("retries a goal continuation whose provider send fails", async () => {
+    const harness = await createHarness({
+      goalFailureRetryDelays: [Duration.millis(50), Duration.millis(50), Duration.millis(50)],
+    });
+    const now = new Date().toISOString();
+    harness.sendTurn.mockImplementation(() =>
+      Effect.fail(
+        new ProviderAdapterValidationError({
+          provider: "codex",
+          operation: "sendTurn",
+          issue: "Provider keeps rejecting the continuation",
+        }),
+      ),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.makeUnsafe("cmd-goal-send-failure"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        goal: "Retry a continuation whose send fails",
+        goalStartBehavior: "defer",
+      }),
+    );
+    harness.setRuntimeSessionTurnState({ threadId: "thread-1", status: "ready" });
+    const goalStartedAt = (await readHarnessThread(harness))?.goalStartedAt;
+    expect(goalStartedAt).toBeTruthy();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.goal.continue",
+        commandId: CommandId.makeUnsafe("cmd-goal-continue-send-failure"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        goalStartedAt: goalStartedAt!,
+        trigger: "turn-completed",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(async () => (await readHarnessThread(harness))?.goalPausedAt != null, 10000);
+    const thread = await readHarnessThread(harness);
+    expect(thread?.goalPausedReason).toBe("error");
+    expect(harness.sendTurn.mock.calls.length).toBeGreaterThanOrEqual(3);
+    const events = Array.from(
+      await Effect.runPromise(Stream.runCollect(harness.engine.readEvents(0))),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "thread.activity-appended",
+        payload: expect.objectContaining({
+          activity: expect.objectContaining({
+            summary: "Goal paused after repeated provider failures",
+          }),
+        }),
+      }),
     );
   });
 

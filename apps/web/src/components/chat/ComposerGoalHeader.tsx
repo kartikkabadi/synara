@@ -4,9 +4,11 @@
 // preview that fades out at the end plus the live pursuit timer; the chevron
 // expands the full objective. Edit / pause-resume / delete act on the persisted goal.
 // Layer: Chat composer UI
-// Exports: ComposerGoalHeader, goalElapsedMs
+// Exports: ComposerGoalHeader, goalElapsedMs, goalHeaderLabel, formatGoalTokenCount
 
 import { useState } from "react";
+
+import type { ThreadGoalPauseReason } from "@synara/contracts";
 
 import { useNowMs } from "~/hooks/useNowMs";
 import { GoalIcon, PauseOutlineIcon, PencilIcon, PlayOutlineIcon, TrashCanIcon } from "~/lib/icons";
@@ -48,10 +50,51 @@ export function goalElapsedMs(
   return Math.max(0, endMs - startedMs);
 }
 
+export function formatGoalTokenCount(tokens: number): string {
+  if (tokens >= 1_000_000) {
+    return `${(tokens / 1_000_000).toFixed(1)}M`;
+  }
+  if (tokens >= 10_000) {
+    return `${Math.round(tokens / 1_000)}k`;
+  }
+  if (tokens >= 1_000) {
+    return `${(tokens / 1_000).toFixed(1)}k`;
+  }
+  return String(tokens);
+}
+
+export function goalHeaderLabel(input: {
+  readonly paused: boolean;
+  readonly goalPausedReason?: ThreadGoalPauseReason | null | undefined;
+  readonly goalBudgetLimitedAt?: string | null | undefined;
+}): string {
+  if (input.paused) {
+    switch (input.goalPausedReason ?? "user") {
+      case "blocked":
+        return "Goal blocked";
+      case "error":
+        return "Goal paused after error";
+      case "budget":
+        return "Goal budget reached";
+      default:
+        return "Goal paused";
+    }
+  }
+  // The wrap-up turn granted at budget exhaustion is still in flight.
+  if ((input.goalBudgetLimitedAt ?? null) !== null) {
+    return "Goal: wrapping up";
+  }
+  return "Pursuing goal";
+}
+
 interface ComposerGoalHeaderProps {
   goal: string;
   goalStartedAt?: string | null | undefined;
   goalPausedAt?: string | null | undefined;
+  goalPausedReason?: ThreadGoalPauseReason | null | undefined;
+  goalTokenBudget?: number | null | undefined;
+  goalTokensUsed?: number | undefined;
+  goalBudgetLimitedAt?: string | null | undefined;
   onEdit: () => void;
   onSetPaused: (paused: boolean) => void | Promise<void>;
   onClear: () => void | Promise<void>;
@@ -65,6 +108,10 @@ export function ComposerGoalHeader({
   goal,
   goalStartedAt,
   goalPausedAt,
+  goalPausedReason,
+  goalTokenBudget,
+  goalTokensUsed,
+  goalBudgetLimitedAt,
   onEdit,
   onSetPaused,
   onClear,
@@ -76,6 +123,13 @@ export function ComposerGoalHeader({
   const paused = (goalPausedAt ?? null) !== null;
   const nowMs = useNowMs(!paused && goalStartedAt != null);
   const elapsedMs = goalElapsedMs({ goalStartedAt, goalPausedAt }, nowMs);
+  const label = canPause
+    ? goalHeaderLabel({ paused, goalPausedReason, goalBudgetLimitedAt })
+    : "Goal";
+  const budgetLabel =
+    (goalTokenBudget ?? null) !== null
+      ? `${formatGoalTokenCount(goalTokensUsed ?? 0)}/${formatGoalTokenCount(goalTokenBudget ?? 0)} tokens`
+      : null;
 
   return (
     <ComposerStackedPanel
@@ -85,9 +139,7 @@ export function ComposerGoalHeader({
       <ComposerStackedPanelRow>
         <ComposerStackedPanelRowMain>
           <GoalIcon className={COMPOSER_STACKED_PANEL_ICON_CLASS_NAME} />
-          <ComposerStackedPanelRowLabel className="shrink-0">
-            {canPause ? (paused ? "Goal paused" : "Pursuing goal") : "Goal"}
-          </ComposerStackedPanelRowLabel>
+          <ComposerStackedPanelRowLabel className="shrink-0">{label}</ComposerStackedPanelRowLabel>
           {open ? null : (
             <span
               data-testid="composer-goal-preview"
@@ -98,6 +150,9 @@ export function ComposerGoalHeader({
               {goal}
             </span>
           )}
+          {budgetLabel !== null ? (
+            <span className="shrink-0 tabular-nums text-muted-foreground/80">{budgetLabel}</span>
+          ) : null}
           {elapsedMs !== null ? (
             <span className="shrink-0 tabular-nums text-muted-foreground/80">
               {formatClockDuration(elapsedMs)}
