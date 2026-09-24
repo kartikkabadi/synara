@@ -307,6 +307,25 @@ export const configureTailscaleServe = (
     return { configured: false, detail: result.output };
   });
 
+/**
+ * Finds an existing `tailscale serve` `/` mount proxying to our port, for the
+ * warn-when-leaving-stale-routes check on non-tailscale re-runs.
+ */
+export const findTailscaleServeRoute = (
+  port: number,
+): Effect.Effect<number | undefined, never, ChildProcessSpawner.ChildProcessSpawner> =>
+  Effect.gen(function* () {
+    const status = yield* runCommand("tailscale", ["serve", "status", "--json"], {
+      timeoutMs: 5_000,
+    });
+    if (!status.ok) return undefined;
+    const parsed = parseTailscaleServeStatus(status.output);
+    const match = parsed.rootMounts.find(
+      (m) => m.proxy === `http://127.0.0.1:${port}` || m.proxy === `http://localhost:${port}`,
+    );
+    return match?.port;
+  });
+
 export const detectSystemdUser: Effect.Effect<
   boolean,
   never,
@@ -320,6 +339,37 @@ export const detectSystemdUser: Effect.Effect<
   // Exit 0 on "running"; non-zero on degraded/starting still means a live manager.
   return probe.ok || /^(degraded|starting|maintenance|initializing|stopping)/.test(probe.output);
 });
+
+/**
+ * firewalld (Fedora/RHEL defaults) drops tailnet HTTPS on `tailscale0` unless
+ * the interface sits in a trusted/custom zone — serve configures fine and the
+ * local health probe passes while remote clients can't connect.
+ */
+export const checkFirewalldTailscaleAccess = (): Effect.Effect<
+  { readonly ok: boolean; readonly detail: string | undefined },
+  never,
+  ChildProcessSpawner.ChildProcessSpawner
+> =>
+  Effect.gen(function* () {
+    if (process.platform !== "linux") return { ok: true, detail: undefined };
+    if (!(yield* commandExists("firewall-cmd"))) return { ok: true, detail: undefined };
+    const state = yield* runCommand("firewall-cmd", ["--state"], { timeoutMs: 5_000 });
+    if (!state.ok || !/^running/.test(state.output.trim())) {
+      return { ok: true, detail: undefined };
+    }
+    const zones = yield* runCommand("firewall-cmd", ["--get-active-zones"], {
+      timeoutMs: 5_000,
+    });
+    if (!zones.ok) return { ok: true, detail: undefined };
+    // Tailscale creates `tailscale0` (or tailscaleNN); any zone owning it
+    // means the admin already placed it deliberately.
+    if (/tailscale\d*/.test(zones.output)) return { ok: true, detail: undefined };
+    return {
+      ok: false,
+      detail:
+        "firewalld is running and no zone claims tailscale0 — tailnet HTTPS may be dropped. Allow it with `sudo firewall-cmd --permanent --zone=trusted --add-interface=tailscale0 && sudo firewall-cmd --reload`.",
+    };
+  });
 
 export interface RunningInstance {
   readonly running: boolean;
@@ -351,9 +401,18 @@ export const detectRunningInstance = (baseDir: string): Effect.Effect<RunningIns
           url: runtime.state.origin,
           timeoutMs: 2_000,
         });
-        return status.reachable
-          ? { running: true, origin: runtime.state.origin, pid: runtime.state.pid }
-          : { running: false };
+        if (status.reachable) {
+          return { running: true, origin: runtime.state.origin, pid: runtime.state.pid };
+        }
+        // HTTP unreachable (broken listener, wedged accept loop) but a live
+        // pid still owns the lifecycle lock — treating it as "not running"
+        // lets setup rewrite the env file and fail the mint at the lock.
+        try {
+          process.kill(runtime.state.pid, 0);
+          return { running: true, origin: runtime.state.origin, pid: runtime.state.pid };
+        } catch {
+          return { running: false };
+        }
       }).pipe(
         Effect.catch(() =>
           Effect.succeed<RunningInstance>({
@@ -447,6 +506,11 @@ export const installSystemdUserService = (input: {
     }
     const unitDir = systemdUserUnitDirectory(home, process.env.XDG_CONFIG_HOME);
     const unitPath = path.join(unitDir, `${input.serviceName}.service`);
+    // `systemctl --version` prints "systemd 245 (245.4-4ubuntu3)" — the
+    // `append:` output target needs ≥240 (breaks CentOS 7 / Ubuntu 18.04).
+    const versionOut = yield* runCommand("systemctl", ["--version"], { timeoutMs: 5_000 });
+    const versionMatch = /systemd (\d+)/.exec(versionOut.output);
+    const systemdVersion = versionMatch ? Number(versionMatch[1]) : undefined;
     const unitContents = renderSystemdUserService({
       serviceName: input.serviceName,
       envFilePath: input.envFilePath,
@@ -454,6 +518,7 @@ export const installSystemdUserService = (input: {
       entrypointPath: input.entrypointPath,
       workingDirectory: input.workingDirectory,
       logFilePath: input.logFilePath,
+      systemdVersion,
     });
     yield* Effect.try({
       try: () => fs.mkdirSync(unitDir, { recursive: true }),

@@ -106,6 +106,12 @@ export interface SystemdUserServiceOptions {
   readonly workingDirectory?: string | undefined;
   /** Optional path to append stdout/stderr to, alongside the journal. */
   readonly logFilePath?: string | undefined;
+  /**
+   * Detected systemd version, when known. `append:` targets need systemd ≥
+   * 240 — on older ones the unit fails to load, so file logging is skipped
+   * and the journal carries everything. Unknown keeps the append lines.
+   */
+  readonly systemdVersion?: number | undefined;
 }
 
 export function renderSystemdUserService(options: SystemdUserServiceOptions): string {
@@ -133,7 +139,10 @@ export function renderSystemdUserService(options: SystemdUserServiceOptions): st
   if (options.workingDirectory) {
     lines.push(`WorkingDirectory=${systemdQuotePath(options.workingDirectory)}`);
   }
-  if (options.logFilePath) {
+  if (
+    options.logFilePath &&
+    (options.systemdVersion === undefined || options.systemdVersion >= 240)
+  ) {
     // Journald covers most hosts; append-file keeps logs reachable where the
     // user journal isn't (minimal systemd, containers).
     lines.push(`StandardOutput=append:${systemdQuotePath(options.logFilePath)}`);
@@ -170,11 +179,19 @@ export function parseTailscaleStatus(rawJson: string): TailscaleStatusSummary | 
   const selfRecord = self && typeof self === "object" ? (self as Record<string, unknown>) : null;
   const rawDnsName =
     typeof selfRecord?.DNSName === "string" ? selfRecord.DNSName.replace(/\.$/, "") : undefined;
-  const ips = Array.isArray(record.TailscaleIPs) ? record.TailscaleIPs : undefined;
+  const ips = Array.isArray(selfRecord?.TailscaleIPs)
+    ? selfRecord.TailscaleIPs
+    : Array.isArray(record.TailscaleIPs)
+      ? record.TailscaleIPs
+      : undefined;
   const ipv4 = ips?.find(
     (entry): entry is string => typeof entry === "string" && isTailscaleCgnatIpv4(entry),
   );
-  const certDomains = Array.isArray(record.CertDomains) ? record.CertDomains : [];
+  // CertDomains moved under Self in newer tailscaled versions; accept both.
+  const certDomains = [
+    ...(Array.isArray(record.CertDomains) ? record.CertDomains : []),
+    ...(Array.isArray(selfRecord?.CertDomains) ? selfRecord.CertDomains : []),
+  ];
   const dnsName = rawDnsName && rawDnsName.length > 0 ? rawDnsName : undefined;
   return {
     dnsName,
@@ -433,16 +450,28 @@ export function isPrivateLanIpv4(address: string): boolean {
  * Private-space addresses win over public ones — a VPN bridge or public NIC
  * listed first would produce a URL no LAN peer can open.
  */
+// Virtual/container bridges report private LAN addresses but bind reach
+// only the containers attached to them — an insecure-lan bind there looks
+// configured yet is unreachable from the actual LAN. They're last resort.
+const VIRTUAL_BRIDGE_PREFIX =
+  /^(docker|br-|veth|virbr|vboxnet|vmnet|utun|tailscale|zt|cni|flannel|kube|lxc|podman|weave|wg)/i;
+
 export function detectPrimaryLanIpv4(
   interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]> = os.networkInterfaces(),
 ): string | undefined {
-  const candidates: string[] = [];
-  for (const infos of Object.values(interfaces)) {
+  const physical: string[] = [];
+  const virtual: string[] = [];
+  for (const [name, infos] of Object.entries(interfaces)) {
+    const bucket = VIRTUAL_BRIDGE_PREFIX.test(name) ? virtual : physical;
     for (const info of infos ?? []) {
-      if (info.family === "IPv4" && !info.internal) candidates.push(info.address);
+      if (info.family === "IPv4" && !info.internal) bucket.push(info.address);
     }
   }
-  return candidates.find(isPrivateLanIpv4) ?? candidates[0];
+  for (const candidates of [physical, virtual]) {
+    const found = candidates.find(isPrivateLanIpv4) ?? candidates[0];
+    if (found) return found;
+  }
+  return undefined;
 }
 
 export { isWildcardHost };

@@ -125,6 +125,16 @@ Current native release targets are Windows x64, macOS Intel, macOS Apple Silicon
 
 Synara uses the provider installations and subscriptions already configured on the local machine. Install and authenticate the runtime you intend to use before starting a session. For Codex sessions, follow the [Codex CLI setup](https://github.com/openai/codex).
 
+### Headless server (VPS / remote device)
+
+Each release also ships a `synara-server-<version>.tar.gz` that runs the web UI on a headless Linux or macOS host. One command installs Node if needed, extracts the server, and walks through remote access (Tailscale, HTTPS proxy, trusted LAN, or loopback):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Emanuele-web04/synara/main/scripts/install-synara-server.sh | bash
+```
+
+See [REMOTE.md](./REMOTE.md) for access modes, flags, and troubleshooting.
+
 ### Run from source
 
 The development checkout uses [Bun 1.4.2](https://bun.sh/) and [Node.js 24.13.1](https://nodejs.org/).

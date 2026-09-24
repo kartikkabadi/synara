@@ -420,6 +420,18 @@ describe("host helpers", () => {
     expect(detectPrimaryLanIpv4(interfaces)).toBe("192.168.1.9");
     expect(detectPrimaryLanIpv4({ lo0: interfaces.lo0 })).toBeUndefined();
   });
+
+  it("skips container bridges when a physical interface exists", () => {
+    const ipv4 = (address: string) => [{ family: "IPv4", address, internal: false }] as never[];
+    expect(detectPrimaryLanIpv4({ docker0: ipv4("172.17.0.1"), eno1: ipv4("10.0.0.5") })).toBe(
+      "10.0.0.5",
+    );
+    expect(detectPrimaryLanIpv4({ virbr0: ipv4("192.168.122.1"), eth0: ipv4("203.0.113.7") })).toBe(
+      "203.0.113.7",
+    );
+    // Only virtual interfaces → still returns one rather than nothing.
+    expect(detectPrimaryLanIpv4({ docker0: ipv4("172.17.0.1") })).toBe("172.17.0.1");
+  });
 });
 
 describe("paths and manual instructions", () => {

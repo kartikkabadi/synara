@@ -9,6 +9,7 @@
 
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 
 import { Duration, Effect, FileSystem, Option, Path } from "effect";
@@ -22,12 +23,14 @@ import { DEFAULT_PORT, deriveServerPaths } from "../config";
 import { ensurePrivateDirectorySync } from "../privatePathPermissions";
 import { isLoopbackHost } from "../startupAccess";
 import {
+  checkFirewalldTailscaleAccess,
   checkPortAvailable,
   configureTailscaleServe,
   detectRunningInstance,
   detectSystemdUser,
   detectTailscale,
   enableUserLinger,
+  findTailscaleServeRoute,
   installSystemdUserService,
   issueOwnerPairingUrl,
   readSetupEnvironmentValue,
@@ -80,7 +83,7 @@ export const setupYesFlag = Flag.boolean("yes").pipe(
 
 export const pairUrlFlag = Flag.string("url").pipe(
   Flag.withDescription(
-    "Base URL the browser uses to reach Synara. Defaults to --public-url, then the discovered server origin.",
+    "Base URL the browser uses to reach Synara. Defaults to --public-url, then SYNARA_PUBLIC_URL, then the setup env file's value.",
   ),
   Flag.optional,
 );
@@ -518,6 +521,10 @@ export const runRemoteSetup = (
           config.publicUrl = `https://${tailscale.dnsName}:${serve.servePort}`;
         }
         yield* writeLine(`tailscale serve → ${config.publicUrl}`);
+        const firewalld = yield* checkFirewalldTailscaleAccess();
+        if (!firewalld.ok && firewalld.detail) {
+          yield* writeLine(`Warning: ${firewalld.detail}`);
+        }
       } else {
         tailscaleAccessBroken = true;
         const hint =
@@ -528,6 +535,15 @@ export const runRemoteSetup = (
               : `Fix with:\n  sudo tailscale serve --bg http://127.0.0.1:${config.port}`;
         yield* writeLine(
           `Warning: could not configure tailscale serve${serve.detail ? ` (${redactTailscaleSecrets(serve.detail)})` : ""}. ${hint}`,
+        );
+      }
+    } else if (tailscale.installed && tailscale.running) {
+      // Switching away from tailscale mode leaves the old `/` route live —
+      // serve mappings persist in tailscaled across reboots.
+      const staleRoute = yield* findTailscaleServeRoute(config.port);
+      if (staleRoute !== undefined) {
+        yield* writeLine(
+          `Note: a tailscale serve route for / → :${config.port} from a previous run is still active on tailnet port ${staleRoute}. Remove it with \`tailscale serve --https=${staleRoute} off\` if this install shouldn't be reachable on the tailnet.`,
         );
       }
     }
@@ -670,6 +686,11 @@ export const runRemoteSetup = (
           ? "  WARNING: plaintext HTTP bound to ALL interfaces — on a public-facing machine that includes the internet. Prefer tailscale/public-url, or pass --host <lan-ip>."
           : "  WARNING: plaintext HTTP on your LAN. Prefer the tailscale or public-url mode when you can.",
       );
+      if (process.platform === "linux" && /microsoft|wsl/i.test(os.release())) {
+        lines.push(
+          "  NOTE: WSL detected — the printed address is WSL's NAT IP, unreachable from your LAN. Use loopback mode + `ssh -L`, or enable mirrored networking in .wslconfig.",
+        );
+      }
     }
     if (serviceMode === "manual") {
       lines.push("");

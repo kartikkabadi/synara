@@ -43,11 +43,11 @@ Run `synara setup --help` for all flags. Setup-level flags (`--access`, `--servi
 ## Troubleshooting
 
 | Symptom / message                                     | What it means                                      | Fix                                                                                                                                                             |
-| ----------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| `Failed to download … (404)` from the installer       | Pinned `SYNARA_VERSION` doesn't exist              | Unset `SYNARA_VERSION` (uses latest) or correct the tag (`v0.9.1`, not `0.9.1`)                                                                                 |
-| `synara: command not found` after install             | `~/.synara/bin` isn't on PATH                      | Re-open the shell or `export PATH="$HOME/.synara/bin:$PATH"` (also printed by the installer)                                                                    |
+| ----------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Failed to download … (404)` from the installer       | Pinned `SYNARA_VERSION` doesn't exist              | Unset `SYNARA_VERSION` (uses latest) or correct the version (`0.9.1`, not `v0.9.1`)                                                                             |
+| `synara: command not found` after install             | `~/.synara-server/bin` isn't on PATH               | Re-open the shell or `export PATH="$HOME/.synara-server/bin:$PATH"` (also printed by the installer)                                                             |
 | `synara setup` exits immediately, no prompts          | Non-interactive stdin (piped/SSH without TTY)      | Pass all flags + `--yes` (e.g. `synara setup --access tailscale --yes`), or run in a real terminal                                                              |
-| `Tailscale is not installed`                          | No `tailscaled` found                              | `curl -fsSL https://tailscale.com/install.sh                                                                                                                    | sh && sudo tailscale up`, then re-run setup |
+| `Tailscale is not installed`                          | No `tailscaled` found                              | Install Tailscale (`curl -fsSL https://tailscale.com/install.sh \| sh`), then `sudo tailscale up` and re-run setup                                              |
 | `tailscaled is installed but not running`             | Daemon stopped                                     | `sudo systemctl enable --now tailscaled && tailscale up`                                                                                                        |
 | `HTTPS certificates aren't enabled for this tailnet`  | `tailscale serve` needs MagicDNS + HTTPS certs on  | Tailscale admin console → DNS → enable **MagicDNS** and **HTTPS Certificates**, then re-run                                                                     |
 | `tailscale serve` warning: permission denied          | Serve needs the tailscale operator/permissions     | `sudo tailscale serve --bg http://127.0.0.1:<port>` (drop `--bg` on Tailscale older than ~v1.46) or add yourself as operator (`tailscale set --operator=$USER`) |
@@ -56,7 +56,7 @@ Run `synara setup --help` for all flags. Setup-level flags (`--access`, `--servi
 | `a Synara server is already running`                  | An existing instance holds the data dir            | `synara server status` to inspect; `systemctl --user stop synara` / kill it, then re-run                                                                        |
 | `systemd --user not found` and service install fails  | Headless box without user systemd / linger         | Pick `nohup` service mode, or `sudo loginctl enable-linger $USER` + relog for user units                                                                        |
 | Server failed the health check after start            | Crash at boot (bad env, locked DB, port race)      | `journalctl --user -u synara -n 50` or read `~/.synara/userdata/logs/server.log` for the real error                                                             |
-| Pairing URL expired / already used                    | One-time link, 30 min TTL                          | `synara server pair` (server stopped) or mint from Settings → pairing while running                                                                             |
+| Pairing URL expired / already used                    | One-time link, 30 min TTL                          | `synara server pair` (server stopped), or `POST /api/auth/pairing-token` from an existing owner session while running                                           |
 | Browser can't reach `https://<machine>.<tail>.ts.net` | Device isn't on the tailnet                        | Install Tailscale on that device and join the same tailnet; check `tailscale ping <machine>`                                                                    |
 | `npm install` fails compiling `node-pty`              | No prebuilt binary for this libc/arch (musl, etc.) | Install build tools first — Debian/Ubuntu: `sudo apt install build-essential python3`; Alpine: `apk add build-base python3`                                     |
 
@@ -68,7 +68,7 @@ Pairing URLs expire and are single-use. To mint a fresh owner link while the ser
 synara server pair [--ttl-minutes 30] [--url http://127.0.0.1:3773]
 ```
 
-While the server is running, mint from the UI instead (Settings → pairing), since the data directory is locked to the live process.
+While the server is running, mint from an existing owner session instead — `POST /api/auth/pairing-token` is owner-gated — since the data directory is locked to the live process.
 
 > **One host per data dir.** The database lock relies on pid liveness on the
 > same machine — sharing a `SYNARA_HOME` over NFS or between two hosts lets
@@ -105,7 +105,8 @@ Remote access should use the built web app (not local Vite redirect mode).
 ```bash
 bun run build
 TOKEN="$(openssl rand -hex 24)"
-bun run --cwd apps/server start -- --host 0.0.0.0 --port 3773 --auth-token "$TOKEN" --no-browser
+bun run --cwd apps/server start -- --host 0.0.0.0 --port 3773 \
+  --auth-token "$TOKEN" --allow-insecure-remote --no-browser
 ```
 
 Then open on your phone:

@@ -19,7 +19,7 @@ The installer verifies or installs Node.js ≥ 22.19, downloads the latest serve
 
 Re-running the installer on an existing same-version install skips the download and goes straight to `synara setup`, so it also works as a "reconfigure remote access" command. Pass `SYNARA_NO_SETUP=1` to install without launching the wizard, or `--yes --access tailscale` for a non-interactive run. See [REMOTE.md](https://github.com/Emanuele-web04/synara/blob/main/REMOTE.md) for the full flag and env-var reference.
 
-While the server is stopped, `synara server pair` re-mints an expired owner pairing URL; while it is running, mint from the UI instead.
+While the server is stopped, `synara server pair` re-mints an expired owner pairing URL; while it is running, an existing owner session can mint one via `POST /api/auth/pairing-token`.
 
 ## Requirements
 
