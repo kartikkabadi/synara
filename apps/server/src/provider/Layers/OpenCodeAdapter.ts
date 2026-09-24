@@ -51,6 +51,7 @@ import {
   takeSynaraHarnessPolicyForProviderSession,
 } from "../../agentGateway/harnessPolicy.ts";
 import { shouldAllowSynaraComputerProviderTool } from "../../agentGateway/computerToolPermission.ts";
+import { shouldAllowSynaraUnattendedProviderTool } from "../../agentGateway/synaraToolPermission.ts";
 import { buildOpenCodeMcpServer, SYNARA_MCP_SERVER_NAME } from "../../agentGateway/mcpInjection.ts";
 import { AgentGatewayCredentials } from "../../agentGateway/Services/AgentGatewayCredentials.ts";
 import {
@@ -112,6 +113,12 @@ export function resolveOpenCodePermissionPolicyReply(input: {
   if (
     shouldAllowSynaraComputerProviderTool({
       computerControlEnabled: input.computerControlEnabled,
+      activeTurn: input.activeTurn,
+      interactionMode: input.interactionMode,
+      runtimeMode: input.runtimeMode,
+      permission: { name: input.permission, metadata: input.metadata },
+    }) ||
+    shouldAllowSynaraUnattendedProviderTool({
       activeTurn: input.activeTurn,
       interactionMode: input.interactionMode,
       runtimeMode: input.runtimeMode,

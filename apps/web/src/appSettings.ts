@@ -258,6 +258,42 @@ const PersistedHiddenModels = Schema.Array(
   ),
 );
 
+// Per-project notification preferences (monocode parity): categories a project
+// may mute plus a timed mute-all window. Categories mirror what the runtime
+// actually emits — there's no separate pull-request/issue channel here.
+export const NOTIFICATION_CATEGORY_IDS = ["task-finished", "needs-input", "reminders"] as const;
+export type NotificationCategoryId = (typeof NOTIFICATION_CATEGORY_IDS)[number];
+
+export const NOTIFICATION_CATEGORY_LABELS: Readonly<Record<NotificationCategoryId, string>> = {
+  "task-finished": "Task finished",
+  "needs-input": "Needs input",
+  reminders: "Reminders",
+};
+
+const NotificationCategoryIdSchema = Schema.Literals([...NOTIFICATION_CATEGORY_IDS]);
+
+export const ProjectNotificationPrefsSchema = Schema.Struct({
+  mutedCategories: Schema.Array(NotificationCategoryIdSchema).pipe(withDefaults(() => [])),
+  /** ISO timestamp; notifications resume automatically after it passes. */
+  mutedUntil: Schema.NullOr(Schema.String).pipe(withDefaults((): string | null => null)),
+});
+export type ProjectNotificationPrefs = typeof ProjectNotificationPrefsSchema.Type;
+
+const ProjectNotificationPrefsRecord = Schema.Record(Schema.String, ProjectNotificationPrefsSchema);
+
+export function projectNotificationCategoryMuted(
+  prefs: ProjectNotificationPrefs | undefined,
+  category: NotificationCategoryId,
+  now: number = Date.now(),
+): boolean {
+  if (prefs === undefined) return false;
+  if (prefs.mutedUntil !== null) {
+    const mutedUntilMs = Date.parse(prefs.mutedUntil);
+    if (Number.isFinite(mutedUntilMs) && mutedUntilMs > now) return true;
+  }
+  return prefs.mutedCategories.includes(category);
+}
+
 export const AppSettingsSchema = Schema.Struct({
   claudeBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   claudeEnableArtifacts: Schema.Boolean.pipe(withDefaults(() => false)),
@@ -345,6 +381,11 @@ export const AppSettingsSchema = Schema.Struct({
   useCustomTitleBar: Schema.Boolean.pipe(withDefaults(() => true)),
   enableTaskCompletionToasts: Schema.Boolean.pipe(withDefaults(() => true)),
   enableSystemTaskCompletionNotifications: Schema.Boolean.pipe(withDefaults(() => true)),
+  // Local-only UI preference: per-project notification muting, keyed by project id.
+  // `{}` means every project notifies normally.
+  projectNotificationPrefs: ProjectNotificationPrefsRecord.pipe(
+    withDefaults((): Readonly<Record<string, ProjectNotificationPrefs>> => ({})),
+  ),
   // Local desktop preference. Native capability/permission state remains owned by Electron.
   // AppSnap is opt-in because enabling its Settings toggle requests macOS
   // Input Monitoring and Screen Recording permissions.

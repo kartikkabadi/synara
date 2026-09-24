@@ -57,6 +57,7 @@ const DRAFT_FORM = {
   mode: "standalone",
   runtimeMode: "standard",
   worktreeMode: "isolated",
+  eventTriggers: [],
 } as never;
 const DRAFT_WARNING = {
   id: "full-access",

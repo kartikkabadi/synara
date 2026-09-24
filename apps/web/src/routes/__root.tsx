@@ -100,6 +100,7 @@ import {
 } from "../lib/terminalStateCleanup";
 import { useProjectRunStore } from "../projectRunStore";
 import { dockTerminalThreadId } from "../lib/dockTerminalScope";
+import { ReminderNotifications } from "../notifications/reminders";
 import { TaskCompletionNotifications } from "../notifications/taskCompletion";
 import { useWorkspacePathsStore } from "../workspacePathsStore";
 import {
@@ -330,6 +331,7 @@ function RootRouteView() {
           <GlobalFeedbackDialog />
           <GlobalWhatsNewSurface />
           <TaskCompletionNotifications />
+          <ReminderNotifications />
           <QueuedComposerDrainCoordinator />
           <SafariAccessOnboarding>
             <AppSnapWelcomeDialog />

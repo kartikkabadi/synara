@@ -24,6 +24,13 @@ import {
 } from "./automation";
 import { OpenInEditorInput } from "./editor";
 import {
+  ReminderCancelInput,
+  ReminderListResult,
+  ReminderSetInput,
+  ReminderStreamEvent,
+  ThreadReminder,
+} from "./reminders";
+import {
   ExternalMcpCreateIntegrationInput,
   ExternalMcpCreateIntegrationResult,
   ExternalMcpIntegration,
@@ -1524,6 +1531,31 @@ export const WsSubscribeAutomationEventsRpc = Rpc.make(WS_METHODS.subscribeAutom
   stream: true,
 });
 
+export const WsReminderListRpc = Rpc.make(WS_METHODS.reminderList, {
+  payload: Schema.Struct({}),
+  success: ReminderListResult,
+  error: WsRpcError,
+});
+
+export const WsReminderSetRpc = Rpc.make(WS_METHODS.reminderSet, {
+  payload: ReminderSetInput,
+  success: ThreadReminder,
+  error: WsRpcError,
+});
+
+export const WsReminderCancelRpc = Rpc.make(WS_METHODS.reminderCancel, {
+  payload: ReminderCancelInput,
+  success: Schema.Void,
+  error: WsRpcError,
+});
+
+export const WsSubscribeReminderEventsRpc = Rpc.make(WS_METHODS.subscribeReminderEvents, {
+  payload: Schema.Struct({}),
+  success: ReminderStreamEvent,
+  error: WsRpcError,
+  stream: true,
+});
+
 export const WsBootstrapRpcGroup = RpcGroup.make(WsBootstrapNegotiateRpc);
 
 export const WsFeatureRpcGroup = RpcGroup.make(
@@ -1658,4 +1690,8 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsAutomationArchiveRunRpc,
   WsAutomationResolveProposalRpc,
   WsSubscribeAutomationEventsRpc,
+  WsReminderListRpc,
+  WsReminderSetRpc,
+  WsReminderCancelRpc,
+  WsSubscribeReminderEventsRpc,
 );

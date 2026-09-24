@@ -19,6 +19,7 @@ import {
   NonNegativeInt,
   ProjectId,
   ThreadId,
+  ThreadReminder,
   TurnId,
 } from "@synara/contracts";
 import { Option, Schema, ServiceMap } from "effect";
@@ -331,6 +332,95 @@ export const AcquireAutomationSchedulerLeaseInput = Schema.Struct({
 });
 export type AcquireAutomationSchedulerLeaseInput = typeof AcquireAutomationSchedulerLeaseInput.Type;
 
+export const ListEventTriggeredAutomationDefinitionsInput = Schema.Struct({
+  limit: Schema.Number,
+  includeDisabled: Schema.optional(Schema.Boolean),
+});
+export type ListEventTriggeredAutomationDefinitionsInput =
+  typeof ListEventTriggeredAutomationDefinitionsInput.Type;
+
+export const ClaimAutomationEventInput = Schema.Struct({
+  automationId: AutomationId,
+  eventKey: Schema.String,
+  runId: Schema.NullOr(AutomationRunId),
+  now: Schema.String,
+});
+export type ClaimAutomationEventInput = typeof ClaimAutomationEventInput.Type;
+
+export const AttachAutomationEventRunInput = Schema.Struct({
+  automationId: AutomationId,
+  eventKey: Schema.String,
+  runId: AutomationRunId,
+});
+export type AttachAutomationEventRunInput = typeof AttachAutomationEventRunInput.Type;
+
+export const DeleteAutomationEventClaimInput = Schema.Struct({
+  automationId: AutomationId,
+  eventKey: Schema.String,
+});
+export type DeleteAutomationEventClaimInput = typeof DeleteAutomationEventClaimInput.Type;
+
+export const ListAutomationSeenEventKeysInput = Schema.Struct({
+  source: Schema.String,
+  repository: Schema.String,
+});
+export type ListAutomationSeenEventKeysInput = typeof ListAutomationSeenEventKeysInput.Type;
+
+export const HasAutomationSeenEventRepositoryInput = Schema.Struct({
+  source: Schema.String,
+  repository: Schema.String,
+});
+export type HasAutomationSeenEventRepositoryInput =
+  typeof HasAutomationSeenEventRepositoryInput.Type;
+
+export const InsertAutomationSeenEventsInput = Schema.Struct({
+  events: Schema.Array(
+    Schema.Struct({
+      eventKey: Schema.String,
+      source: Schema.String,
+      repository: Schema.String,
+      seenAt: Schema.String,
+    }),
+  ),
+});
+export type InsertAutomationSeenEventsInput = typeof InsertAutomationSeenEventsInput.Type;
+
+export const TrimAutomationRunHistoryInput = Schema.Struct({
+  automationId: AutomationId,
+  keepTerminalRuns: NonNegativeInt,
+});
+export type TrimAutomationRunHistoryInput = typeof TrimAutomationRunHistoryInput.Type;
+
+export const GetThreadReminderInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type GetThreadReminderInput = typeof GetThreadReminderInput.Type;
+
+export const UpsertThreadReminderInput = Schema.Struct({
+  threadId: ThreadId,
+  dueAt: Schema.String,
+  note: Schema.NullOr(Schema.String),
+  now: Schema.String,
+});
+export type UpsertThreadReminderInput = typeof UpsertThreadReminderInput.Type;
+
+export const DeleteThreadReminderInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type DeleteThreadReminderInput = typeof DeleteThreadReminderInput.Type;
+
+export const ListDueThreadRemindersInput = Schema.Struct({
+  now: Schema.String,
+  limit: Schema.Number,
+});
+export type ListDueThreadRemindersInput = typeof ListDueThreadRemindersInput.Type;
+
+export const MarkThreadReminderFiredInput = Schema.Struct({
+  threadId: ThreadId,
+  firedAt: Schema.String,
+});
+export type MarkThreadReminderFiredInput = typeof MarkThreadReminderFiredInput.Type;
+
 export interface AutomationRepositoryShape {
   readonly createDefinition: (
     input: CreateAutomationDefinitionInput,
@@ -497,6 +587,62 @@ export interface AutomationRepositoryShape {
   readonly tryAcquireSchedulerLease: (
     input: AcquireAutomationSchedulerLeaseInput,
   ) => Effect.Effect<boolean, AutomationRepositoryError>;
+  /** Enabled, non-archived, non-proposal definitions that carry at least one event trigger. */
+  readonly listEventTriggeredDefinitions: (
+    input: ListEventTriggeredAutomationDefinitionsInput,
+  ) => Effect.Effect<ReadonlyArray<AutomationDefinition>, AutomationRepositoryError>;
+  /**
+   * Idempotently claims an external event for an automation via INSERT OR IGNORE on the
+   * (automation_id, event_key) primary key. Returns true when this call claimed the event.
+   */
+  readonly claimAutomationEvent: (
+    input: ClaimAutomationEventInput,
+  ) => Effect.Effect<boolean, AutomationRepositoryError>;
+  /** Records the run a claimed event produced so the ledger links claims to runs. */
+  readonly attachAutomationEventRun: (
+    input: AttachAutomationEventRunInput,
+  ) => Effect.Effect<void, AutomationRepositoryError>;
+  /**
+   * Releases an event claim a run dispatch could not consume (provider disabled, run slot
+   * busy), so a later poll may retry it instead of dropping the event permanently.
+   */
+  readonly deleteAutomationEventClaim: (
+    input: DeleteAutomationEventClaimInput,
+  ) => Effect.Effect<void, AutomationRepositoryError>;
+  /** Event keys the watcher has already observed for one source+repository feed. */
+  readonly listAutomationSeenEventKeys: (
+    input: ListAutomationSeenEventKeysInput,
+  ) => Effect.Effect<ReadonlyArray<string>, AutomationRepositoryError>;
+  /** True once at least one item has been seen for the feed; used to detect first poll. */
+  readonly hasAutomationSeenEventsForRepository: (
+    input: HasAutomationSeenEventRepositoryInput,
+  ) => Effect.Effect<boolean, AutomationRepositoryError>;
+  readonly insertAutomationSeenEvents: (
+    input: InsertAutomationSeenEventsInput,
+  ) => Effect.Effect<void, AutomationRepositoryError>;
+  /** Deletes the oldest terminal runs for a definition beyond the retention cap. */
+  readonly trimAutomationRunHistory: (
+    input: TrimAutomationRunHistoryInput,
+  ) => Effect.Effect<void, AutomationRepositoryError>;
+  readonly getThreadReminder: (
+    input: GetThreadReminderInput,
+  ) => Effect.Effect<Option.Option<ThreadReminder>, AutomationRepositoryError>;
+  readonly listThreadReminders: () => Effect.Effect<
+    ReadonlyArray<ThreadReminder>,
+    AutomationRepositoryError
+  >;
+  readonly upsertThreadReminder: (
+    input: UpsertThreadReminderInput,
+  ) => Effect.Effect<ThreadReminder, AutomationRepositoryError>;
+  readonly deleteThreadReminder: (
+    input: DeleteThreadReminderInput,
+  ) => Effect.Effect<void, AutomationRepositoryError>;
+  readonly listDueThreadReminders: (
+    input: ListDueThreadRemindersInput,
+  ) => Effect.Effect<ReadonlyArray<ThreadReminder>, AutomationRepositoryError>;
+  readonly markThreadReminderFired: (
+    input: MarkThreadReminderFiredInput,
+  ) => Effect.Effect<Option.Option<ThreadReminder>, AutomationRepositoryError>;
 }
 
 export class AutomationRepository extends ServiceMap.Service<

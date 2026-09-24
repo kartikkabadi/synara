@@ -58,6 +58,8 @@ import {
   stopAfterConsecutiveFailuresFromPolicyValue,
 } from "~/lib/automationFailurePolicy";
 import { automationCronExpressionError, automationTimezoneError } from "~/lib/automationForm";
+import { isValidGitHubRepositoryNameWithOwner } from "@synara/shared/githubRepository";
+import { toastManager } from "~/components/ui/toast";
 import {
   completionPolicyFromStopWhen,
   stopWhenFromCompletionPolicy,
@@ -79,12 +81,19 @@ import { ensureNativeApi } from "~/nativeApi";
 import { useStore } from "~/store";
 import { createSidebarThreadSummariesSelector } from "~/storeSelectors";
 import {
+  automationMissedRunGraceOptions,
   AutomationApprovalBanner,
+  AutomationEventTriggersEditor,
   AutomationModelPicker,
   automationIntervalPresetOptions,
+  automationRunTriggerLabel,
   automationTargetThreads,
   canCancelAutomationRun,
   datetimeLocalFromIso,
+  eventTriggerDraftsFromTriggers,
+  eventTriggerDraftsToTriggers,
+  eventTriggerRepositories,
+  formatAutomationEventTrigger,
   formatRelativeTime,
   isoFromDatetimeLocal,
   isRowInteractiveEventTarget,
@@ -93,8 +102,7 @@ import {
   providerOptionsForAutomationModelSelection,
   runResultSummary,
   runResultTitle,
-  runStatusLabel,
-  RunStatusIndicator,
+  RunStatusPill,
   SCHEDULE_KIND_OPTIONS,
   scheduleFromKind,
   scheduleKindFromSchedule,
@@ -102,6 +110,7 @@ import {
   updateWeeklyScheduleTime,
   useAutomations,
   weekdayLabel,
+  type AutomationEventTriggerDraft,
 } from "./-automations.shared";
 import { resolveThreadPickerTitle } from "./-chatThreadRoute.logic";
 
@@ -117,6 +126,10 @@ const selectAllThreads = createSidebarThreadSummariesSelector();
 // Commit the trimmed text: the validators trim before checking, so committing the raw
 // draft would persist stray whitespace the validation never saw.
 const trimDraft = (value: string) => value.trim();
+
+function missedRunGraceOptions(graceSeconds: number | null | undefined) {
+  return automationMissedRunGraceOptions(graceSeconds);
+}
 
 function lastFinishedRun(runs: readonly AutomationRun[]): AutomationRun | null {
   return runs.find((run) => run.finishedAt != null || run.startedAt != null) ?? null;
@@ -186,6 +199,97 @@ function automationStoppedExplanation(definition: AutomationDefinition): string 
     case "user":
       return null;
   }
+}
+
+// Local drafts let the shared editor collect keystrokes; the patch only ships on
+// Save, matching how other multi-field rows avoid firing an update per keypress.
+function EventTriggersSection({
+  definition,
+  editable,
+  disabledTitle,
+  saving,
+  onSave,
+}: {
+  readonly definition: AutomationDefinition;
+  readonly editable: boolean;
+  readonly disabledTitle: string | undefined;
+  readonly saving: boolean;
+  readonly onSave: (eventTriggers: AutomationDefinition["eventTriggers"]) => void;
+}) {
+  const [drafts, setDrafts] = useState<readonly AutomationEventTriggerDraft[]>(() =>
+    eventTriggerDraftsFromTriggers(definition.eventTriggers ?? []),
+  );
+  const savedKey = JSON.stringify(definition.eventTriggers ?? []);
+  const [savedKeyForDrafts, setSavedKeyForDrafts] = useState(savedKey);
+  if (savedKeyForDrafts !== savedKey) {
+    // Authoritative change landed (optimistic merge, stream upsert, proposal accept):
+    // drop the local drafts. Render-phase set state is React-sanctioned for this
+    // reset-derived-state pattern and avoids a post-paint flash of stale rows.
+    setSavedKeyForDrafts(savedKey);
+    setDrafts(eventTriggerDraftsFromTriggers(definition.eventTriggers ?? []));
+  }
+  const triggers = eventTriggerDraftsToTriggers(drafts);
+  const dirty = JSON.stringify(triggers) !== savedKey;
+
+  const save = () => {
+    for (const draft of drafts) {
+      for (const repository of eventTriggerRepositories(draft)) {
+        if (!isValidGitHubRepositoryNameWithOwner(repository)) {
+          toastManager.add({
+            type: "error",
+            title: `Use owner/name for repository "${repository}"`,
+          });
+          return;
+        }
+      }
+    }
+    onSave(triggers);
+  };
+
+  return (
+    <DetailGroup title="GitHub event triggers">
+      {definition.eventTriggers && definition.eventTriggers.length > 0 && !dirty
+        ? definition.eventTriggers.map((trigger) => (
+            <DetailRow key={trigger.id} label={formatAutomationEventTrigger(trigger)}>
+              <span className="text-ui-sm text-muted-foreground">
+                {trigger.source === "github" ? "GitHub" : trigger.source}
+              </span>
+            </DetailRow>
+          ))
+        : null}
+      <div className="px-1.5 py-1">
+        <AutomationEventTriggersEditor
+          value={drafts}
+          disabled={!editable || saving}
+          onChange={(next) => setDrafts([...next])}
+        />
+      </div>
+      {dirty ? (
+        <div className="flex items-center justify-end gap-2 px-1.5 pb-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={saving}
+            onClick={() =>
+              setDrafts(eventTriggerDraftsFromTriggers(definition.eventTriggers ?? []))
+            }
+          >
+            Reset
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            disabled={!editable || saving}
+            title={disabledTitle}
+            onClick={save}
+          >
+            Save triggers
+          </Button>
+        </div>
+      ) : null}
+    </DetailGroup>
+  );
 }
 
 function AutomationDetailView() {
@@ -303,6 +407,8 @@ function AutomationDetailView() {
 
   const patch = (input: Omit<AutomationUpdateInput, "id">) =>
     updateMutation.mutate({ id: definition.id, ...input });
+  const saveEventTriggers = (eventTriggers: AutomationDefinition["eventTriggers"]) =>
+    patch({ eventTriggers });
 
   // One-time risk approval surfaced at the top of the panel when an already-created
   // automation still needs it (e.g. created via the API). Persists on the automation.
@@ -952,6 +1058,23 @@ function AutomationDetailView() {
                     }
                   />
                 </EditRow>
+                <EditRow label="Missed-run grace">
+                  <InlineSelect
+                    value={
+                      definition.missedRunGraceSeconds == null
+                        ? ""
+                        : String(definition.missedRunGraceSeconds)
+                    }
+                    options={missedRunGraceOptions(definition.missedRunGraceSeconds)}
+                    disabled={!editable}
+                    title={editDisabledTitle}
+                    onChange={(value) =>
+                      patch({
+                        missedRunGraceSeconds: value === "" ? null : Number.parseInt(value, 10),
+                      })
+                    }
+                  />
+                </EditRow>
                 {definition.mode === "heartbeat" ? (
                   // Heartbeat targets are the user's choice, so the thread stays editable.
                   // Dedicated threads are server-owned and keep the read-only row below.
@@ -1006,6 +1129,14 @@ function AutomationDetailView() {
                   </DetailRow>
                 ) : null}
               </DetailGroup>
+
+              <EventTriggersSection
+                definition={definition}
+                editable={editable}
+                disabledTitle={editDisabledTitle}
+                saving={updateMutation.isPending}
+                onSave={saveEventTriggers}
+              />
 
               <DetailGroup title="Memory">
                 <div className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-foreground/[0.035] px-2.5 py-2 font-mono text-ui-sm leading-relaxed text-muted-foreground">
@@ -1241,11 +1372,21 @@ function RunRow({
         openable ? "cursor-pointer hover:bg-foreground/[0.03]" : undefined,
       )}
     >
-      <RunStatusIndicator status={run.status} />
+      <span className="flex w-32 shrink items-center gap-1.5 text-muted-foreground/80">
+        <CentralIcon
+          name={automationRunTriggerLabel(run).icon}
+          className="size-3.5 shrink-0"
+          aria-hidden="true"
+        />
+        <span className="truncate text-ui-xs">{automationRunTriggerLabel(run).label}</span>
+      </span>
+      <RunStatusPill status={run.status} />
       <div className="min-w-0 flex-1 truncate">
-        <span className="text-foreground/90">{runStatusLabel(run.status)}</span>
-        {resultTitle ? <span className="text-foreground/90"> · {resultTitle}</span> : null}
-        <span className="text-muted-foreground"> · {runResultSummary(run)}</span>
+        {resultTitle ? <span className="text-foreground/90">{resultTitle} </span> : null}
+        <span className="text-muted-foreground">
+          {resultTitle ? "· " : ""}
+          {runResultSummary(run)}
+        </span>
       </div>
       {triageActionable ? (
         <div className="flex shrink-0 items-center gap-1.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">

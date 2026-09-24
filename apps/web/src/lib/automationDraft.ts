@@ -28,6 +28,7 @@ function automationOpensItsOwnCheckout(mode: AutomationMode): boolean {
 export type AutomationCreationDraftSource = "slash" | "mention" | "dialog" | "generated";
 
 export type AutomationDraftWarningId =
+  | "approval-required-unattended"
   | "attachments-not-persisted"
   | "fast-recurring-interval"
   | "full-access"
@@ -77,8 +78,21 @@ export function buildAutomationDraftWarnings(input: {
   readonly generatedConfidence: number | null;
   readonly generatedNeedsConfirmation: boolean;
   readonly prompt: string;
+  readonly hasEventTriggers?: boolean;
 }): readonly AutomationDraftWarning[] {
   const warnings: AutomationDraftWarning[] = [];
+  if (
+    input.runtimeMode === "approval-required" &&
+    (input.schedule.type !== "manual" || input.hasEventTriggers === true)
+  ) {
+    warnings.push({
+      id: "approval-required-unattended",
+      title: "Approvals can pause unattended runs",
+      detail:
+        "Approval-required runs pause for a person before mutating tool calls; schedules and event triggers may wait until someone approves a run.",
+      requiresAcknowledgement: false,
+    });
+  }
   if (input.hasEphemeralContext) {
     warnings.push({
       id: "attachments-not-persisted",

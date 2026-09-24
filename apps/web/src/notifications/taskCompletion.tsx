@@ -8,7 +8,11 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { useMemo, useEffect, useRef, useState } from "react";
 import { toastManager } from "../components/ui/toast";
 import { resolveVisibleToastThreadIds } from "../components/ui/toastRouteVisibility";
-import { useAppSettings } from "../appSettings";
+import {
+  projectNotificationCategoryMuted,
+  useAppSettings,
+  type NotificationCategoryId,
+} from "../appSettings";
 import { isElectron } from "../env";
 import { useDiffRouteSearch } from "../hooks/useDiffRouteSearch";
 import { selectSplitView, useSplitViewStore } from "../splitViewStore";
@@ -66,21 +70,24 @@ export async function requestBrowserNotificationPermission(): Promise<BrowserNot
   return Notification.requestPermission();
 }
 
-function isWindowForeground(): boolean {
+export function isWindowForeground(): boolean {
   if (typeof document === "undefined") {
     return true;
   }
   return document.visibilityState === "visible" && document.hasFocus();
 }
 
-interface ThreadNotificationCopy {
+export interface ThreadNotificationCopy {
   title: string;
   body: string;
 }
 
 // Notification opens are generic thread activations, so they clear splitViewId
 // instead of resurrecting a hidden split pairing.
-function focusThread(threadId: Thread["id"], navigate: ReturnType<typeof useNavigate>): void {
+export function focusThread(
+  threadId: Thread["id"],
+  navigate: ReturnType<typeof useNavigate>,
+): void {
   void navigate({
     to: "/$threadId",
     params: { threadId },
@@ -88,7 +95,7 @@ function focusThread(threadId: Thread["id"], navigate: ReturnType<typeof useNavi
   });
 }
 
-async function showSystemThreadNotification(
+export async function showSystemThreadNotification(
   copy: ThreadNotificationCopy,
   threadId: Thread["id"],
   navigate: ReturnType<typeof useNavigate>,
@@ -124,7 +131,7 @@ async function showSystemThreadNotification(
   return true;
 }
 
-function showThreadToast(
+export function showThreadToast(
   copy: ThreadNotificationCopy,
   threadId: Thread["id"],
   tone: "success" | "warning",
@@ -256,8 +263,23 @@ export function TaskCompletionNotifications() {
       isWindowForeground: isWindowForeground(),
     });
 
+    // Per-project mute rules apply on top of the global switches: a muted
+    // category or an active timed mute suppresses both the toast and the OS
+    // notification for threads in that project.
+    const projectMuted = (
+      projectId: Thread["projectId"] | null,
+      category: NotificationCategoryId,
+    ): boolean =>
+      projectNotificationCategoryMuted(
+        projectId === null ? undefined : settings.projectNotificationPrefs[projectId],
+        category,
+      );
+    const projectIdForThreadId = (threadId: Thread["id"]): Thread["projectId"] | null =>
+      threads.find((thread) => thread.id === threadId)?.projectId ?? null;
+
     for (const completion of completions) {
       notifiedCompletionKeysRef.current.add(completedThreadNotificationKey(completion));
+      if (projectMuted(completion.projectId, "task-finished")) continue;
       const copy = buildTaskCompletionCopy(completion);
       if (
         settings.enableTaskCompletionToasts &&
@@ -275,6 +297,7 @@ export function TaskCompletionNotifications() {
     }
 
     for (const candidate of inputNeededCandidates) {
+      if (projectMuted(candidate.projectId, "needs-input")) continue;
       const copy = buildInputNeededCopy(candidate);
       if (
         settings.enableTaskCompletionToasts &&
@@ -292,6 +315,7 @@ export function TaskCompletionNotifications() {
     }
 
     for (const completion of terminalCompletions) {
+      if (projectMuted(projectIdForThreadId(completion.threadId), "task-finished")) continue;
       const copy = buildTerminalCompletionCopy(completion);
       if (
         settings.enableTaskCompletionToasts &&
@@ -309,6 +333,7 @@ export function TaskCompletionNotifications() {
     }
 
     for (const candidate of terminalAttentionCandidates) {
+      if (projectMuted(projectIdForThreadId(candidate.threadId), "needs-input")) continue;
       const copy = buildTerminalAttentionCopy(candidate);
       if (
         settings.enableTaskCompletionToasts &&
@@ -328,6 +353,7 @@ export function TaskCompletionNotifications() {
     navigate,
     settings.enableSystemTaskCompletionNotifications,
     settings.enableTaskCompletionToasts,
+    settings.projectNotificationPrefs,
     terminalStateByThreadId,
     threads,
     threadsHydrated,

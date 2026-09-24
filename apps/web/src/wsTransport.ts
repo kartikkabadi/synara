@@ -42,6 +42,7 @@ import {
   type ProjectDevServerEvent,
   type ProjectFileChangeEvent,
   type ProjectWatchFileInput,
+  type ReminderStreamEvent,
   type ServerConfigStreamEvent,
   type ServerLifecycleStreamEvent,
   type ServerProviderStatusesUpdatedPayload,
@@ -1557,6 +1558,14 @@ export class WsTransport {
             (event: AutomationStreamEvent) => this.emit(WS_CHANNELS.automationEvent, event),
             restartChannel,
           );
+        } else if (channel === WS_CHANNELS.reminderEvent) {
+          this.startStream(
+            client,
+            "reminder.events",
+            client[WS_METHODS.subscribeReminderEvents]({}),
+            (event: ReminderStreamEvent) => this.emit(WS_CHANNELS.reminderEvent, event),
+            restartChannel,
+          );
         } else if (channel === DEVICE_WS_CHANNELS.event) {
           this.startStream(
             client,
@@ -1606,6 +1615,7 @@ export class WsTransport {
     else if (channel === WS_CHANNELS.terminalEvent) this.stopStream("terminal.events");
     else if (channel === WS_CHANNELS.projectDevServerEvent) this.stopStream("project.devServers");
     else if (channel === WS_CHANNELS.automationEvent) this.stopStream("automation.events");
+    else if (channel === WS_CHANNELS.reminderEvent) this.stopStream("reminder.events");
     else if (channel === DEVICE_WS_CHANNELS.event) this.stopStream("device.events");
     else if (channel === COMPUTER_WS_CHANNELS.event) this.stopStream("computer.events");
     else if (channel === ORCHESTRATION_WS_CHANNELS.domainEvent)

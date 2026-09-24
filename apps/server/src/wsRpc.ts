@@ -175,6 +175,7 @@ import {
   makeResnapshotEscalationTracker,
 } from "./wsSnapshotLiveStream";
 import { PullRequestService } from "./pullRequests/Services/PullRequestService";
+import { ReminderService } from "./reminders/Services/ReminderService";
 import { resolveGitHubRepository } from "./pullRequests/repositoryResolution";
 import {
   GitHubProjectProvisioningError,
@@ -385,6 +386,7 @@ const makeWsRpcHandlersLayer = () =>
       const sidechatExpiryReactor = yield* SidechatExpiryReactor;
       const path = yield* Path.Path;
       const pullRequests = yield* PullRequestService;
+      const reminderService = yield* ReminderService;
       const profileStatsQuery = yield* ProfileStatsQuery;
       const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
       const providerAdapterRegistry = yield* ProviderAdapterRegistry;
@@ -2094,6 +2096,29 @@ const makeWsRpcHandlersLayer = () =>
             automationService.resolveProposal(input),
             "Failed to resolve automation proposal",
           ),
+        [WS_METHODS.reminderList]: () =>
+          rpcEffect(reminderService.list(), "Failed to list reminders"),
+        [WS_METHODS.reminderSet]: (input) =>
+          rpcEffect(reminderService.set(input), "Failed to set reminder"),
+        [WS_METHODS.reminderCancel]: (input) =>
+          rpcEffect(reminderService.cancel(input), "Failed to cancel reminder"),
+        [WS_METHODS.subscribeReminderEvents]: (_, { clientId }) =>
+          streamAdmission.guard(
+            clientId,
+            { key: "reminder.events" },
+            Stream.merge(
+              Stream.fromEffect(
+                reminderService.list().pipe(
+                  Effect.map(({ reminders }) => ({
+                    type: "snapshot" as const,
+                    reminders,
+                  })),
+                ),
+              ),
+              reminderService.streamEvents,
+            ).pipe(Stream.mapError((cause) => toWsRpcError(cause, "Reminder event stream failed"))),
+          ),
+
         [WS_METHODS.subscribeAutomationEvents]: (_, { clientId }) =>
           streamAdmission.guard(
             clientId,

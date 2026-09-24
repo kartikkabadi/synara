@@ -29,7 +29,11 @@ describe("automation draft warnings", () => {
       prompt: "Use $sentry to inspect crashes.",
     });
 
-    expect(warnings.map((warning) => warning.id)).toEqual(["worktree-cleanup", "skill-reference"]);
+    expect(warnings.map((warning) => warning.id)).toEqual([
+      "approval-required-unattended",
+      "worktree-cleanup",
+      "skill-reference",
+    ]);
   });
 
   it("blocks direct submission when composer context is not persisted", () => {
@@ -46,11 +50,15 @@ describe("automation draft warnings", () => {
 
     expect(warnings).toMatchObject([
       {
+        id: "approval-required-unattended",
+        requiresAcknowledgement: false,
+      },
+      {
         id: "attachments-not-persisted",
         requiresAcknowledgement: true,
       },
     ]);
-    expect(warnings[0]?.detail).toContain("provider mentions");
+    expect(warnings[1]?.detail).toContain("provider mentions");
     expect(hasBlockingAutomationDraftWarnings(warnings, new Set())).toBe(true);
   });
 
@@ -67,6 +75,10 @@ describe("automation draft warnings", () => {
     });
 
     expect(warnings).toMatchObject([
+      {
+        id: "approval-required-unattended",
+        requiresAcknowledgement: false,
+      },
       {
         id: "local-checkout",
         requiresAcknowledgement: true,

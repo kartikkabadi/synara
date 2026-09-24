@@ -12,7 +12,14 @@ import { appSnapShortcutLabels } from "@synara/shared/appSnapShortcut";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
-import type { AppSettingsBinding } from "~/appSettings";
+import {
+  NOTIFICATION_CATEGORY_IDS,
+  NOTIFICATION_CATEGORY_LABELS,
+  projectNotificationCategoryMuted,
+  type AppSettingsBinding,
+  type NotificationCategoryId,
+  type ProjectNotificationPrefs,
+} from "~/appSettings";
 import { createLatestAppSnapRequestGuard } from "~/appSnap.logic";
 import { useRefreshOnWindowReturn } from "~/hooks/useRefreshOnWindowReturn";
 import { playAppSnapCaptureSound } from "~/lib/appSnapSound";
@@ -39,6 +46,7 @@ import { SettingsCard, SettingsRow, SettingsSection } from "./SettingsPanelPrimi
 import { Button } from "~/components/ui/button";
 import { Switch } from "~/components/ui/switch";
 import { toastManager } from "~/components/ui/toast";
+import { useStore } from "~/store";
 import { serverConfigQueryOptions } from "~/lib/serverReactQuery";
 
 function appSnapStatusText(state: DesktopAppSnapState | null): string {
@@ -55,6 +63,127 @@ function appSnapStatusText(state: DesktopAppSnapState | null): string {
 }
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
+
+const EMPTY_PROJECT_PREFS: ProjectNotificationPrefs = {
+  mutedCategories: [],
+  mutedUntil: null,
+};
+
+const MUTE_DURATION_OPTIONS = [
+  { value: "", label: "Not muted" },
+  { value: "3600", label: "Muted for 1 hour" },
+  { value: "14400", label: "Muted for 4 hours" },
+  { value: "28800", label: "Muted for 8 hours" },
+  { value: "86400", label: "Muted for 24 hours" },
+];
+
+function projectMuteSelectValue(prefs: ProjectNotificationPrefs): string {
+  if (prefs.mutedUntil === null) return "";
+  const remainingMs = Date.parse(prefs.mutedUntil) - Date.now();
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) return "";
+  const hours = Math.ceil(remainingMs / 3_600_000);
+  const preset = MUTE_DURATION_OPTIONS.find(
+    (option) => option.value !== "" && Number(option.value) >= hours * 3600,
+  );
+  return preset?.value ?? "86400";
+}
+
+function projectMuteDescription(prefs: ProjectNotificationPrefs): string {
+  if (prefs.mutedUntil !== null) {
+    const mutedUntilMs = Date.parse(prefs.mutedUntil);
+    if (Number.isFinite(mutedUntilMs) && mutedUntilMs > Date.now()) {
+      return `All alerts muted until ${new Date(mutedUntilMs).toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })}`;
+    }
+  }
+  if (
+    NOTIFICATION_CATEGORY_IDS.every((category) => projectNotificationCategoryMuted(prefs, category))
+  ) {
+    return "All alerts muted for this project";
+  }
+  return "Choose which alerts this project can send.";
+}
+
+function PerProjectNotificationRows({
+  settings,
+  updateSettings,
+}: Pick<AppSettingsBinding, "settings" | "updateSettings">) {
+  const projects = useStore((state) => state.projects);
+  if (projects.length === 0) return null;
+
+  const prefsFor = (projectId: string): ProjectNotificationPrefs =>
+    settings.projectNotificationPrefs[projectId] ?? EMPTY_PROJECT_PREFS;
+  const writePrefs = (projectId: string, prefs: ProjectNotificationPrefs) =>
+    updateSettings({
+      projectNotificationPrefs: { ...settings.projectNotificationPrefs, [projectId]: prefs },
+    });
+
+  return (
+    <SettingsSection title="Per project">
+      {projects.map((project) => {
+        const prefs = prefsFor(project.id);
+        return (
+          <SettingsRow
+            key={project.id}
+            title={project.name}
+            description={projectMuteDescription(prefs)}
+            control={
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
+                <select
+                  value={projectMuteSelectValue(prefs)}
+                  onChange={(event) => {
+                    const seconds = event.target.value;
+                    writePrefs(project.id, {
+                      ...prefs,
+                      mutedUntil:
+                        seconds === ""
+                          ? null
+                          : new Date(Date.now() + Number(seconds) * 1000).toISOString(),
+                    });
+                  }}
+                  aria-label={`Mute ${project.name} notifications`}
+                  className="rounded-md border border-border bg-transparent px-2 py-1.5 text-ui leading-snug outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  {MUTE_DURATION_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="flex flex-wrap items-center gap-3">
+                  {NOTIFICATION_CATEGORY_IDS.map((category: NotificationCategoryId) => (
+                    <label
+                      key={category}
+                      className="flex items-center gap-1.5 text-ui-sm leading-snug text-muted-foreground"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!prefs.mutedCategories.includes(category)}
+                        onChange={(event) =>
+                          writePrefs(project.id, {
+                            ...prefs,
+                            mutedCategories: event.target.checked
+                              ? prefs.mutedCategories.filter((entry) => entry !== category)
+                              : [...prefs.mutedCategories, category],
+                          })
+                        }
+                      />
+                      {NOTIFICATION_CATEGORY_LABELS[category]}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            }
+          />
+        );
+      })}
+    </SettingsSection>
+  );
+}
 
 export function NotificationsSettingsPanel({
   settings,
@@ -203,6 +332,8 @@ export function NotificationsSettingsPanel({
           }
         />
       </SettingsSection>
+
+      <PerProjectNotificationRows settings={settings} updateSettings={updateSettings} />
     </div>
   );
 }

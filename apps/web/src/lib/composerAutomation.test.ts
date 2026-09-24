@@ -305,7 +305,10 @@ describe("composerAutomation", () => {
       maxIterations: "3",
       prompt: "say hi",
     });
-    expect(draft.warnings.map((warning) => warning.id)).toEqual(["fast-recurring-interval"]);
+    expect(draft.warnings.map((warning) => warning.id)).toEqual([
+      "approval-required-unattended",
+      "fast-recurring-interval",
+    ]);
     expect(Array.from(draft.acknowledgedWarningIds)).toEqual(["fast-recurring-interval"]);
   });
 
@@ -399,6 +402,7 @@ describe("composerAutomation", () => {
       maxIterations: "3",
     });
     expect(draft.warnings.map((warning) => warning.id)).toEqual([
+      "approval-required-unattended",
       "fast-recurring-interval",
       "local-checkout",
       "worktree-cleanup",

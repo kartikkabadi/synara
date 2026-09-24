@@ -39,6 +39,7 @@ import { ThreadPrStatusBadge } from "~/components/pullRequest/ThreadPrStatusBadg
 import { PinStatusIcon, pinActionLabel } from "~/lib/pin";
 import { THREAD_CONTEXT_MENU_ICONS } from "~/lib/contextMenuIcons";
 import { ensureNativeApi } from "~/nativeApi";
+import { pendingReminderForThread } from "~/notifications/reminderStore";
 import { autoAnimate } from "@formkit/auto-animate";
 import { FiGitBranch } from "react-icons/fi";
 import { IoIosGitCompare } from "react-icons/io";
@@ -458,6 +459,46 @@ const readGitHubProvisioningServerCapability = () => false;
 const THREAD_PREVIEW_LIMIT = 5;
 // Each "Show more" click reveals this many extra rows; "Show less" hides them again page by page.
 const THREAD_PREVIEW_PAGE_SIZE = 5;
+
+/** Context-menu reminder presets → due timestamps. "tomorrow" = next local 9:00. */
+function reminderDueAtForMenuId(menuId: string): string | null {
+  const now = Date.now();
+  switch (menuId) {
+    case "reminder-1h":
+      return new Date(now + 60 * 60_000).toISOString();
+    case "reminder-4h":
+      return new Date(now + 4 * 60 * 60_000).toISOString();
+    case "reminder-tomorrow": {
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(9, 0, 0, 0);
+      return tomorrow.toISOString();
+    }
+    default:
+      return null;
+  }
+}
+
+const REMINDER_DUE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  hour: "2-digit",
+  minute: "2-digit",
+});
+const REMINDER_DUE_DATE_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  day: "numeric",
+  month: "short",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+function reminderDueLabel(dueAt: string): string {
+  const date = new Date(dueAt);
+  if (Number.isNaN(date.getTime())) return dueAt;
+  const sameDay = date.toDateString() === new Date().toDateString();
+  return sameDay
+    ? `today at ${REMINDER_DUE_TIME_FORMATTER.format(date)}`
+    : REMINDER_DUE_DATE_FORMATTER.format(date);
+}
+
 // Mouse clicks must not focus the paging buttons, or the focus ring lingers as a solid block
 // after the click; they should only light up on hover/press. Keyboard focus is unaffected.
 const preventFocusOnMouseDown = (event: React.MouseEvent) => {
@@ -2995,6 +3036,32 @@ export default function Sidebar() {
         envMode: thread.envMode,
         worktreePath: thread.worktreePath,
       });
+      const pendingReminder = pendingReminderForThread(threadId);
+      const reminderItems = pendingReminder
+        ? [
+            {
+              id: "reminder-cancel",
+              label: `Cancel reminder (${reminderDueLabel(pendingReminder.dueAt)})`,
+              icon: THREAD_CONTEXT_MENU_ICONS.reminder,
+            },
+          ]
+        : [
+            {
+              id: "reminder-1h",
+              label: "Remind me in 1 hour",
+              icon: THREAD_CONTEXT_MENU_ICONS.reminder,
+            },
+            {
+              id: "reminder-4h",
+              label: "Remind me in 4 hours",
+              icon: THREAD_CONTEXT_MENU_ICONS.reminder,
+            },
+            {
+              id: "reminder-tomorrow",
+              label: "Remind me tomorrow morning",
+              icon: THREAD_CONTEXT_MENU_ICONS.reminder,
+            },
+          ];
       const clicked = await api.contextMenu.show(
         [
           { id: "rename", label: "Rename thread", icon: THREAD_CONTEXT_MENU_ICONS.rename },
@@ -3013,6 +3080,7 @@ export default function Sidebar() {
               ]
             : []),
           { id: "mark-unread", label: "Mark unread", icon: THREAD_CONTEXT_MENU_ICONS.markUnread },
+          ...reminderItems,
           ...handoffItems,
           {
             id: "copy-path",
@@ -3067,6 +3135,26 @@ export default function Sidebar() {
       if (clicked === "mark-unread") {
         clearDismissedThreadStatus(threadId);
         markThreadUnread(threadId);
+        return;
+      }
+      if (typeof clicked === "string" && clicked.startsWith("reminder")) {
+        try {
+          if (clicked === "reminder-cancel") {
+            await api.reminder.cancel({ threadId });
+            toastManager.add({ type: "success", title: "Reminder canceled" });
+          } else {
+            const dueAt = reminderDueAtForMenuId(clicked);
+            if (dueAt !== null) {
+              await api.reminder.set({ threadId, dueAt });
+              toastManager.add({ type: "success", title: "Reminder set" });
+            }
+          }
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: error instanceof Error ? error.message : "Reminder update failed",
+          });
+        }
         return;
       }
       if (clicked === "clear-notification") {

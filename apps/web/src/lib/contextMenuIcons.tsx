@@ -23,6 +23,7 @@ export const THREAD_CONTEXT_MENU_ICONS = {
   rename: PENCIL_ICON_NAME,
   pin: PIN_ICON_NAME,
   clearNotification: BELL_ICON_NAME,
+  reminder: BELL_ICON_NAME,
   markUnread: EYE_OPEN_ICON_NAME,
   handoff: HANDOFF_ICON_NAME,
   copy: COPY_ICON_NAME,

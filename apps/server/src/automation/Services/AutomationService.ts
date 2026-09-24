@@ -15,6 +15,9 @@ import {
   AutomationRunActionResult,
   AutomationRunNowInput,
   AutomationRunNowResult,
+  AutomationEventRunContext,
+  AutomationEventTrigger,
+  AutomationId,
   AutomationStreamEvent,
   AutomationUpdateInput,
   ThreadId,
@@ -24,6 +27,16 @@ import { ServiceMap } from "effect";
 import type { Effect, Option, Stream } from "effect";
 
 import type { AutomationServiceError } from "../Errors.ts";
+
+/**
+ * What one event dispatch did for one automation: `dispatched` created (or queued) a run,
+ * `skipped` consumed the event without a run (disabled, pending proposal, or already
+ * claimed), `retry` left the event unconsumed for a later poll.
+ */
+export type AutomationEventDispatchResult =
+  | { readonly status: "dispatched"; readonly run: AutomationRun }
+  | { readonly status: "skipped" }
+  | { readonly status: "retry"; readonly reason: string };
 
 export interface AutomationServiceShape {
   readonly list: (
@@ -72,6 +85,25 @@ export interface AutomationServiceShape {
   readonly runNow: (
     input: AutomationRunNowInput,
   ) => Effect.Effect<AutomationRunNowResult, AutomationServiceError>;
+  /**
+   * Dispatch one external event for one automation. The event's claim row makes dispatch
+   * idempotent: a re-seen item or a competing watcher `skipped` instead of a second run.
+   * Runs queue as deferred pending runs when the automation's target thread is busy;
+   * `retry` leaves the event unconsumed so the next poll retries it.
+   */
+  readonly runEvent: (input: {
+    readonly automationId: AutomationId;
+    readonly trigger: AutomationEventTrigger;
+    readonly event: AutomationEventRunContext;
+  }) => Effect.Effect<AutomationEventDispatchResult, AutomationServiceError>;
+  /**
+   * Definitions carrying at least one event trigger (used by the event watcher).
+   * `includeDisabled` adds disabled definitions so the watcher keeps marking their feed
+   * seen while paused; they never dispatch.
+   */
+  readonly listEventTriggeredDefinitions: (input?: {
+    readonly includeDisabled?: boolean;
+  }) => Effect.Effect<ReadonlyArray<AutomationDefinition>, AutomationServiceError>;
   readonly cancelRun: (
     input: AutomationCancelRunInput,
   ) => Effect.Effect<AutomationCancelRunResult, AutomationServiceError>;
