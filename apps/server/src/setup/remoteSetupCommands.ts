@@ -439,12 +439,14 @@ export const runRemoteSetup = (
       });
     }
 
-    yield* writeLine(`Writing configuration to ${config.baseDir} …`);
-    const envFilePath = yield* writeEnvironmentFile(config);
-
     if (mode === "tailscale") {
       const serve = yield* configureTailscaleServe(config.port);
       if (serve.configured) {
+        // A reused mapping may live on a non-443 tailnet port — reflect it in
+        // the public URL and the pairing link.
+        if (serve.servePort && serve.servePort !== 443 && config.publicUrl) {
+          config.publicUrl = `https://${tailscale.dnsName}:${serve.servePort}`;
+        }
         yield* writeLine(`tailscale serve → ${config.publicUrl}`);
       } else {
         const hint =
@@ -458,6 +460,9 @@ export const runRemoteSetup = (
         );
       }
     }
+
+    yield* writeLine(`Writing configuration to ${config.baseDir} …`);
+    const envFilePath = yield* writeEnvironmentFile(config);
 
     const pairing =
       config.mode === "loopback"

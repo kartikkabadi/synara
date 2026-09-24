@@ -29,6 +29,7 @@ import {
   parseTailscaleStatus,
   renderEnvironmentFile,
   renderSystemdUserService,
+  shellQuotePath,
   systemdUserUnitDirectory,
   type CommandResultSummary,
   type RemoteSetupConfig,
@@ -185,6 +186,8 @@ export interface TailscaleServeResult {
   readonly detail: string;
   /** The existing `/` proxy target found in serve config, when it blocks us. */
   readonly conflict?: string | undefined;
+  /** The tailnet HTTPS port actually serving us (defaults to 443). */
+  readonly servePort?: number | undefined;
 }
 
 /**
@@ -214,9 +217,13 @@ export const configureTailscaleServe = (
     }
     if (status.ok) {
       const parsed = parseTailscaleServeStatus(status.output);
-      for (const proxy of parsed.rootProxies) {
-        if (proxy === target || proxy === `http://localhost:${port}`) {
-          return { configured: true, detail: `Already serving ${target} on the tailnet.` };
+      for (const mount of parsed.rootMounts) {
+        if (mount.proxy === target || mount.proxy === `http://localhost:${port}`) {
+          return {
+            configured: true,
+            servePort: mount.port,
+            detail: `Already serving ${target} on the tailnet.`,
+          };
         }
       }
       if (parsed.serving && parsed.rootProxies.length > 0) {
@@ -426,7 +433,7 @@ export const startDetachedServer = (input: {
 }): Effect.Effect<number, RemoteSetupError, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const shellCommand = `set -a; . ${input.envFilePath}; set +a; nohup ${input.executablePath} ${input.entrypointPath} --no-browser >>${input.logPath} 2>&1 </dev/null & echo $!`;
+    const shellCommand = `set -a; . ${shellQuotePath(input.envFilePath)}; set +a; nohup ${shellQuotePath(input.executablePath)} ${shellQuotePath(input.entrypointPath)} --no-browser >>${shellQuotePath(input.logPath)} 2>&1 </dev/null & echo $!`;
     const pidLine = yield* spawner
       .string(
         ChildProcess.make("sh", ["-c", shellCommand], {

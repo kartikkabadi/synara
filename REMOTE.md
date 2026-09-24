@@ -2,6 +2,13 @@
 
 Use this when you want to open Synara from another device (phone, tablet, another laptop) — for example a headless Linux VPS you reach through Tailscale.
 
+## Pick your access mode
+
+- **The other device is on your tailnet** → Tailscale mode (recommended). Real HTTPS on `https://<machine>.<tail>.ts.net`, nothing exposed to the public internet.
+- **You have a domain / TLS-terminating proxy or tunnel** (nginx, Caddy, `cloudflared`, Funnel) → public-URL mode. The wizard configures `--public-url` and keeps the server on loopback.
+- **Trusted LAN, no TLS available** → insecure-LAN mode. Authenticated, but plaintext on the wire — last resort.
+- **You only need SSH port-forwarding** (`ssh -L`) or localhost use → loopback mode.
+
 ## One-command install (recommended)
 
 On the machine that should host Synara:
@@ -30,6 +37,27 @@ curl -fsSL .../install-synara-server.sh | bash -s -- --yes --access tailscale --
 Useful installer overrides: `SYNARA_VERSION` (pin a release), `SYNARA_TARBALL` (install a local tarball offline), `SYNARA_INSTALL_DIR`, `SYNARA_NO_SETUP=1` (install only, no wizard), `SYNARA_NODE_VERSION` (pinned fallback Node).
 
 Run `synara setup --help` for all flags (`--access`, `--service`, `--port`, `--host`, `--public-url`, `--pair-url`, `--pair-ttl`, `--yes`).
+
+> NOTE: The one-line installer URL goes live when this lands on `main`. Until then, test it with `curl -fsSL <raw-url-of-this-branch>/scripts/install-synara-server.sh | bash` or copy the script file to the host directly.
+
+## Troubleshooting
+
+| Symptom / message                                     | What it means                                     | Fix                                                                                                                |
+| ----------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- |
+| `Failed to download … (404)` from the installer       | Pinned `SYNARA_VERSION` doesn't exist             | Unset `SYNARA_VERSION` (uses latest) or correct the tag (`v0.9.1`, not `0.9.1`)                                    |
+| `synara: command not found` after install             | `~/.synara/bin` isn't on PATH                     | Re-open the shell or `export PATH="$HOME/.synara/bin:$PATH"` (also printed by the installer)                       |
+| `synara setup` exits immediately, no prompts          | Non-interactive stdin (piped/SSH without TTY)     | Pass all flags + `--yes` (e.g. `synara setup --access tailscale --yes`), or run in a real terminal                 |
+| `Tailscale is not installed`                          | No `tailscaled` found                             | `curl -fsSL https://tailscale.com/install.sh                                                                       | sh && sudo tailscale up`, then re-run setup |
+| `tailscaled is installed but not running`             | Daemon stopped                                    | `sudo systemctl enable --now tailscaled && tailscale up`                                                           |
+| `HTTPS certificates aren't enabled for this tailnet`  | `tailscale serve` needs MagicDNS + HTTPS certs on | Tailscale admin console → DNS → enable **MagicDNS** and **HTTPS Certificates**, then re-run                        |
+| `tailscale serve` warning: permission denied          | Serve needs the tailscale operator/permissions    | `sudo tailscale serve --bg http://127.0.0.1:<port>` or add yourself as operator (`tailscale set --operator=$USER`) |
+| `a different tailscale serve mapping already exists`  | Root path is mapped to another port               | `tailscale serve --bg http://127.0.0.1:<port>` to replace it, or use `--port` to match the existing                |
+| `Port 3773 is already in use`                         | Something else holds the port                     | `synara setup --port <free-port>` or stop the other process                                                        |
+| `a Synara server is already running`                  | An existing instance holds the data dir           | `synara server status` to inspect; `systemctl --user stop synara` / kill it, then re-run                           |
+| `systemd --user not found` and service install fails  | Headless box without user systemd / linger        | Pick `nohup` service mode, or `sudo loginctl enable-linger $USER` + relog for user units                           |
+| Server failed the health check after start            | Crash at boot (bad env, locked DB, port race)     | `journalctl --user -u synara -n 50` or read `~/.synara/server.log` for the real error                              |
+| Pairing URL expired / already used                    | One-time link, 10 min TTL                         | `synara server pair` (server stopped) or mint from Settings → pairing while running                                |
+| Browser can't reach `https://<machine>.<tail>.ts.net` | Device isn't on the tailnet                       | Install Tailscale on that device and join the same tailnet; check `tailscale ping <machine>`                       |
 
 ### Re-minting a pairing URL
 

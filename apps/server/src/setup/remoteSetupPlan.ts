@@ -32,7 +32,8 @@ export interface RemoteSetupConfig {
   readonly baseDir: string;
   readonly port: number;
   readonly host: string;
-  readonly publicUrl?: string | undefined;
+  /** Set at config time; the tailscale path may correct it to the live serve port. */
+  publicUrl?: string | undefined;
   readonly authToken: string;
   readonly allowInsecureRemote: boolean;
 }
@@ -50,6 +51,21 @@ const SHELL_SAFE_VALUE = /^[A-Za-z0-9._~:\-/@%+=,]+$/u;
 export function renderEnvironmentAssignment(key: string, value: string): string {
   if (SHELL_SAFE_VALUE.test(value)) return `${key}=${value}`;
   return `${key}='${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Single-quote a path for embedding in a `sh -c` command or printed shell
+ * instructions. Required even when the path looks safe — a home dir like
+ * `/home/first last` otherwise breaks `source`/`nohup` lines.
+ */
+export function shellQuotePath(value: string): string {
+  if (SHELL_SAFE_VALUE.test(value)) return value;
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/** Double-quote a path for systemd unit directives (ExecStart, EnvironmentFile). */
+export function systemdQuotePath(value: string): string {
+  return `"${value.replace(/["\\]/g, "\\$&")}"`;
 }
 
 /** Maps the resolved setup config to the environment the server runs with. */
@@ -103,21 +119,21 @@ export function renderSystemdUserService(options: SystemdUserServiceOptions): st
     "Type=simple",
     // EnvironmentFile holds SYNARA_AUTH_TOKEN, keeping the secret out of the
     // unit's world-readable ExecStart/process list.
-    `EnvironmentFile=${options.envFilePath}`,
-    `ExecStart=${options.executablePath} ${options.entrypointPath}`,
+    `EnvironmentFile=${systemdQuotePath(options.envFilePath)}`,
+    `ExecStart=${systemdQuotePath(options.executablePath)} ${systemdQuotePath(options.entrypointPath)}`,
     // A provider/agent child OOMing must not take down the control plane.
     "OOMPolicy=continue",
     "Restart=always",
     "RestartSec=5s",
   ];
   if (options.workingDirectory) {
-    lines.push(`WorkingDirectory=${options.workingDirectory}`);
+    lines.push(`WorkingDirectory=${systemdQuotePath(options.workingDirectory)}`);
   }
   if (options.logFilePath) {
     // Journald covers most hosts; append-file keeps logs reachable where the
     // user journal isn't (minimal systemd, containers).
-    lines.push(`StandardOutput=append:${options.logFilePath}`);
-    lines.push(`StandardError=append:${options.logFilePath}`);
+    lines.push(`StandardOutput=append:${systemdQuotePath(options.logFilePath)}`);
+    lines.push(`StandardError=append:${systemdQuotePath(options.logFilePath)}`);
   }
   lines.push("", "[Install]", "WantedBy=default.target", "");
   return lines.join("\n");
@@ -187,9 +203,11 @@ export function isTailscaleCgnatIpv4(ip: string): boolean {
 export function parseTailscaleServeStatus(rawOutput: string): {
   readonly serving: boolean;
   readonly rootProxies: ReadonlyArray<string>;
+  /** Each `/` mount's listen port (from the Web host:port key) paired with its target. */
+  readonly rootMounts: ReadonlyArray<{ readonly port: number; readonly proxy: string }>;
 } {
   const trimmed = rawOutput.trim();
-  const empty = { serving: false, rootProxies: [] as const };
+  const empty = { serving: false, rootProxies: [] as const, rootMounts: [] as const };
   if (!trimmed) return empty;
   try {
     const decoded: unknown = JSON.parse(trimmed);
@@ -198,21 +216,27 @@ export function parseTailscaleServeStatus(rawOutput: string): {
     if (!web || typeof web !== "object" || Array.isArray(web)) return empty;
     if (Object.keys(web).length === 0) return empty;
     const rootProxies: string[] = [];
-    for (const hostEntry of Object.values(web)) {
+    const rootMounts: Array<{ readonly port: number; readonly proxy: string }> = [];
+    for (const [hostPort, hostEntry] of Object.entries(web)) {
       if (!hostEntry || typeof hostEntry !== "object") continue;
       const handlers = (hostEntry as Record<string, unknown>).Handlers;
       if (!handlers || typeof handlers !== "object" || Array.isArray(handlers)) continue;
       const root = (handlers as Record<string, unknown>)["/"];
       const proxy =
         root && typeof root === "object" ? (root as Record<string, unknown>).Proxy : undefined;
-      if (typeof proxy === "string") rootProxies.push(proxy);
+      if (typeof proxy !== "string") continue;
+      rootProxies.push(proxy);
+      const port = Number(hostPort.slice(hostPort.lastIndexOf(":") + 1));
+      if (Number.isInteger(port) && port > 0 && port < 65536) {
+        rootMounts.push({ port, proxy });
+      }
     }
-    return { serving: true, rootProxies };
+    return { serving: true, rootProxies, rootMounts };
   } catch {
     // Text status: a non-empty "Available within your tailnet" block means
     // serving is configured, but targets aren't machine-readable — callers
     // should treat them as unknown rather than as absent.
-    return { serving: /https?:\/\//.test(trimmed), rootProxies: [] };
+    return { serving: /https?:\/\//.test(trimmed), rootProxies: [], rootMounts: [] };
   }
 }
 
@@ -365,16 +389,17 @@ export function renderManualStartInstructions(input: {
   readonly executablePath: string;
   readonly entrypointPath?: string | undefined;
 }): ReadonlyArray<string> {
+  const envFile = shellQuotePath(input.envFilePath);
   if (!input.entrypointPath) {
     // Source checkout (the argv entry is a .ts file): the packaged
     // `node dist/index.mjs` line doesn't apply, so point at the dev runner.
     return [
-      `set -a; . ${input.envFilePath}; set +a`,
+      `set -a; . ${envFile}; set +a`,
       `bun run --cwd apps/server start  # from the repository root`,
     ];
   }
   return [
-    `set -a; . ${input.envFilePath}; set +a`,
-    `exec ${input.executablePath} ${input.entrypointPath} --no-browser`,
+    `set -a; . ${envFile}; set +a`,
+    `exec ${shellQuotePath(input.executablePath)} ${shellQuotePath(input.entrypointPath)} --no-browser`,
   ];
 }

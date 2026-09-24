@@ -23,6 +23,8 @@ import {
   renderEnvironmentFile,
   renderManualStartInstructions,
   renderSystemdUserService,
+  shellQuotePath,
+  systemdQuotePath,
   systemdUserUnitDirectory,
   tailscaleDiagnostic,
   validatePublicOrigin,
@@ -101,8 +103,8 @@ describe("renderSystemdUserService", () => {
       executablePath: "/opt/node/bin/node",
       entrypointPath: "/opt/synara/dist/index.mjs",
     });
-    expect(unit).toContain("EnvironmentFile=/home/u/.synara/synara.env");
-    expect(unit).toContain("ExecStart=/opt/node/bin/node /opt/synara/dist/index.mjs");
+    expect(unit).toContain('EnvironmentFile="/home/u/.synara/synara.env"');
+    expect(unit).toContain('ExecStart="/opt/node/bin/node" "/opt/synara/dist/index.mjs"');
     expect(unit).toContain("WantedBy=default.target");
     expect(unit).toContain("[Install]");
     expect(unit).not.toContain("tok");
@@ -121,8 +123,8 @@ describe("renderSystemdUserService", () => {
     expect(unit).toContain("OOMPolicy=continue");
     expect(unit).toContain("StartLimitIntervalSec=300");
     expect(unit).toContain("StartLimitBurst=5");
-    expect(unit).toContain("WorkingDirectory=/d");
-    expect(unit).toContain("StandardOutput=append:/d/logs/server.log");
+    expect(unit).toContain('WorkingDirectory="/d"');
+    expect(unit).toContain('StandardOutput=append:"/d/logs/server.log"');
   });
 });
 
@@ -188,6 +190,44 @@ describe("parseTailscaleStatus", () => {
   });
 });
 
+describe("path quoting", () => {
+  it("leaves shell-safe paths bare and quotes unsafe ones", () => {
+    expect(shellQuotePath("/home/u/.synara")).toBe("/home/u/.synara");
+    expect(shellQuotePath("/home/first last/.synara")).toBe("'/home/first last/.synara'");
+    expect(shellQuotePath("/x/it's")).toBe("'/x/it'\\''s'");
+  });
+
+  it("always double-quotes for systemd and escapes quotes/backslashes", () => {
+    expect(systemdQuotePath("/home/u/.synara")).toBe('"/home/u/.synara"');
+    expect(systemdQuotePath('/a"b\\c')).toBe('"/a\\"b\\\\c"');
+  });
+
+  it("quotes spaced paths inside the unit file and manual instructions", () => {
+    const unit = renderSystemdUserService({
+      serviceName: "synara",
+      envFilePath: "/home/first last/.synara/synara.env",
+      executablePath: "/opt/node bin/node",
+      entrypointPath: "/opt/synara app/dist/index.mjs",
+      workingDirectory: "/home/first last/.synara",
+      logFilePath: "/home/first last/.synara/logs/server.log",
+    });
+    expect(unit).toContain('EnvironmentFile="/home/first last/.synara/synara.env"');
+    expect(unit).toContain('ExecStart="/opt/node bin/node" "/opt/synara app/dist/index.mjs"');
+    expect(unit).toContain('WorkingDirectory="/home/first last/.synara"');
+    expect(unit).toContain('StandardOutput=append:"/home/first last/.synara/logs/server.log"');
+
+    const manual = renderManualStartInstructions({
+      envFilePath: "/home/first last/.synara/synara.env",
+      executablePath: "/opt/node bin/node",
+      entrypointPath: "/opt/synara app/dist/index.mjs",
+    });
+    expect(manual[0]).toBe("set -a; . '/home/first last/.synara/synara.env'; set +a");
+    expect(manual[1]).toBe(
+      "exec '/opt/node bin/node' '/opt/synara app/dist/index.mjs' --no-browser",
+    );
+  });
+});
+
 describe("parseTailscaleServeStatus", () => {
   it("detects serving via JSON Web block", () => {
     expect(
@@ -211,6 +251,20 @@ describe("parseTailscaleServeStatus", () => {
     );
     expect(status.serving).toBe(true);
     expect(status.rootProxies).toEqual(["http://127.0.0.1:3773"]);
+    expect(status.rootMounts).toEqual([{ port: 443, proxy: "http://127.0.0.1:3773" }]);
+  });
+
+  it("tracks the tailnet listen port for non-443 mappings", () => {
+    const status = parseTailscaleServeStatus(
+      JSON.stringify({
+        Web: {
+          "vps.tail.ts.net:8443": {
+            Handlers: { "/": { Proxy: "http://127.0.0.1:3773" } },
+          },
+        },
+      }),
+    );
+    expect(status.rootMounts).toEqual([{ port: 8443, proxy: "http://127.0.0.1:3773" }]);
   });
 
   it("reports serving but empty proxies when handlers lack a root mount", () => {
