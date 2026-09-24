@@ -26,7 +26,7 @@ The installer checks for Node.js ≥ 22.19 (installs a pinned runtime next to th
 
 For each remote mode the wizard generates a random auth token, writes a private (`0600`) `synara.env` next to your data directory, installs a service it can (user-level `systemd` with linger, a `nohup` fallback, or printed manual instructions), starts the server, waits for `/health`, and prints a **one-time owner pairing URL**. Open that URL on your other device once — it mints the authenticated owner session.
 
-Re-running the installer is safe: when the same version is already installed it skips the download and goes straight to `synara setup`, so it doubles as "reconfigure my remote access".
+Re-running the installer is safe: when the same version is already installed it skips the download and goes straight to `synara setup`. To reconfigure remote access, stop the running server first (`systemctl --user stop synara` or kill the process) — the wizard refuses to mint credentials against a live data directory.
 
 Non-interactive example (provisioning, SSH, CI):
 
@@ -36,38 +36,44 @@ curl -fsSL .../install-synara-server.sh | bash -s -- --yes --access tailscale --
 
 Useful installer overrides: `SYNARA_VERSION` (pin a release), `SYNARA_TARBALL` (install a local tarball offline), `SYNARA_INSTALL_DIR`, `SYNARA_NO_SETUP=1` (install only, no wizard), `SYNARA_NODE_VERSION` (pinned fallback Node).
 
-Run `synara setup --help` for all flags (`--access`, `--service`, `--port`, `--host`, `--public-url`, `--pair-url`, `--pair-ttl`, `--yes`).
+Run `synara setup --help` for all flags. Setup-level flags (`--access`, `--service`, `--yes`) go after `setup`; server flags (`--port`, `--host`, `--public-url`, `--auth-token`, `--home-dir`, `--allow-insecure-remote`) are parent flags and go before it, e.g. `synara --port 4001 --public-url https://synara.example.com setup --access public-url --yes`.
 
 > NOTE: The one-line installer URL goes live when this lands on `main`. Until then, test it with `curl -fsSL <raw-url-of-this-branch>/scripts/install-synara-server.sh | bash` or copy the script file to the host directly.
 
 ## Troubleshooting
 
-| Symptom / message                                     | What it means                                     | Fix                                                                                                                |
-| ----------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------- |
-| `Failed to download … (404)` from the installer       | Pinned `SYNARA_VERSION` doesn't exist             | Unset `SYNARA_VERSION` (uses latest) or correct the tag (`v0.9.1`, not `0.9.1`)                                    |
-| `synara: command not found` after install             | `~/.synara/bin` isn't on PATH                     | Re-open the shell or `export PATH="$HOME/.synara/bin:$PATH"` (also printed by the installer)                       |
-| `synara setup` exits immediately, no prompts          | Non-interactive stdin (piped/SSH without TTY)     | Pass all flags + `--yes` (e.g. `synara setup --access tailscale --yes`), or run in a real terminal                 |
-| `Tailscale is not installed`                          | No `tailscaled` found                             | `curl -fsSL https://tailscale.com/install.sh                                                                       | sh && sudo tailscale up`, then re-run setup |
-| `tailscaled is installed but not running`             | Daemon stopped                                    | `sudo systemctl enable --now tailscaled && tailscale up`                                                           |
-| `HTTPS certificates aren't enabled for this tailnet`  | `tailscale serve` needs MagicDNS + HTTPS certs on | Tailscale admin console → DNS → enable **MagicDNS** and **HTTPS Certificates**, then re-run                        |
-| `tailscale serve` warning: permission denied          | Serve needs the tailscale operator/permissions    | `sudo tailscale serve --bg http://127.0.0.1:<port>` or add yourself as operator (`tailscale set --operator=$USER`) |
-| `a different tailscale serve mapping already exists`  | Root path is mapped to another port               | `tailscale serve --bg http://127.0.0.1:<port>` to replace it, or use `--port` to match the existing                |
-| `Port 3773 is already in use`                         | Something else holds the port                     | `synara setup --port <free-port>` or stop the other process                                                        |
-| `a Synara server is already running`                  | An existing instance holds the data dir           | `synara server status` to inspect; `systemctl --user stop synara` / kill it, then re-run                           |
-| `systemd --user not found` and service install fails  | Headless box without user systemd / linger        | Pick `nohup` service mode, or `sudo loginctl enable-linger $USER` + relog for user units                           |
-| Server failed the health check after start            | Crash at boot (bad env, locked DB, port race)     | `journalctl --user -u synara -n 50` or read `~/.synara/server.log` for the real error                              |
-| Pairing URL expired / already used                    | One-time link, 10 min TTL                         | `synara server pair` (server stopped) or mint from Settings → pairing while running                                |
-| Browser can't reach `https://<machine>.<tail>.ts.net` | Device isn't on the tailnet                       | Install Tailscale on that device and join the same tailnet; check `tailscale ping <machine>`                       |
+| Symptom / message                                     | What it means                                      | Fix                                                                                                                                                             |
+| ----------------------------------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `Failed to download … (404)` from the installer       | Pinned `SYNARA_VERSION` doesn't exist              | Unset `SYNARA_VERSION` (uses latest) or correct the tag (`v0.9.1`, not `0.9.1`)                                                                                 |
+| `synara: command not found` after install             | `~/.synara/bin` isn't on PATH                      | Re-open the shell or `export PATH="$HOME/.synara/bin:$PATH"` (also printed by the installer)                                                                    |
+| `synara setup` exits immediately, no prompts          | Non-interactive stdin (piped/SSH without TTY)      | Pass all flags + `--yes` (e.g. `synara setup --access tailscale --yes`), or run in a real terminal                                                              |
+| `Tailscale is not installed`                          | No `tailscaled` found                              | `curl -fsSL https://tailscale.com/install.sh                                                                                                                    | sh && sudo tailscale up`, then re-run setup |
+| `tailscaled is installed but not running`             | Daemon stopped                                     | `sudo systemctl enable --now tailscaled && tailscale up`                                                                                                        |
+| `HTTPS certificates aren't enabled for this tailnet`  | `tailscale serve` needs MagicDNS + HTTPS certs on  | Tailscale admin console → DNS → enable **MagicDNS** and **HTTPS Certificates**, then re-run                                                                     |
+| `tailscale serve` warning: permission denied          | Serve needs the tailscale operator/permissions     | `sudo tailscale serve --bg http://127.0.0.1:<port>` (drop `--bg` on Tailscale older than ~v1.46) or add yourself as operator (`tailscale set --operator=$USER`) |
+| `a different tailscale serve mapping already exists`  | Root path is mapped to another port                | `tailscale serve --bg http://127.0.0.1:<port>` to replace it, or use `--port` to match the existing                                                             |
+| `Port 3773 is already in use`                         | Something else holds the port                      | `synara --port <free-port> setup` (the flag sits on the parent command) or stop the other process                                                               |
+| `a Synara server is already running`                  | An existing instance holds the data dir            | `synara server status` to inspect; `systemctl --user stop synara` / kill it, then re-run                                                                        |
+| `systemd --user not found` and service install fails  | Headless box without user systemd / linger         | Pick `nohup` service mode, or `sudo loginctl enable-linger $USER` + relog for user units                                                                        |
+| Server failed the health check after start            | Crash at boot (bad env, locked DB, port race)      | `journalctl --user -u synara -n 50` or read `~/.synara/userdata/logs/server.log` for the real error                                                             |
+| Pairing URL expired / already used                    | One-time link, 30 min TTL                          | `synara server pair` (server stopped) or mint from Settings → pairing while running                                                                             |
+| Browser can't reach `https://<machine>.<tail>.ts.net` | Device isn't on the tailnet                        | Install Tailscale on that device and join the same tailnet; check `tailscale ping <machine>`                                                                    |
+| `npm install` fails compiling `node-pty`              | No prebuilt binary for this libc/arch (musl, etc.) | Install build tools first — Debian/Ubuntu: `sudo apt install build-essential python3`; Alpine: `apk add build-base python3`                                     |
 
 ### Re-minting a pairing URL
 
 Pairing URLs expire and are single-use. To mint a fresh owner link while the server is **stopped**:
 
 ```bash
-synara server pair [--ttl 30m] [--url http://127.0.0.1:3773]
+synara server pair [--ttl-minutes 30] [--url http://127.0.0.1:3773]
 ```
 
 While the server is running, mint from the UI instead (Settings → pairing), since the data directory is locked to the live process.
+
+> **One host per data dir.** The database lock relies on pid liveness on the
+> same machine — sharing a `SYNARA_HOME` over NFS or between two hosts lets
+> both treat the other as dead and write to the same SQLite file. Keep each
+> `--home-dir` local to one host.
 
 ## CLI ↔ Env option map
 

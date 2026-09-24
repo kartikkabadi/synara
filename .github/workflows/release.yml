@@ -645,11 +645,20 @@ jobs:
       - name: Pack server tarball
         run: node apps/server/scripts/cli.ts pack --out release-server --app-version "${{ needs.preflight.outputs.version }}"
 
+      - name: Checksum server tarball
+        run: |
+          set -euo pipefail
+          for f in release-server/*.tar.gz; do
+            (cd release-server && sha256sum "$(basename "$f")" > "$(basename "$f").sha256")
+          done
+
       - name: Upload server tarball
         uses: actions/upload-artifact@v7
         with:
           name: server-tarball
-          path: release-server/*.tar.gz
+          path: |
+            release-server/*.tar.gz
+            release-server/*.tar.gz.sha256
           if-no-files-found: error
 
   release:
@@ -788,6 +797,7 @@ jobs:
             release-assets/*.yml
             release-assets/*.provenance.json
             release-assets/*.tar.gz
+            release-assets/*.tar.gz.sha256
           fail_on_unmatched_files: true
 
       - name: Mirror Synara artifacts onto the pinned updater feed

@@ -13,12 +13,14 @@ import {
   environmentFilePath,
   generateRemoteAuthToken,
   isPermissionFailure,
+  isPrivateLanIpv4,
   isUnknownFlagFailure,
   isWildcardHost,
   localProbeOrigin,
   parseTailscaleServeStatus,
   parseTailscaleStatus,
   publicFacingOrigin,
+  redactTailscaleSecrets,
   renderEnvironmentAssignment,
   renderEnvironmentFile,
   renderManualStartInstructions,
@@ -296,6 +298,31 @@ describe("parseTailscaleServeStatus", () => {
     expect(status.rootProxies).toEqual([]);
     expect(parseTailscaleServeStatus("").serving).toBe(false);
   });
+
+  it("captures non-Proxy / handlers so serve --bg can't silently replace them", () => {
+    const status = parseTailscaleServeStatus(
+      JSON.stringify({
+        Web: { "vps.tail.ts.net:443": { Handlers: { "/": { Path: "/var/www" } } } },
+      }),
+    );
+    expect(status.rootProxies).toEqual([]);
+    expect(status.rootMounts).toEqual([{ port: 443, proxy: "<non-proxy>" }]);
+  });
+
+  it("flags undecodable serving state so callers refuse blind applies", () => {
+    const text = parseTailscaleServeStatus("https://vps.tail.ts.net (tailnet only)\n|-- / proxy …");
+    expect(text.serving).toBe(true);
+    expect(text.targetsUnknown).toBe(true);
+
+    const json = parseTailscaleServeStatus(
+      JSON.stringify({
+        Web: { "vps.tail.ts.net:443": { Handlers: { "/": { Proxy: "http://127.0.0.1:1" } } } },
+      }),
+    );
+    expect(json.targetsUnknown).toBe(false);
+    const none = parseTailscaleServeStatus("");
+    expect(none.targetsUnknown).toBe(false);
+  });
 });
 
 describe("tailscaleDiagnostic", () => {
@@ -426,5 +453,48 @@ describe("generateRemoteAuthToken", () => {
     const token = generateRemoteAuthToken();
     expect(token).toMatch(/^[A-Za-z0-9_-]{40,}$/);
     expect(generateRemoteAuthToken()).not.toBe(token);
+  });
+});
+
+describe("isPrivateLanIpv4", () => {
+  it("accepts RFC1918, CGNAT and link-local ranges only", () => {
+    for (const addr of [
+      "10.0.0.4",
+      "10.255.255.255",
+      "172.16.0.1",
+      "172.31.254.254",
+      "192.168.1.9",
+      "100.64.0.1",
+      "100.127.255.254",
+      "169.254.10.20",
+    ]) {
+      expect(isPrivateLanIpv4(addr)).toBe(true);
+    }
+    for (const addr of [
+      "8.8.8.8",
+      "172.15.9.9",
+      "172.32.0.1",
+      "192.167.0.1",
+      "100.63.255.255",
+      "100.128.0.1",
+      "169.253.0.1",
+      "169.255.0.1",
+      "11.0.0.1",
+      "127.0.0.1",
+      "not-an-ip",
+      "1.2.3",
+      "1.2.3.4.5",
+    ]) {
+      expect(isPrivateLanIpv4(addr)).toBe(false);
+    }
+  });
+});
+
+describe("redactTailscaleSecrets", () => {
+  it("strips tskey- auth keys and leaves the rest of the output", () => {
+    expect(redactTailscaleSecrets("login via tskey-auth-abcDEF_123-xYZ done")).toBe(
+      "login via tskey-… done",
+    );
+    expect(redactTailscaleSecrets("no secrets here")).toBe("no secrets here");
   });
 });

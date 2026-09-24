@@ -91,9 +91,12 @@ export function isOwnerPrivateWindowsRuntimeAcl(snapshot: WindowsRuntimeAclSnaps
 }
 
 export class ExternalMcpBridgeError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  readonly code: string | undefined;
+
+  constructor(message: string, options?: ErrorOptions, code?: string) {
     super(message, options);
     this.name = "ExternalMcpBridgeError";
+    this.code = code;
   }
 }
 
@@ -319,6 +322,8 @@ function discoverRunningRuntime(
   if (candidates.length > 1) {
     throw new ExternalMcpBridgeError(
       `Multiple running Synara instances were found under ${baseDir}: ${candidates.map((candidate) => candidate.state.origin).join(", ")}. Stop one instance or pass a distinct --home-dir.`,
+      undefined,
+      "multiple_running_instances",
     );
   }
   return candidates[0]!;

@@ -192,6 +192,20 @@ const stageDistributionPackage = Effect.fn("stageDistributionPackage")(function*
   }
 
   const version = Option.getOrElse(appVersion, () => serverPackageJson.version);
+  const dependencies = resolveCatalogDependencies(
+    serverPackageJson.dependencies as Record<string, unknown>,
+    resolveRootWorkspaceCatalog(),
+    "apps/server dependencies",
+  );
+  // Deps the shipped runtime patches were written against — pin them so the
+  // postinstall applier's context always matches, never whatever the registry
+  // happens to serve that day.
+  const pinnedPatchTargets: Record<string, string> = {
+    "@pierre/diffs": "1.3.5",
+  };
+  for (const [name, pinned] of Object.entries(pinnedPatchTargets)) {
+    if (name in dependencies) dependencies[name] = pinned;
+  }
   const pkg = {
     name: serverPackageJson.name,
     license: serverPackageJson.license,
@@ -200,12 +214,15 @@ const stageDistributionPackage = Effect.fn("stageDistributionPackage")(function*
     type: serverPackageJson.type,
     version,
     engines: serverPackageJson.engines,
-    files: serverPackageJson.files,
-    dependencies: resolveCatalogDependencies(
-      serverPackageJson.dependencies as Record<string, unknown>,
-      resolveRootWorkspaceCatalog(),
-      "apps/server dependencies",
-    ),
+    files: [...(serverPackageJson.files as string[]), "patches", "scripts"],
+    scripts: { postinstall: "node scripts/apply-runtime-patches.mjs" },
+    dependencies,
+    // platform-node-shared arrives transitively; pin it to the exact
+    // pkg.pr.new snapshot the repo patch was written for.
+    overrides: {
+      "@effect/platform-node-shared":
+        "https://pkg.pr.new/Effect-TS/effect-smol/@effect/platform-node-shared@8881a9b606d84a6f5eb6615279138322984f5368",
+    },
   };
 
   const stagedPackageDir = yield* fs.makeTempDirectoryScoped({
@@ -231,15 +248,66 @@ const stageDistributionPackage = Effect.fn("stageDistributionPackage")(function*
     yield* fs.chmod(stagedBinPath, 0o755);
   }
   yield* applyPublishIconOverrides(repoRoot, stagedPackageDir);
+  // Runtime dependency patches: the repo's bun-side patchedDependencies never
+  // reach an npm-installed tarball, so ship the subset that touches server
+  // runtime code plus a small applier run by postinstall.
+  const runtimePatchFiles = [
+    "@effect%2Fplatform-node-shared@8881a9b.patch",
+    "@pierre%2Fdiffs@1.3.5.patch",
+  ];
+  const stagedPatchesDir = path.join(stagedPackageDir, "patches");
+  const stagedScriptsDir = path.join(stagedPackageDir, "scripts");
+  yield* fs.makeDirectory(stagedPatchesDir, { recursive: true });
+  yield* fs.makeDirectory(stagedScriptsDir, { recursive: true });
+  for (const patchFile of runtimePatchFiles) {
+    const source = path.join(repoRoot, "patches", patchFile);
+    if (!(yield* fs.exists(source))) {
+      return yield* new CliError({
+        message: `Missing runtime dependency patch: ${source}`,
+      });
+    }
+    yield* fs.copyFile(source, path.join(stagedPatchesDir, patchFile));
+  }
+  yield* fs.copyFile(
+    path.join(serverDir, "scripts", "apply-runtime-patches.mjs"),
+    path.join(stagedScriptsDir, "apply-runtime-patches.mjs"),
+  );
   yield* fs.writeFileString(
     path.join(stagedPackageDir, "package.json"),
     `${JSON.stringify(pkg, null, 2)}\n`,
   );
+  // package-lock.json so `npm install` in the extracted tarball is
+  // reproducible — the exact transitive versions the runtime patches verify
+  // against, not whatever the registry serves later.
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const lockOutput = yield* spawner
+    .string(
+      ChildProcess.make(
+        "npm",
+        ["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"],
+        { cwd: stagedPackageDir, stdin: "ignore" },
+      ),
+    )
+    .pipe(
+      Effect.mapError(
+        (cause) =>
+          new CliError({
+            message:
+              "npm lockfile generation failed (npm install --package-lock-only in the staged package).",
+            cause,
+          }),
+      ),
+    );
+  if (!(yield* fs.exists(path.join(stagedPackageDir, "package-lock.json")))) {
+    return yield* new CliError({
+      message: `npm install --package-lock-only produced no lockfile. Output: ${lockOutput}`,
+    });
+  }
   const stagedRootEntries = (yield* fs.readDirectory(stagedPackageDir)).sort();
+  const expectedEntries = ["dist", "package-lock.json", "package.json", "patches", "scripts"];
   if (
-    stagedRootEntries.length !== 2 ||
-    stagedRootEntries[0] !== "dist" ||
-    stagedRootEntries[1] !== "package.json"
+    stagedRootEntries.length !== expectedEntries.length ||
+    !expectedEntries.every((entry, index) => stagedRootEntries[index] === entry)
   ) {
     return yield* new CliError({
       message: `Unexpected CLI publish-stage entries: ${stagedRootEntries.join(", ")}`,
@@ -308,13 +376,17 @@ const packCmd = Command.make(
 
       const tarballPath = path.join(outDir, `synara-server-${version}.tar.gz`);
       yield* runCommand(
-        ChildProcess.make("tar", ["-czf", tarballPath, "dist", "package.json"], {
-          cwd: stagedPackageDir,
-          stdout: "inherit",
-          stderr: "inherit",
-          // Windows needs shell mode to resolve .cmd shims.
-          shell: process.platform === "win32",
-        }),
+        ChildProcess.make(
+          "tar",
+          ["-czf", tarballPath, "dist", "package.json", "package-lock.json", "patches", "scripts"],
+          {
+            cwd: stagedPackageDir,
+            stdout: "inherit",
+            stderr: "inherit",
+            // Windows needs shell mode to resolve .cmd shims.
+            shell: process.platform === "win32",
+          },
+        ),
       );
 
       yield* Effect.log(`[cli] Wrote server tarball: ${tarballPath}`);

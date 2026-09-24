@@ -7,6 +7,8 @@
 //          one-time owner pairing URL. Command wiring lives in main.ts.
 // Layer: Server CLI program
 
+import { createHash } from "node:crypto";
+import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { Duration, Effect, FileSystem, Option, Path } from "effect";
@@ -17,6 +19,8 @@ import { getBooleanFlagValue } from "@synara/shared/cli";
 
 import { resolveExternalMcpBaseDir } from "../externalMcp/bridge";
 import { DEFAULT_PORT, deriveServerPaths } from "../config";
+import { ensurePrivateDirectorySync } from "../privatePathPermissions";
+import { isLoopbackHost } from "../startupAccess";
 import {
   checkPortAvailable,
   configureTailscaleServe,
@@ -26,6 +30,7 @@ import {
   enableUserLinger,
   installSystemdUserService,
   issueOwnerPairingUrl,
+  readSetupEnvironmentValue,
   RemoteSetupError,
   resolvePackagedEntrypoint,
   startDetachedServer,
@@ -38,10 +43,12 @@ import {
   generateRemoteAuthToken,
   isWildcardHost,
   localProbeOrigin,
+  redactTailscaleSecrets,
   renderManualStartInstructions,
   SETUP_HEALTH_TIMEOUT_MS,
   SETUP_PAIRING_TTL,
   SETUP_SERVICE_NAME,
+  systemdUserUnitDirectory,
   tailscaleDiagnostic,
   type RemoteServiceMode,
   type RemoteSetupConfig,
@@ -193,7 +200,39 @@ const resolveConfig = (
   Effect.gen(function* () {
     const baseDir = resolveExternalMcpBaseDir(Option.getOrUndefined(parent.synaraHome));
     const port = yield* resolvePort(parent, input.interactive);
-    const authToken = Option.getOrUndefined(parent.authToken) ?? process.env.SYNARA_AUTH_TOKEN;
+    // A blank --auth-token/env value is unset, not "no auth": remote binds
+    // without a token are refused by the server at boot.
+    const rawToken = Option.getOrUndefined(parent.authToken) ?? process.env.SYNARA_AUTH_TOKEN;
+    // Re-running setup rotates the WS token unless the operator asks for one,
+    // which bricks already-paired clients — reuse the env-file token written
+    // by a previous run when present. Rotate by passing --auth-token.
+    const persistedToken = readSetupEnvironmentValue(baseDir, "SYNARA_AUTH_TOKEN");
+    const authToken = (rawToken?.trim() ? rawToken : undefined) ?? persistedToken;
+    const explicitToken = Option.getOrUndefined(parent.authToken)?.trim()
+      ? Option.getOrUndefined(parent.authToken)
+      : undefined;
+
+    // The remote modes own their bind host — an explicit --host that
+    // contradicts the mode means a misread of the flags, not an override.
+    const explicitHost = Option.getOrUndefined(parent.host);
+    const modeBindsLoopback = input.mode === "tailscale" || input.mode === "public-url";
+    if (explicitHost !== undefined) {
+      if (modeBindsLoopback && explicitHost !== "127.0.0.1" && explicitHost !== "localhost") {
+        return yield* new RemoteSetupError({
+          message: `--host ${explicitHost} contradicts --access ${input.mode} (the proxy/front-end terminates TLS; Synara must stay on loopback). Drop --host.`,
+        });
+      }
+      if (input.mode === "loopback" && !isLoopbackHost(explicitHost)) {
+        return yield* new RemoteSetupError({
+          message: `--access loopback can't bind ${explicitHost} — that's a remote bind, which needs tailscale, public-url, or insecure-lan mode.`,
+        });
+      }
+      if (input.mode === "insecure-lan" && isLoopbackHost(explicitHost)) {
+        return yield* new RemoteSetupError({
+          message: `--access insecure-lan with --host ${explicitHost} exposes nothing remotely — drop insecure-lan (use loopback) or pass a LAN interface.`,
+        });
+      }
+    }
 
     switch (input.mode) {
       case "tailscale": {
@@ -234,7 +273,7 @@ const resolveConfig = (
         if (!raw) {
           return yield* new RemoteSetupError({
             message:
-              "This mode needs the HTTPS origin your proxy exposes — pass --public-url https://… or set SYNARA_PUBLIC_URL.",
+              "This mode needs the HTTPS origin your proxy exposes — run `synara --public-url https://… setup` or set SYNARA_PUBLIC_URL.",
           });
         }
         const validated = validatePublicOrigin(raw);
@@ -261,10 +300,31 @@ const resolveConfig = (
         if (flagValue === false) {
           return yield* new RemoteSetupError({
             message:
-              "insecure-lan mode needs --allow-insecure-remote. It binds plaintext HTTP on your LAN — prefer tailscale or public-url mode.",
+              "insecure-lan binds plaintext HTTP on your LAN — run `synara --allow-insecure-remote --access insecure-lan setup` to confirm, or prefer tailscale/public-url mode.",
           });
         }
-        const host = Option.getOrUndefined(parent.host) ?? "0.0.0.0";
+        if (flagValue !== true) {
+          // Three-state flag: absent means not acknowledged, not refused.
+          const confirmed = input.interactive
+            ? yield* ask(
+                Prompt.confirm({
+                  message:
+                    "insecure-lan exposes Synara over plaintext HTTP to anyone on your network. Continue?",
+                  initial: false,
+                }),
+              )
+            : false;
+          if (!confirmed) {
+            return yield* new RemoteSetupError({
+              message:
+                "insecure-lan declined — rerun with `synara --allow-insecure-remote --access insecure-lan setup`, or pick tailscale/public-url mode.",
+            });
+          }
+        }
+        // Bind the detected LAN interface, not 0.0.0.0: on a VPS the wildcard
+        // reaches the PUBLIC NIC, exposing plaintext HTTP + bearer token to
+        // the internet. Explicit --host always wins.
+        const host = Option.getOrUndefined(parent.host) ?? detectPrimaryLanIpv4() ?? "0.0.0.0";
         return {
           mode: "insecure-lan",
           baseDir,
@@ -283,9 +343,10 @@ const resolveConfig = (
           port,
           host,
           publicUrl: undefined,
-          // Loopback needs no auth token — setting one would force pairing on
-          // same-machine browsers.
-          authToken: authToken ?? "",
+          // Loopback needs no auth token. Only an explicit --auth-token is
+          // honored here — an ambient SYNARA_AUTH_TOKEN in this shell would
+          // silently lock same-machine browsers out with no pairing link.
+          authToken: explicitToken ?? "",
           allowInsecureRemote: false,
         };
       }
@@ -304,6 +365,14 @@ const resolveServiceMode = (input: {
       new RemoteSetupError({
         message:
           "--service systemd-user needs a systemd user session, but `systemctl --user` is unavailable here. Use --service nohup or manual.",
+      }),
+    );
+  }
+  if (input.requested === "nohup" && input.platform === "win32") {
+    return Effect.fail(
+      new RemoteSetupError({
+        message:
+          "--service nohup needs a POSIX shell (sh, nohup, /dev/null) — not available on Windows. Use --service manual.",
       }),
     );
   }
@@ -388,7 +457,7 @@ export const runRemoteSetup = (
     const running = yield* detectRunningInstance(baseDir);
     if (running.running) {
       return yield* new RemoteSetupError({
-        message: `A Synara server is already running for ${baseDir}${running.origin ? ` at ${running.origin}` : ""}. Stop it first (e.g. \`systemctl --user stop synara\`), then re-run setup — a running server holds the database lock, so pairing credentials can't be minted.`,
+        message: `A Synara server is already running for ${baseDir}${running.origin ? ` at ${running.origin}` : ""}. Stop it first (e.g. \`systemctl --user stop synara\`${running.pid ? ` or \`kill ${running.pid}\`` : ""}), then re-run setup — a running server holds the database lock, so pairing credentials can't be minted.`,
       });
     }
 
@@ -435,10 +504,11 @@ export const runRemoteSetup = (
     const bindProbe = yield* checkPortAvailable(config.host, config.port);
     if (!bindProbe.available) {
       return yield* new RemoteSetupError({
-        message: `Port ${config.port} is already in use on this machine. Pass --port to pick another.`,
+        message: `Port ${config.port} is already in use on this machine. Pick another with \`synara --port <free-port> setup\`.`,
       });
     }
 
+    let tailscaleAccessBroken = false;
     if (mode === "tailscale") {
       const serve = yield* configureTailscaleServe(config.port);
       if (serve.configured) {
@@ -449,6 +519,7 @@ export const runRemoteSetup = (
         }
         yield* writeLine(`tailscale serve → ${config.publicUrl}`);
       } else {
+        tailscaleAccessBroken = true;
         const hint =
           tailscaleDiagnostic(serve.detail) === "permission-denied"
             ? `Try: sudo tailscale serve --bg http://127.0.0.1:${config.port}`
@@ -456,7 +527,7 @@ export const runRemoteSetup = (
               ? "Run `tailscale up` to join a tailnet, then re-run setup."
               : `Fix with:\n  sudo tailscale serve --bg http://127.0.0.1:${config.port}`;
         yield* writeLine(
-          `Warning: could not configure tailscale serve${serve.detail ? ` (${serve.detail})` : ""}. ${hint}`,
+          `Warning: could not configure tailscale serve${serve.detail ? ` (${redactTailscaleSecrets(serve.detail)})` : ""}. ${hint}`,
         );
       }
     }
@@ -465,7 +536,12 @@ export const runRemoteSetup = (
     const envFilePath = yield* writeEnvironmentFile(config);
 
     const pairing =
-      config.mode === "loopback"
+      // Loopback skips the mint unless a token is actually in effect —
+      // otherwise the owner link is the only way in to a locked browser.
+      // When the tailnet route never got configured, skip the mint too: the
+      // link would be dead the moment it printed (and likely expired by the
+      // time serve is fixed), so the summary points at `server pair` instead.
+      (config.mode === "loopback" && !config.authToken) || tailscaleAccessBroken
         ? undefined
         : yield* issueOwnerPairingUrl({
             baseDir: config.baseDir,
@@ -478,40 +554,108 @@ export const runRemoteSetup = (
     const derivedPaths = yield* deriveServerPaths(config.baseDir, undefined);
     let serviceSummary = "";
     let ready = false;
-    if (serviceMode === "systemd-user") {
-      const installed = yield* installSystemdUserService({
-        serviceName: SETUP_SERVICE_NAME,
-        envFilePath,
-        executablePath,
-        entrypointPath: entrypoint!,
-        workingDirectory: config.baseDir,
-        logFilePath: path.join(derivedPaths.logsDir, "server.log"),
+    // The server creates logsDir itself at boot, but nohup's `>>` redirect and
+    // systemd's `append:` sink need the directory to exist beforehand.
+    if (serviceMode !== "manual") {
+      yield* Effect.try({
+        try: () => ensurePrivateDirectorySync(derivedPaths.logsDir),
+        catch: (cause) =>
+          new RemoteSetupError({ message: `Failed to create ${derivedPaths.logsDir}.`, cause }),
       });
-      const linger = yield* enableUserLinger();
-      serviceSummary = `systemd --user unit ${installed.unitPath}${linger.enabled ? "; linger enabled (survives logout)" : ""}`;
-    } else if (serviceMode === "nohup") {
-      const pid = yield* startDetachedServer({
-        envFilePath,
-        executablePath,
-        entrypointPath: entrypoint!,
-        logPath: path.join(derivedPaths.logsDir, "server.log"),
-      });
-      serviceSummary = `nohup background process (pid ${pid}, log ${path.join(derivedPaths.logsDir, "server.log")})`;
-    } else {
-      serviceSummary = "manual start — commands below";
     }
+    // A fixed synara.service name would silently stomp a second install's
+    // unit (canary vs stable, different --home-dir). If an existing unit
+    // points at a different env file, derive a per-home suffix instead.
+    const serviceName = yield* Effect.sync((): string => {
+      if (serviceMode !== "systemd-user") return SETUP_SERVICE_NAME;
+      const home = process.env.HOME;
+      if (!home) return SETUP_SERVICE_NAME;
+      const unitPath = path.join(
+        systemdUserUnitDirectory(home, process.env.XDG_CONFIG_HOME),
+        `${SETUP_SERVICE_NAME}.service`,
+      );
+      try {
+        const contents = fs.readFileSync(unitPath, "utf8");
+        const envLine = contents.split("\n").find((line) => line.startsWith("EnvironmentFile="));
+        const ref = envLine
+          ?.slice("EnvironmentFile=".length)
+          .trim()
+          .replace(/^"|"$/g, "")
+          .replace(/%%/g, "%")
+          .replace(/\\"/g, '"');
+        if (ref && ref !== envFilePath) {
+          const hash = createHash("sha256").update(config.baseDir).digest("hex").slice(0, 6);
+          return `${SETUP_SERVICE_NAME}-${hash}`;
+        }
+      } catch {
+        // Missing or unreadable unit → the default name is safe.
+      }
+      return SETUP_SERVICE_NAME;
+    });
+    const installService =
+      serviceMode === "systemd-user"
+        ? Effect.gen(function* () {
+            const installed = yield* installSystemdUserService({
+              serviceName,
+              envFilePath,
+              executablePath,
+              entrypointPath: entrypoint!,
+              workingDirectory: config.baseDir,
+              logFilePath: path.join(derivedPaths.logsDir, "server.log"),
+            });
+            const linger = yield* enableUserLinger();
+            return `systemd --user unit ${installed.unitPath}${installed.replaced ? " (replaced existing unit)" : ""}${linger.enabled ? "; linger enabled (survives logout)" : "; linger not enabled — service stops at logout"}`;
+          })
+        : serviceMode === "nohup"
+          ? Effect.map(
+              startDetachedServer({
+                envFilePath,
+                executablePath,
+                entrypointPath: entrypoint!,
+                logPath: path.join(derivedPaths.logsDir, "server.log"),
+              }),
+              (pid) =>
+                `nohup background process (pid ${pid}, log ${path.join(derivedPaths.logsDir, "server.log")})`,
+            )
+          : Effect.succeed("manual start — commands below");
+    // A minted credential survives a failed install — print it before
+    // propagating so the owner link isn't orphaned silently.
+    serviceSummary = yield* installService.pipe(
+      Effect.tapError(() =>
+        pairing === undefined
+          ? Effect.void
+          : writeOutput([
+              "",
+              `Service setup failed — but a pairing link WAS minted (one-time, expires ${pairing.expiresAt.toISOString()}):`,
+              `  ${pairing.url}`,
+              "",
+            ]),
+      ),
+    );
 
     if (serviceMode !== "manual") {
       const probe = yield* waitForServerReady(localProbeOrigin(config));
       ready = probe.ready;
     }
 
-    const lines: Array<string> = ["", "Synara remote setup complete.", ""];
+    const lines: Array<string> = [
+      "",
+      tailscaleAccessBroken
+        ? "Synara remote setup finished — tailscale serve is NOT configured."
+        : "Synara remote setup complete.",
+      "",
+    ];
     if (config.publicUrl) lines.push(`  Public URL:   ${config.publicUrl}`);
     lines.push(`  Bind:         http://${config.host}:${config.port}`);
     lines.push(`  Data dir:     ${config.baseDir}`);
     lines.push(`  Env file:     ${envFilePath} (mode 600 — holds SYNARA_AUTH_TOKEN)`);
     lines.push(`  Service:      ${serviceSummary}`);
+    if (tailscaleAccessBroken) {
+      lines.push("");
+      lines.push("  The server is running on loopback but unreachable from your tailnet.");
+      lines.push("  After `tailscale serve` works, mint a fresh link:");
+      lines.push("    synara server pair --ttl-minutes 30");
+    }
     if (pairing) {
       lines.push("");
       lines.push(`  Pairing URL — one-time, expires ${pairing.expiresAt.toISOString()}:`);
@@ -522,7 +666,9 @@ export const runRemoteSetup = (
     if (mode === "insecure-lan") {
       lines.push("");
       lines.push(
-        "  WARNING: plaintext HTTP on your LAN. Prefer the tailscale or public-url mode when you can.",
+        isWildcardHost(config.host)
+          ? "  WARNING: plaintext HTTP bound to ALL interfaces — on a public-facing machine that includes the internet. Prefer tailscale/public-url, or pass --host <lan-ip>."
+          : "  WARNING: plaintext HTTP on your LAN. Prefer the tailscale or public-url mode when you can.",
       );
     }
     if (serviceMode === "manual") {
@@ -535,20 +681,28 @@ export const runRemoteSetup = (
       })) {
         lines.push(`    ${line}`);
       }
+      if (pairing) {
+        lines.push("");
+        lines.push(
+          `  The pairing URL above expires ${pairing.expiresAt.toISOString()} — start the server and open it before then, or run \`synara server pair\` later for a fresh one.`,
+        );
+      }
     }
     if (serviceMode === "systemd-user") {
       lines.push("");
-      lines.push("Manage:  systemctl --user status synara | restart | stop");
-      lines.push("Logs:    journalctl --user -u synara -f");
-    }
-    if (!ready && serviceMode !== "manual") {
-      lines.push("");
-      lines.push(
-        `Note: the server did not report ready within ${SETUP_HEALTH_TIMEOUT_MS / 1000}s — check ${path.join(derivedPaths.logsDir, "server.log")}${serviceMode === "systemd-user" ? " or journalctl --user -u synara" : ""}.`,
-      );
+      lines.push(`Manage:  systemctl --user status ${serviceName} | restart | stop`);
+      lines.push(`Logs:    journalctl --user -u ${serviceName} -f`);
     }
     lines.push("");
     yield* writeOutput(lines);
+
+    if (!ready && serviceMode !== "manual") {
+      // The service was started but never answered /health — for --yes
+      // provisioning this must fail loudly, not exit 0 on a dead server.
+      return yield* new RemoteSetupError({
+        message: `The Synara server did not report ready within ${SETUP_HEALTH_TIMEOUT_MS / 1000}s. Check ${path.join(derivedPaths.logsDir, "server.log")}${serviceMode === "systemd-user" ? ` or \`journalctl --user -u ${serviceName}\`` : ""} for the crash, then re-run \`synara server status\`.`,
+      });
+    }
   });
 
 export const runServerPair = (
@@ -560,10 +714,21 @@ export const runServerPair = (
     const running = yield* detectRunningInstance(baseDir);
     if (running.running) {
       return yield* new RemoteSetupError({
-        message: `A Synara server is already running for ${baseDir}${running.origin ? ` at ${running.origin}` : ""}. Stop it first — a running server holds the database lock, so a pairing credential can't be minted.`,
+        message: `A Synara server is already running for ${baseDir}${running.origin ? ` at ${running.origin}` : ""}. Stop it first (\`systemctl --user stop synara\`${running.pid ? ` or \`kill ${running.pid}\`` : ""}) — a running server holds the database lock, so a pairing credential can't be minted.`,
       });
     }
     let baseUrl: string | undefined = Option.getOrUndefined(flags.url);
+    if (baseUrl) {
+      try {
+        const parsed = new URL(baseUrl);
+        if (parsed.origin === "null") throw new Error("no origin");
+        baseUrl = parsed.origin;
+      } catch {
+        return yield* new RemoteSetupError({
+          message: `--url ${baseUrl} is not a valid URL — pass a full origin like https://vps.tail123.ts.net or http://127.0.0.1:3773.`,
+        });
+      }
+    }
     if (!baseUrl && Option.isSome(parent.publicUrl)) {
       baseUrl = parent.publicUrl.value.toString();
     }
@@ -571,10 +736,22 @@ export const runServerPair = (
       baseUrl = process.env.SYNARA_PUBLIC_URL;
     }
     if (!baseUrl) {
-      const port = Option.isSome(parent.port) ? parent.port.value : DEFAULT_PORT;
+      // Remote installs keep their public origin in <base>/synara.env, not in
+      // this shell's environment — fall back to it before guessing loopback.
+      baseUrl = readSetupEnvironmentValue(baseDir, "SYNARA_PUBLIC_URL");
+    }
+    if (!baseUrl) {
+      const port = Option.isSome(parent.port)
+        ? parent.port.value
+        : Number(readSetupEnvironmentValue(baseDir, "SYNARA_PORT")) || DEFAULT_PORT;
       baseUrl = `http://127.0.0.1:${port}`;
     }
 
+    if (!Number.isFinite(flags.ttlMinutes) || flags.ttlMinutes < 1 || flags.ttlMinutes > 1440) {
+      return yield* new RemoteSetupError({
+        message: `--ttl-minutes must be between 1 and 1440 minutes (got ${flags.ttlMinutes}).`,
+      });
+    }
     const issued = yield* issueOwnerPairingUrl({
       baseDir,
       baseUrl,

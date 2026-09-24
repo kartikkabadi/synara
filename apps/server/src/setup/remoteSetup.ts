@@ -7,6 +7,7 @@
 
 import * as fs from "node:fs";
 import * as net from "node:net";
+import * as os from "node:os";
 import * as path from "node:path";
 
 import { Data, DateTime, Duration, Effect, FileSystem, Layer, Path, Stream } from "effect";
@@ -17,14 +18,17 @@ import { makeSqlitePersistenceLive } from "../persistence/Layers/Sqlite";
 import { BootstrapCredentialServiceLive } from "../auth/Layers/BootstrapCredentialService";
 import { BootstrapCredentialService } from "../auth/Services/BootstrapCredentialService";
 import { deriveServerPaths } from "../config";
-import { discoverServerRuntime } from "../externalMcp/bridge";
+import { discoverServerRuntime, ExternalMcpBridgeError } from "../externalMcp/bridge";
+import { DatabaseLifecycleLockedError } from "../persistence/DatabaseLifecycleLock";
 import { fetchSynaraServerStatus } from "../serverStatusCli";
+import { isWildcardHost } from "../startupAccess";
 import { makeEffectProcessCommand } from "../platform/effectProcessRuntime";
 import {
   buildPairingUrl,
   environmentFilePath,
   isPermissionFailure,
   isUnknownFlagFailure,
+  parseEnvironmentValue,
   parseTailscaleServeStatus,
   parseTailscaleStatus,
   renderEnvironmentFile,
@@ -204,56 +208,103 @@ export const configureTailscaleServe = (
   Effect.gen(function* () {
     const target = `http://127.0.0.1:${port}`;
 
-    // Inspect the existing mapping first: idempotent re-runs must not stack a
-    // second route, and a / mount pointing at a different backend would leave
-    // the pairing URL silently broken behind the wrong port.
-    let status = yield* runCommand("tailscale", ["serve", "status", "--json"], {
-      timeoutMs: 5_000,
-    });
-    if (!status.ok && isPermissionFailure(status)) {
-      status = yield* runCommand("sudo", ["-n", "tailscale", "serve", "status", "--json"], {
-        timeoutMs: 5_000,
-      });
-    }
-    if (status.ok) {
-      const parsed = parseTailscaleServeStatus(status.output);
-      for (const mount of parsed.rootMounts) {
-        if (mount.proxy === target || mount.proxy === `http://localhost:${port}`) {
-          return {
-            configured: true,
-            servePort: mount.port,
-            detail: `Already serving ${target} on the tailnet.`,
-          };
+    const readStatus = () =>
+      Effect.gen(function* () {
+        let status = yield* runCommand("tailscale", ["serve", "status", "--json"], {
+          timeoutMs: 5_000,
+        });
+        if (!status.ok && isPermissionFailure(status)) {
+          status = yield* runCommand("sudo", ["-n", "tailscale", "serve", "status", "--json"], {
+            timeoutMs: 5_000,
+          });
         }
-      }
-      if (parsed.serving && parsed.rootProxies.length > 0) {
+        return status;
+      });
+
+    const matchesTarget = (mount: { proxy: string }) =>
+      mount.proxy === target || mount.proxy === `http://localhost:${port}`;
+
+    // Inspect the existing mapping first: `serve --bg` silently REPLACES a `/`
+    // handler of the same type on the same port, so applying blindly could
+    // clobber someone else's service. Refuse on any unreadable or conflicting
+    // mount rather than stack a broken route.
+    const status = yield* readStatus();
+    if (!status.ok) {
+      return {
+        configured: false,
+        detail: `could not read \`tailscale serve status\` (${status.output.trim() || "command failed"}). Inspect it manually — applying blindly could overwrite an existing / route — then re-run setup.`,
+      };
+    }
+    const parsed = parseTailscaleServeStatus(status.output);
+    for (const mount of parsed.rootMounts) {
+      if (matchesTarget(mount)) {
         return {
-          configured: false,
-          conflict: parsed.rootProxies.join(", "),
-          detail: `tailscale serve already forwards / to ${parsed.rootProxies.join(", ")}. Remove it with \`tailscale serve --https=443 off\` (or clear the stale route), then re-run setup.`,
+          configured: true,
+          servePort: mount.port,
+          detail: `Already serving ${target} on the tailnet.`,
         };
       }
-      // serving with unparseable targets (text output) — proceed; a conflicted
-      // serve command fails loudly below either way.
+    }
+    const claimed = parsed.rootMounts.filter((m) => m.port === 443);
+    if (claimed.length > 0) {
+      const list = claimed.map((m) => m.proxy).join(", ");
+      return {
+        configured: false,
+        conflict: list,
+        detail: `tailscale serve already claims / on the tailnet (${list}). Remove it with \`tailscale serve --https=443 off\` (or clear the stale route), then re-run setup.`,
+      };
+    }
+    if (parsed.targetsUnknown) {
+      return {
+        configured: false,
+        detail: `tailscale serve is active but its routes could not be decoded — inspect \`tailscale serve status\` manually (applying blindly could overwrite an existing / route), then re-run setup.`,
+      };
     }
 
     const run = (viaSudo: boolean, extra: ReadonlyArray<string>) =>
       viaSudo
-        ? runCommand("sudo", ["-n", "tailscale", "serve", "--bg", ...extra, target], {
+        ? runCommand("sudo", ["-n", "tailscale", "serve", ...extra, target], {
             timeoutMs: 15_000,
           })
-        : runCommand("tailscale", ["serve", "--bg", ...extra, target], { timeoutMs: 15_000 });
-    let result = yield* run(false, ["--yes"]);
-    if (!result.ok && isUnknownFlagFailure(result, "--yes")) {
-      result = yield* run(false, []);
-    }
+        : runCommand("tailscale", ["serve", ...extra, target], { timeoutMs: 15_000 });
+    // Older CLIs reject --bg and/or --yes; start full-featured and degrade
+    // flag-by-flag, remembering whether persistence (--bg) survived.
+    const variants: ReadonlyArray<ReadonlyArray<string>> = [
+      ["--bg", "--yes"],
+      ["--bg"],
+      ["--yes"],
+      [],
+    ];
+    const apply = (viaSudo: boolean) =>
+      Effect.gen(function* () {
+        let result = yield* run(viaSudo, variants[0]!);
+        let used: ReadonlyArray<string> = variants[0]!;
+        for (const extra of variants.slice(1)) {
+          if (result.ok || !isUnknownFlagFailure(result)) break;
+          result = yield* run(viaSudo, extra);
+          used = extra;
+        }
+        return { result, persistent: used.includes("--bg") };
+      });
+    let { result, persistent } = yield* apply(false);
     if (!result.ok && isPermissionFailure(result)) {
-      result = yield* run(true, ["--yes"]);
-      if (!result.ok && isUnknownFlagFailure(result, "--yes")) {
-        result = yield* run(true, []);
+      ({ result, persistent } = yield* apply(true));
+    }
+
+    // Verify the daemon-side mapping regardless of the command's exit: a
+    // silently stale apply shows up here, and so does a config an older CLI
+    // wrote before dying on an unknown flag.
+    const verify = yield* readStatus();
+    if (verify.ok) {
+      const verified = parseTailscaleServeStatus(verify.output).rootMounts.find(matchesTarget);
+      if (verified) {
+        const detail = persistent
+          ? result.output
+          : `${result.output}\nNote: this Tailscale CLI doesn't support --bg — the serve mapping works now but won't survive a tailscaled restart. Upgrade Tailscale, then re-run \`tailscale serve --bg http://127.0.0.1:${port}\`.`;
+        return { configured: true, servePort: verified.port, detail };
       }
     }
-    return { configured: result.ok, detail: result.output };
+    return { configured: false, detail: result.output };
   });
 
 export const detectSystemdUser: Effect.Effect<
@@ -274,6 +325,7 @@ export interface RunningInstance {
   readonly running: boolean;
   readonly origin?: string | undefined;
   readonly multiple?: boolean | undefined;
+  readonly pid?: number | undefined;
 }
 
 /** Reports whether a live Synara server already owns this home directory. */
@@ -282,8 +334,11 @@ export const detectRunningInstance = (baseDir: string): Effect.Effect<RunningIns
     try {
       return discoverServerRuntime(baseDir);
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
-      return message.includes("Multiple running") ? "multiple" : null;
+      const multiple =
+        cause instanceof ExternalMcpBridgeError
+          ? cause.code === "multiple_running_instances"
+          : cause instanceof Error && cause.message.includes("Multiple running");
+      return multiple ? "multiple" : null;
     }
   }).pipe(
     Effect.flatMap((runtime) => {
@@ -297,15 +352,29 @@ export const detectRunningInstance = (baseDir: string): Effect.Effect<RunningIns
           timeoutMs: 2_000,
         });
         return status.reachable
-          ? { running: true, origin: runtime.state.origin }
+          ? { running: true, origin: runtime.state.origin, pid: runtime.state.pid }
           : { running: false };
       }).pipe(
         Effect.catch(() =>
-          Effect.succeed<RunningInstance>({ running: true, origin: runtime.state.origin }),
+          Effect.succeed<RunningInstance>({
+            running: true,
+            origin: runtime.state.origin,
+            pid: runtime.state.pid,
+          }),
         ),
       );
     }),
   );
+
+/** Reads one KEY from the setup env file; undefined when absent/unreadable. */
+export const readSetupEnvironmentValue = (baseDir: string, key: string): string | undefined => {
+  try {
+    const contents = fs.readFileSync(environmentFilePath(baseDir), "utf8");
+    return parseEnvironmentValue(contents, key);
+  } catch {
+    return undefined;
+  }
+};
 
 /**
  * Writes the EnvironmentFile holding SYNARA_AUTH_TOKEN next to the home dir
@@ -316,7 +385,16 @@ export const writeEnvironmentFile = (
 ): Effect.Effect<string, RemoteSetupError> =>
   Effect.try({
     try: () => {
-      ensurePrivateDirectorySync(config.baseDir);
+      // Only tighten permissions on a directory this process created — a
+      // pre-existing baseDir (--home-dir /shared/dir, or even ~) may be
+      // shared or intentionally group-accessible, and silently chmod'ing it
+      // would lock other users out. The env file itself is always 0600.
+      const baseDirExisted = fs.existsSync(config.baseDir);
+      if (baseDirExisted) {
+        fs.mkdirSync(config.baseDir, { recursive: true });
+      } else {
+        ensurePrivateDirectorySync(config.baseDir);
+      }
       const envFilePath = environmentFilePath(config.baseDir);
       // Temp+rename so an interrupted write never leaves a truncated env file.
       const tmpPath = `${envFilePath}.tmp-${process.pid}`;
@@ -343,6 +421,8 @@ export const resolvePackagedEntrypoint = (): string | undefined => {
 export interface ServiceInstallResult {
   readonly unitPath: string;
   readonly serviceName: string;
+  /** True when an existing unit was replaced. */
+  readonly replaced: boolean;
 }
 
 export const installSystemdUserService = (input: {
@@ -358,7 +438,14 @@ export const installSystemdUserService = (input: {
   ChildProcessSpawner.ChildProcessSpawner
 > =>
   Effect.gen(function* () {
-    const unitDir = systemdUserUnitDirectory(process.env.HOME ?? "", process.env.XDG_CONFIG_HOME);
+    const home = process.env.HOME;
+    if (!home) {
+      return yield* new RemoteSetupError({
+        message:
+          "HOME is not set — can't locate the systemd user unit directory (common under cron/sudo). Export HOME or use --service nohup.",
+      });
+    }
+    const unitDir = systemdUserUnitDirectory(home, process.env.XDG_CONFIG_HOME);
     const unitPath = path.join(unitDir, `${input.serviceName}.service`);
     const unitContents = renderSystemdUserService({
       serviceName: input.serviceName,
@@ -371,6 +458,10 @@ export const installSystemdUserService = (input: {
     yield* Effect.try({
       try: () => fs.mkdirSync(unitDir, { recursive: true }),
       catch: (cause) => new RemoteSetupError({ message: `Failed to create ${unitDir}.`, cause }),
+    });
+    const replaced = yield* Effect.try({
+      try: () => fs.existsSync(unitPath),
+      catch: () => new RemoteSetupError({ message: `Failed to stat ${unitPath}.` }),
     });
     yield* Effect.try({
       try: () => {
@@ -396,11 +487,16 @@ export const installSystemdUserService = (input: {
       { timeoutMs: 15_000 },
     );
     if (!enable.ok) {
+      // Don't leave an enabled unit that retry-loops at the next login —
+      // disable best-effort and tell the user the unit file still exists.
+      yield* runCommand("systemctl", ["--user", "disable", `${input.serviceName}.service`], {
+        timeoutMs: 10_000,
+      });
       return yield* new RemoteSetupError({
-        message: `systemctl --user enable --now ${input.serviceName} failed: ${enable.output}`,
+        message: `systemctl --user enable --now ${input.serviceName} failed: ${enable.output}. The unit at ${unitPath} was disabled again — remove it manually or fix the error and \`systemctl --user enable --now ${input.serviceName}\` yourself.`,
       });
     }
-    return { unitPath, serviceName: input.serviceName };
+    return { unitPath, serviceName: input.serviceName, replaced };
   });
 
 export const enableUserLinger = (): Effect.Effect<
@@ -409,10 +505,23 @@ export const enableUserLinger = (): Effect.Effect<
   ChildProcessSpawner.ChildProcessSpawner
 > =>
   Effect.gen(function* () {
-    const direct = yield* runCommand("loginctl", ["enable-linger"], { timeoutMs: 8_000 });
+    // enable-linger resolves against the calling uid when no USER is given —
+    // under sudo that's root, so pass the invoking user explicitly. Minimal
+    // containers can lack a passwd entry for the uid; fall back to it.
+    let user = process.env.SUDO_USER ?? "";
+    if (!user) {
+      try {
+        user = os.userInfo().username;
+      } catch {
+        user = String(process.getuid?.() ?? "");
+      }
+    }
+    const args = user ? ["enable-linger", user] : ["enable-linger"];
+    const direct = yield* runCommand("loginctl", args, { timeoutMs: 8_000 });
     if (direct.ok) return { enabled: true, detail: direct.output };
     if (isPermissionFailure(direct)) {
-      const elevated = yield* runCommand("sudo", ["-n", "loginctl", "enable-linger"], {
+      if (!user) return { enabled: false, detail: direct.output };
+      const elevated = yield* runCommand("sudo", ["-n", "loginctl", ...args], {
         timeoutMs: 8_000,
       });
       if (elevated.ok) return { enabled: true, detail: elevated.output };
@@ -434,12 +543,27 @@ export const startDetachedServer = (input: {
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const shellCommand = `set -a; . ${shellQuotePath(input.envFilePath)}; set +a; nohup ${shellQuotePath(input.executablePath)} ${shellQuotePath(input.entrypointPath)} --no-browser >>${shellQuotePath(input.logPath)} 2>&1 </dev/null & echo $!`;
+    // detached:false is load-bearing: with the default detached:true, `sh`
+    // gets its own process group that the `&`-launched server shares, and the
+    // spawner's scope finalizer SIGTERMs the whole group when stdout closes
+    // before `sh` exits — killing the fresh server ~half the time.
+    // Ambient SYNARA_*/VITE_* vars are scrubbed so the env file is the sole
+    // config source; an inherited VITE_DEV_SERVER_URL would flip the server
+    // into dev mode and fail the remote-access policy check.
+    const spawnEnv: Record<string, string> = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (value !== undefined && !key.startsWith("SYNARA_") && !key.startsWith("VITE_")) {
+        spawnEnv[key] = value;
+      }
+    }
     const pidLine = yield* spawner
       .string(
         ChildProcess.make("sh", ["-c", shellCommand], {
           stdin: "ignore",
           stdout: "pipe",
           stderr: "pipe",
+          detached: false,
+          env: spawnEnv,
         }),
       )
       .pipe(
@@ -457,6 +581,23 @@ export const startDetachedServer = (input: {
         message: `Background launch did not report a pid (got ${JSON.stringify(pidLine)}).`,
       });
     }
+    // The subshell reports $! before nohup even runs — a spawn that dies
+    // instantly (missing log dir, bad entrypoint) would otherwise look
+    // successful until the readiness poll times out 30s later.
+    yield* Effect.sleep(400);
+    const alive = yield* Effect.sync(() => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (!alive) {
+      return yield* new RemoteSetupError({
+        message: `The background Synara server (pid ${pid}) exited immediately — check ${input.logPath} for the error.`,
+      });
+    }
     return pid;
   });
 
@@ -472,7 +613,7 @@ export const checkPortAvailable = (
   Effect.promise(
     () =>
       new Promise<{ available: boolean }>((resolve) => {
-        const probeHost = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
+        const probeHost = isWildcardHost(host) ? "127.0.0.1" : host;
         const socket = net.createConnection({ host: probeHost, port });
         socket.setTimeout(1_500);
         socket.once("connect", () => {
@@ -527,6 +668,16 @@ export const issueOwnerPairingUrl = (input: {
   FileSystem.FileSystem | Path.Path
 > =>
   Effect.gen(function* () {
+    // A dev-mode home keeps its database under dev/, not userdata/ — minting
+    // there would land the credential in a database no server reads.
+    if (
+      fs.existsSync(path.join(input.baseDir, "dev", "state.sqlite")) &&
+      !fs.existsSync(path.join(input.baseDir, "userdata", "state.sqlite"))
+    ) {
+      return yield* new RemoteSetupError({
+        message: `${input.baseDir} belongs to a dev-mode Synara (dev/ database, not userdata/) — pairing here mints into the wrong database. Use a separate --home-dir for a fresh install, or pair from the running dev server's Settings UI.`,
+      });
+    }
     const derivedPaths = yield* deriveServerPaths(input.baseDir, undefined);
     const mint = Effect.gen(function* () {
       const credentials = yield* BootstrapCredentialService;
@@ -544,10 +695,14 @@ export const issueOwnerPairingUrl = (input: {
       ),
       Effect.scoped,
       Effect.mapError(
+        // Only the lifecycle lock means "stop the running server" — migrations,
+        // FS permission, or corrupt-DB failures need their real cause shown.
         (cause) =>
           new RemoteSetupError({
             message:
-              "Failed to mint a pairing link. A running Synara server holds the database lock for this home directory — stop it first.",
+              cause instanceof DatabaseLifecycleLockedError
+                ? "Failed to mint a pairing link. A running Synara server holds the database lock for this home directory — stop it first."
+                : `Failed to mint a pairing link: ${cause instanceof Error ? cause.message : String(cause)}`,
             cause,
           }),
       ),

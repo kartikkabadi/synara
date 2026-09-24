@@ -11,7 +11,7 @@ import * as path from "node:path";
 
 import { Duration } from "effect";
 
-import { isLoopbackHost } from "../startupAccess";
+import { isLoopbackHost, isWildcardHost } from "../startupAccess";
 
 export const SETUP_PAIRING_TTL = Duration.minutes(30);
 export const SETUP_SERVICE_NAME = "synara";
@@ -63,9 +63,13 @@ export function shellQuotePath(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-/** Double-quote a path for systemd unit directives (ExecStart, EnvironmentFile). */
+/**
+ * Double-quote a path for systemd unit directives (ExecStart,
+ * EnvironmentFile). `%` becomes `%%` so systemd's specifier expansion can't
+ * mangle a path containing e.g. `%h`.
+ */
 export function systemdQuotePath(value: string): string {
-  return `"${value.replace(/["\\]/g, "\\$&")}"`;
+  return `"${value.replace(/%/g, "%%").replace(/["\\]/g, "\\$&")}"`;
 }
 
 /** Maps the resolved setup config to the environment the server runs with. */
@@ -203,11 +207,21 @@ export function isTailscaleCgnatIpv4(ip: string): boolean {
 export function parseTailscaleServeStatus(rawOutput: string): {
   readonly serving: boolean;
   readonly rootProxies: ReadonlyArray<string>;
-  /** Each `/` mount's listen port (from the Web host:port key) paired with its target. */
+  /** Each `/` mount's listen port (from the Web host:port key) paired with its
+   *  target — `"<non-proxy>"` for Path/Text handlers that `serve` would still
+   *  replace. */
   readonly rootMounts: ReadonlyArray<{ readonly port: number; readonly proxy: string }>;
+  /** Serving state is on but mount targets couldn't be decoded — callers must
+   *  not assume `/` is free. */
+  readonly targetsUnknown: boolean;
 } {
   const trimmed = rawOutput.trim();
-  const empty = { serving: false, rootProxies: [] as const, rootMounts: [] as const };
+  const empty = {
+    serving: false,
+    rootProxies: [] as const,
+    rootMounts: [] as const,
+    targetsUnknown: false,
+  };
   if (!trimmed) return empty;
   try {
     const decoded: unknown = JSON.parse(trimmed);
@@ -222,21 +236,22 @@ export function parseTailscaleServeStatus(rawOutput: string): {
       const handlers = (hostEntry as Record<string, unknown>).Handlers;
       if (!handlers || typeof handlers !== "object" || Array.isArray(handlers)) continue;
       const root = (handlers as Record<string, unknown>)["/"];
-      const proxy =
-        root && typeof root === "object" ? (root as Record<string, unknown>).Proxy : undefined;
-      if (typeof proxy !== "string") continue;
-      rootProxies.push(proxy);
+      if (!root || typeof root !== "object") continue;
+      const proxy = (root as Record<string, unknown>).Proxy;
+      const target = typeof proxy === "string" ? proxy : "<non-proxy>";
+      if (typeof proxy === "string") rootProxies.push(proxy);
       const port = Number(hostPort.slice(hostPort.lastIndexOf(":") + 1));
       if (Number.isInteger(port) && port > 0 && port < 65536) {
-        rootMounts.push({ port, proxy });
+        rootMounts.push({ port, proxy: target });
       }
     }
-    return { serving: true, rootProxies, rootMounts };
+    return { serving: true, rootProxies, rootMounts, targetsUnknown: false };
   } catch {
     // Text status: a non-empty "Available within your tailnet" block means
     // serving is configured, but targets aren't machine-readable — callers
     // should treat them as unknown rather than as absent.
-    return { serving: /https?:\/\//.test(trimmed), rootProxies: [], rootMounts: [] };
+    const serving = /https?:\/\//.test(trimmed);
+    return { serving, rootProxies: [], rootMounts: [], targetsUnknown: serving };
   }
 }
 
@@ -280,6 +295,11 @@ export interface CommandResultSummary {
   readonly output: string;
 }
 
+/** Strips tailscale auth-key material (tskey-…) from CLI output before it is shown. */
+export function redactTailscaleSecrets(output: string): string {
+  return output.replace(/tskey-[A-Za-z0-9_-]+/g, "tskey-…");
+}
+
 /** True when a failed CLI invocation looks like a privilege problem worth retrying via sudo -n. */
 export function isPermissionFailure(result: CommandResultSummary): boolean {
   if (result.ok) return false;
@@ -288,18 +308,19 @@ export function isPermissionFailure(result: CommandResultSummary): boolean {
   );
 }
 
-/** True when the failure means the flag is unsupported (retry without it). */
-export function isUnknownFlagFailure(result: CommandResultSummary, flag: string): boolean {
+/** True when the failure means a flag is unsupported (retry without it). */
+export function isUnknownFlagFailure(result: CommandResultSummary, flag?: string): boolean {
   if (result.ok) return false;
+  const phrased =
+    /unknown (flag|option)|flag provided but not defined|no such flag|unrecognized/i.test(
+      result.output,
+    );
+  if (!phrased) return false;
+  if (flag === undefined) return true;
   // go-flag reports unknown long options single-dashed (`-yes`).
   const bare = flag.replace(/^-+/, "").toLowerCase();
   const rendered = new RegExp(`(?<![\\w-])-+${bare}(?![\\w-])`, "i");
-  return (
-    rendered.test(result.output) &&
-    /unknown (flag|option)|flag provided but not defined|no such flag|unrecognized/i.test(
-      result.output,
-    )
-  );
+  return rendered.test(result.output);
 }
 
 /** Builds the browser pairing URL exactly like `issueStartupPairingUrl` does. */
@@ -313,7 +334,8 @@ export function buildPairingUrl(baseUrl: string, credential: string): string {
 
 /** Origin used for local /health probes regardless of the public-facing URL. */
 export function localProbeOrigin(config: Pick<RemoteSetupConfig, "host" | "port">): string {
-  const host = isLoopbackHost(config.host) || config.host === "0.0.0.0" ? "127.0.0.1" : config.host;
+  const host =
+    isLoopbackHost(config.host) || isWildcardHost(config.host) ? "127.0.0.1" : config.host;
   return `http://${host.includes(":") ? `[${host}]` : host}:${config.port}`;
 }
 
@@ -324,11 +346,37 @@ export function publicFacingOrigin(config: RemoteSetupConfig): string {
 }
 
 export function systemdUserUnitDirectory(homeDirectory: string, xdgConfigHome?: string): string {
-  return path.join(xdgConfigHome || path.join(homeDirectory, ".config"), "systemd", "user");
+  // The XDG spec requires absolute values; a relative one is invalid and falls
+  // back to the default rather than resolving against the caller's cwd.
+  const configHome =
+    xdgConfigHome && path.isAbsolute(xdgConfigHome)
+      ? xdgConfigHome
+      : path.join(homeDirectory, ".config");
+  return path.join(configHome, "systemd", "user");
 }
 
 export function environmentFilePath(baseDir: string): string {
   return path.join(baseDir, SETUP_ENV_FILE_NAME);
+}
+
+/**
+ * Reads one `KEY=value` from env-file contents, understanding the quoting
+ * `renderEnvironmentAssignment` emits (bare values and POSIX single-quoted
+ * values with the '\'' escape).
+ */
+export function parseEnvironmentValue(contents: string, key: string): string | undefined {
+  const prefix = `${key}=`;
+  for (const line of contents.split("\n")) {
+    if (!line.startsWith(prefix)) continue;
+    const raw = line.slice(prefix.length);
+    if (raw.startsWith("'")) {
+      // Undo '…'\''…' POSIX single-quote escaping.
+      const inner = raw.slice(1, raw.endsWith("'") ? -1 : undefined);
+      return inner.replace(/'\\''/g, "'");
+    }
+    return raw;
+  }
+  return undefined;
 }
 
 /**
@@ -364,22 +412,40 @@ export function validatePublicOrigin(raw: string): {
   return { ok: true, origin: url.origin };
 }
 
-/** First non-loopback IPv4 on the box, used to build insecure-LAN access URLs. */
+/** RFC1918 or carrier-grade-NAT space — the ranges LAN clients can actually reach. */
+export function isPrivateLanIpv4(address: string): boolean {
+  const parts = address.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) {
+    return false;
+  }
+  const [a, b] = parts;
+  return (
+    a === 10 ||
+    (a === 172 && b !== undefined && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 100 && b !== undefined && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254)
+  );
+}
+
+/**
+ * First non-loopback IPv4 on the box, used to build insecure-LAN access URLs.
+ * Private-space addresses win over public ones — a VPN bridge or public NIC
+ * listed first would produce a URL no LAN peer can open.
+ */
 export function detectPrimaryLanIpv4(
   interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]> = os.networkInterfaces(),
 ): string | undefined {
+  const candidates: string[] = [];
   for (const infos of Object.values(interfaces)) {
     for (const info of infos ?? []) {
-      if (info.family === "IPv4" && !info.internal) return info.address;
+      if (info.family === "IPv4" && !info.internal) candidates.push(info.address);
     }
   }
-  return undefined;
+  return candidates.find(isPrivateLanIpv4) ?? candidates[0];
 }
 
-export function isWildcardHost(host: string): boolean {
-  return host === "0.0.0.0" || host === "::" || host === "*";
-}
-
+export { isWildcardHost };
 /**
  * The manual fallback the wizard prints: source the env file, then exec the
  * server entrypoint. The auth token never lands in shell history this way.
