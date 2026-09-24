@@ -25,6 +25,7 @@ import {
   environmentFilePath,
   isPermissionFailure,
   isUnknownFlagFailure,
+  parseTailscaleServeStatus,
   parseTailscaleStatus,
   renderEnvironmentFile,
   renderSystemdUserService,
@@ -55,7 +56,11 @@ const collectStreamAsString = <E>(stream: Stream.Stream<Uint8Array, E>): Effect.
 const runCommand = (
   command: string,
   args: ReadonlyArray<string>,
-  options: { readonly env?: NodeJS.ProcessEnv | undefined; readonly cwd?: string | undefined } = {},
+  options: {
+    readonly env?: NodeJS.ProcessEnv | undefined;
+    readonly cwd?: string | undefined;
+    readonly timeoutMs?: number | undefined;
+  } = {},
 ): Effect.Effect<CommandResultSummary, never, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -81,6 +86,26 @@ const runCommand = (
     } satisfies CommandResultSummary;
   }).pipe(
     Effect.scoped,
+    Effect.timeoutOption(options.timeoutMs ?? 30_000),
+    Effect.map((result) =>
+      result._tag === "Some"
+        ? result.value
+        : ({
+            ok: false,
+            exitCode: -1,
+            output: `timed out after ${options.timeoutMs ?? 30_000}ms`,
+          } satisfies CommandResultSummary),
+    ),
+    // Spawn can fail as a defect (a non-directory PATH entry makes node throw
+    // ENOTDIR synchronously) — degrade it to a non-ok result like any other
+    // detection failure instead of crashing the wizard.
+    Effect.catchDefect((cause) =>
+      Effect.succeed({
+        ok: false,
+        exitCode: -1,
+        output: cause instanceof Error ? cause.message : String(cause),
+      } satisfies CommandResultSummary),
+    ),
     Effect.catch((cause) =>
       Effect.succeed({
         ok: false,
@@ -118,10 +143,12 @@ export const detectTailscale: Effect.Effect<
     backendState: undefined,
   };
   if (!(yield* commandExists("tailscale"))) return notInstalled;
-  const status = yield* runCommand("tailscale", ["status", "--json"]);
+  const status = yield* runCommand("tailscale", ["status", "--json"], { timeoutMs: 5_000 });
   let parsed = status.ok ? parseTailscaleStatus(status.output) : null;
   if (!parsed && isPermissionFailure(status)) {
-    const elevated = yield* runCommand("sudo", ["-n", "tailscale", "status", "--json"]);
+    const elevated = yield* runCommand("sudo", ["-n", "tailscale", "status", "--json"], {
+      timeoutMs: 5_000,
+    });
     if (elevated.ok) parsed = parseTailscaleStatus(elevated.output);
   }
   if (!parsed) {
@@ -146,21 +173,59 @@ export const detectTailscale: Effect.Effect<
 export interface TailscaleServeResult {
   readonly configured: boolean;
   readonly detail: string;
+  /** The existing `/` proxy target found in serve config, when it blocks us. */
+  readonly conflict?: string | undefined;
 }
 
 /**
- * Points `tailscale serve` at the loopback server. Retries without `--yes` on
- * older CLIs that lack the flag, and through sudo -n on permission failures.
+ * Points `tailscale serve` at the loopback server. Serve config is daemon-side
+ * and survives process exit and reboots, so first inspect the current mapping:
+ * a `/` mount already pointing at our port is reused as-is; a `/` mount
+ * pointing elsewhere is a conflict we refuse to stack behind. Retries without
+ * `--yes` on older CLIs that lack the flag, and through sudo -n on permission
+ * failures.
  */
 export const configureTailscaleServe = (
   port: number,
 ): Effect.Effect<TailscaleServeResult, never, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const target = `http://127.0.0.1:${port}`;
+
+    // Inspect the existing mapping first: idempotent re-runs must not stack a
+    // second route, and a / mount pointing at a different backend would leave
+    // the pairing URL silently broken behind the wrong port.
+    let status = yield* runCommand("tailscale", ["serve", "status", "--json"], {
+      timeoutMs: 5_000,
+    });
+    if (!status.ok && isPermissionFailure(status)) {
+      status = yield* runCommand("sudo", ["-n", "tailscale", "serve", "status", "--json"], {
+        timeoutMs: 5_000,
+      });
+    }
+    if (status.ok) {
+      const parsed = parseTailscaleServeStatus(status.output);
+      for (const proxy of parsed.rootProxies) {
+        if (proxy === target || proxy === `http://localhost:${port}`) {
+          return { configured: true, detail: `Already serving ${target} on the tailnet.` };
+        }
+      }
+      if (parsed.serving && parsed.rootProxies.length > 0) {
+        return {
+          configured: false,
+          conflict: parsed.rootProxies.join(", "),
+          detail: `tailscale serve already forwards / to ${parsed.rootProxies.join(", ")}. Remove it with \`tailscale serve --https=443 off\` (or clear the stale route), then re-run setup.`,
+        };
+      }
+      // serving with unparseable targets (text output) — proceed; a conflicted
+      // serve command fails loudly below either way.
+    }
+
     const run = (viaSudo: boolean, extra: ReadonlyArray<string>) =>
       viaSudo
-        ? runCommand("sudo", ["-n", "tailscale", "serve", "--bg", ...extra, target])
-        : runCommand("tailscale", ["serve", "--bg", ...extra, target]);
+        ? runCommand("sudo", ["-n", "tailscale", "serve", "--bg", ...extra, target], {
+            timeoutMs: 15_000,
+          })
+        : runCommand("tailscale", ["serve", "--bg", ...extra, target], { timeoutMs: 15_000 });
     let result = yield* run(false, ["--yes"]);
     if (!result.ok && isUnknownFlagFailure(result, "--yes")) {
       result = yield* run(false, []);
@@ -181,7 +246,9 @@ export const detectSystemdUser: Effect.Effect<
 > = Effect.gen(function* () {
   if (process.platform !== "linux") return false;
   if (!(yield* commandExists("systemctl"))) return false;
-  const probe = yield* runCommand("systemctl", ["--user", "is-system-running"]);
+  const probe = yield* runCommand("systemctl", ["--user", "is-system-running"], {
+    timeoutMs: 8_000,
+  });
   // Exit 0 on "running"; non-zero on degraded/starting still means a live manager.
   return probe.ok || /^(degraded|starting|maintenance|initializing|stopping)/.test(probe.output);
 });
@@ -286,18 +353,19 @@ export const installSystemdUserService = (input: {
       catch: (cause) => new RemoteSetupError({ message: `Failed to write ${unitPath}.`, cause }),
     });
 
-    const reload = yield* runCommand("systemctl", ["--user", "daemon-reload"]);
+    const reload = yield* runCommand("systemctl", ["--user", "daemon-reload"], {
+      timeoutMs: 10_000,
+    });
     if (!reload.ok) {
       return yield* new RemoteSetupError({
         message: `systemctl --user daemon-reload failed: ${reload.output}. A user systemd session needs XDG_RUNTIME_DIR set (it is missing when sudoing into the machine).`,
       });
     }
-    const enable = yield* runCommand("systemctl", [
-      "--user",
-      "enable",
-      "--now",
-      `${input.serviceName}.service`,
-    ]);
+    const enable = yield* runCommand(
+      "systemctl",
+      ["--user", "enable", "--now", `${input.serviceName}.service`],
+      { timeoutMs: 15_000 },
+    );
     if (!enable.ok) {
       return yield* new RemoteSetupError({
         message: `systemctl --user enable --now ${input.serviceName} failed: ${enable.output}`,
@@ -312,10 +380,12 @@ export const enableUserLinger = (): Effect.Effect<
   ChildProcessSpawner.ChildProcessSpawner
 > =>
   Effect.gen(function* () {
-    const direct = yield* runCommand("loginctl", ["enable-linger"]);
+    const direct = yield* runCommand("loginctl", ["enable-linger"], { timeoutMs: 8_000 });
     if (direct.ok) return { enabled: true, detail: direct.output };
     if (isPermissionFailure(direct)) {
-      const elevated = yield* runCommand("sudo", ["-n", "loginctl", "enable-linger"]);
+      const elevated = yield* runCommand("sudo", ["-n", "loginctl", "enable-linger"], {
+        timeoutMs: 8_000,
+      });
       if (elevated.ok) return { enabled: true, detail: elevated.output };
       return { enabled: false, detail: elevated.output || direct.output };
     }

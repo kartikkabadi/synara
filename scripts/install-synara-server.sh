@@ -12,6 +12,8 @@
 #   SYNARA_INSTALL_DIR  Install root (default: ~/.synara-server)
 #   SYNARA_NODE_VERSION Pinned Node fallback when system node is missing/old
 #                       (default: 24.13.1; Synara needs >= 22.19)
+#   SYNARA_TARBALL      Install from a local synara-server-<ver>.tar.gz instead
+#                       of downloading (offline installs, testing).
 #   SYNARA_NO_SETUP=1   Install only — don't run the setup wizard.
 
 set -euo pipefail
@@ -97,24 +99,54 @@ else
 fi
 log "Using node: $NODE_BIN ($("$NODE_BIN" -p 'process.version'))"
 
-# --- Resolve version --------------------------------------------------------
-if [ -z "${SYNARA_VERSION:-}" ]; then
+APP_DIR="$INSTALL_DIR/app"
+
+if [ -n "${SYNARA_TARBALL:-}" ]; then
+  [ -f "$SYNARA_TARBALL" ] || die "SYNARA_TARBALL does not exist: $SYNARA_TARBALL"
+elif [ -z "${SYNARA_VERSION:-}" ]; then
   # releases/latest redirects to /releases/tag/<tag>; avoids the rate-limited API.
-  latest_url="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${SYNARA_REPO}/releases/latest" 2>/dev/null || true)"
+  if command -v curl >/dev/null 2>&1; then
+    latest_url="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${SYNARA_REPO}/releases/latest" 2>/dev/null || true)"
+  else
+    latest_url="$(wget -q --server-response --spider --max-redirect=20 "https://github.com/${SYNARA_REPO}/releases/latest" 2>&1 | sed -n 's/^ *Location: *//p' | tail -1 | tr -d '\r')"
+  fi
   SYNARA_VERSION="${latest_url##*/}"
   SYNARA_VERSION="${SYNARA_VERSION#v}"
 fi
-[ -n "${SYNARA_VERSION:-}" ] || die "could not resolve the latest Synara release — set SYNARA_VERSION explicitly (e.g. SYNARA_VERSION=0.9.1)"
-log "Installing Synara server v${SYNARA_VERSION} from ${SYNARA_REPO}…"
 
-APP_DIR="$INSTALL_DIR/app"
-ASSET="synara-server-${SYNARA_VERSION}.tar.gz"
-ASSET_URL="https://github.com/${SYNARA_REPO}/releases/download/v${SYNARA_VERSION}/${ASSET}"
+# Re-running the installer on an existing install of the same version skips
+# the download+deps entirely and goes straight to setup.
+if [ -x "$INSTALL_DIR/bin/synara" ] && [ -f "$APP_DIR/package.json" ] \
+  && [ -z "${SYNARA_TARBALL:-}" ] && [ -n "${SYNARA_VERSION:-}" ]; then
+  installed_version="$("$NODE_BIN" -p 'require("'"$APP_DIR"'/package.json").version' 2>/dev/null || true)"
+  if [ "$installed_version" = "$SYNARA_VERSION" ]; then
+    log "Synara server v${SYNARA_VERSION} already installed at $INSTALL_DIR — skipping install."
+    if [ "${SYNARA_NO_SETUP:-0}" = "1" ]; then exit 0; fi
+    if [ -e /dev/tty ]; then
+      exec "$INSTALL_DIR/bin/synara" setup "$@" < /dev/tty
+    else
+      exec "$INSTALL_DIR/bin/synara" setup "$@"
+    fi
+  fi
+fi
 
+if [ -z "${SYNARA_TARBALL:-}" ]; then
+  [ -n "${SYNARA_VERSION:-}" ] || die "could not resolve the latest Synara release — set SYNARA_VERSION explicitly (e.g. SYNARA_VERSION=0.9.1)"
+fi
+if [ -n "${SYNARA_TARBALL:-}" ]; then
+  log "Installing Synara server from local tarball ${SYNARA_TARBALL}…"
+else
+  log "Installing Synara server v${SYNARA_VERSION} from ${SYNARA_REPO}…"
+fi
 mkdir -p "$APP_DIR"
 tmp_pkg="$(mktemp)"
 trap 'rm -f "$tmp_pkg"' EXIT
-fetch "$ASSET_URL" "$tmp_pkg" || die "download failed: $ASSET_URL (does release v${SYNARA_VERSION} ship a server tarball?)"
+if [ -n "${SYNARA_TARBALL:-}" ]; then
+  cp "$SYNARA_TARBALL" "$tmp_pkg"
+else
+  ASSET_URL="https://github.com/${SYNARA_REPO}/releases/download/v${SYNARA_VERSION}/synara-server-${SYNARA_VERSION}.tar.gz"
+  fetch "$ASSET_URL" "$tmp_pkg" || die "download failed: $ASSET_URL (does release v${SYNARA_VERSION} ship a server tarball?)"
+fi
 tar -xzf "$tmp_pkg" -C "$APP_DIR"
 [ -f "$APP_DIR/dist/index.mjs" ] || die "server tarball did not contain dist/index.mjs"
 [ -f "$APP_DIR/package.json" ] || die "server tarball did not contain package.json"

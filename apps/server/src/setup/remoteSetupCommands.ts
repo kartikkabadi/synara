@@ -42,6 +42,7 @@ import {
   SETUP_HEALTH_TIMEOUT_MS,
   SETUP_PAIRING_TTL,
   SETUP_SERVICE_NAME,
+  tailscaleDiagnostic,
   type RemoteServiceMode,
   type RemoteSetupConfig,
   type RemoteSetupMode,
@@ -440,8 +441,14 @@ export const runRemoteSetup = (
       if (serve.configured) {
         yield* writeLine(`tailscale serve → ${config.publicUrl}`);
       } else {
+        const hint =
+          tailscaleDiagnostic(serve.detail) === "permission-denied"
+            ? `Try: sudo tailscale serve --bg http://127.0.0.1:${config.port}`
+            : tailscaleDiagnostic(serve.detail) === "not-logged-in"
+              ? "Run `tailscale up` to join a tailnet, then re-run setup."
+              : `Fix with:\n  sudo tailscale serve --bg http://127.0.0.1:${config.port}`;
         yield* writeLine(
-          `Warning: could not configure tailscale serve${serve.detail ? ` (${serve.detail})` : ""}. Fix with:\n  sudo tailscale serve --bg http://127.0.0.1:${config.port}`,
+          `Warning: could not configure tailscale serve${serve.detail ? ` (${serve.detail})` : ""}. ${hint}`,
         );
       }
     }
@@ -511,7 +518,7 @@ export const runRemoteSetup = (
       for (const line of renderManualStartInstructions({
         envFilePath,
         executablePath,
-        entrypointPath: entrypoint ?? "<path-to>/dist/index.mjs",
+        ...(entrypoint !== undefined ? { entrypointPath: entrypoint } : {}),
       })) {
         lines.push(`    ${line}`);
       }

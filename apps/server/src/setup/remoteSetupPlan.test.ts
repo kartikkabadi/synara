@@ -24,6 +24,7 @@ import {
   renderManualStartInstructions,
   renderSystemdUserService,
   systemdUserUnitDirectory,
+  tailscaleDiagnostic,
   validatePublicOrigin,
   type RemoteSetupConfig,
 } from "./remoteSetupPlan";
@@ -144,13 +145,62 @@ describe("parseTailscaleServeStatus", () => {
     expect(parseTailscaleServeStatus(JSON.stringify({ Web: {} })).serving).toBe(false);
   });
 
-  it("detects serving via text output", () => {
+  it("extracts root proxy targets for idempotency and conflict checks", () => {
+    const status = parseTailscaleServeStatus(
+      JSON.stringify({
+        Web: {
+          "vps.tail.ts.net:443": {
+            Handlers: {
+              "/": { Proxy: "http://127.0.0.1:3773" },
+              "/other": { Proxy: "http://127.0.0.1:9" },
+            },
+          },
+        },
+      }),
+    );
+    expect(status.serving).toBe(true);
+    expect(status.rootProxies).toEqual(["http://127.0.0.1:3773"]);
+  });
+
+  it("reports serving but empty proxies when handlers lack a root mount", () => {
+    const status = parseTailscaleServeStatus(
+      JSON.stringify({
+        Web: { "vps.tail.ts.net:443": { Handlers: { "/api": { Proxy: "http://127.0.0.1:9" } } } },
+      }),
+    );
+    expect(status.serving).toBe(true);
+    expect(status.rootProxies).toEqual([]);
+  });
+
+  it("tolerates malformed Web shapes", () => {
+    expect(parseTailscaleServeStatus(JSON.stringify({ Web: [] })).serving).toBe(false);
     expect(
-      parseTailscaleServeStatus(
-        "https://vps.tail.ts.net (tailnet only)\n|-- / proxy http://127.0.0.1:3773",
-      ).serving,
+      parseTailscaleServeStatus(JSON.stringify({ Web: { h: { Handlers: null } } })).serving,
     ).toBe(true);
+    expect(
+      parseTailscaleServeStatus(JSON.stringify({ Web: { h: { Handlers: { "/": {} } } } }))
+        .rootProxies,
+    ).toEqual([]);
+  });
+
+  it("detects serving via text output", () => {
+    const status = parseTailscaleServeStatus(
+      "https://vps.tail.ts.net (tailnet only)\n|-- / proxy http://127.0.0.1:3773",
+    );
+    expect(status.serving).toBe(true);
+    expect(status.rootProxies).toEqual([]);
     expect(parseTailscaleServeStatus("").serving).toBe(false);
+  });
+});
+
+describe("tailscaleDiagnostic", () => {
+  it("classifies known failures and never echoes raw output", () => {
+    expect(tailscaleDiagnostic("Serve config: handler does not exist")).toBe("no-existing-handler");
+    expect(tailscaleDiagnostic("Tailscale is stopped. (not logged in)")).toBe("not-logged-in");
+    expect(tailscaleDiagnostic("error: permission denied")).toBe("permission-denied");
+    expect(tailscaleDiagnostic("flag provided but not defined: -https")).toBe("unknown-flag");
+    expect(tailscaleDiagnostic("some other error")).toBe("unknown");
+    expect(tailscaleDiagnostic("   ")).toBeUndefined();
   });
 });
 
@@ -255,6 +305,14 @@ describe("paths and manual instructions", () => {
     });
     expect(lines[0]).toBe("set -a; . /d/synara.env; set +a");
     expect(lines[1]).toBe("exec /opt/node/node /opt/synara/dist/index.mjs --no-browser");
+  });
+
+  it("points source checkouts at the dev runner when no packaged entrypoint exists", () => {
+    const lines = renderManualStartInstructions({
+      envFilePath: "/d/synara.env",
+      executablePath: "/opt/node/node",
+    });
+    expect(lines[1]).toBe("bun run --cwd apps/server start  # from the repository root");
   });
 });
 

@@ -144,27 +144,76 @@ export function parseTailscaleStatus(rawJson: string): TailscaleStatusSummary | 
   };
 }
 
-/** Extracts the https serve host from `tailscale serve status` JSON or text output. */
+/**
+ * Extracts the root (`/`) proxy targets from `tailscale serve status` output.
+ * A stale mapping survives process death and reboots, so setup must detect
+ * whether port 443's `/` mount already points at our server (idempotent) or at
+ * something else (conflict — refuse rather than stack a broken route).
+ */
 export function parseTailscaleServeStatus(rawOutput: string): {
   readonly serving: boolean;
-  readonly origin?: string;
+  readonly rootProxies: ReadonlyArray<string>;
 } {
   const trimmed = rawOutput.trim();
-  if (!trimmed) return { serving: false };
+  const empty = { serving: false, rootProxies: [] as const };
+  if (!trimmed) return empty;
   try {
     const decoded: unknown = JSON.parse(trimmed);
-    if (decoded && typeof decoded === "object") {
-      const record = decoded as Record<string, unknown>;
-      const web = record.Web;
-      if (web && typeof web === "object" && Object.keys(web).length > 0) {
-        return { serving: true };
-      }
-      return { serving: false };
+    if (!decoded || typeof decoded !== "object") return empty;
+    const web = (decoded as Record<string, unknown>).Web;
+    if (!web || typeof web !== "object" || Array.isArray(web)) return empty;
+    if (Object.keys(web).length === 0) return empty;
+    const rootProxies: string[] = [];
+    for (const hostEntry of Object.values(web)) {
+      if (!hostEntry || typeof hostEntry !== "object") continue;
+      const handlers = (hostEntry as Record<string, unknown>).Handlers;
+      if (!handlers || typeof handlers !== "object" || Array.isArray(handlers)) continue;
+      const root = (handlers as Record<string, unknown>)["/"];
+      const proxy =
+        root && typeof root === "object" ? (root as Record<string, unknown>).Proxy : undefined;
+      if (typeof proxy === "string") rootProxies.push(proxy);
     }
+    return { serving: true, rootProxies };
   } catch {
-    // Text output: any non-empty "Available within your tailnet" block means serving.
+    // Text status: a non-empty "Available within your tailnet" block means
+    // serving is configured, but targets aren't machine-readable — callers
+    // should treat them as unknown rather than as absent.
+    return { serving: /https?:\/\//.test(trimmed), rootProxies: [] };
   }
-  return { serving: /https?:\/\//.test(trimmed) };
+}
+
+/**
+ * Closed-set classification of `tailscale` stderr. Raw CLI output can carry
+ * auth keys (`tskey-…`) and node names, so callers surface these labels (plus
+ * their own wording) instead of echoing stderr verbatim into summaries.
+ */
+export type TailscaleDiagnostic =
+  | "no-existing-handler"
+  | "not-logged-in"
+  | "permission-denied"
+  | "unknown-flag"
+  | "unknown";
+
+export function tailscaleDiagnostic(stderrOrOutput: string): TailscaleDiagnostic | undefined {
+  const text = stderrOrOutput.trim();
+  if (!text) return undefined;
+  if (/handler does not exist|no existing handler|serve config has no/i.test(text)) {
+    return "no-existing-handler";
+  }
+  if (/not logged in|logged out|needs login|needs to log in|tailscaled not running/i.test(text)) {
+    return "not-logged-in";
+  }
+  if (
+    /permission denied|access denied|must be (root|run as root)|operation not permitted|requires root/i.test(
+      text,
+    )
+  ) {
+    return "permission-denied";
+  }
+  if (/unknown (flag|option)|flag provided but not defined|no such flag|unrecognized/i.test(text)) {
+    return "unknown-flag";
+  }
+  return "unknown";
 }
 
 export interface CommandResultSummary {
@@ -280,8 +329,16 @@ export function isWildcardHost(host: string): boolean {
 export function renderManualStartInstructions(input: {
   readonly envFilePath: string;
   readonly executablePath: string;
-  readonly entrypointPath: string;
+  readonly entrypointPath?: string | undefined;
 }): ReadonlyArray<string> {
+  if (!input.entrypointPath) {
+    // Source checkout (the argv entry is a .ts file): the packaged
+    // `node dist/index.mjs` line doesn't apply, so point at the dev runner.
+    return [
+      `set -a; . ${input.envFilePath}; set +a`,
+      `bun run --cwd apps/server start  # from the repository root`,
+    ];
+  }
   return [
     `set -a; . ${input.envFilePath}; set +a`,
     `exec ${input.executablePath} ${input.entrypointPath} --no-browser`,

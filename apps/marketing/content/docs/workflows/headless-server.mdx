@@ -7,6 +7,20 @@ Synara releases include `synara-server-<version>.tar.gz` for running the same lo
 
 The tarball is not a single static binary. It contains the built application, package metadata, and the source-shipped iOS device helper; install its production Node dependencies before starting it.
 
+## One-command install and setup
+
+For a typical headless box (VPS, homelab server, dev machine you reach over Tailscale), skip the manual steps below entirely:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Emanuele-web04/synara/main/scripts/install-synara-server.sh | bash
+```
+
+The installer verifies or installs Node.js ≥ 22.19, downloads the latest server tarball, installs production dependencies, and launches `synara setup` — an interactive wizard that picks an access mode (Tailscale serve with HTTPS on your `*.ts.net` name, a TLS-terminating reverse proxy or tunnel, authenticated plaintext on a trusted LAN, or loopback only), generates an auth token, writes a private env file, installs a `systemd --user` service (or a `nohup` fallback), waits for `/health`, and prints the one-time owner pairing URL to open on your other device.
+
+Re-running the installer on an existing same-version install skips the download and goes straight to `synara setup`, so it also works as a "reconfigure remote access" command. Pass `SYNARA_NO_SETUP=1` to install without launching the wizard, or `--yes --access tailscale` for a non-interactive run. See [REMOTE.md](https://github.com/Emanuele-web04/synara/blob/main/REMOTE.md) for the full flag and env-var reference.
+
+While the server is stopped, `synara server pair` re-mints an expired owner pairing URL; while it is running, mint from the UI instead.
+
 ## Requirements
 
 - Node.js `22.19` or newer in the supported engine range
