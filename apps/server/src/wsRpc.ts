@@ -1,6 +1,5 @@
 import { AgentGatewaySessionRegistry } from "./agentGateway/Services/AgentGatewaySessionRegistry";
 import { execFile } from "node:child_process";
-
 import {
   CommandId,
   COMPUTER_WS_METHODS,
@@ -111,6 +110,7 @@ import {
   OrchestrationCommandPreviouslyRejectedError,
 } from "./orchestration/Errors";
 import { makeDispatchCommandNormalizer } from "./orchestration/dispatchCommandNormalization";
+import { dispatchAutomaticPullRequestReview } from "./orchestration/automaticPullRequestReview";
 import { prepareQuitResume } from "./orchestration/quitResume";
 import { makeImportThreadHandler } from "./orchestration/importThreadRoute";
 import { makeProjectImportHandlers } from "./orchestration/projectImportRoute";
@@ -1589,6 +1589,45 @@ const makeWsRpcHandlersLayer = () =>
                   },
                 })
                 .pipe(
+                  Effect.tap((result) =>
+                    Effect.gen(function* () {
+                      const threadId = input.threadId;
+                      if (!threadId) return false;
+                      let baseBranch = result.pr.baseBranch;
+                      if (!baseBranch) {
+                        const branch = result.push.branch ?? result.branch.name;
+                        if (branch) {
+                          const pullRequest = yield* gitManager
+                            .pullRequestForBranch({
+                              cwd: input.cwd,
+                              branch,
+                              upstreamRef: result.push.upstreamBranch ?? null,
+                            })
+                            .pipe(Effect.orElseSucceed(() => null));
+                          baseBranch = pullRequest?.baseBranch;
+                        }
+                      }
+                      if (!baseBranch) return false;
+                      const threadOption =
+                        yield* projectionReadModelQuery.getThreadShellById(threadId);
+                      return yield* Option.match(threadOption, {
+                        onNone: () => Effect.succeed(false),
+                        onSome: (thread) =>
+                          dispatchAutomaticPullRequestReview({
+                            orchestrationEngine,
+                            thread,
+                            baseBranch,
+                          }),
+                      });
+                    }).pipe(
+                      Effect.catchCause((cause) =>
+                        Effect.logWarning("automatic pull request review dispatch failed", {
+                          threadId: input.threadId,
+                          cause,
+                        }).pipe(Effect.as(false)),
+                      ),
+                    ),
+                  ),
                   Effect.tap(() => refreshGitStatusInBackground(input.cwd)),
                   Effect.matchCauseEffect({
                     onFailure: (cause) =>

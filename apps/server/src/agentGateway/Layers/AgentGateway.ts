@@ -44,6 +44,7 @@ import { GitCore } from "../../git/Services/GitCore.ts";
 import { GitManager } from "../../git/Services/GitManager.ts";
 import { ServerConfig } from "../../config.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
+import { dispatchAutomaticPullRequestReview } from "../../orchestration/automaticPullRequestReview.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { AutomationService } from "../../automation/Services/AutomationService.ts";
 import { buildAutomationProposalActivity } from "../../automation/proposalActivity.ts";
@@ -683,6 +684,18 @@ export const makeAgentGateway = Effect.gen(function* () {
             lastKnownPr: pullRequest,
           })
           .pipe(Effect.mapError((error) => new ToolInputError(errorText(error))));
+        yield* dispatchAutomaticPullRequestReview({
+          orchestrationEngine,
+          thread: target,
+          baseBranch: pullRequest.baseBranch,
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("automatic pull request review dispatch failed", {
+              threadId: target.id,
+              cause,
+            }).pipe(Effect.as(false)),
+          ),
+        );
         return mcpToolResultJson({ threadId: target.id, pullRequest });
       }).pipe(Effect.catch((error) => Effect.succeed(mcpToolResultError(errorText(error))))),
   };

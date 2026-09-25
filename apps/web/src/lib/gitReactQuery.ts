@@ -7,6 +7,7 @@ import type {
   ModelSelection,
   NativeApi,
   ProviderStartOptions,
+  ThreadId,
 } from "@synara/contracts";
 import { mutationOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
 import { ensureNativeApi } from "../nativeApi";
@@ -805,6 +806,7 @@ export function gitUnstageFilesMutationOptions(input: {
 
 export function gitRunStackedActionMutationOptions(input: {
   cwd: string | null;
+  threadId?: ThreadId | null;
   queryClient: QueryClient;
   model?: string | null;
   modelSelection?: ModelSelection | null;
@@ -814,6 +816,7 @@ export function gitRunStackedActionMutationOptions(input: {
   return makeGitMutationOptions<
     {
       actionId: string;
+      threadId?: ThreadId;
       action: GitStackedAction;
       commitMessage?: string;
       featureBranch?: boolean;
@@ -836,6 +839,7 @@ export function gitRunStackedActionMutationOptions(input: {
       cwd,
       {
         actionId,
+        threadId,
         action,
         commitMessage,
         featureBranch,
@@ -848,6 +852,7 @@ export function gitRunStackedActionMutationOptions(input: {
     ) =>
       api.git.runStackedAction({
         actionId,
+        ...(threadId ? { threadId } : {}),
         cwd,
         action,
         ...(commitMessage ? { commitMessage } : {}),
