@@ -14,6 +14,7 @@ import {
   DEFAULT_SERVER_SETTINGS_VIEW,
   GIT_TEXT_GENERATION_PROVIDERS,
   TrimmedNonEmptyString,
+  DevinCloudProviderMode,
   ProviderKind,
   type GitTextGenerationProvider,
   type ProviderStartOptions,
@@ -186,6 +187,7 @@ const PersistedProviderKind = Schema.Literals([
   "claudeAgent",
   "cursor",
   "devin",
+  "devinCloud",
   "antigravity",
   "gemini",
   "grok",
@@ -200,6 +202,7 @@ const PersistedProviderKind = Schema.Literals([
       decode: (provider) => {
         if (provider === "gemini") return "antigravity";
         if (provider === "kilo") return "opencode";
+        if (provider === "devinCloud") return "devin";
         return provider;
       },
       encode: (provider) => provider,
@@ -213,6 +216,7 @@ const PersistedProviderKind = Schema.Literals([
 // values are dropped too instead of failing the whole settings decode.
 const RENAMED_PROVIDERS: Readonly<Record<string, ProviderKind>> = {
   gemini: "antigravity",
+  devinCloud: "devin",
 };
 
 function resolvePersistedProviderListEntry(provider: string): ProviderKind | undefined {
@@ -276,6 +280,12 @@ export const AppSettingsSchema = Schema.Struct({
   cursorBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   cursorApiEndpoint: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   devinBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
+  devinCloudMode: DevinCloudProviderMode.pipe(withDefaults(() => "auto" as const)),
+  devinCloudOrgId: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
+  devinCloudServerPassword: Schema.String.check(Schema.isMaxLength(4096)).pipe(
+    withDefaults(() => ""),
+  ),
+  devinCloudServerPasswordConfigured: Schema.Boolean.pipe(withDefaults(() => false)),
   antigravityBinaryPath: Schema.String.check(Schema.isMaxLength(4096)).pipe(withDefaults(() => "")),
   // Deprecated Gemini keys remain decodable until normalization rewrites local storage.
   geminiBinaryPath: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
@@ -673,6 +683,7 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     // Password fields are accepted only as write-only update patches. Never retain
     // reusable provider credentials in browser state or localStorage.
     openCodeServerPassword: "",
+    devinCloudServerPassword: "",
     claudeBinaryPath: normalizeProviderBinaryPathOverride("claudeAgent", settings.claudeBinaryPath),
     codexBinaryPath: normalizeProviderBinaryPathOverride("codex", settings.codexBinaryPath),
     cursorBinaryPath: normalizeProviderBinaryPathOverride("cursor", settings.cursorBinaryPath),
@@ -754,6 +765,9 @@ function serverSettingsToAppSettings(settings: ServerSettingsView): Partial<AppS
     cursorApiEndpoint: settings.providers.cursor.apiEndpoint,
     cursorBinaryPath: settings.providers.cursor.binaryPath,
     devinBinaryPath: settings.providers.devin.binaryPath,
+    devinCloudMode: settings.providers.devin.cloudMode,
+    devinCloudOrgId: settings.providers.devin.orgId,
+    devinCloudServerPasswordConfigured: settings.providers.devin.serverPasswordConfigured,
     defaultThreadEnvMode: settings.defaultThreadEnvMode,
     enableAssistantStreaming: settings.enableAssistantStreaming,
     enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
@@ -914,9 +928,20 @@ export function appSettingsPatchToServerSettingsPatch(
         : {}),
     };
   }
-  if (hasOwn(patch, "devinBinaryPath") || hasOwn(patch, "customDevinModels")) {
+  if (
+    hasOwn(patch, "devinBinaryPath") ||
+    hasOwn(patch, "devinCloudMode") ||
+    hasOwn(patch, "devinCloudOrgId") ||
+    hasOwn(patch, "devinCloudServerPassword") ||
+    hasOwn(patch, "customDevinModels")
+  ) {
     providers.devin = {
       ...(hasOwn(patch, "devinBinaryPath") ? { binaryPath: patch.devinBinaryPath ?? "" } : {}),
+      ...(hasOwn(patch, "devinCloudMode") ? { cloudMode: patch.devinCloudMode ?? "auto" } : {}),
+      ...(hasOwn(patch, "devinCloudOrgId") ? { orgId: patch.devinCloudOrgId ?? "" } : {}),
+      ...(hasOwn(patch, "devinCloudServerPassword")
+        ? { serverPassword: patch.devinCloudServerPassword ?? "" }
+        : {}),
       ...(hasOwn(patch, "customDevinModels")
         ? { customModels: patch.customDevinModels ?? [] }
         : {}),
@@ -1024,6 +1049,8 @@ function buildInitialServerSettingsMigrationPatch(settings: AppSettings): Server
     "enableAssistantStreaming",
     "enableProviderUpdateChecks",
     "devinBinaryPath",
+    "devinCloudMode",
+    "devinCloudOrgId",
     "antigravityBinaryPath",
     "grokBinaryPath",
     "droidBinaryPath",
@@ -1045,6 +1072,9 @@ function buildInitialServerSettingsMigrationPatch(settings: AppSettings): Server
   // scrubs them from local state. All subsequent reads use redacted server views.
   if (settings.openCodeServerPassword.trim()) {
     patch.openCodeServerPassword = settings.openCodeServerPassword;
+  }
+  if (settings.devinCloudServerPassword.trim()) {
+    patch.devinCloudServerPassword = settings.devinCloudServerPassword;
   }
 
   for (const key of [
@@ -1085,6 +1115,9 @@ export function applyLocalAppSettingsPatch(
     ...localPatch,
     ...(hasOwn(patch, "openCodeServerPassword")
       ? { openCodeServerPasswordConfigured: Boolean(patch.openCodeServerPassword?.trim()) }
+      : {}),
+    ...(hasOwn(patch, "devinCloudServerPassword")
+      ? { devinCloudServerPasswordConfigured: Boolean(patch.devinCloudServerPassword?.trim()) }
       : {}),
   });
 }
@@ -1133,10 +1166,16 @@ export function getAppModelOptions(
   customModels: readonly string[],
   selectedModel?: string | null,
 ): AppModelOption[] {
-  const options: AppModelOption[] = getModelOptions(provider).map(({ slug, name }) => ({
+  const options: AppModelOption[] = getModelOptions(provider).map((model) => ({
     provider,
-    slug,
-    name,
+    slug: model.slug,
+    name: model.name,
+    ...("upstreamProviderId" in model && model.upstreamProviderId !== undefined
+      ? { upstreamProviderId: model.upstreamProviderId }
+      : {}),
+    ...("upstreamProviderName" in model && model.upstreamProviderName !== undefined
+      ? { upstreamProviderName: model.upstreamProviderName }
+      : {}),
     isCustom: false,
   }));
   const seen = new Set(options.map((option) => option.slug));

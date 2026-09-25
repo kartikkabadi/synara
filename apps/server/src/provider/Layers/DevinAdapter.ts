@@ -10,6 +10,7 @@ import { snapshotProviderTurns } from "../snapshotProviderTurns.ts";
 import {
   ApprovalRequestId,
   type ChatAttachment,
+  devinCloudModeFromModelSlug,
   type DevinModelOptions,
   EventId,
   MODEL_OPTIONS_BY_PROVIDER,
@@ -151,10 +152,12 @@ import { type AcpSessionRuntimeShape } from "../acp/AcpSessionRuntime.ts";
 import { makeEventNdjsonLogger, type EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import {
   PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
+  type ProviderAdapterShape,
   type ProviderThreadSnapshot,
   type ProviderThreadTurnSnapshot,
 } from "../Services/ProviderAdapter.ts";
 import { DevinAdapter, type DevinAdapterShape } from "../Services/DevinAdapter.ts";
+import type { ServerSettingsService } from "../../serverSettings.ts";
 
 const PROVIDER = "devin" as const;
 
@@ -366,6 +369,15 @@ interface DevinAdapterLiveOptions {
   readonly onSessionUpdateProcessed?: () => void;
   readonly timeouts?: DevinAdapterTimeouts;
   readonly wedgeRecovery?: DevinWedgeRecoveryOptions;
+  /** Spawn `devin acp --cloud` instead of the local ACP server. Used by the
+   *  cloud runtime's ACP transport — callers select it internally, never
+   *  directly. */
+  readonly cloud?: boolean;
+  /** A pre-built Devin Cloud runtime (REST + `devin acp --cloud`). When set,
+   *  the returned adapter dispatches `cloud/<mode>` model selections and
+   *  `cloud: true` resume cursors to it; when absent the adapter is the
+   *  local ACP implementation only. */
+  readonly cloudAdapter?: ProviderAdapterShape<ProviderAdapterError>;
 }
 
 interface PendingApproval {
@@ -481,12 +493,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readDevinProviderStartOptions(
   providerOptions: unknown,
-): { readonly binaryPath?: string } | undefined {
+): { readonly binaryPath?: string; readonly model?: string } | undefined {
   if (!isRecord(providerOptions) || !isRecord(providerOptions.devin)) {
     return undefined;
   }
   const binaryPath = providerOptions.devin.binaryPath;
-  return typeof binaryPath === "string" ? { binaryPath } : {};
+  const model = providerOptions.devin.model;
+  return {
+    ...(typeof binaryPath === "string" ? { binaryPath } : {}),
+    ...(typeof model === "string" ? { model } : {}),
+  };
 }
 
 function parseDevinResume(resumeCursor: unknown): { readonly sessionId: string } | undefined {
@@ -1321,6 +1337,7 @@ export function makeDevinAdapter(
   devinSettings: DevinAcpRuntimeSettings = {},
   options?: DevinAdapterLiveOptions,
 ) {
+  const adapterProvider = PROVIDER;
   const timeouts = options?.timeouts ?? resolveDevinAdapterTimeouts();
   const watchdogIntervalMs = Math.min(5_000, timeouts.turnIdleMs, timeouts.toolIdleMs);
   const wedge = options?.wedgeRecovery ?? resolveDevinWedgeRecoveryOptions();
@@ -1404,7 +1421,7 @@ export function makeDevinAdapter(
       return Effect.gen(function* () {
         let discoveryError: string | undefined;
         const cliModels = yield* Effect.gen(function* () {
-          const childEnv = buildProviderChildEnvironment({ provider: PROVIDER });
+          const childEnv = buildProviderChildEnvironment({ provider: adapterProvider });
           const child = yield* childProcessSpawner.spawn(
             makeEffectProcessCommand(binaryPath, ["models", "list", "--format", "json"], {
               env: childEnv,
@@ -1487,7 +1504,7 @@ export function makeDevinAdapter(
             event: {
               id: crypto.randomUUID(),
               kind: "notification",
-              provider: PROVIDER,
+              provider: adapterProvider,
               createdAt: observedAt,
               method,
               threadId,
@@ -1509,7 +1526,7 @@ export function makeDevinAdapter(
           ctx.lifecycleGeneration,
           makeAcpPlanUpdatedEvent({
             stamp: yield* makeEventStamp(),
-            provider: PROVIDER,
+            provider: adapterProvider,
             threadId: ctx.threadId,
             turnId: ctx.activeTurnId,
             payload,
@@ -1525,7 +1542,7 @@ export function makeDevinAdapter(
       if (!ctx || ctx.stopped) {
         return Effect.fail(
           new ProviderAdapterSessionNotFoundError({
-            provider: PROVIDER,
+            provider: adapterProvider,
             threadId,
           }),
         );
@@ -1564,7 +1581,7 @@ export function makeDevinAdapter(
         yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
           type: "session.exited",
           ...(yield* makeEventStamp()),
-          provider: PROVIDER,
+          provider: adapterProvider,
           threadId: ctx.threadId,
           payload: { exitKind: "graceful" },
         });
@@ -1627,7 +1644,7 @@ export function makeDevinAdapter(
         yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
           type: input.lifecycle,
           ...(yield* makeEventStamp()),
-          provider: PROVIDER,
+          provider: adapterProvider,
           threadId: ctx.threadId,
           itemId: RuntimeItemId.makeUnsafe(`devin-compaction:${ctx.threadId}`),
           payload: {
@@ -1750,11 +1767,11 @@ export function makeDevinAdapter(
       withThreadLock(
         input.threadId,
         Effect.gen(function* () {
-          if (input.provider !== undefined && input.provider !== PROVIDER) {
+          if (input.provider !== undefined && input.provider !== adapterProvider) {
             return yield* new ProviderAdapterValidationError({
-              provider: PROVIDER,
+              provider: adapterProvider,
               operation: "startSession",
-              issue: `Expected provider '${PROVIDER}' but received '${input.provider}'.`,
+              issue: `Expected provider '${adapterProvider}' but received '${input.provider}'.`,
             });
           }
 
@@ -1765,14 +1782,16 @@ export function makeDevinAdapter(
           });
           if (cwd === undefined) {
             return yield* new ProviderAdapterValidationError({
-              provider: PROVIDER,
+              provider: adapterProvider,
               operation: "startSession",
               issue: "cwd is required and no server cwd fallback is available.",
             });
           }
 
+          // Cloud selections (`cloud/*` slugs) never reach this branch — the
+          // dispatcher routes them away first.
           const devinModelSelection =
-            input.modelSelection?.provider === PROVIDER ? input.modelSelection : undefined;
+            input.modelSelection?.provider === "devin" ? input.modelSelection : undefined;
 
           const existing = sessions.get(input.threadId);
           // Recheck under the lock: a user turn may start while recovery waits.
@@ -1797,7 +1816,7 @@ export function makeDevinAdapter(
           const gatewaySessionLease = acquireAgentGatewaySessionLease(
             agentGatewayCredentials,
             input.threadId,
-            PROVIDER,
+            adapterProvider,
             input,
           );
 
@@ -1824,7 +1843,7 @@ export function makeDevinAdapter(
             },
             catch: (error) =>
               new ProviderAdapterRequestError({
-                provider: PROVIDER,
+                provider: adapterProvider,
                 method: "session/start",
                 detail:
                   error instanceof Error ? error.message : "Failed to install Devin MCP config.",
@@ -1840,13 +1859,13 @@ export function makeDevinAdapter(
           const resumeSessionId = parseDevinResume(input.resumeCursor)?.sessionId;
           const acpNativeLoggers = makeAcpNativeLoggers({
             nativeEventLogger,
-            provider: PROVIDER,
+            provider: adapterProvider,
             threadId: input.threadId,
           });
           const acpRuntimeLoggers = makeAcpDebugLoggers({
             base: acpNativeLoggers,
             enabled: isDevinAcpDebugEnabled(),
-            provider: PROVIDER,
+            provider: adapterProvider,
             marker: DEVIN_ACP_TRANSPORT_DEBUG_MARKER,
             payloadLimit: DEVIN_ACP_LOG_PAYLOAD_LIMIT,
             shouldMirrorIncomingRaw: (payload) => payload.includes("devinShell"),
@@ -1868,6 +1887,10 @@ export function makeDevinAdapter(
             ...(providerDevinOptions?.binaryPath !== undefined
               ? { binaryPath: providerDevinOptions.binaryPath }
               : {}),
+            ...(providerDevinOptions?.model !== undefined
+              ? { model: providerDevinOptions.model }
+              : {}),
+            ...(options?.cloud === true ? { cloud: true } : {}),
           };
 
           yield* Effect.logInfo("devin.acp.start", {
@@ -1955,7 +1978,7 @@ export function makeDevinAdapter(
                   input.lifecycleGeneration,
                   makeAcpRequestOpenedEvent({
                     stamp: yield* makeEventStamp(),
-                    provider: PROVIDER,
+                    provider: adapterProvider,
                     threadId: input.threadId,
                     turnId: ctx?.activeTurnId,
                     requestId: runtimeRequestId,
@@ -1975,7 +1998,7 @@ export function makeDevinAdapter(
                   input.lifecycleGeneration,
                   makeAcpRequestResolvedEvent({
                     stamp: yield* makeEventStamp(),
-                    provider: PROVIDER,
+                    provider: adapterProvider,
                     threadId: input.threadId,
                     turnId: ctx?.activeTurnId,
                     requestId: runtimeRequestId,
@@ -2019,7 +2042,7 @@ export function makeDevinAdapter(
                 yield* offerRuntimeEvent(input.lifecycleGeneration, {
                   type: "user-input.requested",
                   ...(yield* makeEventStamp()),
-                  provider: PROVIDER,
+                  provider: adapterProvider,
                   threadId: input.threadId,
                   turnId: ctx?.activeTurnId,
                   requestId: runtimeRequestId,
@@ -2037,7 +2060,7 @@ export function makeDevinAdapter(
                 yield* offerRuntimeEvent(input.lifecycleGeneration, {
                   type: "user-input.resolved",
                   ...(yield* makeEventStamp()),
-                  provider: PROVIDER,
+                  provider: adapterProvider,
                   threadId: input.threadId,
                   turnId: ctx?.activeTurnId,
                   requestId: runtimeRequestId,
@@ -2065,7 +2088,7 @@ export function makeDevinAdapter(
                 cause instanceof AcpRequestError &&
                 cause.errorMessage.trim().toLowerCase() === "failed to load session data"
                   ? new ProviderAdapterProcessError({
-                      provider: PROVIDER,
+                      provider: adapterProvider,
                       threadId: input.threadId,
                       detail: cause.message,
                       reason: "resume-state-unavailable",
@@ -2081,7 +2104,7 @@ export function makeDevinAdapter(
           const sessionConfigReady = yield* Deferred.make<void>();
           const now = yield* nowIso;
           const session: ProviderSession = {
-            provider: PROVIDER,
+            provider: adapterProvider,
             status: "ready",
             runtimeMode: input.runtimeMode,
             cwd,
@@ -2198,7 +2221,7 @@ export function makeDevinAdapter(
                         input.lifecycleGeneration,
                         makeAcpAssistantItemEvent({
                           stamp: yield* makeEventStamp(),
-                          provider: PROVIDER,
+                          provider: adapterProvider,
                           threadId: ctx.threadId,
                           turnId: activeTurnId,
                           itemId: scopedItemId,
@@ -2246,7 +2269,7 @@ export function makeDevinAdapter(
                           input.lifecycleGeneration,
                           makeAcpToolCallEvent({
                             stamp: yield* makeEventStamp(),
-                            provider: PROVIDER,
+                            provider: adapterProvider,
                             threadId: ctx.threadId,
                             turnId: recordedTurnId,
                             toolCall: scopeDevinToolCallStateForTurn(
@@ -2276,7 +2299,7 @@ export function makeDevinAdapter(
                         input.lifecycleGeneration,
                         makeAcpToolCallEvent({
                           stamp: yield* makeEventStamp(),
-                          provider: PROVIDER,
+                          provider: adapterProvider,
                           threadId: ctx.threadId,
                           turnId: activeTurnId,
                           toolCall: scopeDevinToolCallStateForTurn(activeTurnId, event.toolCall),
@@ -2306,7 +2329,7 @@ export function makeDevinAdapter(
                         input.lifecycleGeneration,
                         makeAcpContentDeltaEvent({
                           stamp: yield* makeEventStamp(),
-                          provider: PROVIDER,
+                          provider: adapterProvider,
                           threadId: ctx.threadId,
                           turnId: activeTurnId,
                           ...(scopedItemId ? { itemId: scopedItemId } : {}),
@@ -2330,7 +2353,7 @@ export function makeDevinAdapter(
                         input.lifecycleGeneration,
                         makeAcpTokenUsageEvent({
                           stamp: yield* makeEventStamp(),
-                          provider: PROVIDER,
+                          provider: adapterProvider,
                           threadId: ctx.threadId,
                           turnId: activeTurnId,
                           usage: event.usage,
@@ -2393,21 +2416,21 @@ export function makeDevinAdapter(
             yield* offerRuntimeEvent(input.lifecycleGeneration, {
               type: "session.started",
               ...(yield* makeEventStamp()),
-              provider: PROVIDER,
+              provider: adapterProvider,
               threadId: input.threadId,
               payload: { resume: started.initializeResult },
             });
             yield* offerRuntimeEvent(input.lifecycleGeneration, {
               type: "session.state.changed",
               ...(yield* makeEventStamp()),
-              provider: PROVIDER,
+              provider: adapterProvider,
               threadId: input.threadId,
               payload: { state: "ready", reason: "Devin ACP session ready" },
             });
             yield* offerRuntimeEvent(input.lifecycleGeneration, {
               type: "thread.started",
               ...(yield* makeEventStamp()),
-              provider: PROVIDER,
+              provider: adapterProvider,
               threadId: input.threadId,
               payload: { providerThreadId: started.sessionId },
             });
@@ -2456,7 +2479,7 @@ export function makeDevinAdapter(
         yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
           type: "turn.completed",
           ...(yield* makeEventStamp()),
-          provider: PROVIDER,
+          provider: adapterProvider,
           threadId: ctx.threadId,
           turnId,
           payload: {
@@ -2530,7 +2553,7 @@ export function makeDevinAdapter(
           yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
             type: "runtime.warning",
             ...(yield* makeEventStamp()),
-            provider: PROVIDER,
+            provider: adapterProvider,
             threadId: ctx.threadId,
             turnId,
             payload: { message: DEVIN_WEDGE_RECOVERY_WARNING },
@@ -2556,7 +2579,7 @@ export function makeDevinAdapter(
           }
           const started = yield* startDevinSession(
             {
-              provider: PROVIDER,
+              provider: adapterProvider,
               threadId: ctx.threadId,
               lifecycleGeneration: ctx.lifecycleGeneration,
               cwd,
@@ -2605,7 +2628,7 @@ export function makeDevinAdapter(
               yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
                 type: "runtime.error",
                 ...(yield* makeEventStamp()),
-                provider: PROVIDER,
+                provider: adapterProvider,
                 threadId: ctx.threadId,
                 turnId,
                 payload: {
@@ -2672,7 +2695,7 @@ export function makeDevinAdapter(
         // compaction prompt cannot slip into that window.
         if (ctx.compactingThread) {
           return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
+            provider: adapterProvider,
             operation: "sendTurn",
             issue: "Cannot start a turn while Devin context compaction is in progress.",
           });
@@ -2682,14 +2705,14 @@ export function makeDevinAdapter(
         // turn dispatch anyway) and race two ACP prompts; reject it instead.
         if (ctx.turnStarting) {
           return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
+            provider: adapterProvider,
             operation: "sendTurn",
             issue: "Another Devin turn is still starting for this thread.",
           });
         }
         if (ctx.activeTurnId !== undefined) {
           return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
+            provider: adapterProvider,
             operation: "sendTurn",
             issue: "Another Devin turn is already active for this thread.",
           });
@@ -2728,13 +2751,15 @@ export function makeDevinAdapter(
         // session.
         if (ctx.stopped) {
           return yield* new ProviderAdapterSessionNotFoundError({
-            provider: PROVIDER,
+            provider: adapterProvider,
             threadId: input.threadId,
           });
         }
         const turnId = TurnId.makeUnsafe(crypto.randomUUID());
         const model =
-          input.modelSelection?.provider === PROVIDER ? input.modelSelection.model : undefined;
+          input.modelSelection?.provider === adapterProvider
+            ? input.modelSelection.model
+            : undefined;
         const interactionMode = resolveAcpTurnInteractionMode(input.interactionMode);
         // Model selection rides the process-start `--model` flag; only the
         // fail-closed mode gate applies per turn.
@@ -2754,7 +2779,7 @@ export function makeDevinAdapter(
 
         if (promptParts.length === 0) {
           return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
+            provider: adapterProvider,
             operation: "sendTurn",
             issue: "Turn requires non-empty text or attachments.",
           });
@@ -2773,7 +2798,7 @@ export function makeDevinAdapter(
         // phantom cancelled completion) for a session that already exited.
         if (ctx.stopped) {
           return yield* new ProviderAdapterSessionNotFoundError({
-            provider: PROVIDER,
+            provider: adapterProvider,
             threadId: input.threadId,
           });
         }
@@ -2816,7 +2841,7 @@ export function makeDevinAdapter(
         yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
           type: "turn.started",
           ...(yield* makeEventStamp()),
-          provider: PROVIDER,
+          provider: adapterProvider,
           threadId: input.threadId,
           turnId,
           payload: model ? { model } : {},
@@ -2838,7 +2863,7 @@ export function makeDevinAdapter(
               }),
         ).pipe(
           Effect.mapError((error) =>
-            mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
+            mapAcpToAdapterError(adapterProvider, input.threadId, "session/prompt", error),
           ),
           Effect.matchEffect({
             onFailure: (error) =>
@@ -2861,7 +2886,7 @@ export function makeDevinAdapter(
                 yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
                   type: "turn.completed",
                   ...(yield* makeEventStamp()),
-                  provider: PROVIDER,
+                  provider: adapterProvider,
                   threadId: input.threadId,
                   turnId,
                   payload: {
@@ -2911,7 +2936,7 @@ export function makeDevinAdapter(
                 yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
                   type: "turn.completed",
                   ...(yield* makeEventStamp()),
-                  provider: PROVIDER,
+                  provider: adapterProvider,
                   threadId: input.threadId,
                   turnId,
                   payload: {
@@ -2952,7 +2977,7 @@ export function makeDevinAdapter(
               yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
                 type: "turn.completed",
                 ...(yield* makeEventStamp()),
-                provider: PROVIDER,
+                provider: adapterProvider,
                 threadId: input.threadId,
                 turnId,
                 payload: {
@@ -3031,7 +3056,7 @@ export function makeDevinAdapter(
             yield* Effect.ignore(
               ctx.acp.cancel.pipe(
                 Effect.mapError((error) =>
-                  mapAcpToAdapterError(PROVIDER, threadId, "session/cancel", error),
+                  mapAcpToAdapterError(adapterProvider, threadId, "session/cancel", error),
                 ),
               ),
             );
@@ -3054,7 +3079,7 @@ export function makeDevinAdapter(
         const pending = ctx.pendingApprovals.get(requestId);
         if (!pending) {
           return yield* new ProviderAdapterRequestError({
-            provider: PROVIDER,
+            provider: adapterProvider,
             method: "session/request_permission",
             detail: `Unknown pending approval request: ${requestId}`,
           });
@@ -3072,7 +3097,7 @@ export function makeDevinAdapter(
         const pending = ctx.pendingUserInputs.get(requestId);
         if (!pending) {
           return yield* new ProviderAdapterRequestError({
-            provider: PROVIDER,
+            provider: adapterProvider,
             method: "session/elicitation",
             detail: `Unknown pending user-input request: ${requestId}`,
           });
@@ -3094,7 +3119,7 @@ export function makeDevinAdapter(
       Effect.gen(function* () {
         yield* requireSession(threadId);
         return yield* new ProviderAdapterValidationError({
-          provider: PROVIDER,
+          provider: adapterProvider,
           operation: "rollbackThread",
           issue: "Devin does not support conversation rollback.",
         });
@@ -3125,7 +3150,7 @@ export function makeDevinAdapter(
 
     const getComposerCapabilities: NonNullable<DevinAdapterShape["getComposerCapabilities"]> = () =>
       Effect.succeed({
-        provider: PROVIDER,
+        provider: adapterProvider,
         supportsSkillMentions: false,
         supportsSkillDiscovery: false,
         supportsNativeSlashCommandDiscovery: true,
@@ -3168,7 +3193,7 @@ export function makeDevinAdapter(
           });
           if (!cwd) {
             return yield* new ProviderAdapterValidationError({
-              provider: PROVIDER,
+              provider: adapterProvider,
               operation: "listCommands",
               issue: "cwd is required and no server cwd fallback is available.",
             });
@@ -3210,7 +3235,7 @@ export function makeDevinAdapter(
             cause instanceof ProviderAdapterValidationError
               ? cause
               : mapAcpToAdapterError(
-                  PROVIDER,
+                  adapterProvider,
                   ThreadId.makeUnsafe("devin-command-discovery"),
                   "command/list",
                   cause,
@@ -3222,7 +3247,7 @@ export function makeDevinAdapter(
               onNone: () =>
                 Effect.fail(
                   new ProviderAdapterRequestError({
-                    provider: PROVIDER,
+                    provider: adapterProvider,
                     method: "command/list",
                     detail: "Timed out while discovering Devin commands over ACP.",
                   }),
@@ -3273,7 +3298,7 @@ export function makeDevinAdapter(
         // session that the original compaction request never targeted.
         if (ctx !== preLockCtx) {
           return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
+            provider: adapterProvider,
             operation: "compactThread",
             issue:
               "The Devin session was restarted while waiting to compact; retry once it settles.",
@@ -3283,7 +3308,7 @@ export function makeDevinAdapter(
           // The session was restarted while waiting above and its new replay
           // window is still settling; reject instead of blocking the lock.
           return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
+            provider: adapterProvider,
             operation: "compactThread",
             issue: "Cannot compact while the resumed Devin thread is still replaying history.",
           });
@@ -3292,7 +3317,7 @@ export function makeDevinAdapter(
         // reach this point while one is already in flight; reject it here.
         if (ctx.compactingThread) {
           return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
+            provider: adapterProvider,
             operation: "compactThread",
             issue: "A Devin context compaction is already in progress.",
           });
@@ -3302,7 +3327,7 @@ export function makeDevinAdapter(
         // below stay in one synchronous block so the two paths cannot interleave.
         if (ctx.activeTurnId !== undefined || ctx.turnStarting) {
           return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
+            provider: adapterProvider,
             operation: "compactThread",
             issue: "Cannot compact while a Devin turn is still active.",
           });
@@ -3324,7 +3349,7 @@ export function makeDevinAdapter(
         });
         return yield* Effect.fail(
           new ProviderAdapterRequestError({
-            provider: PROVIDER,
+            provider: adapterProvider,
             method: "session/prompt",
             detail,
           }),
@@ -3344,7 +3369,7 @@ export function makeDevinAdapter(
 
         const compactResult = yield* runDevinAcpCompactionCommand(ctx.acp).pipe(
           Effect.mapError((error) =>
-            mapAcpToAdapterError(PROVIDER, ctx.threadId, "session/prompt", error),
+            mapAcpToAdapterError(adapterProvider, ctx.threadId, "session/prompt", error),
           ),
           Effect.timeoutOption(DEVIN_COMPACT_TIMEOUT_MS),
           Effect.exit,
@@ -3408,7 +3433,7 @@ export function makeDevinAdapter(
         yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
           type: "thread.state.changed",
           ...(yield* makeEventStamp()),
-          provider: PROVIDER,
+          provider: adapterProvider,
           threadId: ctx.threadId,
           payload: {
             state: "compacted",
@@ -3444,8 +3469,8 @@ export function makeDevinAdapter(
 
     const streamEvents = Stream.fromPubSub(runtimeEventPubSub);
 
-    return {
-      provider: PROVIDER,
+    const localAdapter = {
+      provider: adapterProvider,
       capabilities: {
         sessionModelSwitch: "restart-session",
         conversationRollback: "restart-session",
@@ -3468,7 +3493,138 @@ export function makeDevinAdapter(
       stopAll,
       streamEvents,
     } satisfies DevinAdapterShape;
+
+    // No cloud runtime injected → pure local ACP adapter (also the shape the
+    // cloud runtime's own ACP transport wraps, so this must not recurse).
+    return options?.cloudAdapter === undefined
+      ? localAdapter
+      : dispatchDevinAdapter(localAdapter, options.cloudAdapter);
   });
+}
+
+/** Cloud starts carry either a `cloud/<mode>` model slug or a cloud resume
+ *  cursor (`cloud: true`; the local cursor shares `{schemaVersion, sessionId}`
+ *  so the discriminator is required). */
+function isDevinCloudStart(input: ProviderSessionStartInput): boolean {
+  const cursor = input.resumeCursor;
+  if (isRecord(cursor) && cursor.cloud === true) {
+    return true;
+  }
+  return devinCloudModeFromModelSlug(input.modelSelection?.model) !== null;
+}
+
+/**
+ * One `devin` adapter dispatching between the local ACP runtime and the Devin
+ * Cloud runtime. Cloud ownership is tracked per thread; every session-scoped
+ * method routes by threadId, provider-scoped calls stay local (the cloud
+ * REST surface cannot answer catalog/skills/plugins), and lifecycle methods
+ * fan out to both.
+ */
+function dispatchDevinAdapter(
+  local: DevinAdapterShape,
+  cloud: ProviderAdapterShape<ProviderAdapterError>,
+): DevinAdapterShape {
+  const cloudThreadIds = new Set<ThreadId>();
+  const forThread = (threadId: ThreadId) => (cloudThreadIds.has(threadId) ? cloud : local);
+  const methodUnsupported = (method: string) =>
+    Effect.fail(
+      new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method,
+        detail: "This Devin thread does not support that operation.",
+      }),
+    );
+
+  const startSessionDispatch: DevinAdapterShape["startSession"] = (input) =>
+    isDevinCloudStart(input)
+      ? cloud
+          .startSession(input)
+          .pipe(Effect.tap(() => Effect.sync(() => cloudThreadIds.add(input.threadId))))
+      : local.startSession(input);
+
+  return {
+    provider: PROVIDER,
+    capabilities: {
+      ...local.capabilities,
+      ...(cloud.capabilities.supportsTurnSteering === true
+        ? { supportsTurnSteering: true as const }
+        : {}),
+    },
+    startSession: startSessionDispatch,
+    didResumeSession: (input, session) =>
+      cloudThreadIds.has(input.threadId) && cloud.didResumeSession !== undefined
+        ? cloud.didResumeSession(input, session)
+        : (local.didResumeSession?.(input, session) ?? false),
+    sendTurn: (input) => forThread(input.threadId).sendTurn(input),
+    ...(cloud.steerTurn === undefined
+      ? {}
+      : {
+          steerTurn: (input: Parameters<NonNullable<DevinAdapterShape["steerTurn"]>>[0]) => {
+            const fn = forThread(input.threadId).steerTurn;
+            return fn === undefined ? methodUnsupported("steerTurn") : fn(input);
+          },
+        }),
+    interruptTurn: (threadId, turnId, providerThreadId) =>
+      forThread(threadId).interruptTurn(threadId, turnId, providerThreadId),
+    respondToRequest: (threadId, requestId, decision) =>
+      forThread(threadId).respondToRequest(threadId, requestId, decision),
+    respondToUserInput: (threadId, requestId, answers) =>
+      forThread(threadId).respondToUserInput(threadId, requestId, answers),
+    stopSession: (threadId) => {
+      if (cloudThreadIds.delete(threadId)) {
+        return cloud.stopSession(threadId);
+      }
+      return local.stopSession(threadId);
+    },
+    listSessions: () =>
+      Effect.map(
+        Effect.all([local.listSessions(), cloud.listSessions()]),
+        ([localSessions, cloudSessions]) => [...localSessions, ...cloudSessions],
+      ),
+    hasSession: (threadId) =>
+      Effect.gen(function* () {
+        if (yield* local.hasSession(threadId)) return true;
+        return yield* cloud.hasSession(threadId);
+      }),
+    readThread: (threadId) => forThread(threadId).readThread(threadId),
+    ...(cloud.readExternalThread === undefined && local.readExternalThread === undefined
+      ? {}
+      : {
+          readExternalThread: (
+            input: Parameters<NonNullable<DevinAdapterShape["readExternalThread"]>>[0],
+          ) => {
+            const cloudRead = cloud.readExternalThread;
+            const read = (
+              local.readExternalThread ??
+              (() =>
+                Effect.fail(
+                  new ProviderAdapterRequestError({
+                    provider: PROVIDER,
+                    method: "readExternalThread",
+                    detail: "Thread not found locally.",
+                  }),
+                ))
+            )(input);
+            return cloudRead === undefined ? read : read.pipe(Effect.catch(() => cloudRead(input)));
+          },
+        }),
+    rollbackThread: (threadId, numTurns) => forThread(threadId).rollbackThread(threadId, numTurns),
+    ...(local.compactThread === undefined
+      ? {}
+      : {
+          compactThread: (...args: Parameters<NonNullable<DevinAdapterShape["compactThread"]>>) => {
+            const fn = forThread(args[0]).compactThread;
+            return fn === undefined ? methodUnsupported("compactThread") : fn(...args);
+          },
+        }),
+    stopAll: () => Effect.all([local.stopAll(), cloud.stopAll()]).pipe(Effect.asVoid),
+    streamEvents: Stream.merge(local.streamEvents, cloud.streamEvents),
+    ...(local.getComposerCapabilities === undefined
+      ? {}
+      : { getComposerCapabilities: local.getComposerCapabilities }),
+    ...(local.listCommands === undefined ? {} : { listCommands: local.listCommands }),
+    ...(local.listModels === undefined ? {} : { listModels: local.listModels }),
+  } satisfies DevinAdapterShape;
 }
 
 export const DevinAdapterLive = Layer.effect(DevinAdapter, makeDevinAdapter());

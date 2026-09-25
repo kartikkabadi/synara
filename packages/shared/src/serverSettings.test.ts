@@ -49,6 +49,7 @@ describe("providerStartOptionsFromServerSettings", () => {
         devin: {
           ...DEFAULT_SERVER_SETTINGS.providers.devin,
           binaryPath: "",
+          orgId: "",
         },
       },
     };
@@ -93,6 +94,8 @@ describe("providerStartOptionsFromServerSettings", () => {
         devin: {
           ...DEFAULT_SERVER_SETTINGS.providers.devin,
           binaryPath: "/custom/bin/devin",
+          cloudMode: "rest" as const,
+          orgId: "org-example",
         },
       },
     };
@@ -108,6 +111,10 @@ describe("providerStartOptionsFromServerSettings", () => {
       serverUrl: "http://127.0.0.1:4096",
       experimentalWebSockets: true,
     });
-    expect(providerOptions.devin).toEqual({ binaryPath: "/custom/bin/devin" });
+    expect(providerOptions.devin).toEqual({
+      binaryPath: "/custom/bin/devin",
+      cloudMode: "rest",
+      orgId: "org-example",
+    });
   });
 });

@@ -12,7 +12,8 @@ import { ProviderValidationError } from "./Errors";
 import { makeClaudeAdapterLive } from "./Layers/ClaudeAdapter";
 import { makeCodexAdapterLive } from "./Layers/CodexAdapter";
 import { makeCursorAdapterLive } from "./Layers/CursorAdapter";
-import { makeDevinAdapterLive } from "./Layers/DevinAdapter";
+import { makeDevinAdapter, makeDevinAdapterLive } from "./Layers/DevinAdapter";
+import { makeDevinCloudAdapter } from "./Layers/DevinCloudAdapter";
 import { makeEventNdjsonLogger } from "./Layers/EventNdjsonLogger";
 import { makeAntigravityAdapterLive } from "./Layers/AntigravityAdapter";
 import { makeDroidAdapterLive } from "./Layers/DroidAdapter";
@@ -79,9 +80,26 @@ export function makeServerProviderLayer(
       {},
       nativeEventLogger ? { nativeEventLogger } : undefined,
     ).pipe(Layer.provide(agentGatewayCredentialsLayer));
+    // The `devin` adapter dispatches to the Devin Cloud runtime for
+    // `cloud/<mode>` model selections and `cloud: true` resume cursors; its
+    // ACP transport wraps the local adapter machinery with `cloud: true`.
+    const devinCloudAdapter = yield* makeDevinCloudAdapter({
+      resolveServerPassword: resolveProviderServerPassword,
+      makeAcpAdapter: ({ binaryPath }) =>
+        makeDevinAdapter(
+          { ...(binaryPath !== undefined ? { binaryPath } : {}) },
+          {
+            cloud: true,
+            ...(nativeEventLogger ? { nativeEventLogger } : {}),
+          },
+        ),
+    });
     const devinAdapterLayer = makeDevinAdapterLive(
       {},
-      nativeEventLogger ? { nativeEventLogger } : undefined,
+      {
+        ...(nativeEventLogger ? { nativeEventLogger } : {}),
+        cloudAdapter: devinCloudAdapter,
+      },
     ).pipe(Layer.provide(agentGatewayCredentialsLayer));
     const piAdapterLayer = makePiAdapterLive(
       nativeEventLogger ? { nativeEventLogger } : undefined,

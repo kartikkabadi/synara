@@ -259,7 +259,12 @@ export function mergeDynamicModelOptions(input: {
         input.provider === "grok" ||
         input.provider === "devin"));
   const missingStaticBuiltIns = hasAuthoritativeCatalog
-    ? []
+    ? staticBuiltInModels.filter(
+        (model) =>
+          input.provider === "devin" &&
+          model.slug.startsWith("cloud/") &&
+          !dynamicNormalizedSlugs.has(model.slug),
+      )
     : staticBuiltInModels.filter((model) => !dynamicNormalizedSlugs.has(model.slug));
 
   if (input.provider === "claudeAgent") {

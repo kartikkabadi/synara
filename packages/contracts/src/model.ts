@@ -159,6 +159,38 @@ export const DevinModelOptions = Schema.Struct({
 });
 export type DevinModelOptions = typeof DevinModelOptions.Type;
 
+export const DEVIN_CLOUD_AGENT_MODE_OPTIONS = [
+  "normal",
+  "fast",
+  "lite",
+  "ultra",
+  "fusion",
+  "swe-2-medium",
+  "swe-2-high",
+  "swe-2-max",
+] as const;
+export type DevinCloudAgentMode = (typeof DEVIN_CLOUD_AGENT_MODE_OPTIONS)[number];
+
+// Devin Cloud sessions ride the `devin` provider: the cloud agent mode is
+// selected through a `cloud/<mode>` model slug ("cloud/auto" = org default).
+export const DEVIN_CLOUD_MODEL_SLUG_PREFIX = "cloud/" as const;
+
+/** Returns the Devin Cloud agent mode for a `cloud/<mode>` slug, else null. */
+export function devinCloudModeFromModelSlug(
+  model: string | null | undefined,
+): DevinCloudAgentMode | "auto" | null {
+  if (typeof model !== "string" || !model.startsWith(DEVIN_CLOUD_MODEL_SLUG_PREFIX)) {
+    return null;
+  }
+  const mode = model.slice(DEVIN_CLOUD_MODEL_SLUG_PREFIX.length).trim();
+  if (mode === "auto") {
+    return "auto";
+  }
+  return (DEVIN_CLOUD_AGENT_MODE_OPTIONS as readonly string[]).includes(mode)
+    ? (mode as DevinCloudAgentMode)
+    : null;
+}
+
 export const ProviderModelOptions = Schema.Struct({
   codex: Schema.optional(CodexModelOptions),
   claudeAgent: Schema.optional(ClaudeModelOptions),
@@ -565,6 +597,9 @@ type ModelDefinition = {
   readonly slug: string;
   readonly name: string;
   readonly capabilities: ModelCapabilities;
+  /** Groups the option under a named section in provider model menus. */
+  readonly upstreamProviderId?: string;
+  readonly upstreamProviderName?: string;
 };
 
 // Static catalog entries that rely on live CLI discovery advertise no
@@ -1147,6 +1182,72 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
         promptInjectedEffortLevels: [],
         contextWindowOptions: [],
       },
+    },
+    // Devin Cloud entries: the cloud agent mode is the `cloud/<mode>` slug
+    // ("cloud/auto" omits devin_mode so the org default applies). They group
+    // under a "Devin Cloud" section inside Devin's model menu.
+    {
+      slug: "cloud/auto",
+      name: "Auto",
+      capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
+    },
+    {
+      slug: "cloud/normal",
+      name: "Normal",
+      capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
+    },
+    {
+      slug: "cloud/fast",
+      name: "Fast",
+      capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
+    },
+    {
+      slug: "cloud/lite",
+      name: "Lite",
+      capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
+    },
+    {
+      slug: "cloud/ultra",
+      name: "Ultra",
+      capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
+    },
+    {
+      slug: "cloud/fusion",
+      name: "Fusion",
+      capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
+    },
+    {
+      slug: "cloud/swe-2-medium",
+      name: "SWE-2 Medium",
+      capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
+    },
+    {
+      slug: "cloud/swe-2-high",
+      name: "SWE-2 High",
+      capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
+    },
+    {
+      slug: "cloud/swe-2-max",
+      name: "SWE-2 Max",
+      capabilities: EMPTY_MODEL_CAPABILITIES,
+      upstreamProviderId: "devincloud",
+      upstreamProviderName: "Devin Cloud",
     },
   ],
 } as const satisfies Record<ProviderKind, readonly ModelDefinition[]>;

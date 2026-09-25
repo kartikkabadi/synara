@@ -87,6 +87,8 @@ export type ProviderKind = typeof ProviderKind.Type;
 export const LEGACY_PROVIDER_MIGRATIONS: Readonly<Record<string, ProviderKind>> = {
   gemini: "antigravity",
   kilo: "opencode",
+  // Devin Cloud folded into the `devin` provider (cloud/<mode> model slugs).
+  devinCloud: "devin",
 };
 
 /**
@@ -237,6 +239,11 @@ export const PiProviderStartOptions = Schema.Struct({
 
 export const DevinProviderStartOptions = Schema.Struct({
   binaryPath: Schema.optional(TrimmedNonEmptyString),
+  // Devin Cloud transport: "auto" prefers `devin acp --cloud` and falls back
+  // to the v3 REST API; "acp"/"rest" pin one transport.
+  cloudMode: Schema.optional(Schema.Literals(["auto", "acp", "rest"])),
+  // Devin Cloud org id override; auto-resolves through GET /v3/self.
+  orgId: Schema.optional(TrimmedNonEmptyString),
 });
 
 export const ProviderStartOptions = Schema.Struct({
