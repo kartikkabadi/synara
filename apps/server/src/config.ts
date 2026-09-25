@@ -26,6 +26,21 @@ export const PRIVATE_STATE_REPAIR_MARKER = ".permissions-v1";
 
 export type RuntimeMode = "web" | "desktop";
 
+export type ControlPlaneKernelMode = "off" | "shadow" | "on";
+
+/**
+ * Rollout flag for the minisqlite control-plane kernel backing the
+ * checkpoint-revert saga. "off" (default) keeps the legacy revert path,
+ * "shadow" records kernel state alongside the legacy path, "on" makes the
+ * kernel authoritative. Unrecognized values fall back to "off".
+ */
+export function controlPlaneKernelMode(
+  env: Record<string, string | undefined> = process.env,
+): ControlPlaneKernelMode {
+  const value = env.SYNARA_CONTROL_PLANE_KERNEL?.trim().toLowerCase();
+  return value === "shadow" || value === "on" ? value : "off";
+}
+
 export function normalizeHttpsPublicOrigin(publicUrl: URL): URL | null {
   if (
     publicUrl.protocol !== "https:" ||
