@@ -28,6 +28,7 @@ import {
   mergeDevinModelDescriptors,
   makeDevinAdapterLive,
   parseDevinCliModelList,
+  parseDevinFusionVariant,
   pruneDevinToolCallTurnIds,
   resolveDevinAdapterTimeouts,
   resolveDevinOptionalTimeoutMs,
@@ -1475,6 +1476,66 @@ describe("resolveDevinStartModel", () => {
 
     expect(effectiveModel).toBe("gpt-5-6-sol-high");
   });
+
+  it("resolves Fusion lead, sidekick, effort, and fast selections", async () => {
+    const models = mergeDevinModelDescriptors([
+      parseDevinCliModelList(
+        JSON.stringify({
+          families: [
+            {
+              family_uid: "fusion",
+              slug: "fusion",
+              family_label: "Fusion",
+              variants: [
+                {
+                  model_uid: "fusion-claude-fable-5-1-medium-sidekick-swe-2-medium",
+                  label: "Fusion (Claude Fable 5.1 Medium + SWE-2 Medium)",
+                },
+                {
+                  model_uid: "fusion-claude-fable-5-1-high-sidekick-swe-2-medium",
+                  label: "Fusion (Claude Fable 5.1 High + SWE-2 Medium)",
+                },
+                {
+                  model_uid: "fusion-claude-opus-5-5-max-sidekick-glm-5-2",
+                  label: "Fusion (Claude Opus 5.5 Max + GLM-5.2 High)",
+                },
+                {
+                  model_uid: "fusion-gpt-6-sol-high-fast-sidekick-gpt-5-6-luna-high-priority",
+                  label: "Fusion (GPT-6 Sol High Thinking Fast + GPT-5.6 Luna High Thinking Fast)",
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    ]);
+    const runtimeModel = models[0];
+    if (!runtimeModel) throw new Error("Expected Fusion to be discovered");
+    expect(
+      await Effect.runPromise(
+        resolveDevinStartModel({
+          explicitModel: undefined,
+          modelSelection: {
+            model: "fusion",
+            options: { reasoningEffort: "max", leadModel: "claude-opus-5-5", sidekick: "glm-5-2" },
+          },
+          discoverModels: () => Effect.succeed({ models, source: "devin-cli", cached: false }),
+        }),
+      ),
+    ).toBe("fusion-claude-opus-5-5-max-sidekick-glm-5-2");
+    expect(
+      await Effect.runPromise(
+        resolveDevinStartModel({
+          explicitModel: undefined,
+          modelSelection: {
+            model: "fusion",
+            options: { fastMode: true, leadModel: "gpt-6-sol", sidekick: "gpt-5-6-luna-high" },
+          },
+          discoverModels: () => Effect.succeed({ models, source: "devin-cli", cached: false }),
+        }),
+      ),
+    ).toBe("fusion-gpt-6-sol-high-fast-sidekick-gpt-5-6-luna-high-priority");
+  });
 });
 
 describe("buildDevinPromptMeta", () => {
@@ -1508,6 +1569,98 @@ describe("buildDevinStaticModelDescriptors", () => {
 });
 
 describe("Devin CLI model discovery", () => {
+  it("publishes Fusion lead and sidekick option descriptors", () => {
+    const [model] = mergeDevinModelDescriptors([
+      parseDevinCliModelList(
+        JSON.stringify({
+          families: [
+            {
+              family_uid: "fusion",
+              family_label: "Fusion",
+              slug: "fusion",
+              variants: [
+                {
+                  model_uid: "fusion-claude-fable-5-1-medium-sidekick-swe-2-medium",
+                  label: "Fusion (Claude Fable 5.1 Medium + SWE-2 Medium)",
+                },
+                {
+                  model_uid: "fusion-claude-fable-5-1-high-sidekick-swe-2-medium",
+                  label: "Fusion (Claude Fable 5.1 High + SWE-2 Medium)",
+                },
+                {
+                  model_uid: "fusion-gpt-6-sol-high-fast-sidekick-gpt-5-6-luna-high-priority",
+                  label: "Fusion (GPT-6 Sol High Thinking Fast + GPT-5.6 Luna High Thinking Fast)",
+                },
+                {
+                  model_uid: "fusion-claude-opus-5-5-max-sidekick-glm-5-2",
+                  label: "Fusion (Claude Opus 5.5 Max + GLM-5.2 High)",
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    ]);
+    if (!model) throw new Error("Expected Fusion to be discovered");
+    expect(model.supportedReasoningEfforts?.map((effort) => effort.value)).toEqual([
+      "medium",
+      "high",
+      "max",
+    ]);
+    expect(model.modelVariants).toContainEqual({
+      model: "fusion-claude-fable-5-1-high-sidekick-swe-2-medium",
+      leadModel: "claude-fable-5-1",
+      sidekick: "swe-2-medium",
+      reasoningEffort: "high",
+      fastMode: false,
+    });
+    expect(model.modelVariants).toContainEqual({
+      model: "fusion-gpt-6-sol-high-fast-sidekick-gpt-5-6-luna-high-priority",
+      leadModel: "gpt-6-sol",
+      sidekick: "gpt-5-6-luna-high",
+      reasoningEffort: "high",
+      fastMode: true,
+    });
+    expect(model.optionDescriptors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "leadModel",
+          type: "select",
+          options: expect.arrayContaining([
+            { id: "claude-fable-5-1", label: "Claude Fable 5.1", isDefault: true },
+            { id: "gpt-6-sol", label: "GPT-6 Sol" },
+          ]),
+        }),
+        expect.objectContaining({
+          id: "sidekick",
+          type: "select",
+          options: expect.arrayContaining([
+            { id: "swe-2-medium", label: "SWE-2 Medium", isDefault: true },
+            { id: "gpt-5-6-luna-high", label: "GPT-5.6 Luna High Thinking" },
+            { id: "glm-5-2", label: "GLM-5.2 High" },
+          ]),
+        }),
+        expect.objectContaining({ id: "fastMode", type: "boolean" }),
+      ]),
+    );
+  });
+
+  it("parses Fusion labels and strips sidekick priority", () => {
+    expect(
+      parseDevinFusionVariant({
+        model: "fusion-gpt-6-sol-high-fast-sidekick-gpt-5-6-luna-high-priority",
+        label: "Fusion (GPT-6 Sol High Thinking Fast + GPT-5.6 Luna High Thinking Fast)",
+      }),
+    ).toEqual({
+      leadModel: "gpt-6-sol",
+      reasoningEffort: "high",
+      fastMode: true,
+      sidekick: "gpt-5-6-luna-high",
+      leadLabel: "GPT-6 Sol",
+      sidekickLabel: "GPT-5.6 Luna High Thinking",
+    });
+  });
+
   it("publishes reasoning, fast, context, and concrete variant metadata", () => {
     const models = parseDevinCliModelList(
       JSON.stringify({

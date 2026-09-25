@@ -271,6 +271,8 @@ export function resolveDevinModelVariant(input: {
   readonly runtimeModel?: ProviderModelDescriptor | undefined;
   readonly modelVariant?: string | null | undefined;
   readonly reasoningEffort?: string | null | undefined;
+  readonly leadModel?: string | null | undefined;
+  readonly sidekick?: string | null | undefined;
   readonly fastMode?: boolean | undefined;
   readonly thinking?: boolean | null | undefined;
   readonly contextWindow?: string | null | undefined;
@@ -282,9 +284,15 @@ export function resolveDevinModelVariant(input: {
   }
 
   const reasoningEffort = trimOrNull(input.reasoningEffort);
+  const leadModel = trimOrNull(input.leadModel);
+  const sidekick = trimOrNull(input.sidekick);
   const contextWindow = trimOrNull(input.contextWindow);
   const mapsReasoningEffort =
     reasoningEffort !== null && variants.some((variant) => variant.reasoningEffort !== undefined);
+  const mapsLeadModel =
+    leadModel !== null && variants.some((variant) => variant.leadModel !== undefined);
+  const mapsSidekick =
+    sidekick !== null && variants.some((variant) => variant.sidekick !== undefined);
   const mapsFastMode =
     input.fastMode !== undefined && variants.some((variant) => variant.fastMode !== undefined);
   const mapsThinking =
@@ -293,12 +301,23 @@ export function resolveDevinModelVariant(input: {
     variants.some((variant) => variant.thinking !== undefined);
   const mapsContextWindow =
     contextWindow !== null && variants.some((variant) => variant.contextWindow !== undefined);
-  if (!mapsReasoningEffort && !mapsFastMode && !mapsThinking && !mapsContextWindow) {
+  if (
+    !mapsReasoningEffort &&
+    !mapsLeadModel &&
+    !mapsSidekick &&
+    !mapsFastMode &&
+    !mapsThinking &&
+    !mapsContextWindow
+  ) {
     return explicitVariant;
   }
 
   const effectiveReasoningEffort =
     reasoningEffort ?? trimOrNull(input.runtimeModel?.defaultReasoningEffort);
+  const effectiveLeadModel =
+    leadModel ?? getProviderOptionDefaultValue(input.runtimeModel?.optionDescriptors, "leadModel");
+  const effectiveSidekick =
+    sidekick ?? getProviderOptionDefaultValue(input.runtimeModel?.optionDescriptors, "sidekick");
   const effectiveContextWindow =
     contextWindow ?? trimOrNull(input.runtimeModel?.defaultContextWindow);
   // Thinking is on by default for Devin families that expose a thinking
@@ -312,6 +331,12 @@ export function resolveDevinModelVariant(input: {
       return false;
     }
     if (effectiveContextWindow && variant.contextWindow !== effectiveContextWindow) {
+      return false;
+    }
+    if (effectiveLeadModel && variant.leadModel !== effectiveLeadModel) {
+      return false;
+    }
+    if (effectiveSidekick && variant.sidekick !== effectiveSidekick) {
       return false;
     }
     if (input.fastMode === true && variant.fastMode !== true) {
@@ -469,7 +494,7 @@ function withProviderOptionCurrentValue(
   return { ...descriptor, currentValue };
 }
 
-function reasoningDescriptorId(provider: ProviderKind): string {
+export function reasoningDescriptorId(provider: ProviderKind): string {
   if (provider === "claudeAgent") {
     return "effort";
   }
@@ -570,6 +595,16 @@ export function getProviderOptionCurrentValue(
     return descriptor.currentValue;
   }
   return descriptor.currentValue ?? descriptor.options.find((option) => option.isDefault)?.id;
+}
+
+export function getProviderOptionDefaultValue(
+  descriptors: ReadonlyArray<ProviderOptionDescriptor> | undefined,
+  id: string,
+): string | boolean | undefined {
+  const descriptor = descriptors?.find((candidate) => candidate.id === id);
+  if (!descriptor) return undefined;
+  if (descriptor.type === "boolean") return descriptor.currentValue;
+  return descriptor.options.find((option) => option.isDefault)?.id ?? descriptor.currentValue;
 }
 
 // ── Data-driven capability resolver ───────────────────────────────────

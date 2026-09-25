@@ -374,18 +374,24 @@ export function normalizeProviderModelOptions(
   const devinReasoningEffort = trimStringOrUndefined(devinCandidate?.reasoningEffort);
   const devinThinking = booleanOrUndefined(devinCandidate?.thinking);
   const devinContextWindow = trimStringOrUndefined(devinCandidate?.contextWindow);
+  const devinLeadModel = trimStringOrUndefined(devinCandidate?.leadModel);
+  const devinSidekick = trimStringOrUndefined(devinCandidate?.sidekick);
   const devinModelVariant = trimStringOrUndefined(devinCandidate?.modelVariant);
   const devin: DevinModelOptions | undefined =
     devinReasoningEffort !== undefined ||
     devinFastMode !== undefined ||
     devinThinking !== undefined ||
     devinContextWindow !== undefined ||
+    devinLeadModel !== undefined ||
+    devinSidekick !== undefined ||
     devinModelVariant !== undefined
       ? {
           ...(devinReasoningEffort !== undefined ? { reasoningEffort: devinReasoningEffort } : {}),
           ...(devinFastMode !== undefined ? { fastMode: devinFastMode } : {}),
           ...(devinThinking !== undefined ? { thinking: devinThinking } : {}),
           ...(devinContextWindow !== undefined ? { contextWindow: devinContextWindow } : {}),
+          ...(devinLeadModel !== undefined ? { leadModel: devinLeadModel } : {}),
+          ...(devinSidekick !== undefined ? { sidekick: devinSidekick } : {}),
           ...(devinModelVariant !== undefined ? { modelVariant: devinModelVariant } : {}),
         }
       : undefined;
