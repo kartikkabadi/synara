@@ -1704,6 +1704,10 @@ export function makeCursorAdapter(
           childProcessSpawner,
           cwd: process.cwd(),
           clientInfo: { name: "Synara", version: "0.0.0" },
+          // Passive probe: a background model refresh must never open a login
+          // browser. On auth-required failure we fall back to the headless CLI
+          // model list, which reports the unauthenticated status textually.
+          authPolicy: "never",
         });
         const started = yield* runtime.start();
         const models = yield* fetchCursorAcpModelDescriptors(runtime, started.sessionId);
