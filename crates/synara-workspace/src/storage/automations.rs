@@ -1,7 +1,7 @@
 //! One versioned scheduler ledger in the existing SQLite store. Every mutation
 //! takes the database writer lock before reading. Transcript events never decide
 //! whether a scheduled slot has already been claimed.
-use super::organization::automation_hub_context;
+
 use super::*;
 use crate::automations::*;
 use crate::{
@@ -58,9 +58,6 @@ fn context(
         [project.workspace_id.to_string()],
         |r| r.get(0),
     )?;
-    if definition.context == AutomationContextPolicy::Hub {
-        let _ = automation_hub_context(connection, project.id)?;
-    }
     Ok((project, decode(&workspace)?))
 }
 fn validate_completion_policy(
@@ -332,22 +329,9 @@ impl Store {
             }
         }
         let (project, workspace) = context(&tx, &definition)?;
-        let (new_scope, prompt, hub_revision) = match definition.context {
-            AutomationContextPolicy::Project => {
-                (TaskScope::Project, definition.instructions.clone(), None)
-            }
-            AutomationContextPolicy::Hub => {
-                let (revision, shared) = automation_hub_context(&tx, project.id)?;
-                let mut prompt = shared;
-                prompt.push_str(&definition.instructions);
-                if prompt.len() > MAX_AUTOMATION_PROMPT_BYTES || prompt.contains('\0') {
-                    return Err(invalid(
-                        "Combined Hub automation context exceeds the 128 KiB prompt limit.",
-                    ));
-                }
-                (TaskScope::Studio, prompt, Some(revision))
-            }
-        };
+        // Upstream has no automation context knob: the submitted prompt is the
+        // reviewed instructions verbatim, in the ordinary project scope.
+        let prompt = definition.instructions.clone();
 
         let mut created_task = false;
         let task = match definition.mode {
@@ -362,7 +346,7 @@ impl Store {
                     agent_id: definition.agent_id.clone(),
                     working_directory: crate::service::project_directory(&workspace, &project)?,
                     updated_at_ms: now,
-                    scope: new_scope,
+                    scope: TaskScope::Project,
                 }
             }
             AutomationMode::Heartbeat => match continuation_target_for_run(
@@ -401,7 +385,7 @@ impl Store {
                         agent_id: definition.agent_id.clone(),
                         working_directory: crate::service::project_directory(&workspace, &project)?,
                         updated_at_ms: now,
-                        scope: new_scope,
+                        scope: TaskScope::Project,
                     };
                     definition.target_task_id = Some(task.id);
                     ledger.definitions[index].target_task_id = Some(task.id);
@@ -420,7 +404,7 @@ impl Store {
             status: AutomationRunStatus::Running,
             task_id: Some(task.id),
             prompt,
-            hub_revision,
+            hub_revision: None,
             completion_evaluation: None,
             output: String::new(),
         };

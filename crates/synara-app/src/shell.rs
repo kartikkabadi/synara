@@ -659,9 +659,8 @@ impl Shell {
             return false;
         }
         if self.hubs.pending(cx) {
-            self.notice = Some(
-                "Finish Hub creation or save/discard the Hub context editor before closing.".into(),
-            );
+            self.notice =
+                Some("Finish Hub creation or save/discard the Hub editor before closing.".into());
             cx.notify();
             return false;
         }

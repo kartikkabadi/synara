@@ -86,10 +86,13 @@ impl Shell {
         // Capture the origin when the dialog opens. Later navigation must not
         // change whether a request creates a normal task or a Hub task.
         let hub = if self.navigation.studio {
-            let Some(hub) = self.hubs.rows.iter().find(|hub| {
-                Some(hub.profile.project) == self.hubs.selected && !hub.profile.archived
-            }) else {
-                self.error = Some("Select an active Hub before creating a task.".into());
+            let Some(hub) = self
+                .hubs
+                .rows
+                .iter()
+                .find(|hub| Some(hub.profile.project) == self.hubs.selected)
+            else {
+                self.error = Some("Select a Hub before creating a task.".into());
                 cx.notify();
                 return;
             };
@@ -252,17 +255,7 @@ impl Shell {
     }
     fn submit_kanban_text(&mut self, id: TaskId, text: String, cx: &mut Context<Self>) {
         self.kanban.launching.remove(&id);
-        let context_only = self
-            .catalog
-            .tasks
-            .iter()
-            .any(|task| task.id == id && task.scope == TaskScope::Studio)
-            && (text.starts_with("## Hub instructions\n")
-                || text.starts_with("## Shared Hub knowledge\n"))
-            && text
-                .rsplit_once("\nTask:\n")
-                .is_some_and(|(_, task)| task.trim().is_empty());
-        if text.trim().is_empty() || context_only {
+        if text.trim().is_empty() {
             self.notice = Some("Open this task and write a prompt before running it.".into());
             return;
         }

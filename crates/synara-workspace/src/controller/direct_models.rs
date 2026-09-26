@@ -524,7 +524,7 @@ fn model_error(error: synara_model::ModelError) -> WorkspaceError {
 mod tests {
     use super::*;
     use crate::{
-        AutomationContextPolicy, AutomationId, AutomationMode, AutomationSchedule,
+        AutomationId, AutomationMode, AutomationSchedule,
         DEFAULT_AUTOMATION_HEARTBEAT_COOLDOWN_SECONDS, DEFAULT_AUTOMATION_MAX_RUNTIME_SECONDS,
         MissedRunPolicy, now_ms,
     };
@@ -744,7 +744,7 @@ mod tests {
             mode: AutomationMode::Standalone,
             target_task_id: None,
             heartbeat_cooldown_seconds: DEFAULT_AUTOMATION_HEARTBEAT_COOLDOWN_SECONDS,
-            context: AutomationContextPolicy::Project,
+            context: None,
             completion_policy: AutomationCompletionPolicy::AiEvaluated {
                 stop_when: "Release is complete".into(),
                 confidence_threshold: 0.8,

@@ -56,7 +56,7 @@ impl Shell {
                 .hubs
                 .rows
                 .iter()
-                .any(|hub| hub.profile.project == task.project_id && !hub.profile.archived)
+                .any(|hub| hub.profile.project == task.project_id)
     }
     fn find_hub_tasks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.kanban.hub_view.query.is_none() {
@@ -75,18 +75,17 @@ impl Shell {
         cx.notify();
     }
     pub(super) fn hub_task_board(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
-        let Some(profile) = self
+        if !self
             .hubs
             .rows
             .iter()
-            .find(|hub| Some(hub.profile.project) == self.hubs.selected)
-            .map(|hub| &hub.profile)
-        else {
+            .any(|hub| Some(hub.profile.project) == self.hubs.selected)
+        {
             return div()
                 .p_4()
                 .child("Select a Hub to see its tasks.")
                 .into_any_element();
-        };
+        }
         let state = &self.kanban.hub_view;
         let query = state
             .query
@@ -166,8 +165,6 @@ impl Shell {
                             })).text_size(px(12.)).rounded_none().bg(gpui::rgba(0))
                             .border_b_2().border_color(if filter == state.filter { rgb(palette().focus) } else { gpui::rgba(0) })
                     })))
-            .children(profile.archived.then(|| div().px_4().py_2().text_size(px(12.))
-                .child("Archived Hub. Existing work remains visible. Restore it to create or run drafts.")))
             .child(div().id("hub-task-rows").flex_1().min_h_0().overflow_y_scroll().px_3()
                 .children(filtered.iter().take(cap).map(|task| {
                     let id = task.id;
@@ -192,7 +189,7 @@ impl Shell {
                             "hub-task-action",
                             if group == 0 { "Run saved draft" } else { "Stop task" },
                             if group == 0 { Glyph::Send } else { Glyph::Stop },
-                            group == 0 && profile.archived || self.kanban.stopping.contains(&id),
+                            self.kanban.stopping.contains(&id),
                             cx.listener(move |this, _: &(), _, cx| {
                                 if group == 0 { this.run_kanban_draft(id, cx); } else { this.stop_kanban_task(id, cx); }
                             }))))

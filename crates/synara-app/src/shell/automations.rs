@@ -43,7 +43,6 @@ struct Editor {
     missed: MissedRunPolicy,
     mode: AutomationMode,
     target_task: Option<TaskId>,
-    context: AutomationContextPolicy,
     completion_selection: Option<ModelSelection>,
 }
 #[derive(Clone)]
@@ -52,7 +51,7 @@ enum Pending {
     Run(AutomationDefinition),
     Enable(AutomationDefinition, bool),
     Delete(AutomationDefinition),
-    Recover(AutomationRun),
+    Recover(Box<AutomationRun>),
     PruneHistory(usize),
     PruneDefinitionHistory(AutomationDefinition, usize),
 }
@@ -373,7 +372,6 @@ impl Shell {
                         missed: d.missed,
                         mode: d.mode,
                         target_task: d.target_task_id,
-                        context: d.context,
                         completion_selection,
                     },
                     d.title,
@@ -400,7 +398,6 @@ impl Shell {
                     missed: MissedRunPolicy::Skip,
                     mode: AutomationMode::Standalone,
                     target_task: None,
-                    context: AutomationContextPolicy::Project,
                     completion_selection: None,
                 },
                 String::new(),
@@ -560,7 +557,7 @@ impl Shell {
                 missed: editor.missed,
                 mode: editor.mode,
                 target_task_id: editor.target_task,
-                context: editor.context,
+                context: None,
                 completion_policy,
                 heartbeat_cooldown_seconds: parse_cooldown_seconds(
                     self.automations.heartbeat_cooldown.read(cx).text(),
@@ -683,6 +680,7 @@ impl Shell {
                             workspace.delete_automation(d.id, d.revision, true).await
                         }
                         Pending::Recover(run) => {
+                            let run = *run;
                             workspace
                                 .resolve_interrupted_automation(run.id, owner, true)
                                 .await

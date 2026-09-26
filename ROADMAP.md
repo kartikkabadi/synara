@@ -633,6 +633,16 @@ Verification receipts:
   chip that toggles back to Default. The 400+-line journal surface (phases,
   edit ledgers, accordion bar) had no upstream counterpart and is deleted.
   See the [batch 44 receipt](docs/verification/parity-2026-09-26-batch44.md).
+- Batch 45 slims the invented Hub overlay down to upstream's studio-project
+  shape. `HubProfile` is now just `project + name + instructions`; the
+  description, curated "shared knowledge" memory, include-in-new-threads
+  composer injection, archived flag, promote-message-to-knowledge action, and
+  the automations context-policy/`hub_revision` machinery are all deleted.
+  Instructions now seed a new thread's saved notes (`task-context:`) exactly
+  like upstream's `mergeProjectInstructionsIntoThreadNotes`, and automation
+  run prompts are the instructions verbatim in ordinary project scope. Legacy
+  v1 hub rows fold `memory` into `instructions` on decode so no text is lost.
+  See the [batch 45 receipt](docs/verification/parity-2026-09-26-batch45.md).
 
 
 ## How to update this roadmap

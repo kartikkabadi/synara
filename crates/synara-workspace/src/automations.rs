@@ -480,22 +480,6 @@ impl AutomationMode {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum AutomationContextPolicy {
-    #[default]
-    Project,
-    Hub,
-}
-impl AutomationContextPolicy {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Project => "Project instructions only",
-            Self::Hub => "Hub shared context + instructions",
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AutomationCompletionPolicy {
@@ -552,8 +536,10 @@ pub struct AutomationDefinition {
     pub target_task_id: Option<TaskId>,
     #[serde(default = "default_automation_heartbeat_cooldown_seconds")]
     pub heartbeat_cooldown_seconds: u32,
-    #[serde(default)]
-    pub context: AutomationContextPolicy,
+    /// Removed hub-context knob: rows written by older versions decode, and
+    /// the value is ignored — automation prompts are the instructions verbatim.
+    #[serde(default, skip_serializing)]
+    pub context: Option<serde_json::Value>,
     #[serde(default)]
     pub completion_policy: AutomationCompletionPolicy,
     #[serde(default)]
@@ -655,9 +641,9 @@ pub struct AutomationRun {
     /// may be empty because they predate prompt snapshots or launched no task.
     #[serde(default)]
     pub prompt: String,
-    /// Hub revision resolved inside the claim transaction, when Hub context was used.
-    #[serde(default)]
-    pub hub_revision: Option<u64>,
+    /// Removed hub-context snapshot marker: retained so stored runs decode.
+    #[serde(default, skip_serializing)]
+    pub hub_revision: Option<serde_json::Value>,
     #[serde(default)]
     pub completion_evaluation: Option<AutomationCompletionEvaluation>,
     pub output: String,
