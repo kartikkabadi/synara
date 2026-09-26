@@ -54,11 +54,28 @@ gesture. Now the extras menu owns the flow:
 
 ## Live test
 
-Acceptance gesture: with a task open, `+` → "Attach window" slides the
-extras menu to a window list (row per visible window, size detail);
-selecting a row attaches an `AppSnap-PID…png` draft chip and "Back"
-restores the root menu. Verified in the running app — see attached
-screenshots in the session report; results below.
+Acceptance gesture: with a task open, `+` → "Attach window" swaps the
+extras menu to its windows view (Back row + per-window rows or an empty
+state), and "Back" returns to the root view. Verified in the running app
+(`cargo run -p synara-app` build `bca718daa`):
+
+- `+` → "Attach window": menu repopulated in place to `Back` +
+  "No capturable windows · No supported visible application windows were
+  found" — the standalone AppSnap card never opened.
+- The menu-mode discovery failure surfaced through the shell error
+  strip: "Attach window failed: operation is not supported: AppSnap
+  currently supports Linux/X11 only…" — this box is macOS, where the
+  port's SnapTools has no capture backend (pre-existing capability gap,
+  same error the standalone card would show; upstream desktop captures
+  via native APIs on each platform).
+- "Back" returned the menu to the root view
+  (Files and folders / Attach window / Goal / Plan mode / Debug mode /
+  Follow-ups).
+
+The per-window-row → draft-attachment capture gesture cannot be
+exercised on macOS because discovery itself is unsupported; on
+Linux/X11 the same code path lists `SnapWindow` rows and captures the
+selected index through the existing `capture_appsnap` path.
 
 ## Known parity gaps recorded
 
