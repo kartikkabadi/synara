@@ -62,9 +62,17 @@ model, no evidence-phase API — so the journal is deleted, not kept.
   once on timing, passed 96/0 on rerun; the crate is untouched by this batch.
   The known gitconfig-proxy failure
   (`discovery_does_not_change_worktree_or_index`) remains env-only.
-- Live UI check: `/debug` → Debug badge appears and mode persists after task
-  switch; `/default` and badge click clear it; mode-menu row shows the check
-  state. See attached screenshots.
+- Live UI check (real GPUI app, isolated data dir, debug build): the port
+  namespaces native commands — the live syntax is `/synara/debug` and
+  `/synara/default`; bare `/debug` is deliberately not intercepted and sends
+  as a normal prompt (verified: no command menu, no badge). With the native
+  prefix: `/synara/debug` renders the "Debug" badge chip and writes
+  `task-interaction-mode:{task}` = `"debug"`; the extras menu "Debug mode"
+  row shows its checkmark; the badge survives a task switch away and back;
+  `/synara/default` and clicking the chip both clear it; a normal prompt
+  submits with no badge; the deleted phases accordion no longer renders.
+  Recording `rec-1445eb6b-…-edited.mp4` and screenshots under
+  `~/screenshots/` capture each gesture.
 
 ### Known parity gaps recorded
 
