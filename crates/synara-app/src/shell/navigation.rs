@@ -244,6 +244,21 @@ impl Shell {
         .child(ui::layout_probe_slot("thread-row", index))
         .child(self.thread_pin_button(task, cx))
         .children(
+            self.pending
+                .iter()
+                .any(|(key, interaction)| {
+                    key.0 == task.thread_id
+                        && matches!(interaction, UiInteraction::Permission { .. })
+                })
+                .then(|| {
+                    div()
+                        .text_xs()
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(palette().pending))
+                        .child("Pending")
+                }),
+        )
+        .children(
             (self.busy.contains(&id) || self.connecting.contains(&id))
                 .then(|| div().size(px(5.)).rounded_full().bg(rgb(palette().focus))),
         )

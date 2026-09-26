@@ -44,6 +44,9 @@ pub struct Palette {
     pub error: u32,
     pub error_surface: u32,
     pub notice_surface: u32,
+    /// Pending-approval row badge (upstream text-amber-300/90 dark,
+    /// text-amber-600 light).
+    pub pending: u32,
 }
 pub const DARK: Palette = Palette {
     canvas: 0x272731,
@@ -58,6 +61,7 @@ pub const DARK: Palette = Palette {
     error: 0xffb9c0,
     error_surface: 0x432c35,
     notice_surface: 0x303a4a,
+    pending: 0xe7c24a,
 };
 
 pub const LIGHT: Palette = Palette {
@@ -73,6 +77,7 @@ pub const LIGHT: Palette = Palette {
     error: 0x99283b,
     error_surface: 0xffe4e8,
     notice_surface: 0xe6edf7,
+    pending: 0xd97706,
 };
 // Synara currently owns one application window. All native views, including
 // menus and text entries, paint on the UI thread and share its current palette.

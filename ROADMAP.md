@@ -9,7 +9,7 @@ Detailed parity evidence lives in:
 
 ## Current status
 
-- Shipped feature slices: **105**
+- Shipped feature slices: **106**
 - Major remaining: **0**
 - Smaller remaining: **0**
 - Acceptance/integration remaining: **0**
@@ -670,6 +670,10 @@ Verification receipts:
   menu-mode AppSnap discovery), and picking a row captures that window as a
   draft attachment — instead of jumping to the standalone AppSnap card. See
   the [batch 49 receipt](docs/verification/parity-2026-09-26-batch49.md).
+- Batch 50 surfaces upstream's sidebar "Pending" approval badge: a thread row
+  with an unanswered permission prompt shows a medium-weight amber "Pending"
+  at the title's right end, driven by the existing per-task pending map. See
+  the [batch 50 receipt](docs/verification/parity-2026-09-26-batch50.md).
 
 
 ## How to update this roadmap
