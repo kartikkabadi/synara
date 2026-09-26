@@ -48,6 +48,12 @@ impl FollowupState {
                 self.input.read(cx).text() != original || self.input.read(cx).is_composing()
             })
     }
+    pub fn saved_count(&self) -> usize {
+        self.value.as_ref().map_or(0, |queue| queue.items.len())
+    }
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
 }
 impl Shell {
     pub(super) fn followup_navigation_blocked(&mut self, cx: &mut Context<Self>) -> bool {
@@ -67,6 +73,12 @@ impl Shell {
             true
         } else {
             false
+        }
+    }
+    pub(super) fn toggle_followups(&mut self, cx: &mut Context<Self>) {
+        if self.selected.is_some() {
+            self.followups.open = !self.followups.open;
+            cx.notify();
         }
     }
     pub(super) fn load_followups(&mut self, task: TaskId) {
@@ -250,30 +262,6 @@ impl Shell {
             Err(error) => self.followups.error = Some(error),
         }
         cx.notify();
-    }
-    pub(super) fn followup_toggle(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
-        let count = self
-            .followups
-            .value
-            .as_ref()
-            .map_or(0, |queue| queue.items.len());
-        ui::action(
-            "open-followups",
-            if count == 0 {
-                String::new()
-            } else {
-                count.to_string()
-            },
-            Some(Glyph::Clock),
-            self.followups.open,
-            cx.listener(|this, _: &(), _, cx| {
-                this.followups.open = !this.followups.open;
-                cx.notify();
-            }),
-        )
-        .aria_label(format!("Saved follow-up drafts: {count}"))
-        .text_size(px(11.))
-        .into_any_element()
     }
     pub(super) fn followups_view(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let state = &self.followups;

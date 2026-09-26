@@ -643,6 +643,17 @@ Verification receipts:
   run prompts are the instructions verbatim in ordinary project scope. Legacy
   v1 hub rows fold `memory` into `instructions` on decode so no text is lost.
   See the [batch 45 receipt](docs/verification/parity-2026-09-26-batch45.md).
+- Batch 46 normalizes the composer footer and sidebar to upstream's exact
+  shape. The footer now reads `+` extras → "Ask for approval" → context ring
+  meter (rendered only when the session reports usage) → model picker → mic →
+  circular send; the permanent voice disclaimer, in-box context text row,
+  standalone attach/AppSnap/follow-up buttons, model cycle arrows, and the
+  invented orange-shield access styling are gone. Extras rows are rewired to
+  real actions: "Files and folders" opens the native file picker, "Attach
+  window" opens AppSnap, "Goal" inserts `/synara/goal set <draft>`. The
+  sidebar gains upstream's flat Pinned section, and pinned threads no longer
+  appear inside their project group or Chats. See the
+  [batch 46 receipt](docs/verification/parity-2026-09-26-batch46.md).
 
 
 ## How to update this roadmap

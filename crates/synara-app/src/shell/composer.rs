@@ -145,15 +145,7 @@ impl Shell {
                             }))
                             .child(message.clone())
                     }))
-                    .child(
-                        div()
-                            .px_2()
-                            .text_xs()
-                            .text_color(rgb(palette().muted))
-                            .child("Voice clips upload to ChatGPT for transcription. The transcript stays an unsent draft until you choose Send."),
-                    )
                     .child(self.native_commands_view(cx))
-                    .child(self.context_usage_view(cx))
                     .child(
                         div()
                             .flex()
@@ -167,27 +159,6 @@ impl Shell {
                                     self.session_controls(cx)
                                 },
                             ))
-                            .child(
-                                ui::chrome_button(
-                                    "attach-files",
-                                    "Attach images or UTF-8 files",
-                                    Glyph::Attach,
-                                    self.attachment_send_blocked(),
-                                    cx.listener(|this, _: &(), _, cx| this.choose_attachments(cx)),
-                                )
-                                .size(px(28.)),
-                            )
-                            .child(
-                                ui::chrome_button(
-                                    "appsnap-toggle",
-                                    "AppSnap: capture one application window",
-                                    Glyph::Capture,
-                                    self.selected.is_none(),
-                                    cx.listener(|this, _: &(), _, cx| this.toggle_appsnap(cx)),
-                                )
-                                .size(px(28.)),
-                            )
-                            .child(self.followup_toggle(cx))
                             .children(self.voice.recording_status().map(|(duration, level)| {
                                 div()
                                     .id("voice-recording-status")

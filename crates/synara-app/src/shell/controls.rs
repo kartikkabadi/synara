@@ -58,7 +58,10 @@ pub(in crate::shell) enum ControlAction {
     DebugMode,
     Project(ProjectId),
     BrowseWorkspace,
-    AddReferences,
+    AttachFiles,
+    AttachWindow,
+    Goal,
+    Followups,
     Unavailable,
     AccessInfo,
     Connect,
@@ -426,8 +429,8 @@ impl Shell {
         if kind == ControlKind::Access {
             return vec![(
                 Choice {
-                    label: "Ask permission".into(),
-                    detail: "Agent approval requests require your confirmation.".into(),
+                    label: "Ask for approval".into(),
+                    detail: "Always ask to edit external files and use the internet".into(),
                     selected: true,
                     ..Default::default()
                 },
@@ -452,38 +455,35 @@ impl Shell {
                     Choice {
                         label: "Files and folders".into(),
                         icon: Some(ui::Glyph::Attach),
-                        unavailable: (!matches!(
-                            self.workspace_target(),
-                            Some(WorkspaceTarget::Local { .. })
-                        ))
-                        .then(|| "Choose a local project to add file references.".into()),
                         ..Default::default()
                     },
-                    ControlAction::AddReferences,
+                    ControlAction::AttachFiles,
                 ),
                 (
                     Choice {
                         label: "Attach window".into(),
                         detail: "Capture an open app window".into(),
                         icon: Some(ui::Glyph::Window),
-                        unavailable: Some(
-                            "Window capture is not available in this native build yet.".into(),
-                        ),
+                        unavailable: self
+                            .selected
+                            .is_none()
+                            .then(|| "Select a task first.".into()),
                         ..Default::default()
                     },
-                    ControlAction::Unavailable,
+                    ControlAction::AttachWindow,
                 ),
                 (
                     Choice {
                         label: "Goal".into(),
                         detail: "Set a goal to keep pursuing".into(),
                         icon: Some(ui::Glyph::Goal),
-                        unavailable: Some(
-                            "Goals are not available in this native build yet.".into(),
-                        ),
+                        unavailable: self
+                            .selected
+                            .is_none()
+                            .then(|| "Select a task first.".into()),
                         ..Default::default()
                     },
-                    ControlAction::Unavailable,
+                    ControlAction::Goal,
                 ),
             ];
             rows.push((
@@ -513,6 +513,24 @@ impl Shell {
                         .then(|| "Select a task first.".into()),
                 },
                 ControlAction::DebugMode,
+            ));
+            let saved = self.followups.saved_count();
+            rows.push((
+                Choice {
+                    label: "Follow-ups".into(),
+                    detail: match saved {
+                        0 => "Saved follow-up drafts".into(),
+                        1 => "1 saved follow-up draft".into(),
+                        n => format!("{n} saved follow-up drafts"),
+                    },
+                    icon: Some(ui::Glyph::Clock),
+                    selected: self.followups.is_open(),
+                    unavailable: self
+                        .selected
+                        .is_none()
+                        .then(|| "Select a task first.".into()),
+                },
+                ControlAction::Followups,
             ));
             return rows;
         }
@@ -827,8 +845,29 @@ impl Shell {
                 self.browse_workspace(cx);
                 return;
             }
-            ControlAction::AddReferences => {
-                self.add_file_references(cx);
+            ControlAction::AttachFiles => {
+                self.choose_attachments(cx);
+                return;
+            }
+            ControlAction::Goal => {
+                self.composer.update(cx, |entry, cx| {
+                    let text = entry.text().to_owned();
+                    let objective = text
+                        .strip_prefix("/synara/goal set")
+                        .map(str::trim_start)
+                        .unwrap_or(&text);
+                    entry.set_text(format!("/synara/goal set {objective}"), cx);
+                });
+                self.focus_composer = true;
+                cx.notify();
+                return;
+            }
+            ControlAction::AttachWindow => {
+                self.toggle_appsnap(cx);
+                return;
+            }
+            ControlAction::Followups => {
+                self.toggle_followups(cx);
                 return;
             }
             ControlAction::Connect => {
@@ -887,7 +926,10 @@ impl Shell {
                 ControlAction::Project(_)
                 | ControlAction::DebugMode
                 | ControlAction::BrowseWorkspace
-                | ControlAction::AddReferences
+                | ControlAction::AttachFiles
+                | ControlAction::AttachWindow
+                | ControlAction::Goal
+                | ControlAction::Followups
                 | ControlAction::Unavailable
                 | ControlAction::AccessInfo
                 | ControlAction::Connect => {
@@ -982,13 +1024,11 @@ impl Shell {
             .aria_label(kind.title()).accessibility_id(kind.id()).when(disabled, |el| el.aria_description("Unavailable while the session is busy, or when no choices are advertised"))
             .text_size(px(14.)).max_w(px(320.)).min_w_0().text_ellipsis().px_2().py_1()
             .bg(gpui::rgba(0)).when(disabled, |el| el.opacity(0.5).cursor_default())
-            .when(kind == ControlKind::Access, |el| el.text_color(rgb(0xf0844b)))
             .when(kind == ControlKind::Extras, |el| el.size(px(30.)).p_0().justify_center())
             .on_click(cx.listener(move |this, _, window, cx| this.open_control(kind, window, cx)))
             .children(match kind {
                 ControlKind::Project => Some(ui::icon(ui::Glyph::Folder)),
                 ControlKind::Agent => Some(ui::icon(self.selected_agent_glyph())),
-                ControlKind::Access => Some(ui::icon(ui::Glyph::Shield).text_color(rgb(0xf0844b))),
                 ControlKind::Extras => Some(ui::icon(ui::Glyph::Plus).size(px(17.))),
                 _ => None,
             })
@@ -1028,55 +1068,8 @@ impl Shell {
             .into_any_element()
     }
 
-    // The ACP text prompt supports workspace references; a picker never sends
-    // content or starts a turn. Recheck task/root after the asynchronous dialog.
-    fn add_file_references(&mut self, cx: &mut Context<Self>) {
-        let Some(WorkspaceTarget::Local { root }) = self.workspace_target() else {
-            return;
-        };
-        let selected = self.selected;
-        let picker = cx.prompt_for_paths(gpui::PathPromptOptions {
-            files: true,
-            directories: true,
-            multiple: true,
-            prompt: Some("Add workspace references".into()),
-        });
-        cx.spawn(async move |view, cx| {
-            let result = picker.await;
-            let _ = view.update(cx, |this, cx| {
-                if this.selected != selected || !matches!(this.workspace_target(), Some(WorkspaceTarget::Local { root: current }) if current == root) { return; }
-                match result {
-                    Ok(Ok(Some(paths))) => {
-                        let root = root.canonicalize();
-                        let references: Result<Vec<_>, _> = paths.into_iter().map(|path| {
-                            let path = path.canonicalize().map_err(|_| ())?;
-                            let relative = path.strip_prefix(root.as_ref().map_err(|_| ())?).map_err(|_| ())?;
-                            Ok::<_, ()>(format!("@{}", relative.display()))
-                        }).collect();
-                        match references {
-                            Ok(references) => this.composer.update(cx, |entry, cx| {
-                                let mut text = entry.text().to_owned();
-                                if !text.is_empty() && !text.ends_with(char::is_whitespace) { text.push(' '); }
-                                text.push_str(&references.join(" "));
-                                entry.set_text(text, cx);
-                            }),
-                            Err(()) => this.error = Some("Choose files or folders inside the current project.".into()),
-                        }
-                    }
-                    Ok(Ok(None)) => {},
-                    _ => this.error = Some("The system file picker could not open. Type a workspace path in the message instead.".into()),
-                }
-                this.snapshot_draft(cx);
-                cx.notify();
-            });
-        }).detach();
-    }
-
     pub(super) fn session_controls(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let models = self.control_choices(ControlKind::Model);
-        let can_cycle_models =
-            !self.uses_direct_model() && cycle_model_action(&models, true).is_some();
-        let cycle_disabled = self.controls_blocked();
         let label = models
             .iter()
             .find(|(choice, _)| choice.selected)
@@ -1095,37 +1088,10 @@ impl Shell {
             .gap_1()
             .min_w_0()
             .child(self.control_trigger(ControlKind::Extras, String::new(), true, cx))
-            .child(self.control_trigger(ControlKind::Access, "Ask permission".into(), true, cx))
+            .child(self.control_trigger(ControlKind::Access, "Ask for approval".into(), true, cx))
+            .children(self.context_meter(cx))
             .child(div().flex_1())
             .child(self.control_trigger(ControlKind::Agent, label, !self.profiles.is_empty(), cx))
-            .children(can_cycle_models.then(|| {
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .child(
-                        ui::button_shell("previous-session-model", "Previous model", false)
-                            .size(px(28.))
-                            .p_0()
-                            .relative()
-                            .when(cycle_disabled, |el| el.opacity(0.5).cursor_default())
-                            .child(ui::icon(ui::Glyph::Back).size(px(13.)))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.cycle_session_model(false, cx);
-                            })),
-                    )
-                    .child(
-                        ui::button_shell("next-session-model", "Next model", false)
-                            .size(px(28.))
-                            .p_0()
-                            .relative()
-                            .when(cycle_disabled, |el| el.opacity(0.5).cursor_default())
-                            .child(ui::icon(ui::Glyph::Forward).size(px(13.)))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.cycle_session_model(true, cx);
-                            })),
-                    )
-            }))
             .into_any_element()
     }
 

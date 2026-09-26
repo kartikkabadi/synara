@@ -279,7 +279,6 @@ impl Shell {
         if self.settings.value.general.oldest_threads_first {
             tasks.reverse();
         }
-        tasks.sort_by_key(|task| !self.pinned_thread(task.id));
         let mut projects: Vec<_> = self
             .catalog
             .projects
@@ -298,9 +297,14 @@ impl Shell {
             .task_page
             .saturating_add(1)
             .saturating_mul(5);
+        let pinned: Vec<_> = tasks
+            .iter()
+            .filter(|task| self.pinned_thread(task.id))
+            .copied()
+            .collect();
         let chats: Vec<_> = tasks
             .iter()
-            .filter(|task| task.scope != TaskScope::Project)
+            .filter(|task| task.scope != TaskScope::Project && !self.pinned_thread(task.id))
             .copied()
             .collect();
         div()
@@ -475,6 +479,24 @@ impl Shell {
                     .min_h_0()
                     .overflow_y_scroll()
                     .pb_4()
+                    .children((!pinned.is_empty()).then(|| {
+                        div()
+                            .id("pinned-threads")
+                            .mt_4()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .px_2()
+                                    .pb_1()
+                                    .text_size(px(11.))
+                                    .text_color(rgb(palette().muted))
+                                    .child("Pinned"),
+                            )
+                            .child(div().px_2().flex().flex_col().children(
+                                pinned.iter().map(|task| self.thread_row(task, false, cx)),
+                            ))
+                    }))
                     .when(!studio, |list| {
                         list.child(
                             div()
@@ -578,6 +600,7 @@ impl Shell {
                                             .filter(|task| {
                                                 task.scope == TaskScope::Project
                                                     && task.project_id == id
+                                                    && !self.pinned_thread(task.id)
                                             })
                                             .copied()
                                             .collect();
