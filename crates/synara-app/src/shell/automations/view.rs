@@ -148,8 +148,8 @@ impl Shell {
                                 .capabilities
                                 .max_output_tokens
                                 .unwrap_or(512)
-                                .min(512)
-                                .max(1) as u32,
+                                .clamp(1, 512)
+                                as u32,
                             reasoning_effort: None,
                             output: synara_model::OutputFormat::Text,
                         };

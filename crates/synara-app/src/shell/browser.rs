@@ -270,7 +270,7 @@ impl Shell {
                         tab.profile == (BrowserProfile::Authentication { flow: *flow_id })
                     })
                     .filter_map(|tab| tab.url.clone())
-                    .last()?;
+                    .next_back()?;
                 Some((task.id.0.as_u128(), flow.url.clone(), url))
             })
             .collect();
