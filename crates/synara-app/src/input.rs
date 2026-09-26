@@ -745,7 +745,12 @@ impl Render for TextEntry {
             .when(self.mode == EntryMode::Composer, |el| el
                 .bg(gpui::rgba(0)).border_0().rounded_none().font_family(crate::ui::ui_font()))
             .when_some(self.leading_icon, |el, icon| el.pl(px(32.)).child(div().absolute().left(px(10.)).top(px(7.)).child(crate::ui::icon(icon))))
-            .when(self.mode == EntryMode::Editor, |el| el.font_family(crate::ui::code_font()).flex_1().min_h_0().h_full())
+            .when(self.mode == EntryMode::Editor, |el| {
+                el.font_family(crate::ui::code_font())
+                    .flex_1()
+                    .min_h(px(self.visible_height()))
+                    .h_full()
+            })
             .when(self.picker_chrome, |el| el.bg(gpui::rgba(0)).border_0().rounded_none())
             .cursor_text()
             .when(self.mode == EntryMode::Composer, |el| el.child(crate::ui::layout_probe("composer-input")))
