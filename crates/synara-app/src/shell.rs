@@ -117,6 +117,8 @@ struct FormState {
     error: Option<String>,
 }
 enum Update {
+    /// Fire-and-forget job result (e.g. persisting a visit stamp).
+    Noop,
     Releases(Result<NativeVersionHistory, String>),
     NativeBuildIntegrity(Result<NativeBuildIntegrity, String>),
     Goals(Box<goals::Reply>),
@@ -941,6 +943,15 @@ impl Shell {
         self.controls.retire();
         self.navigation.record_task(id);
         self.selected = Some(id);
+        // Upstream markThreadVisited — client-side stamp for the
+        // unread-completed badge on other rows.
+        let visited_at = now_ms();
+        self.catalog.visited.insert(id, visited_at);
+        let workspace = self.controller.workspace.clone();
+        self.job(async move {
+            let _ = workspace.save_task_visit(id, visited_at).await;
+            Ok(Update::Noop)
+        });
         self.loading_task = Some(id);
         self.chat_tools.reset_selection();
         self.studio.reset();
@@ -1532,6 +1543,7 @@ impl Shell {
     }
     fn receive(&mut self, update: Update, cx: &mut Context<Self>) {
         match update {
+            Update::Noop => {}
             Update::DirectModels(reply) => self.direct_model_reply(*reply, cx),
             Update::Autonomy(reply) => self.autonomy_reply(*reply, cx),
             Update::ProjectImport(reply) => self.import_reply(*reply, cx),

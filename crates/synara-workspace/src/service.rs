@@ -9,6 +9,7 @@ use async_trait::async_trait;
 pub use new_worktree::NewWorktreePlan;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
@@ -48,6 +49,9 @@ pub struct Catalog {
     pub workspaces: Vec<Workspace>,
     pub projects: Vec<Project>,
     pub tasks: Vec<Task>,
+    /// TaskId → last visit stamp (upstream `lastVisitedAt`), for the
+    /// unread-completed sidebar badge.
+    pub visited: HashMap<TaskId, i64>,
 }
 /// A Git-linked worktree mapped to the registered project's directory within it.
 /// `path` is the directory Synara will use as this task's working directory.
@@ -1339,10 +1343,12 @@ fn catalog(store: &Store) -> WorkspaceResult<Catalog> {
         }
     }
     tasks.sort_by_key(|task| std::cmp::Reverse(task.updated_at_ms));
+    let visited = store.task_visits()?;
     Ok(Catalog {
         workspaces,
         projects,
         tasks,
+        visited,
     })
 }
 fn catalog_name(value: &str, kind: &str) -> WorkspaceResult<String> {

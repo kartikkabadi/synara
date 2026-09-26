@@ -284,6 +284,13 @@ impl Shell {
             palette().awaiting
         } else if self.busy.contains(&task.id) || self.connecting.contains(&task.id) {
             palette().focus
+        } else if task.state == TaskState::Completed
+            && self.selected != Some(task.id)
+            && task.updated_at_ms > self.catalog.visited.get(&task.id).copied().unwrap_or(0)
+        {
+            // Upstream "unread completion" — the accent dot shows until the
+            // thread is visited again.
+            palette().focus
         } else {
             return None;
         };

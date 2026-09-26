@@ -2,6 +2,7 @@
 use super::*;
 use crate::{WorkspaceError, WorkspaceResult, WorkspaceService};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 const MAX_DRAFT: usize = 1024 * 1024;
 const MAX_FAVORITES: usize = 256;
 const MAX_MODEL_PRESETS: usize = 256;
@@ -257,6 +258,48 @@ impl Store {
         tx.commit()?;
         Ok(true)
     }
+    /// Upstream `thread.lastVisitedAt` — client-side visit stamps driving the
+    /// unread-completed badge; kept as a preference, not an event.
+    pub(crate) fn task_visits(&self) -> StorageResult<HashMap<TaskId, i64>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT key,data FROM preferences WHERE key LIKE 'task-visited:%'")?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?.parse::<i64>().unwrap_or(0),
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(key, at)| {
+                key.strip_prefix("task-visited:")
+                    .and_then(|id| uuid::Uuid::parse_str(id).ok())
+                    .map(|uuid| (TaskId(uuid), at))
+            })
+            .collect())
+    }
+    fn save_task_visit(&mut self, id: TaskId, at_ms: i64) -> StorageResult<bool> {
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1)",
+            [id.to_string()],
+            |r| r.get(0),
+        )?;
+        if !exists {
+            return Ok(false);
+        }
+        tx.execute(
+            "INSERT INTO preferences(key,data) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET data=excluded.data",
+            params![format!("task-visited:{id}"), at_ms.to_string()],
+        )?;
+        tx.commit()?;
+        Ok(true)
+    }
 }
 impl WorkspaceService {
     pub async fn model_favorites(&self) -> WorkspaceResult<Vec<ModelFavorite>> {
@@ -291,6 +334,20 @@ impl WorkspaceService {
     pub async fn save_task_draft(&self, id: TaskId, text: String) -> WorkspaceResult<()> {
         self.access(move |store| {
             if store.save_task_draft(id, text)? {
+                Ok(())
+            } else {
+                Err(WorkspaceError::NotFound)
+            }
+        })
+        .await
+    }
+    /// Last visit stamp per task, for the unread-completed sidebar badge.
+    pub async fn task_visits(&self) -> WorkspaceResult<HashMap<TaskId, i64>> {
+        self.access(|store| Ok(store.task_visits()?)).await
+    }
+    pub async fn save_task_visit(&self, id: TaskId, at_ms: i64) -> WorkspaceResult<()> {
+        self.access(move |store| {
+            if store.save_task_visit(id, at_ms)? {
                 Ok(())
             } else {
                 Err(WorkspaceError::NotFound)

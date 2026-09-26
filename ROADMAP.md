@@ -9,7 +9,7 @@ Detailed parity evidence lives in:
 
 ## Current status
 
-- Shipped feature slices: **107**
+- Shipped feature slices: **108**
 - Major remaining: **0**
 - Smaller remaining: **0**
 - Acceptance/integration remaining: **0**
@@ -679,6 +679,11 @@ Verification receipts:
   (focus dot) — off the same pending map; Completed/Plan Ready legs remain
   open pending `lastVisitedAt`/`proposedPlans` on `Task`. See the
   [batch 51 receipt](docs/verification/parity-2026-09-26-batch51.md).
+- Batch 52 lands `lastVisitedAt` parity: visit stamps persist as
+  `task-visited:{id}` preference keys, ride `Catalog.visited`, and stamp on
+  `select_task` — so an unread `Completed` row now gets the accent dot until
+  revisited (the status-dot ladder's lowest leg). See the
+  [batch 52 receipt](docs/verification/parity-2026-09-26-batch52.md).
 
 
 ## How to update this roadmap
