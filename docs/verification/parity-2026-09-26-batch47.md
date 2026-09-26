@@ -32,3 +32,14 @@ box collapsing to ~20px.
 - Root cause identified during live verification of batch 45/46: fields held
   text (Copy button returned full contents, ledger JSON intact) but painted
   nothing.
+
+## Live test (verified after fix, recording `rec-77278a3a`)
+
+- Notes dialog field paints stored text at full height (~115px rendered)
+  instead of the previous thin empty rect (`ss_b463000c`); typing appends
+  visibly and flips the status to "Unsaved changes" (`ss_79c0254d`).
+- Hub settings Instructions field still fills its fixed-height (160px)
+  parent and paints text — no regression (`ss_99deefc6`).
+- Automation editor's instructions box now paints stored text
+  (`ss_12a2b6a7`).
+- Discard-unsaved confirm strip still works (`ss_735e8b67`).
