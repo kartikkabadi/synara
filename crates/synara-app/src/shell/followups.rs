@@ -59,13 +59,6 @@ impl Shell {
             cx.notify();
             return true;
         }
-        if self.debug_workflow.pending(cx) {
-            self.error = Some(
-                "Save or discard the Debug evidence edit before leaving this conversation.".into(),
-            );
-            cx.notify();
-            return true;
-        }
         if self.followups.pending(cx) {
             self.error = Some(
                 "Save or discard the follow-up editor before leaving this conversation.".into(),

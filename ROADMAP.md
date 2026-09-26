@@ -626,6 +626,13 @@ Verification receipts:
   onboarding sign-in guide. The remaining 18 are confirmed already-equivalent,
   architectural non-issues, or upstream repo/CI work. See the
   [batch 43 receipt](docs/verification/parity-2026-09-26-batch43.md).
+- Batch 44 replaces the invented debug evidence journal with upstream's real
+  Debug interaction mode: a persisted per-task `interactionMode` flag that
+  prepends the verbatim `<synara_debug_mode>` provider prompt block,
+  `/debug` + `/default` slash entries, a checked mode-menu row, and a badge
+  chip that toggles back to Default. The 400+-line journal surface (phases,
+  edit ledgers, accordion bar) had no upstream counterpart and is deleted.
+  See the [batch 44 receipt](docs/verification/parity-2026-09-26-batch44.md).
 
 
 ## How to update this roadmap

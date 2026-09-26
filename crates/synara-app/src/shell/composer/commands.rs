@@ -8,6 +8,7 @@ enum Command {
     ModelNext,
     ModelPrevious,
     Debug,
+    Default,
     Goal,
     GoalPause,
     GoalResume,
@@ -78,8 +79,13 @@ const COMMANDS: &[(&str, &str, Command)] = &[
     ),
     (
         "debug",
-        "Open the evidence-first Debug workflow",
+        "Turn on the evidence-first Debug interaction mode",
         Command::Debug,
+    ),
+    (
+        "default",
+        "Return to the default interaction mode",
+        Command::Default,
     ),
     (
         "goal",
@@ -360,10 +366,8 @@ impl Shell {
                 Command::Plan => self.native_plan_mode(cx),
                 Command::ModelNext => self.cycle_session_model(true, cx),
                 Command::ModelPrevious => self.cycle_session_model(false, cx),
-                Command::Debug => {
-                    self.open_debug(cx);
-                    self.debug_workflow.open
-                }
+                Command::Debug => self.debug_mode_command(true, cx),
+                Command::Default => self.default_mode_command(cx),
                 Command::Goal => {
                     self.open_goals(cx);
                     self.goals.open

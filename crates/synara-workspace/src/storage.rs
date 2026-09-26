@@ -1,10 +1,10 @@
 mod automations;
-mod debug_workflow;
 mod direct_models;
 mod imports;
 mod integrations;
+mod interaction_mode;
 mod workflows;
-pub use debug_workflow::{DebugEdit, DebugPhase, DebugWorkflow};
+pub use interaction_mode::{DEBUG_MODE_PROMPT_PREFIX, InteractionMode, with_debug_prompt};
 mod goals;
 pub use goals::{
     GOAL_MAX_FOLLOWUPS, GOAL_PURSUIT_LIMIT_MS, GoalAchievement, GoalDecision, GoalEdit, GoalStatus,
@@ -335,7 +335,7 @@ PRAGMA user_version=2;")?;
             [task.thread_id.to_string()],
         )?;
         tx.execute(
-            "DELETE FROM preferences WHERE key IN (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+            "DELETE FROM preferences WHERE key IN (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
             params![
                 format!("task-draft:{id}"),
                 format!("message-pins:{id}"),
@@ -346,6 +346,7 @@ PRAGMA user_version=2;")?;
                 format!("side-selection:{id}"),
                 format!("task-direct-model:{id}"),
                 format!("task-debug:{id}"),
+                format!("task-interaction-mode:{id}"),
                 format!("task-recap:{id}"),
                 format!("task-inline-comments:{id}"),
                 format!("task-checkpoints:{id}"),
@@ -663,6 +664,7 @@ fn valid_preference_key(key: &str) -> bool {
         .or_else(|| key.strip_prefix("task-inline-comments:"))
         .or_else(|| key.strip_prefix("task-recap:"))
         .or_else(|| key.strip_prefix("task-debug:"))
+        .or_else(|| key.strip_prefix("task-interaction-mode:"))
         .or_else(|| key.strip_prefix("task-direct-model:"))
         .or_else(|| {
             key.strip_prefix("task-workflow:")

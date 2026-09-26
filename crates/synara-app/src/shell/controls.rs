@@ -54,8 +54,8 @@ impl ControlKind {
     }
 }
 #[derive(Clone, Debug, PartialEq)]
-enum ControlAction {
-    DebugWorkflow,
+pub(in crate::shell) enum ControlAction {
+    DebugMode,
     Project(ProjectId),
     BrowseWorkspace,
     AddReferences,
@@ -419,7 +419,10 @@ impl Shell {
         }
     }
 
-    fn control_choices(&self, kind: ControlKind) -> Vec<(Choice, ControlAction)> {
+    pub(in crate::shell) fn control_choices(
+        &self,
+        kind: ControlKind,
+    ) -> Vec<(Choice, ControlAction)> {
         if kind == ControlKind::Access {
             return vec![(
                 Choice {
@@ -498,12 +501,18 @@ impl Shell {
             rows.push((
                 Choice {
                     label: "Debug mode".into(),
-                    detail: "Observe, reproduce, investigate, fix and verify with saved evidence"
+                    detail: "Send provider prompts with the evidence-first Debug instructions"
                         .into(),
                     icon: Some(ui::Glyph::Debug),
-                    ..Default::default()
+                    selected: self
+                        .selected
+                        .is_some_and(|task| self.debug_tasks.contains(&task)),
+                    unavailable: self
+                        .selected
+                        .is_none()
+                        .then(|| "Select a task first.".into()),
                 },
-                ControlAction::DebugWorkflow,
+                ControlAction::DebugMode,
             ));
             return rows;
         }
@@ -803,8 +812,11 @@ impl Shell {
             return;
         }
         match action {
-            ControlAction::DebugWorkflow => {
-                self.open_debug(cx);
+            ControlAction::DebugMode => {
+                let on = !self
+                    .selected
+                    .is_some_and(|task| self.debug_tasks.contains(&task));
+                self.debug_mode_command(on, cx);
                 return;
             }
             ControlAction::Project(id) => {
@@ -861,7 +873,7 @@ impl Shell {
         }
         true
     }
-    fn apply_session_control(
+    pub(in crate::shell) fn apply_session_control(
         &mut self,
         task: TaskId,
         action: ControlAction,
@@ -873,7 +885,7 @@ impl Shell {
         self.job(async move {
             let result = match action {
                 ControlAction::Project(_)
-                | ControlAction::DebugWorkflow
+                | ControlAction::DebugMode
                 | ControlAction::BrowseWorkspace
                 | ControlAction::AddReferences
                 | ControlAction::Unavailable

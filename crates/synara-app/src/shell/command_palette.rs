@@ -42,7 +42,7 @@ impl PaletteState {
 }
 #[derive(Clone)]
 enum Action {
-    DebugWorkflow,
+    DebugMode,
     Goals,
     Recap,
     Handoff,
@@ -346,10 +346,10 @@ impl Shell {
                     Action::Goals,
                 ),
                 (
-                    "Debug workflow",
-                    "Evidence-first Observe, Reproduce, Investigate, Fix, Verify",
+                    "Debug mode",
+                    "Evidence-first provider instructions for this thread",
                     Glyph::Debug,
-                    Action::DebugWorkflow,
+                    Action::DebugMode,
                 ),
                 (
                     "Chat notes and checklist",
@@ -449,7 +449,9 @@ impl Shell {
         match action {
             Action::Recap => self.open_recap(cx),
             Action::Goals => self.open_goals(cx),
-            Action::DebugWorkflow => self.open_debug(cx),
+            Action::DebugMode => {
+                self.debug_mode_command(true, cx);
+            }
             Action::Handoff => self.open_handoff_menu(window, cx),
             Action::ToggleZen => self.toggle_zen(cx),
             Action::Appearance => self.open_appearance(cx),

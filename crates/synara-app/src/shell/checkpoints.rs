@@ -110,7 +110,6 @@ impl Shell {
             && !self.handoff.open()
             && !self.recap.pending()
             && !self.followups.pending(cx)
-            && !self.debug_workflow.pending(cx)
             && !self.hubs.pending(cx)
             && !self.controls.is_pending(task.id)
             && !self.goal_send_pending(cx)

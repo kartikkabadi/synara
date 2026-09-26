@@ -75,7 +75,6 @@ impl Shell {
         root = root.child(self.handoff_source_row(cx));
         root = root.child(self.workflow_strip(cx));
         root = root.child(self.goal_bar(cx));
-        root = root.child(self.debug_bar(cx));
         root = root.child(self.recap_bar(cx));
         root = root.child(self.checkpoint_panel(cx));
         if let Some(details) = &self.details {
