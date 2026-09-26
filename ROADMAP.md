@@ -9,7 +9,7 @@ Detailed parity evidence lives in:
 
 ## Current status
 
-- Shipped feature slices: **102**
+- Shipped feature slices: **105**
 - Major remaining: **0**
 - Smaller remaining: **0**
 - Acceptance/integration remaining: **0**
@@ -654,6 +654,22 @@ Verification receipts:
   sidebar gains upstream's flat Pinned section, and pinned threads no longer
   appear inside their project group or Chats. See the
   [batch 46 receipt](docs/verification/parity-2026-09-26-batch46.md).
+- Batch 47 fixes multi-line `EntryMode::Editor` fields (Notes dialog,
+  automation/hub instructions) painting as empty rectangles — `h_full()`
+  collapsed inside auto-height parents, so a `min_h(visible_height())` floor
+  now keeps the configured height. See the
+  [batch 47 receipt](docs/verification/parity-2026-09-26-batch47.md).
+- Batch 48 turns the composer access trigger into upstream's real picker:
+  the ⌄ lists the provider's advertised session modes relabeled with
+  upstream's "Ask for approval / Approve for me / Full access" copy where
+  ids match, and the trigger shows the current mode. See the
+  [batch 48 receipt](docs/verification/parity-2026-09-26-batch48.md).
+- Batch 49 makes the extras menu two-view like upstream's
+  `ComposerExtrasPanel`: "Attach window" swaps the menu to a windows view
+  (`Back` + one row per discovered `SnapWindow`, populated live by a
+  menu-mode AppSnap discovery), and picking a row captures that window as a
+  draft attachment — instead of jumping to the standalone AppSnap card. See
+  the [batch 49 receipt](docs/verification/parity-2026-09-26-batch49.md).
 
 
 ## How to update this roadmap

@@ -60,6 +60,8 @@ pub(in crate::shell) enum ControlAction {
     BrowseWorkspace,
     AttachFiles,
     AttachWindow,
+    AttachWindowIndex(usize),
+    ExtrasBack,
     Goal,
     Followups,
     Unavailable,
@@ -89,6 +91,7 @@ pub(super) struct ControlState {
     triggers: [Trigger; 7],
     pub composer_bounds: Rc<Cell<Bounds<Pixels>>>,
     pending: HashSet<TaskId>,
+    extras_windows: bool,
 }
 impl ControlState {
     pub fn new(cx: &mut Context<Shell>) -> Self {
@@ -100,6 +103,7 @@ impl ControlState {
                 bounds: Rc::new(Cell::new(Bounds::default())),
             }),
             pending: HashSet::new(),
+            extras_windows: false,
         }
     }
     pub fn is_open(&self) -> bool {
@@ -110,6 +114,7 @@ impl ControlState {
     }
     pub fn retire(&mut self) {
         self.open = None;
+        self.extras_windows = false;
     }
     pub fn completed(&mut self, task: TaskId) {
         self.pending.remove(&task);
@@ -475,6 +480,62 @@ impl Shell {
                 .collect();
         }
         if kind == ControlKind::Extras {
+            if self.controls.extras_windows {
+                let mut rows = vec![(
+                    Choice {
+                        label: "Back".into(),
+                        icon: Some(ui::Glyph::Back),
+                        ..Default::default()
+                    },
+                    ControlAction::ExtrasBack,
+                )];
+                if self.appsnap.busy {
+                    rows.push((
+                        Choice {
+                            label: "Finding windows…".into(),
+                            unavailable: Some("Window discovery is still running.".into()),
+                            ..Default::default()
+                        },
+                        ControlAction::Unavailable,
+                    ));
+                } else if self.appsnap.windows.is_empty() {
+                    rows.push((
+                        Choice {
+                            label: "No capturable windows".into(),
+                            detail: "No supported visible application windows were found.".into(),
+                            unavailable: Some("Nothing to capture.".into()),
+                            ..Default::default()
+                        },
+                        ControlAction::Unavailable,
+                    ));
+                } else {
+                    rows.extend(
+                        self.appsnap
+                            .windows
+                            .iter()
+                            .enumerate()
+                            .map(|(index, window)| {
+                                (
+                                    Choice {
+                                        label: if window.title.is_empty() {
+                                            window.class.clone()
+                                        } else {
+                                            window.title.clone()
+                                        },
+                                        detail: format!(
+                                            "{} · {}×{}",
+                                            window.class, window.width, window.height
+                                        ),
+                                        icon: Some(ui::Glyph::Window),
+                                        ..Default::default()
+                                    },
+                                    ControlAction::AttachWindowIndex(index),
+                                )
+                            }),
+                    );
+                }
+                return rows;
+            }
             let modes = self.control_choices(ControlKind::Mode);
             let plan = modes
                 .iter()
@@ -671,7 +732,29 @@ impl Shell {
                 || self.controls.is_pending(task)
         })
     }
+    /// AppSnap discovery/capture finished while the extras menu sat in its
+    /// windows view — repopulate the open menu in place.
+    pub(super) fn refresh_extras_menu(&mut self, cx: &mut Context<Self>) {
+        if !self.controls.extras_windows
+            || !self
+                .controls
+                .open
+                .as_ref()
+                .is_some_and(|open| open.kind == ControlKind::Extras)
+        {
+            return;
+        }
+        let (items, choices): (Vec<_>, Vec<_>) = self
+            .control_choices(ControlKind::Extras)
+            .into_iter()
+            .unzip();
+        if let Some(open) = self.controls.open.as_mut() {
+            open.choices = choices;
+            open.view.update(cx, |menu, cx| menu.set_choices(items, cx));
+        }
+    }
     pub(super) fn dismiss_control(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.controls.extras_windows = false;
         if let Some(open) = self.controls.open.take() {
             window.focus(&self.controls.triggers[open.kind.index()].focus, cx);
             cx.notify();
@@ -900,7 +983,17 @@ impl Shell {
                 return;
             }
             ControlAction::AttachWindow => {
-                self.toggle_appsnap(cx);
+                self.controls.extras_windows = true;
+                self.discover_appsnap_menu(cx);
+                self.open_control(ControlKind::Extras, window, cx);
+                return;
+            }
+            ControlAction::AttachWindowIndex(index) => {
+                self.capture_appsnap_window(index, cx);
+                return;
+            }
+            ControlAction::ExtrasBack => {
+                self.open_control(ControlKind::Extras, window, cx);
                 return;
             }
             ControlAction::Followups => {
@@ -965,6 +1058,8 @@ impl Shell {
                 | ControlAction::BrowseWorkspace
                 | ControlAction::AttachFiles
                 | ControlAction::AttachWindow
+                | ControlAction::AttachWindowIndex(_)
+                | ControlAction::ExtrasBack
                 | ControlAction::Goal
                 | ControlAction::Followups
                 | ControlAction::Unavailable

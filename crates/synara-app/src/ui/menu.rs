@@ -159,6 +159,22 @@ impl ChoiceMenu {
         self.searchable = false;
         self
     }
+    /// Swap the whole choice list in place (e.g. extras menu changing views).
+    /// Resets the query and moves the highlight to the selected row or row 0.
+    pub fn set_choices(&mut self, choices: Vec<Choice>, cx: &mut Context<Self>) {
+        let active = choices
+            .iter()
+            .position(|choice| choice.selected)
+            .unwrap_or(0);
+        self.choices = choices;
+        self.visible = (0..self.choices.len()).collect();
+        self.searchable = self.add_bounds.is_none() && self.choices.len() > 1;
+        self.query.clear();
+        self.navigation.move_to(active, self.visible.len());
+        self.scroll.scroll_to_item(active, ScrollStrategy::Center);
+        self.unavailable_reason = None;
+        cx.notify();
+    }
     fn filter(&mut self, query: String, cx: &mut Context<Self>) {
         let previous = self.visible.get(self.navigation.active).copied();
         self.visible = matching_choices(&self.choices, &query);
