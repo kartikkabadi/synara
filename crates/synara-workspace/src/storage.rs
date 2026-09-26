@@ -40,9 +40,7 @@ mod organization;
 mod task_context;
 pub use checkpoints::{CheckpointRestored, CheckpointReview, TaskCheckpoint, TaskCheckpoints};
 pub use organization::{NativeSpace, OrganizationEdit, SpaceSymbol, WorkspaceOrganization};
-pub use task_context::{
-    ChecklistItem, MAX_CHECKLIST_ITEMS, MAX_CHECKLIST_TEXT, MAX_NOTE_BYTES, TaskContext,
-};
+pub use task_context::{MAX_NOTE_CHARS, TaskContext};
 mod conversation_tools;
 pub(crate) use conversation_tools::write_new_export;
 pub use conversation_tools::{

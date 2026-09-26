@@ -352,7 +352,7 @@ impl Shell {
                     Action::DebugMode,
                 ),
                 (
-                    "Chat notes and checklist",
+                    "Chat notes",
                     "User-owned saved context",
                     Glyph::Notebook,
                     Action::Notes,

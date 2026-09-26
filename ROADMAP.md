@@ -9,7 +9,7 @@ Detailed parity evidence lives in:
 
 ## Current status
 
-- Shipped feature slices: **108**
+- Shipped feature slices: **109**
 - Major remaining: **0**
 - Smaller remaining: **0**
 - Acceptance/integration remaining: **0**
@@ -684,6 +684,11 @@ Verification receipts:
   `select_task` — so an unread `Completed` row now gets the accent dot until
   revisited (the status-dot ladder's lowest leg). See the
   [batch 52 receipt](docs/verification/parity-2026-09-26-batch52.md).
+- Batch 53 reshapes per-task notes to upstream's `ThreadNotes`: `TaskContext`
+  is notes-only (checklist and saved folder references — both invented —
+  deleted), capped at `THREAD_NOTES_MAX_CHARS = 16_384`, and the notes dialog
+  drops the checklist editor, folder picker, and prompt-insert buttons. See
+  the [batch 53 receipt](docs/verification/parity-2026-09-26-batch53.md).
 
 
 ## How to update this roadmap
