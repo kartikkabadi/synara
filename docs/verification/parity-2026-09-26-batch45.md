@@ -71,7 +71,19 @@ upstream, so they are deleted.
   those fixtures.
 - Storage tests cover: verbatim-prompt claim under legacy `context:"hub"`
   rows, `task-context` seeding, draft validation, and v1→v2 decode.
-- Live UI check: see below.
+- Live UI check: verified in `cargo run -p synara-app` on an isolated
+  `--data-dir` (recording `rec-0b0c512f`). Hub detail shows threads sorted by
+  recency + "Instructions · {bytes} · Revision {N}" caption with no archive /
+  "Use in new threads" / description / "Shared context" UI (`ss_799254cc`).
+  Hub settings editor has only Name + Instructions and saves with the toast
+  "Hub settings saved. New threads inherit the instructions in their notes."
+  (`ss_3855e56f`). New hub threads open with an empty composer; instructions
+  land in `task-context:{id}` (`ss_f2bf32ba`). Automations: no Run context
+  row / Context segment / Context policy anywhere (`ss_d77346f4`,
+  `ss_82b98637`, `ss_99739017`). Kanban: enabled Run/Stop, no archived banner,
+  empty-hub copy "Select a Hub before creating a task." (`ss_27060c8e`,
+  `ss_f8bb0d1e`). Studio message actions are Copy/side-chat/Pin/Reply only —
+  no hub-knowledge button (`ss_74e9218d`, `ss_zoom_badc84e1`).
 
 ### Known parity gaps recorded
 

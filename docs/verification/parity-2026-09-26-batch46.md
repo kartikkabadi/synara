@@ -59,15 +59,33 @@ from their project groups and the Chats list (upstream
 
 ## Live test
 
-Acceptance gestures for the live run:
+Acceptance gestures for the live run (verified in `cargo run -p synara-app`
+on an isolated `--data-dir`, recording `rec-0b0c512f`):
 
 1. Composer footer reads `+  Ask for approval ⌄  [ring if reported]  Model ⌄  mic  send`
-   with no disclaimer line and no context text row.
+   with no disclaimer line and no context text row. **Passed** — before/after
+   screenshots `ss_5d3a45bf` → `ss_20850694`; ring correctly absent (no usage
+   reported, so its rendering is untested).
 2. `+` menu lists Files and folders / Attach window / Goal / Plan mode /
    Debug mode / Follow-ups; "Attach window" opens AppSnap, "Goal" inserts
-   `/synara/goal set ` into the draft.
+   `/synara/goal set ` into the draft. **Passed** — `ss_dac6ca81`,
+   `ss_c1aafd4d`, `ss_ca261ff3` (AppSnap shows the expected
+   platform-unsupported notice on this box). "Files and folders" (native
+   picker), Plan mode, and Follow-ups rows verified present, not clicked.
 3. A pinned thread appears under a flat "Pinned" section and disappears from
-   its project group / Chats row.
+   its project group / Chats row. **Passed** — hover-revealed "Pin thread" →
+   section appeared above Projects, thread left Chats, row exposes
+   "Unpin thread". `ss_616b9a14`.
+4. Chat header shows the thread title (`ss_74e9218d`). **Passed**.
+
+Defect found during live test, queued for next tick: `EntryMode::Editor`
+multi-line fields (Notes dialog, automation instructions) do not visually
+paint their text in this build — content stores correctly (verified via the
+dialog's Copy button + saved ledger JSON) but renders as an empty rectangle.
+Single-line fields paint fine.
+
+Env limits: no agent CLIs installed on the box, so send/run paths stop at
+spawn (`I/O operation failed`) — used only to prove controls are enabled.
 
 ## Known parity gaps recorded
 
