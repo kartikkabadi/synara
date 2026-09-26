@@ -9,7 +9,7 @@ Detailed parity evidence lives in:
 
 ## Current status
 
-- Shipped feature slices: **106**
+- Shipped feature slices: **107**
 - Major remaining: **0**
 - Smaller remaining: **0**
 - Acceptance/integration remaining: **0**
@@ -674,6 +674,11 @@ Verification receipts:
   with an unanswered permission prompt shows a medium-weight amber "Pending"
   at the title's right end, driven by the existing per-task pending map. See
   the [batch 50 receipt](docs/verification/parity-2026-09-26-batch50.md).
+- Batch 51 ranks the thread-row trailing dot in upstream's status order —
+  pending approval (amber) → awaiting input (indigo) → working/connecting
+  (focus dot) — off the same pending map; Completed/Plan Ready legs remain
+  open pending `lastVisitedAt`/`proposedPlans` on `Task`. See the
+  [batch 51 receipt](docs/verification/parity-2026-09-26-batch51.md).
 
 
 ## How to update this roadmap

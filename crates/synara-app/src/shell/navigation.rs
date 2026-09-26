@@ -258,11 +258,42 @@ impl Shell {
                         .child("Pending")
                 }),
         )
-        .children(
-            (self.busy.contains(&id) || self.connecting.contains(&id))
-                .then(|| div().size(px(5.)).rounded_full().bg(rgb(palette().focus))),
-        )
+        .children(self.thread_status_dot(task))
         .into_any_element()
+    }
+    /// Upstream trailing status, in priority order: pending approval (amber)
+    /// → awaiting input (indigo) → working/connecting (focus dot).
+    fn thread_status_dot(&self, task: &Task) -> Option<gpui::AnyElement> {
+        let mut has_input = false;
+        for (key, interaction) in &self.pending {
+            if key.0 != task.thread_id {
+                continue;
+            }
+            if matches!(interaction, UiInteraction::Permission { .. }) {
+                return Some(
+                    div()
+                        .size(px(5.))
+                        .rounded_full()
+                        .bg(rgb(palette().pending))
+                        .into_any_element(),
+                );
+            }
+            has_input = true;
+        }
+        let color = if has_input {
+            palette().awaiting
+        } else if self.busy.contains(&task.id) || self.connecting.contains(&task.id) {
+            palette().focus
+        } else {
+            return None;
+        };
+        Some(
+            div()
+                .size(px(5.))
+                .rounded_full()
+                .bg(rgb(color))
+                .into_any_element(),
+        )
     }
 
     pub(super) fn sidebar(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
