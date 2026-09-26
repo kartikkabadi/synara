@@ -116,6 +116,26 @@ impl ControlState {
     }
 }
 
+/// Upstream `RUNTIME_MODE_PRESENTATION` copy for provider session modes whose
+/// ids map onto the three runtime modes (verbatim labels/descriptions).
+fn access_mode_copy(mode_id: &str) -> Option<(&'static str, &'static str)> {
+    match mode_id {
+        "approval-required" => Some((
+            "Ask for approval",
+            "Always ask to edit external files and use the internet",
+        )),
+        "auto" => Some((
+            "Approve for me",
+            "Only ask for actions detected as potentially unsafe",
+        )),
+        "full-access" => Some((
+            "Full access",
+            "Unrestricted access to the internet and any file on your computer",
+        )),
+        _ => None,
+    }
+}
+
 fn option_kind(option: &SessionOption) -> ControlKind {
     match option.category.as_deref() {
         Some("model") => ControlKind::Model,
@@ -427,15 +447,32 @@ impl Shell {
         kind: ControlKind,
     ) -> Vec<(Choice, ControlAction)> {
         if kind == ControlKind::Access {
-            return vec![(
-                Choice {
-                    label: "Ask for approval".into(),
-                    detail: "Always ask to edit external files and use the internet".into(),
-                    selected: true,
-                    ..Default::default()
-                },
-                ControlAction::AccessInfo,
-            )];
+            let modes = self.control_choices(ControlKind::Mode);
+            if modes.is_empty() {
+                return vec![(
+                    Choice {
+                        label: "Ask for approval".into(),
+                        detail: "Always ask to edit external files and use the internet".into(),
+                        selected: true,
+                        ..Default::default()
+                    },
+                    ControlAction::AccessInfo,
+                )];
+            }
+            return modes
+                .into_iter()
+                .map(|(mut choice, action)| {
+                    if let ControlAction::Mode(id) = &action
+                        && let Some((label, detail)) = access_mode_copy(id)
+                    {
+                        choice.label = label.into();
+                        if choice.detail.is_empty() {
+                            choice.detail = detail.into();
+                        }
+                    }
+                    (choice, action)
+                })
+                .collect();
         }
         if kind == ControlKind::Extras {
             let modes = self.control_choices(ControlKind::Mode);
@@ -1088,7 +1125,20 @@ impl Shell {
             .gap_1()
             .min_w_0()
             .child(self.control_trigger(ControlKind::Extras, String::new(), true, cx))
-            .child(self.control_trigger(ControlKind::Access, "Ask for approval".into(), true, cx))
+            .child(
+                self.control_trigger(
+                    ControlKind::Access,
+                    self.control_choices(ControlKind::Access)
+                        .iter()
+                        .find(|(choice, _)| choice.selected)
+                        .map_or_else(
+                            || "Ask for approval".into(),
+                            |(choice, _)| choice.label.clone(),
+                        ),
+                    true,
+                    cx,
+                ),
+            )
             .children(self.context_meter(cx))
             .child(div().flex_1())
             .child(self.control_trigger(ControlKind::Agent, label, !self.profiles.is_empty(), cx))
