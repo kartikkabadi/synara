@@ -286,12 +286,6 @@ impl Shell {
                     .text_color(rgb(palette().text))
                     .child("What should we work on?"),
             )
-            .children(self.selected.is_none().then(|| {
-                div()
-                    .text_sm()
-                    .text_color(rgb(palette().muted))
-                    .child("Choose a project to get started.")
-            }))
             .into_any_element()
     }
 }
