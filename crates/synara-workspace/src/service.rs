@@ -254,8 +254,39 @@ impl WorkspaceService {
     }
 
     pub async fn archive_task(&self, id: TaskId) -> WorkspaceResult<Task> {
-        self.access(move |store| store.archive_task_with_workflow_guard(id, now_ms()))
-            .await
+        let task = self
+            .access(move |store| store.archive_task_with_workflow_guard(id, now_ms()))
+            .await?;
+        // Opt-in: release the archived task's managed worktree when nothing else
+        // uses it. The archive itself already succeeded; cleanup is best-effort
+        // and a recovered/missing setting stays off.
+        let cleanup = self
+            .access(move |store| {
+                let enabled = crate::settings::load(store)?
+                    .settings
+                    .general
+                    .delete_worktree_on_archive;
+                if enabled {
+                    Ok(store.managed_worktree(id)?)
+                } else {
+                    Ok(None)
+                }
+            })
+            .await?;
+        if let Some(managed) = cleanup
+            && let Err(error) = self
+                .cleanup_archived_managed_worktree(managed.clone(), CancellationToken::new())
+                .await
+        {
+            eprintln!(
+                "managed worktree retained after task archive: task={} branch={} repository={} error={}",
+                managed.task,
+                managed.branch,
+                managed.repository_path.display(),
+                error
+            );
+        }
+        Ok(task)
     }
 
     /// Restore the last durable conversation state without replaying any actions.
@@ -1421,8 +1452,9 @@ mod tests {
     #[tokio::test]
     async fn linked_worktree_branch_is_persisted_and_cannot_be_shared() {
         let directory = tempfile::tempdir().unwrap();
-        let repository_root = directory.path().join("repo");
-        let linked = directory.path().join("linked worktree");
+        let root = directory.path().canonicalize().unwrap();
+        let repository_root = root.join("repo");
+        let linked = root.join("linked worktree");
         repository(&repository_root);
         git(
             &repository_root,
@@ -1554,8 +1586,9 @@ mod tests {
     #[tokio::test]
     async fn linked_worktree_maps_nested_registered_project_directory() {
         let directory = tempfile::tempdir().unwrap();
-        let repository_root = directory.path().join("repo");
-        let linked = directory.path().join("linked");
+        let root = directory.path().canonicalize().unwrap();
+        let repository_root = root.join("repo");
+        let linked = root.join("linked");
         repository(&repository_root);
         std::fs::create_dir(repository_root.join("nested")).unwrap();
         std::fs::write(repository_root.join("nested/README.md"), "project").unwrap();

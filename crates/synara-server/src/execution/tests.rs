@@ -375,9 +375,13 @@ async fn failures_are_allowlisted_and_stopping_a_completed_run_is_idempotent() {
         PORT,
     )
     .await;
+    let mut run_view = view;
+    let object = run_view.as_object_mut().unwrap();
+    object.remove("route");
+    object.remove("remote");
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&stop.body).unwrap(),
-        view
+        run_view
     );
     shutdown(&state).await;
 }

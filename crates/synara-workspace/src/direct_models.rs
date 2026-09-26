@@ -1,6 +1,6 @@
 //! Persisted direct-model choices. Configuration is inert, revision checked and
 //! separate from agent profiles, agent sessions and ACP configuration.
-use crate::{StorageError, WorkspaceError, WorkspaceResult, WorkspaceService};
+use crate::{StorageError, WorkspaceError, WorkspaceResult, WorkspaceService, now_ms};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use synara_core::{Role, TaskId, Thread};
@@ -168,5 +168,107 @@ impl WorkspaceService {
             store.bind_direct_model(task, selection, settings_revision, reviewed_sequence)
         })
         .await
+    }
+}
+
+const PROVIDER_CATALOG_PREFERENCE: &str = "direct-model-catalog-v1";
+
+/// Persisted models.dev payload snapshot. Hydration re-runs the same bounded
+/// parse as a live fetch, so a snapshot is never authoritative over it — it
+/// only lets a reopened picker render last-known provider entries instantly.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PersistedProviderCatalog {
+    pub source: serde_json::Value,
+    /// Unix milliseconds when the payload was fetched.
+    pub stored_at_ms: i64,
+}
+impl WorkspaceService {
+    pub async fn provider_catalog_snapshot(
+        &self,
+    ) -> WorkspaceResult<Option<PersistedProviderCatalog>> {
+        self.access(|store| Ok(store.preference(PROVIDER_CATALOG_PREFERENCE)?))
+            .await
+    }
+    /// Persist the reviewed fetch payload; returns the fetch timestamp.
+    pub async fn save_provider_catalog_snapshot(
+        &self,
+        source: serde_json::Value,
+    ) -> WorkspaceResult<i64> {
+        let snapshot = PersistedProviderCatalog {
+            source,
+            stored_at_ms: now_ms(),
+        };
+        self.access(move |store| {
+            store.set_preference(PROVIDER_CATALOG_PREFERENCE, &snapshot)?;
+            Ok(snapshot.stored_at_ms)
+        })
+        .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn catalog_source() -> serde_json::Value {
+        serde_json::json!({
+            "example-provider": {
+                "name": "Example provider",
+                "npm": "@ai-sdk/openai-compatible",
+                "api": "https://api.example.com/v1",
+                "env": ["EXAMPLE_API_KEY"],
+                "models": {
+                    "example-model": {
+                        "name": "Example model",
+                        "tool_call": true,
+                        "modalities": {"input": ["text"]},
+                        "limit": {"context": 128000, "output": 8192}
+                    }
+                }
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn provider_catalog_snapshot_round_trips_with_fetch_timestamp() {
+        let service = WorkspaceService::memory().unwrap();
+        assert!(service.provider_catalog_snapshot().await.unwrap().is_none());
+
+        let before = now_ms();
+        let stored_at = service
+            .save_provider_catalog_snapshot(catalog_source())
+            .await
+            .unwrap();
+        assert!(stored_at >= before);
+
+        let snapshot = service.provider_catalog_snapshot().await.unwrap().unwrap();
+        assert_eq!(snapshot.stored_at_ms, stored_at);
+        // Hydration runs the same parse as a live fetch.
+        let catalog = synara_model::parse_catalog(snapshot.source).unwrap();
+        assert_eq!(catalog.providers.len(), 1);
+        assert_eq!(catalog.providers[0].id, "example-provider");
+    }
+
+    #[tokio::test]
+    async fn newer_provider_catalog_snapshot_replaces_the_stored_one() {
+        let service = WorkspaceService::memory().unwrap();
+        let first = service
+            .save_provider_catalog_snapshot(catalog_source())
+            .await
+            .unwrap();
+        let second = service
+            .save_provider_catalog_snapshot(serde_json::json!({}))
+            .await
+            .unwrap();
+        let snapshot = service.provider_catalog_snapshot().await.unwrap().unwrap();
+        assert_eq!(snapshot.stored_at_ms, second);
+        assert!(second >= first);
+        assert!(
+            synara_model::parse_catalog(snapshot.source)
+                .unwrap()
+                .providers
+                .is_empty()
+        );
     }
 }

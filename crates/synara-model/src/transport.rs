@@ -291,17 +291,23 @@ impl HttpModelProvider {
         // Do not present a truncated collection as complete discovery.
         Err(ModelError::Limit)
     }
-    /// Explicit user-requested community catalog refresh. No account keys, cookies,
-    /// workspace context or provider requests are sent to models.dev.
-    pub async fn catalog(&self, cancellation: CancellationToken) -> ModelResult<ProviderCatalog> {
+    /// Explicit user-requested community catalog fetch with the same bounds the
+    /// parsed catalog applies. Callers may persist the payload as a snapshot;
+    /// it is never authoritative over a live fetch.
+    pub async fn catalog_source(&self, cancellation: CancellationToken) -> ModelResult<Value> {
         tokio::select! {
             biased;
             () = cancellation.cancelled() => Err(ModelError::Cancelled),
             result = async {
                 let response = self.client.get("https://models.dev/api.json?type=all").send().await.map_err(|_| ModelError::Transport)?;
-                parse_catalog(bounded_json(response, 20 * MAX_REQUEST_BYTES).await?)
+                bounded_json(response, 20 * MAX_REQUEST_BYTES).await
             } => result,
         }
+    }
+    /// Explicit user-requested community catalog refresh. No account keys, cookies,
+    /// workspace context or provider requests are sent to models.dev.
+    pub async fn catalog(&self, cancellation: CancellationToken) -> ModelResult<ProviderCatalog> {
+        parse_catalog(self.catalog_source(cancellation).await?)
     }
 }
 #[async_trait]

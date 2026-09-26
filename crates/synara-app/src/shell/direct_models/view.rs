@@ -516,8 +516,20 @@ impl Shell {
                 .iter()
                 .filter(|p| p.profile.is_some())
                 .count();
-            body=body.child(row().child(format!("Catalog: {} providers, {compatible} compatible metadata candidates",catalog.providers.len()))
-                .child(note("Catalog breadth is not tested provider coverage. Unsupported protocols/cloud authentication remain explicit. Loading this catalog sends no chat content or provider key to models.dev.")));
+            let freshness = state.catalog_stored_at_ms.map(|at| {
+                let minutes = synara_workspace::now_ms().saturating_sub(at).max(0) / 60_000;
+                if minutes < 1 {
+                    "snapshot saved just now".to_owned()
+                } else if minutes < 60 {
+                    format!("snapshot saved {minutes}m ago")
+                } else if minutes < 24 * 60 {
+                    format!("snapshot saved {}h ago", minutes / 60)
+                } else {
+                    format!("snapshot saved {}d ago", minutes / (24 * 60))
+                }
+            });
+            body=body.child(row().child(format!("Catalog: {} providers, {compatible} compatible metadata candidates{}",catalog.providers.len(),freshness.map(|f|format!(" — {f}")).unwrap_or_default()))
+                .child(note("Catalog breadth is not tested provider coverage. Unsupported protocols/cloud authentication remain explicit. The last fetch is persisted and re-parsed on open; only an explicit refresh contacts models.dev and it sends no chat content or provider key.")));
             for (index, entry) in catalog
                 .providers
                 .iter()

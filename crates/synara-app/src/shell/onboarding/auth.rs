@@ -46,6 +46,15 @@ fn provider_login_guide(profile: &AgentProfile) -> Option<ProviderLoginGuide> {
             docs_url: "https://opencode.ai/docs/cli/#auth",
             docs_label: "OpenCode sign-in guide",
         })
+    } else if identity.contains("oh my pi") || command == "omp" || command == "omp.exe" {
+        Some(ProviderLoginGuide {
+            provider: "Oh My Pi",
+            description: "Oh My Pi owns its account, credentials under ~/.omp, model routing and thinking levels. Run it in its own terminal to sign in, then confirm `omp models --json` lists at least one model before reconnecting this setup chat.",
+            command_args: "",
+            terminal_label: "Open terminal · start Oh My Pi sign-in",
+            docs_url: "https://trysynara.com/docs/providers/omp",
+            docs_label: "Oh My Pi setup guide",
+        })
     } else if identity.contains("gemini") {
         Some(ProviderLoginGuide {
             provider: "Gemini CLI",
@@ -74,6 +83,7 @@ fn provider_login_command(profile: &AgentProfile, guide: ProviderLoginGuide) -> 
             executable.as_str(),
             "gemini" | "gemini.exe" | "gemini-cli" | "gemini-cli.exe" | "gemini.js"
         ),
+        "Oh My Pi" => executable == "omp" || executable == "omp.exe",
         _ => false,
     };
     if !known_executable
@@ -444,5 +454,25 @@ mod tests {
         let wrapper = profile("codex-wrapper", "Codex wrapper", "/tmp/provider-wrapper");
         let guide = provider_login_guide(&wrapper).unwrap();
         assert!(provider_login_command(&wrapper, guide).is_none());
+    }
+
+    #[test]
+    fn omp_guide_launches_interactive_sign_in_and_points_at_the_docs() {
+        let omp = profile("omp", "Oh My Pi", "omp");
+        let guide = provider_login_guide(&omp).unwrap();
+        assert_eq!(guide.provider, "Oh My Pi");
+        assert_eq!(guide.docs_url, "https://trysynara.com/docs/providers/omp");
+        // `omp` signs in interactively; no login subcommand is appended.
+        let command = provider_login_command(&omp, guide).unwrap();
+        assert_eq!(command, "'omp'");
+
+        // An unrelated executable named like `omp`-shaped words is not enough:
+        // the executable itself must be `omp`.
+        let lookalike = profile("custom", "Oh My Pi clone", "pi");
+        assert!(
+            provider_login_guide(&lookalike).is_none()
+                || provider_login_command(&lookalike, provider_login_guide(&lookalike).unwrap())
+                    .is_none()
+        );
     }
 }

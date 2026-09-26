@@ -164,7 +164,7 @@ impl SettingsState {
 fn settings_match(info: &SectionInfo, query: &str) -> bool {
     info.label.to_lowercase().contains(query) || info.description.to_lowercase().contains(query)
 }
-fn card() -> gpui::Div {
+pub(super) fn card() -> gpui::Div {
     div()
         .w_full()
         .rounded_xl()
@@ -185,7 +185,7 @@ fn heading(label: &'static str) -> gpui::Div {
         .text_color(rgb(palette().muted))
         .child(label)
 }
-fn row(
+pub(super) fn row(
     title: impl Into<SharedString>,
     description: impl Into<SharedString>,
     control: impl IntoElement,
@@ -626,7 +626,7 @@ impl Shell {
             )
             .into_any_element()
     }
-    fn toggle(
+    pub(super) fn toggle(
         &self,
         id: &'static str,
         label: &'static str,

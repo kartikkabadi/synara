@@ -9,7 +9,7 @@ Detailed parity evidence lives in:
 
 ## Current status
 
-- Shipped feature slices: **98**
+- Shipped feature slices: **102**
 - Major remaining: **0**
 - Smaller remaining: **0**
 - Acceptance/integration remaining: **0**
@@ -21,7 +21,11 @@ The execution inventory is **complete**. The 19 open verification gates are
 larger evidence/acceptance buckets and are not a feature count or a reason to
 reopen implemented roadmap work.
 
-Current upstream reference: `Emanuele-web04/synara@eaa61eded31b6755d4f30ba8eabc5d905cf817cb`.
+Current upstream reference: `Emanuele-web04/synara@a33435c18474eb7816582004e45f87382965ac8d` (v0.9.2).
+The twenty-two commits that landed after the earlier `eaa61ed` pin were audited
+in batch 43: four product changes are ported (credential-redaction tables,
+opt-in worktree removal on Archive, persisted provider catalog, Oh My Pi
+profile) and the rest are confirmed equivalent or not applicable.
 
 Current continuation status: A05 authenticated browser acceptance passed on exact
 candidate `163d59cf1eaba301e413f1d02848a4d4cb397f69`, and A09 provider
@@ -513,7 +517,8 @@ Verification receipts:
 [batch 39](docs/verification/parity-2026-09-26-batch39.md),
 [batch 40](docs/verification/parity-2026-09-26-batch40.md),
 [batch 41](docs/verification/parity-2026-09-26-batch41.md),
-[batch 42](docs/verification/parity-2026-09-26-batch42.md).
+[batch 42](docs/verification/parity-2026-09-26-batch42.md),
+[batch 43](docs/verification/parity-2026-09-26-batch43.md).
 
 - Batch 32: acceptance infrastructure now has a dedicated Linux/macOS/Windows
   native build and development-package matrix. macOS development packaging uses
@@ -613,6 +618,14 @@ Verification receipts:
   harnesses exist, so missing external account/hardware evidence no longer
   remains an execution blocker. See the
   [batch 42 receipt](docs/verification/parity-2026-09-26-batch42.md).
+- Batch 43 audits the 22 upstream commits after the `eaa61ed` pin and ports the
+  four with Rust product-code counterparts: exact credential-redaction tables in
+  `reviewed_tool_input`, opt-in managed-worktree removal on Archive plus
+  `git worktree prune`, a persisted models.dev catalog snapshot hydrated on the
+  direct-models surface, and the Oh My Pi `omp acp` default profile with an
+  onboarding sign-in guide. The remaining 18 are confirmed already-equivalent,
+  architectural non-issues, or upstream repo/CI work. See the
+  [batch 43 receipt](docs/verification/parity-2026-09-26-batch43.md).
 
 
 ## How to update this roadmap

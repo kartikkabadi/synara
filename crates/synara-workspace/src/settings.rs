@@ -121,6 +121,8 @@ pub struct GeneralSettings {
     pub alphabetical_projects: bool,
     pub oldest_threads_first: bool,
     pub restore_last_chat: bool,
+    /// Off by default: archiving a task keeps its managed worktree for recovery.
+    pub delete_worktree_on_archive: bool,
 }
 impl Default for GeneralSettings {
     fn default() -> Self {
@@ -132,6 +134,7 @@ impl Default for GeneralSettings {
             alphabetical_projects: false,
             oldest_threads_first: false,
             restore_last_chat: true,
+            delete_worktree_on_archive: false,
         }
     }
 }
@@ -308,7 +311,7 @@ impl LoadedSettings {
     }
 }
 
-fn load(store: &Store) -> StorageResult<LoadedSettings> {
+pub(crate) fn load(store: &Store) -> StorageResult<LoadedSettings> {
     let Some(raw) = store.preference_raw("settings")? else {
         return Ok(LoadedSettings {
             settings: AppSettings::default(),

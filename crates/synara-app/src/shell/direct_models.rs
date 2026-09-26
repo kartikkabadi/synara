@@ -9,12 +9,16 @@ mod options;
 mod view;
 
 pub(super) enum Reply {
-    Loaded(ProviderSettings, Result<Vec<ModelFavorite>, String>),
+    Loaded(
+        ProviderSettings,
+        Result<Vec<ModelFavorite>, String>,
+        Option<synara_workspace::PersistedProviderCatalog>,
+    ),
     Saved(ProviderSettings),
     FavoritesSaved(Vec<ModelFavorite>),
     Binding(TaskId, u64, Result<Option<DirectModelBinding>, String>),
     Selected(TaskId, Option<DirectModelBinding>),
-    Catalog(ProviderCatalog),
+    Catalog(ProviderCatalog, i64),
     Discovered(String, u64, Vec<ModelInfo>),
     Telemetry(String, u64, ProviderTelemetry),
     KeyChanged,
@@ -53,6 +57,7 @@ pub(super) struct DirectModelState {
     options: Entity<TextEntry>,
     editing: bool,
     catalog: Option<ProviderCatalog>,
+    catalog_stored_at_ms: Option<i64>,
     telemetry: HashMap<String, (u64, ProviderTelemetry)>,
     expanded: Option<String>,
     review: Option<Review>,
@@ -89,6 +94,7 @@ impl DirectModelState {
             options,
             editing: false,
             catalog: None,
+            catalog_stored_at_ms: None,
             telemetry: HashMap::new(),
             expanded: None,
             review: None,
@@ -155,13 +161,15 @@ impl Shell {
         let workspace = self.controller.workspace.clone();
         self.direct_model_job(
             async move {
-                let (settings, favorites) = tokio::join!(
+                let (settings, favorites, snapshot) = tokio::join!(
                     workspace.direct_model_settings(),
                     workspace.model_favorites(),
+                    workspace.provider_catalog_snapshot(),
                 );
                 Ok(Reply::Loaded(
                     settings.map_err(|e| e.to_string())?,
                     favorites.map_err(|e| e.to_string()),
+                    snapshot.ok().flatten(),
                 ))
             },
             cx,
@@ -263,13 +271,22 @@ impl Shell {
         if self.direct_models.editing || self.direct_models.review.is_some() {
             return;
         }
+        let workspace = self.controller.workspace.clone();
         self.direct_model_job(
             async move {
-                HttpModelProvider::new()
+                // Every live fetch refreshes the persisted snapshot so the next
+                // picker open renders last-known entries instantly.
+                let source = HttpModelProvider::new()
                     .map_err(|e| e.to_string())?
-                    .catalog(Default::default())
+                    .catalog_source(Default::default())
                     .await
-                    .map(Reply::Catalog)
+                    .map_err(|e| e.to_string())?;
+                let stored_at_ms = workspace
+                    .save_provider_catalog_snapshot(source.clone())
+                    .await
+                    .unwrap_or_else(|_| now_ms());
+                synara_model::parse_catalog(source)
+                    .map(|catalog| Reply::Catalog(catalog, stored_at_ms))
                     .map_err(|e| e.to_string())
             },
             cx,
@@ -599,11 +616,20 @@ impl Shell {
         }
         self.direct_models.busy = false;
         match reply {
-            Reply::Loaded(value, favorites) => {
+            Reply::Loaded(value, favorites, snapshot) => {
                 self.direct_models
                     .telemetry
                     .retain(|_, (revision, _)| *revision == value.revision);
                 self.direct_models.value = Some(value);
+                // Seed the picker from the persisted snapshot once; the live
+                // refresh above is still required to verify it.
+                if self.direct_models.catalog.is_none()
+                    && let Some(snapshot) = snapshot
+                    && let Ok(catalog) = synara_model::parse_catalog(snapshot.source)
+                {
+                    self.direct_models.catalog = Some(catalog);
+                    self.direct_models.catalog_stored_at_ms = Some(snapshot.stored_at_ms);
+                }
                 match favorites {
                     Ok(favorites) => {
                         self.direct_models.favorites = favorites;
@@ -644,7 +670,10 @@ impl Shell {
                 }
                 self.direct_models.notice=Some("Route selected. Nothing was sent or executed. Return to the conversation and explicitly send when ready.".into());
             }
-            Reply::Catalog(catalog) => self.direct_models.catalog = Some(catalog),
+            Reply::Catalog(catalog, stored_at_ms) => {
+                self.direct_models.catalog = Some(catalog);
+                self.direct_models.catalog_stored_at_ms = Some(stored_at_ms);
+            }
             Reply::Discovered(id, revision, models) => {
                 if let Some(mut value) = self
                     .direct_models
