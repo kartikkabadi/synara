@@ -355,7 +355,11 @@ impl Shell {
         .items_center()
         .justify_center()
         .when(pinned, |el| el.text_color(rgb(palette().focus)))
-        .when(!pinned, |el| el.opacity(0.45))
+        .when(!pinned, |el| {
+            el.opacity(0.)
+                .group_hover("thread-row", |style| style.opacity(0.45))
+                .focus_visible(|style| style.opacity(1.))
+        })
         .when(disabled, |el| el.opacity(0.25))
         .child(ui::icon(Glyph::Pin).size(px(13.)))
         .on_click(cx.listener(move |this, _, _, cx| {

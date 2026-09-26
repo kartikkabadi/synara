@@ -240,6 +240,7 @@ impl Shell {
         .when(nested, |row| row.pl(px(24.)))
         .aria_label(format!("{} · {:?}", task.title, task.state))
         .relative()
+        .group("thread-row")
         .child(ui::layout_probe_slot("thread-row", index))
         .child(self.thread_pin_button(task, cx))
         .children(

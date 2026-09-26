@@ -1343,6 +1343,16 @@ impl Shell {
             .items_center()
             .justify_end()
             .gap_1()
+            .children(self.task().map(|task| {
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_ellipsis()
+                    .overflow_hidden()
+                    .text_size(px(12.))
+                    .text_color(rgb(palette().muted))
+                    .child(task.title.clone())
+            }))
             .child(
                 ui::chrome_button(
                     "handoff-open",
