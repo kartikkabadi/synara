@@ -101,6 +101,21 @@ export function ComposerModelPickerTraitRows(props: {
   const usesEffortSlider = props.effortControl === "slider" && selection.effortLevels.length > 0;
 
   const rows: ReactNode[] = [];
+  rows.push(
+    ...selection.extraSelects.map((extraSelect) => (
+      <TraitRow
+        key={extraSelect.id}
+        label={extraSelect.label}
+        value={extraSelect.value}
+        valueLabel={
+          extraSelect.options.find((option) => option.value === extraSelect.value)?.label ??
+          extraSelect.value
+        }
+        options={extraSelect.options}
+        onValueChange={(value) => commitTrait({ [extraSelect.id]: value })}
+      />
+    )),
+  );
   if (selection.thinkingEnabled !== null) {
     rows.push(
       <TraitRow
