@@ -752,6 +752,16 @@ Verification receipts:
   (Steer maps to upstream's non-steerable-provider interrupt→redispatch),
   and the head auto-dispatches on settle — still sqlite-persisted. See the
   [batch 61 receipt](docs/verification/parity-2026-09-26-batch61.md).
+- Batch 62 is a review, not a slice: the `direct_models` subsystem (~3.5k
+  lines across app/workspace/server — bindings, API keys, models.dev
+  catalog, direct prompt route) has NO upstream counterpart; upstream routes
+  all text generation and automation `ai-evaluated` completion through
+  `textGenerationModelSelection` on agent providers. Excision is staged:
+  (1) drop `evaluator: DirectModelBinding` from `AiEvaluated` + migration,
+  (2) reroute text generation through the agent provider, (3) remove the
+  direct chat route + composer controls + `uses_direct_model` gates,
+  (4) remove the settings section + catalog, (5) drop storage tables. See the
+  [batch 62 review](docs/verification/parity-2026-09-26-batch62.md).
 
 
 ## How to update this roadmap
