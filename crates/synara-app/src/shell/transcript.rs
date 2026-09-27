@@ -13,6 +13,9 @@ enum RowKey {
     Notice(usize),
     Activity(String),
     Plan,
+    /// Live in-flight-turn row at the transcript tail (upstream's `working`
+    /// row — the "Thinking"/"Starting…" shimmer while a turn runs).
+    Working,
     Empty,
 }
 #[derive(Clone, Debug)]
@@ -20,6 +23,7 @@ enum RenderRow {
     Timeline(usize),
     Activity(usize),
     Plan,
+    Working,
     Empty,
 }
 fn role_key(role: Role) -> u8 {
@@ -41,7 +45,7 @@ fn row_key(thread: &Thread, index: usize) -> RowKey {
         TranscriptItem::Notice { .. } => RowKey::Notice(index),
     }
 }
-fn projected_rows(thread: &Thread) -> Vec<(RowKey, RenderRow)> {
+fn projected_rows(thread: &Thread, working: bool) -> Vec<(RowKey, RenderRow)> {
     // Build turn ownership once. Hidden tool/reasoning rows never enter ListState,
     // so even a long collapsed work log costs one measured row per turn.
     let mut ownership = vec![None; thread.timeline.len()];
@@ -91,6 +95,9 @@ fn projected_rows(thread: &Thread) -> Vec<(RowKey, RenderRow)> {
     if !thread.plan.is_empty() {
         rows.push((RowKey::Plan, RenderRow::Plan));
     }
+    if working {
+        rows.push((RowKey::Working, RenderRow::Working));
+    }
     if rows.is_empty() {
         rows.push((RowKey::Empty, RenderRow::Empty));
     }
@@ -126,7 +133,9 @@ impl TranscriptState {
     pub fn is_following(&self) -> bool {
         self.list.is_following_tail()
     }
-    pub fn sync(&mut self, thread: &Thread, event: Option<&ThreadEvent>) {
+    /// `working` mirrors upstream's in-flight-turn tail row: it lives outside
+    /// the durable timeline, so projection rebuilds when it toggles.
+    pub fn sync(&mut self, thread: &Thread, event: Option<&ThreadEvent>, working: bool) {
         let same_thread = self.thread == Some(thread.id);
         if !same_thread
             || matches!(
@@ -162,7 +171,8 @@ impl TranscriptState {
             let anchor = self.list.logical_scroll_top();
             let anchor_key = self.rows.get(anchor.item_ix).cloned();
             let following = !same_thread || self.is_following();
-            let (rows, render_rows): (Vec<_>, Vec<_>) = projected_rows(thread).into_iter().unzip();
+            let (rows, render_rows): (Vec<_>, Vec<_>) =
+                projected_rows(thread, working).into_iter().unzip();
             let prefix = self
                 .rows
                 .iter()
@@ -308,6 +318,7 @@ impl Shell {
                 let row = match *description {
                     RenderRow::Timeline(index) => this.transcript_item(thread, index, cx),
                     RenderRow::Activity(turn) => this.activity_summary(thread, turn, cx),
+                    RenderRow::Working => this.working_row(cx),
                     RenderRow::Plan => div()
                         .p_3()
                         .rounded_md()
@@ -393,7 +404,7 @@ mod tests {
         let mut state = TranscriptState::new();
         for envelope in &envelopes {
             live.apply(envelope).unwrap();
-            state.sync(&live, Some(&envelope.event));
+            state.sync(&live, Some(&envelope.event), false);
         }
         assert_eq!(
             state.rows,
@@ -412,7 +423,7 @@ mod tests {
         for envelope in &envelopes {
             replay.apply(envelope).unwrap();
         }
-        let restored = projected_rows(&replay)
+        let restored = projected_rows(&replay, false)
             .into_iter()
             .map(|(key, _)| key)
             .collect::<Vec<_>>();
@@ -456,12 +467,12 @@ mod tests {
             acp_model_id: None,
             usage: None,
         });
-        let rows = projected_rows(&thread);
+        let rows = projected_rows(&thread, false);
         assert_eq!(rows.len(), 2);
         assert!(matches!(rows[0].1, RenderRow::Activity(0)));
         assert_eq!(rows[1].0, RowKey::Permission("approval".into()));
         thread.permissions.clear();
-        assert_eq!(projected_rows(&thread).len(), 1);
+        assert_eq!(projected_rows(&thread, false).len(), 1);
         thread.messages.push(Message {
             id: "answer".into(),
             role: Role::Assistant,
@@ -469,7 +480,7 @@ mod tests {
         });
         thread.timeline.push(TranscriptItem::Message { index: 0 });
         thread.turns[0].end_timeline_index = thread.timeline.len();
-        let rows = projected_rows(&thread);
+        let rows = projected_rows(&thread, false);
         assert_eq!(rows.len(), 2);
         assert!(matches!(rows[0].1, RenderRow::Activity(0)));
         assert_eq!(rows[1].0, RowKey::Message("answer".into(), 1));
@@ -479,7 +490,7 @@ mod tests {
     fn live_send_animation_survives_same_thread_refresh_but_history_does_not_animate() {
         let mut thread = Thread::new(ThreadId::new());
         let mut state = TranscriptState::new();
-        state.sync(&thread, None);
+        state.sync(&thread, None, false);
         thread.messages.push(Message {
             id: "sent".into(),
             role: Role::User,
@@ -493,14 +504,15 @@ mod tests {
                 role: Role::User,
                 text: "Hello".into(),
             }),
+            false,
         );
         let frame = state.message_entries["sent"] + std::time::Duration::from_millis(50);
         let progress = state.message_progress("sent", frame);
         assert!(progress > 0. && progress < 1.);
-        state.sync(&thread, None); // Concurrent durable hydration of the same live row.
+        state.sync(&thread, None, false); // Concurrent durable hydration of the same live row.
         assert_eq!(state.message_progress("sent", frame), progress);
         let mut restored = TranscriptState::new();
-        restored.sync(&thread, None);
+        restored.sync(&thread, None, false);
         assert_eq!(restored.message_progress("sent", frame), 1.);
     }
     #[test]
@@ -513,7 +525,7 @@ mod tests {
             })
             .collect();
         let mut state = TranscriptState::new();
-        state.sync(&thread, None);
+        state.sync(&thread, None, false);
         assert_eq!(state.list.item_count(), 10_000);
         state.list.scroll_to(ListOffset {
             item_ix: 45,
@@ -528,13 +540,14 @@ mod tests {
             Some(&ThreadEvent::Notice {
                 message: "New output".into(),
             }),
+            false,
         );
         assert!(!state.is_following());
         let offset = state.list.logical_scroll_top();
         assert_eq!(offset.item_ix, 45);
         assert_eq!(offset.offset_in_item, px(12.));
         assert_eq!(state.list.item_count(), 10_001);
-        state.sync(&thread, None);
+        state.sync(&thread, None, false);
         let offset = state.list.logical_scroll_top();
         assert_eq!(offset.item_ix, 45);
         assert_eq!(offset.offset_in_item, px(12.));
@@ -552,7 +565,7 @@ mod tests {
         });
         thread.timeline.push(TranscriptItem::Message { index: 0 });
         let mut state = TranscriptState::new();
-        state.sync(&thread, None);
+        state.sync(&thread, None, false);
         state.list.scroll_to(ListOffset {
             item_ix: 0,
             offset_in_item: px(8.),
@@ -565,13 +578,14 @@ mod tests {
                 role: Role::Assistant,
                 text: " after".into(),
             }),
+            false,
         );
         assert_eq!(state.list.logical_scroll_top().offset_in_item, px(8.));
         assert!(!state.is_following());
-        state.sync(&thread, None);
+        state.sync(&thread, None, false);
         assert_eq!(state.list.item_count(), 1);
         let replacement = Thread::new(ThreadId::new());
-        state.sync(&replacement, None);
+        state.sync(&replacement, None, false);
         assert!(state.is_following());
     }
 }

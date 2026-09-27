@@ -9,7 +9,7 @@ Detailed parity evidence lives in:
 
 ## Current status
 
-- Shipped feature slices: **110**
+- Shipped feature slices: **111**
 - Major remaining: **0**
 - Smaller remaining: **0**
 - Acceptance/integration remaining: **0**
@@ -695,6 +695,11 @@ Verification receipts:
   re-applied to (re)created sessions, and the composer button shows the stored
   or `full-access` default label. See the
   [batch 54 receipt](docs/verification/parity-2026-09-26-batch54.md).
+- Batch 55 lands upstream's in-flight-turn transcript affordances: the live
+  "Working for {elapsed}" activity row (with upstream `formatClockDuration` /
+  `formatDuration` verbatim) and the tail working row (`Starting {agent}…` while
+  connecting, `Thinking` while busy) with a reduce-motion-gated pulse.
+  See the [batch 55 receipt](docs/verification/parity-2026-09-26-batch55.md).
 
 
 ## How to update this roadmap

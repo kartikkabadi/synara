@@ -1231,6 +1231,7 @@ impl Shell {
             return;
         }
         self.connecting.insert(id);
+        self.sync_working_row();
         self.error = None;
         let controller = self.controller.clone();
         let operation = operation.to_owned();
@@ -1255,6 +1256,7 @@ impl Shell {
             return;
         }
         self.connecting.insert(id);
+        self.sync_working_row();
         let controller = self.controller.clone();
         self.error = None;
         self.job(async move {
@@ -1341,6 +1343,7 @@ impl Shell {
         }
         self.goal_manual_send(id, &text, cx);
         self.busy.insert(id);
+        self.sync_working_row();
         self.error = None;
         self.notice = None;
         self.transcript.follow();
@@ -1599,6 +1602,15 @@ impl Shell {
                 if self.panel == Panel::Browser {
                     cx.notify();
                 }
+                // Upstream counts the in-flight turn's "Working for" header live.
+                if self.thread.as_ref().is_some_and(|thread| {
+                    thread
+                        .turns
+                        .last()
+                        .is_some_and(|turn| turn.finished_at_ms.is_none())
+                }) {
+                    cx.notify();
+                }
                 self.tick_devices(cx);
                 self.tick_terminals(cx);
                 self.tick_review(cx);
@@ -1686,7 +1698,8 @@ impl Shell {
                         old.id != thread.id || old.last_sequence <= thread.last_sequence
                     })
                 {
-                    self.transcript.sync(&thread, None);
+                    let working = self.working_label().is_some();
+                    self.transcript.sync(&thread, None, working);
                     self.thread = Some(*thread);
                     self.replace_task(task);
                     self.sync_transcript_media(cx);
@@ -1727,7 +1740,8 @@ impl Shell {
                         }
                     }
                     if let Some(thread) = &self.thread {
-                        self.transcript.sync(thread, Some(&envelope.event));
+                        let working = self.working_label().is_some();
+                        self.transcript.sync(thread, Some(&envelope.event), working);
                     }
                     if let Some(thread) = &self.thread
                         && let Some(task) = self
@@ -1822,6 +1836,7 @@ impl Shell {
                 error,
             } => {
                 self.connecting.remove(&task);
+                self.sync_working_row();
                 if self.selected == Some(task) {
                     self.details = details;
                     self.error = error;
@@ -1841,6 +1856,7 @@ impl Shell {
                 self.goal_prompt_done(task, error.as_deref(), cx);
                 self.finish_attachment_submission(task, error.is_none());
                 self.busy.remove(&task);
+                self.sync_working_row();
                 if self.selected == Some(task) {
                     self.details = details;
                     self.error = error.clone();

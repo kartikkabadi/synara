@@ -125,6 +125,55 @@ impl Shell {
         )
         .into_any_element()
     }
+    /// Upstream `resolveWorkingLabel`: connecting shows `Starting {agent}…`,
+    /// otherwise an in-flight turn reads `Thinking`.
+    pub(super) fn working_label(&self) -> Option<String> {
+        let task = self.task()?;
+        if self.connecting.contains(&task.id) {
+            let name = self
+                .profiles
+                .iter()
+                .find(|profile| profile.id == task.agent_id)
+                .map(|profile| profile.name.as_str())
+                .unwrap_or(task.agent_id.as_str());
+            Some(format!("Starting {name}…"))
+        } else if self.busy.contains(&task.id) {
+            Some("Thinking".into())
+        } else {
+            None
+        }
+    }
+    /// Re-project when the in-flight-turn tail row appears or disappears —
+    /// the `busy`/`connecting` sets are shell state, not thread events.
+    pub(super) fn sync_working_row(&mut self) {
+        let working = self.working_label().is_some();
+        if let Some(thread) = &self.thread {
+            self.transcript.sync(thread, None, working);
+        }
+    }
+    pub(super) fn working_row(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let label = self.working_label().unwrap_or_else(|| "Thinking".into());
+        let row = div()
+            .pt(px(2.))
+            .text_color(rgb(crate::ui::palette().muted))
+            .child(label);
+        if cx.reduce_motion() {
+            return row.into_any_element();
+        }
+        row.with_animation(
+            "working-row-shimmer",
+            Animation::new(std::time::Duration::from_millis(1400)).repeat(),
+            |el, progress| {
+                let pulse = if progress < 0.5 {
+                    progress * 2.
+                } else {
+                    (1. - progress) * 2.
+                };
+                el.opacity(0.45 + 0.55 * pulse)
+            },
+        )
+        .into_any_element()
+    }
     pub(super) fn transcript_item(
         &self,
         thread: &Thread,
