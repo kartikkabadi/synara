@@ -5,10 +5,22 @@ use super::*;
 use crate::ui::{self, Glyph, palette};
 use gpui::{ClickEvent, ClipboardItem, FontWeight};
 use synara_core::{
-    ProposedPlan, build_proposed_plan_markdown_filename, collapsed_proposed_plan_preview,
+    ProposedPlan, build_plan_implementation_prompt, build_plan_implementation_thread_title,
+    build_proposed_plan_markdown_filename, collapsed_proposed_plan_preview,
     find_latest_proposed_plan, has_actionable_proposed_plan, normalize_plan_markdown_for_export,
     proposed_plan_title, strip_displayed_plan_markdown,
 };
+
+/// Upstream `truncateTitle`: trim, then cut at 50 chars and append "...".
+fn truncate_title(text: String) -> String {
+    let trimmed = text.trim();
+    if trimmed.chars().count() <= 50 {
+        return trimmed.to_owned();
+    }
+    let mut truncated: String = trimmed.chars().take(50).collect();
+    truncated.push_str("...");
+    truncated
+}
 
 impl super::Shell {
     /// Upstream `findLatestProposedPlan` + `hasActionableProposedPlan` on the
@@ -209,5 +221,152 @@ impl super::Shell {
                 )
             })
             .into_any_element()
+    }
+    /// Upstream `ChatComposerFooter` while `showPlanFollowUp` holds: a typed
+    /// draft submits "Refine"; an empty draft shows a split "Implement" button
+    /// with a chevron menu carrying "Implement in a new thread".
+    pub(super) fn plan_submit_buttons(
+        &self,
+        disabled: bool,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let has_prompt = !self.composer.read(cx).text().trim().is_empty();
+        let button = |id: &'static str, label: &'static str, disabled: bool| {
+            div()
+                .id(id)
+                .role(gpui::Role::Button)
+                .aria_label(label)
+                .tab_index(0)
+                .h(px(32.))
+                .px_4()
+                .flex()
+                .items_center()
+                .text_size(px(ui::ui_font_size()))
+                .when(disabled, |el| el.text_color(rgb(palette().muted)))
+                .when(!disabled, |el| {
+                    el.text_color(rgb(palette().canvas))
+                        .cursor_pointer()
+                        .hover(|style| style.bg(rgb(palette().focus)))
+                })
+        };
+        if has_prompt {
+            return button("composer-submit", "Refine", disabled)
+                .rounded_md()
+                .bg(rgb(if disabled {
+                    palette().overlay
+                } else {
+                    palette().focus
+                }))
+                .when(!disabled, |el| {
+                    el.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.send_prompt(cx);
+                    }))
+                })
+                .child(ui::layout_probe_enabled("composer-submit", !disabled))
+                .child("Refine")
+                .into_any_element();
+        }
+        div()
+            .flex()
+            .items_center()
+            .child(
+                button("composer-submit", "Implement", disabled)
+                    .rounded_l_md()
+                    .bg(rgb(if disabled {
+                        palette().overlay
+                    } else {
+                        palette().focus
+                    }))
+                    .when(!disabled, |el| {
+                        el.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                            this.send_prompt(cx);
+                        }))
+                    })
+                    .child(ui::layout_probe_enabled("composer-submit", !disabled))
+                    .child("Implement"),
+            )
+            .child(
+                ui::icon_button(
+                    "plan-implement-menu",
+                    "Implementation actions",
+                    Glyph::Chevron,
+                    disabled,
+                    cx.listener(|this, _: &(), window, cx| {
+                        this.open_control(super::controls::ControlKind::PlanImplement, window, cx);
+                    }),
+                )
+                .rounded_l_none()
+                .border_l_1()
+                .border_color(gpui::rgba(0xffffff1f)),
+            )
+            .into_any_element()
+    }
+    /// Upstream `onImplementPlanInNewThread` (useChatTurnFollowUps): create a
+    /// same-project thread titled `Implement {plan title}`, dispatch the
+    /// `PLEASE IMPLEMENT THIS PLAN:` prompt in default mode, and mark the
+    /// source thread's plan implemented (upstream `sourceProposedPlan`). The
+    /// new thread lands in the project directory — the port's one-task-per-
+    /// linked-worktree rule keeps it from sharing the source worktree.
+    pub(super) fn implement_plan_in_new_thread(&mut self, cx: &mut Context<Self>) {
+        let Some(task) = self.task().cloned() else {
+            return;
+        };
+        let Some(plan) = self.actionable_proposed_plan() else {
+            return;
+        };
+        if self.busy.contains(&task.id)
+            || self.connecting.contains(&task.id)
+            || self.creating_task
+            || self.loading_task.is_some()
+        {
+            return;
+        }
+        let title = truncate_title(build_plan_implementation_thread_title(&plan.plan_markdown));
+        let prompt = build_plan_implementation_prompt(&plan.plan_markdown);
+        let plan_id = plan.id.clone();
+        let source_thread = task.thread_id;
+        let project = task.project_id;
+        let agent = task.agent_id.clone();
+        let workspace = self.controller.workspace.clone();
+        let controller = self.controller.clone();
+        let revision = self.selection_revision;
+        self.creating_task = true;
+        self.job(async move {
+            let result = async {
+                let created = workspace
+                    .create_scoped_task(project, title, agent, TaskScope::Project)
+                    .await?;
+                let submitted = async {
+                    workspace
+                        .record(
+                            source_thread,
+                            ThreadEvent::ProposedPlanImplemented {
+                                plan_id,
+                                implementation_thread_id: created.thread_id,
+                            },
+                        )
+                        .await?;
+                    controller.submit(created.id, prompt).await?;
+                    Ok::<_, WorkspaceError>(())
+                }
+                .await;
+                if let Err(error) = submitted {
+                    // Upstream deletes the half-created thread when the
+                    // implementation dispatch fails.
+                    let _ = workspace.delete_task(created.id).await;
+                    return Err(error);
+                }
+                let catalog = workspace.catalog().await?;
+                Ok::<_, WorkspaceError>((created, catalog))
+            }
+            .await;
+            Ok(match result {
+                Ok((task, catalog)) => super::Update::TaskCreated(task, catalog, revision),
+                Err(error) => super::Update::TaskCreationFailed(format!(
+                    "Could not start implementation thread: {error}"
+                )),
+            })
+        });
+        cx.notify();
     }
 }

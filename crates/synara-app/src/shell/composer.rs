@@ -236,27 +236,39 @@ impl Shell {
                                 )
                             }))
                             .child(
-                                ui::icon_button(
-                                    "composer-submit",
-                                    if busy {
-                                        "Stop response"
-                                    } else {
-                                        "Send message"
-                                    },
-                                    if busy { Glyph::Stop } else { Glyph::Send },
-                                    disabled,
-                                    cx.listener(|this, _: &(), _, cx| {
-                                        if this
-                                            .selected
-                                            .is_some_and(|task| this.busy.contains(&task))
-                                        {
-                                            this.cancel(cx);
+                                // Upstream plan-follow-up footer: a typed draft
+                                // submits "Refine"; an empty draft gets a split
+                                // "Implement" button plus a chevron menu with
+                                // "Implement in a new thread".
+                                if plan_follow_up && !busy {
+                                    self.plan_submit_buttons(disabled, cx)
+                                } else {
+                                    ui::icon_button(
+                                        "composer-submit",
+                                        if busy {
+                                            "Stop response"
                                         } else {
-                                            this.send_prompt(cx);
-                                        }
-                                    }),
-                                )
-                                .child(ui::layout_probe_enabled("composer-submit", !disabled)),
+                                            "Send message"
+                                        },
+                                        if busy { Glyph::Stop } else { Glyph::Send },
+                                        disabled,
+                                        cx.listener(|this, _: &(), _, cx| {
+                                            if this
+                                                .selected
+                                                .is_some_and(|task| this.busy.contains(&task))
+                                            {
+                                                this.cancel(cx);
+                                            } else {
+                                                this.send_prompt(cx);
+                                            }
+                                        }),
+                                    )
+                                    .child(ui::layout_probe_enabled(
+                                        "composer-submit",
+                                        !disabled,
+                                    ))
+                                    .into_any_element()
+                                },
                             ),
                     ),
             )

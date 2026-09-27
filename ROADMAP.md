@@ -9,7 +9,7 @@ Detailed parity evidence lives in:
 
 ## Current status
 
-- Shipped feature slices: **113**
+- Shipped feature slices: **114**
 - Major remaining: **0**
 - Smaller remaining: **0**
 - Acceptance/integration remaining: **0**
@@ -718,6 +718,14 @@ Verification receipts:
   Fixes a batch-56 defect where mode-shim'd sends never cleared the composer
   draft (draft-ack now matches the transcript echo, not the raw draft). See
   the [batch 57 receipt](docs/verification/parity-2026-09-26-batch57.md).
+- Batch 58 lands upstream's "Implement in a new thread" follow-up: the
+  plan-ready footer swaps the send icon for a "Refine" pill when a draft is
+  typed and a split "Implement" + chevron menu when empty; the menu's
+  "Implement in a new thread" creates a same-project thread titled
+  `Implement {plan title}`, sends the verbatim `PLEASE IMPLEMENT THIS PLAN:`
+  prompt in Default mode, and records `ProposedPlanImplemented` on the source
+  thread (upstream `sourceProposedPlan`). See the
+  [batch 58 receipt](docs/verification/parity-2026-09-26-batch58.md).
 
 
 ## How to update this roadmap

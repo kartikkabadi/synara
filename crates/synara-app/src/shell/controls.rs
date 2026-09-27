@@ -17,6 +17,7 @@ pub(super) enum ControlKind {
     Options,
     Extras,
     Access,
+    PlanImplement,
 }
 impl ControlKind {
     fn index(self) -> usize {
@@ -28,6 +29,7 @@ impl ControlKind {
             Self::Options => 3,
             Self::Extras => 5,
             Self::Access => 6,
+            Self::PlanImplement => 7,
         }
     }
     fn title(self) -> &'static str {
@@ -39,6 +41,7 @@ impl ControlKind {
             Self::Options => "Session options",
             Self::Extras => "Add",
             Self::Access => "Agent permissions",
+            Self::PlanImplement => "Implement",
         }
     }
     fn id(self) -> &'static str {
@@ -50,6 +53,7 @@ impl ControlKind {
             Self::Options => "options-picker",
             Self::Extras => "composer-extras",
             Self::Access => "access-picker",
+            Self::PlanImplement => "plan-implement-menu",
         }
     }
 }
@@ -63,6 +67,7 @@ pub(in crate::shell) enum ControlAction {
     AttachWindow,
     AttachWindowIndex(usize),
     ExtrasBack,
+    ImplementPlanNewThread,
     Goal,
     Followups,
     Unavailable,
@@ -89,7 +94,7 @@ struct OpenControl {
 }
 pub(super) struct ControlState {
     open: Option<OpenControl>,
-    triggers: [Trigger; 7],
+    triggers: [Trigger; 8],
     pub composer_bounds: Rc<Cell<Bounds<Pixels>>>,
     pending: HashSet<TaskId>,
     extras_windows: bool,
@@ -651,6 +656,17 @@ impl Shell {
             ));
             return rows;
         }
+        // Upstream: the empty-draft plan follow-up submit is a split button
+        // whose chevron menu carries "Implement in a new thread".
+        if kind == ControlKind::PlanImplement {
+            return vec![(
+                Choice {
+                    label: "Implement in a new thread".into(),
+                    ..Default::default()
+                },
+                ControlAction::ImplementPlanNewThread,
+            )];
+        }
         if kind == ControlKind::Project {
             let mut choices: Vec<_> = self
                 .catalog
@@ -779,7 +795,12 @@ impl Shell {
             cx.notify();
         }
     }
-    fn open_control(&mut self, kind: ControlKind, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn open_control(
+        &mut self,
+        kind: ControlKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if kind != ControlKind::Project && self.controls_blocked() {
             return;
         }
@@ -800,7 +821,7 @@ impl Shell {
         self.navigation.menu_open = false;
         let view = cx.new(|cx| {
             let view = ChoiceMenu::new(kind.title().into(), items, cx);
-            if kind == ControlKind::Extras {
+            if matches!(kind, ControlKind::Extras | ControlKind::PlanImplement) {
                 view.add_layout(self.controls.composer_bounds.clone())
             } else if kind == ControlKind::Agent {
                 let profiles =
@@ -1040,6 +1061,10 @@ impl Shell {
                 self.open_control(ControlKind::Extras, window, cx);
                 return;
             }
+            ControlAction::ImplementPlanNewThread => {
+                self.implement_plan_in_new_thread(cx);
+                return;
+            }
             ControlAction::Followups => {
                 self.toggle_followups(cx);
                 return;
@@ -1078,6 +1103,7 @@ impl Shell {
                 | ControlAction::AttachWindow
                 | ControlAction::AttachWindowIndex(_)
                 | ControlAction::ExtrasBack
+                | ControlAction::ImplementPlanNewThread
                 | ControlAction::Goal
                 | ControlAction::Followups
                 | ControlAction::Unavailable
@@ -1311,7 +1337,7 @@ impl Shell {
         let Some(open) = &self.controls.open else {
             return div().into_any_element();
         };
-        let is_add = open.kind == ControlKind::Extras;
+        let is_add = matches!(open.kind, ControlKind::Extras | ControlKind::PlanImplement);
         let bounds = if is_add {
             self.controls.composer_bounds.get()
         } else {
