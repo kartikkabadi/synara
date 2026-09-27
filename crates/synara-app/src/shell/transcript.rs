@@ -337,17 +337,39 @@ impl Shell {
                     RenderRow::Timeline(index) => this.transcript_item(thread, index, cx),
                     RenderRow::Activity(turn) => this.activity_summary(thread, turn, cx),
                     RenderRow::Working => this.working_row(cx),
-                    RenderRow::Plan => div()
-                        .p_3()
-                        .rounded_md()
-                        .bg(rgb(crate::ui::palette().overlay))
-                        .child("Plan")
-                        .children(thread.plan.iter().map(|entry| {
-                            div()
-                                .mt_1()
-                                .child(format!("{} · {}", entry.status, entry.text))
-                        }))
-                        .into_any_element(),
+                    // Upstream `turn.tasks.updated` work-log row: keep-latest
+                    // summary "N out of M tasks completed" + the in-progress
+                    // step as detail.
+                    RenderRow::Plan => {
+                        let done = thread
+                            .plan
+                            .iter()
+                            .filter(|entry| {
+                                synara_core::normalize_plan_step_status(&entry.status)
+                                    == synara_core::TaskStatus::Completed
+                            })
+                            .count();
+                        let in_progress = thread
+                            .plan
+                            .iter()
+                            .find(|entry| {
+                                synara_core::normalize_plan_step_status(&entry.status)
+                                    == synara_core::TaskStatus::InProgress
+                            })
+                            .map(|entry| entry.text.clone());
+                        div()
+                            .flex()
+                            .items_baseline()
+                            .gap_2()
+                            .text_size(px(crate::ui::ui_font_size() - 1.))
+                            .child(div().text_color(rgb(crate::ui::palette().muted)).child(
+                                format!("{done} out of {} tasks completed", thread.plan.len()),
+                            ))
+                            .children(in_progress.map(|task| {
+                                div().text_color(rgb(crate::ui::palette().text)).child(task)
+                            }))
+                            .into_any_element()
+                    }
                     RenderRow::Empty => div().into_any_element(),
                 };
                 div()

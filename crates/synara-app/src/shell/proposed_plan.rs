@@ -5,11 +5,77 @@ use super::*;
 use crate::ui::{self, Glyph, palette};
 use gpui::{ClickEvent, ClipboardItem, FontWeight};
 use synara_core::{
-    ProposedPlan, build_plan_implementation_prompt, build_plan_implementation_thread_title,
-    build_proposed_plan_markdown_filename, collapsed_proposed_plan_preview,
-    find_latest_proposed_plan, find_sidebar_proposed_plan, has_actionable_proposed_plan,
-    normalize_plan_markdown_for_export, proposed_plan_title, strip_displayed_plan_markdown,
+    ActiveTaskList, ProposedPlan, TaskStatus, build_plan_implementation_prompt,
+    build_plan_implementation_thread_title, build_proposed_plan_markdown_filename,
+    collapsed_proposed_plan_preview, find_latest_proposed_plan, find_sidebar_proposed_plan,
+    has_actionable_proposed_plan, normalize_plan_markdown_for_export, proposed_plan_title,
+    strip_displayed_plan_markdown,
 };
+
+/// Upstream `--success` (emerald-500) — completed-step row/icon tints.
+const TASK_SUCCESS: u32 = 0x10b981;
+
+/// Upstream `stepStatusIcon` (`PlanSidebar.tsx`): 20px status circle —
+/// completed = success-tinted check, in-progress = accent-tinted indicator
+/// (upstream spins a LoaderIcon; the port has no spinner glyph), pending =
+/// hollow ring with a center dot.
+fn step_status_icon(status: TaskStatus, accent: u32) -> gpui::Div {
+    match status {
+        TaskStatus::Completed => div()
+            .size(px(20.))
+            .rounded_full()
+            .bg(gpui::rgba((TASK_SUCCESS << 8) | 0x26))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                ui::icon(Glyph::Check)
+                    .size(px(12.))
+                    .text_color(rgb(TASK_SUCCESS)),
+            ),
+        TaskStatus::InProgress => div()
+            .size(px(20.))
+            .rounded_full()
+            .bg(gpui::rgba((accent << 8) | 0x26))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(ui::icon(Glyph::Clock).size(px(12.)).text_color(rgb(accent))),
+        TaskStatus::Pending => div()
+            .size(px(20.))
+            .rounded_full()
+            .border_1()
+            .border_color(rgb(palette().border))
+            .bg(gpui::rgba((palette().muted << 8) | 0x30))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .size(px(6.))
+                    .rounded_full()
+                    .bg(gpui::rgba((palette().muted << 8) | 0x4d)),
+            ),
+    }
+}
+
+/// Upstream `taskStatusIcon` (`ActiveTaskListCard.tsx`): 14px inline status
+/// mark — check, in-progress indicator, or hollow ring.
+fn task_status_icon(status: TaskStatus) -> gpui::AnyElement {
+    match status {
+        TaskStatus::Completed => ui::icon(Glyph::Check).size(px(12.)).into_any_element(),
+        TaskStatus::InProgress => ui::icon(Glyph::Clock)
+            .size(px(12.))
+            .text_color(rgb(palette().focus))
+            .into_any_element(),
+        TaskStatus::Pending => div()
+            .size(px(7.))
+            .rounded_full()
+            .border_1()
+            .border_color(rgb(palette().muted))
+            .into_any_element(),
+    }
+}
 
 /// Upstream `truncateTitle`: trim, then cut at 50 chars and append "...".
 fn truncate_title(text: String) -> String {
@@ -353,9 +419,28 @@ impl super::Shell {
         });
         cx.notify();
     }
-    /// Upstream `setPlanSidebarOpen(!planSidebarOpen)`.
+    /// Upstream `deriveActiveTaskListState` — resolved on the thread's latest
+    /// task-list snapshot.
+    pub(super) fn active_task_list(&self) -> Option<ActiveTaskList> {
+        self.thread.as_ref()?.active_task_list()
+    }
+    /// Upstream `planSidebarDismissedForTurnRef`: the task-list turn, else the
+    /// sidebar plan's turn, else a sentinel.
+    fn plan_sidebar_dismiss_key(&self) -> String {
+        self.active_task_list()
+            .and_then(|list| list.turn_id)
+            .or_else(|| self.sidebar_proposed_plan().and_then(|plan| plan.turn_id))
+            .unwrap_or_else(|| "__dismissed__".into())
+    }
+    /// Upstream `setPlanSidebarOpen(!planSidebarOpen)` — closing records the
+    /// dismissed turn key, opening clears it.
     pub(super) fn toggle_plan_sidebar(&mut self, cx: &mut Context<Self>) {
         self.plan_sidebar_open = !self.plan_sidebar_open;
+        self.plan_sidebar_dismissed_turn = if self.plan_sidebar_open {
+            None
+        } else {
+            Some(self.plan_sidebar_dismiss_key())
+        };
         cx.notify();
     }
     /// Upstream `ChatComposerFooter`'s `sidebarAction`: a ghost button with the
@@ -363,7 +448,8 @@ impl super::Shell {
     /// plan exists or the sidebar is open; toggles to "Hide …" while open.
     pub(super) fn plan_sidebar_toggle(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
         let has_plan = self.sidebar_proposed_plan().is_some();
-        if !has_plan && !self.plan_sidebar_open {
+        let has_tasks = self.active_task_list().is_some();
+        if !has_plan && !has_tasks && !self.plan_sidebar_open {
             return None;
         }
         let base = if has_plan { "Plan details" } else { "Tasks" };
@@ -405,6 +491,7 @@ impl super::Shell {
     /// `turn.tasks.updated`, which the port does not implement.
     pub(super) fn plan_sidebar(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
         let plan = self.sidebar_proposed_plan();
+        let task_list = self.active_task_list();
         let accent = palette().focus;
         let header_actions = div().flex().items_center().gap_1();
         let header_actions = if let Some(plan) = &plan {
@@ -465,18 +552,37 @@ impl super::Shell {
             .border_b_1()
             .border_color(rgb(palette().border))
             .child(
-                div().flex().items_center().gap_2().child(
-                    div()
-                        .px_2()
-                        .py_0p5()
-                        .rounded_md()
-                        .border_1()
-                        .border_color(gpui::rgba((accent << 8) | 0x33))
-                        .bg(gpui::rgba((accent << 8) | 0x19))
-                        .text_size(px(ui::ui_font_size() - 1.))
-                        .text_color(rgb(accent))
-                        .child("Plan"),
-                ),
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .px_2()
+                            .py_0p5()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(gpui::rgba((accent << 8) | 0x33))
+                            .bg(gpui::rgba((accent << 8) | 0x19))
+                            .text_size(px(ui::ui_font_size() - 1.))
+                            .text_color(rgb(accent))
+                            .child("Plan"),
+                    )
+                    // Upstream `formatTimestamp(activeTaskList.createdAt)` next
+                    // to the badge while a task list is active.
+                    .children(task_list.as_ref().and_then(|list| {
+                        chrono::DateTime::from_timestamp_millis(list.created_at_ms).map(|stamp| {
+                            div()
+                                .text_size(px(ui::ui_font_size() - 1.))
+                                .text_color(rgb(palette().muted))
+                                .child(
+                                    stamp
+                                        .with_timezone(&chrono::Local)
+                                        .format("%a %H:%M")
+                                        .to_string(),
+                                )
+                        })
+                    })),
             )
             .child(
                 header_actions.child(
@@ -487,6 +593,8 @@ impl super::Shell {
                         false,
                         cx.listener(|this, _: &(), _, cx| {
                             this.plan_sidebar_open = false;
+                            this.plan_sidebar_dismissed_turn =
+                                Some(this.plan_sidebar_dismiss_key());
                             cx.notify();
                         }),
                     )
@@ -502,6 +610,75 @@ impl super::Shell {
             .flex()
             .flex_col()
             .gap_3();
+        // Upstream body order: task-list explanation, "Steps" rows, then the
+        // collapsible "Full Plan" section; empty state only when neither.
+        let has_task_list = task_list.is_some();
+        let has_plan = plan.is_some();
+        let body = body.when_some(
+            task_list.as_ref().and_then(|list| list.explanation.clone()),
+            |el, explanation| {
+                el.child(
+                    div()
+                        .text_size(px(ui::ui_font_size() + 1.))
+                        .text_color(rgb(palette().muted))
+                        .child(explanation),
+                )
+            },
+        );
+        let body = body.when_some(
+            task_list.as_ref().filter(|list| !list.tasks.is_empty()),
+            |el, list| {
+                el.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(
+                            div()
+                                .pb_1()
+                                .text_size(px(ui::ui_font_size() - 2.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(rgb(palette().muted))
+                                .child("Steps"),
+                        )
+                        .children(list.tasks.iter().map(|task| {
+                            div()
+                                .flex()
+                                .items_start()
+                                .gap(px(10.))
+                                .rounded_md()
+                                .px(px(10.))
+                                .py(px(8.))
+                                .when(task.status == TaskStatus::InProgress, |el| {
+                                    el.bg(gpui::rgba((accent << 8) | 0x0d))
+                                })
+                                .when(task.status == TaskStatus::Completed, |el| {
+                                    el.bg(gpui::rgba((TASK_SUCCESS << 8) | 0x0d))
+                                })
+                                .child(
+                                    div()
+                                        .mt(px(2.))
+                                        .child(step_status_icon(task.status, accent)),
+                                )
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .flex_1()
+                                        .text_size(px(ui::ui_font_size() + 1.))
+                                        .text_color(match task.status {
+                                            TaskStatus::Completed => rgb(palette().muted),
+                                            TaskStatus::InProgress => rgb(palette().text),
+                                            TaskStatus::Pending => rgb(palette().muted),
+                                        })
+                                        .when(task.status == TaskStatus::Completed, |el| {
+                                            el.line_through()
+                                        })
+                                        .child(task.task.clone()),
+                                )
+                        })),
+                )
+            },
+        );
         let body = if let Some(plan) = plan {
             let title =
                 proposed_plan_title(&plan.plan_markdown).unwrap_or_else(|| "Full Plan".into());
@@ -557,6 +734,9 @@ impl super::Shell {
                     }),
             )
         } else {
+            body
+        };
+        let body = if !has_task_list && !has_plan {
             body.child(
                 div()
                     .flex()
@@ -577,6 +757,8 @@ impl super::Shell {
                             .child("Plans will appear here when generated."),
                     ),
             )
+        } else {
+            body
         };
         div()
             .w(px(340.))
@@ -590,6 +772,146 @@ impl super::Shell {
             .child(header)
             .child(body)
             .into_any_element()
+    }
+    /// Upstream `ComposerActiveTaskListCard` + `ActiveTaskListCard`: stacked
+    /// panel above the composer while a task list is active and the sidebar is
+    /// closed — "{done} out of {total} tasks completed" header with sidebar
+    /// and collapse controls, numbered status rows below.
+    pub(super) fn active_task_list_card(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        if self.plan_sidebar_open {
+            return None;
+        }
+        let list = self.active_task_list()?;
+        let total = list.tasks.len();
+        let done = list
+            .tasks
+            .iter()
+            .filter(|task| task.status == TaskStatus::Completed)
+            .count();
+        let compact = self.active_task_list_compact;
+        let has_in_progress = list
+            .tasks
+            .iter()
+            .any(|task| task.status == TaskStatus::InProgress);
+        let header_icon = if compact && has_in_progress {
+            Glyph::Clock
+        } else {
+            Glyph::Sliders
+        };
+        let open_sidebar = ui::chrome_button(
+            "task-list-open-sidebar",
+            "Open tasks sidebar",
+            Glyph::PanelRight,
+            false,
+            cx.listener(|this, _: &(), _, cx| {
+                this.plan_sidebar_open = true;
+                this.plan_sidebar_dismissed_turn = None;
+                cx.notify();
+            }),
+        )
+        .size(px(20.));
+        let collapse = ui::chrome_button(
+            "task-list-compact",
+            if compact {
+                "Expand task banner"
+            } else {
+                "Collapse task banner"
+            },
+            if compact {
+                Glyph::ChevronRight
+            } else {
+                Glyph::Chevron
+            },
+            false,
+            cx.listener(|this, _: &(), _, cx| {
+                this.active_task_list_compact = !this.active_task_list_compact;
+                cx.notify();
+            }),
+        )
+        .size(px(20.));
+        let card = div()
+            .px_5()
+            .py_3()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                ui::icon(header_icon)
+                                    .size(px(14.))
+                                    .text_color(rgb(palette().muted)),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(ui::ui_font_size()))
+                                    .text_color(rgb(palette().muted))
+                                    .child(format!("{done} out of {total} tasks completed")),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .child(open_sidebar)
+                            .child(collapse),
+                    ),
+            )
+            .when(!compact, |card| {
+                card.child(div().flex().flex_col().py_1().children(
+                    list.tasks.iter().enumerate().map(|(index, task)| {
+                        div()
+                            .flex()
+                            .items_start()
+                            .gap_2()
+                            .py(px(4.))
+                            .child(
+                                div()
+                                    .mt(px(3.))
+                                    .flex()
+                                    .min_w_0()
+                                    .flex_shrink_0()
+                                    .items_center()
+                                    .gap_1p5()
+                                    .text_size(px(ui::ui_font_size()))
+                                    .text_color(rgb(palette().muted))
+                                    .child(
+                                        div()
+                                            .size(px(14.))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child(task_status_icon(task.status)),
+                                    )
+                                    .child(format!("{}.", index + 1)),
+                            )
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex_1()
+                                    .text_size(px(ui::ui_font_size() + 1.))
+                                    .text_color(rgb(if task.status == TaskStatus::Completed {
+                                        palette().muted
+                                    } else {
+                                        palette().text
+                                    }))
+                                    .when(task.status == TaskStatus::Completed, |el| {
+                                        el.line_through()
+                                    })
+                                    .child(task.task.clone()),
+                            )
+                    }),
+                ))
+            });
+        Some(card.into_any_element())
     }
     /// Upstream `onImplementPlanInNewThread` (useChatTurnFollowUps): create a
     /// same-project thread titled `Implement {plan title}`, dispatch the

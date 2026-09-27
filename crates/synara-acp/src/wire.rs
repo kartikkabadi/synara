@@ -408,7 +408,14 @@ pub(crate) fn update(
                     })
                 })
                 .collect::<AgentResult<_>>()?;
-            events.push(ThreadEvent::PlanChanged { entries });
+            let explanation = value
+                .get("explanation")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            events.push(ThreadEvent::PlanChanged {
+                entries,
+                explanation,
+            });
         }
         "usage_update" => {
             let usage = Usage {

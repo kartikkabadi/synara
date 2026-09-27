@@ -313,6 +313,12 @@ pub struct Shell {
     /// `proposedPlans` in the shared read model; here it is fetched lazily).
     sidebar_source_plan: Option<ProposedPlan>,
     sidebar_source_loading: Option<String>,
+    /// Upstream `activeTaskListCompact` (`ChatView`): collapse toggle on the
+    /// composer's task-list card, reset per thread.
+    active_task_list_compact: bool,
+    /// Upstream `planSidebarDismissedForTurnRef`: records the turn key when the
+    /// sidebar is closed so a later auto-open does not fight the dismissal.
+    plan_sidebar_dismissed_turn: Option<String>,
     pending: HashMap<InteractionKey, UiInteraction>,
     forms: HashMap<InteractionKey, FormState>,
     files: Vec<FileEntry>,
@@ -591,6 +597,8 @@ impl Shell {
             plan_sidebar_expanded: false,
             sidebar_source_plan: None,
             sidebar_source_loading: None,
+            active_task_list_compact: false,
+            plan_sidebar_dismissed_turn: None,
             pending: HashMap::new(),
             forms: HashMap::new(),
             files: vec![],
@@ -983,6 +991,8 @@ impl Shell {
         self.plan_sidebar_expanded = false;
         self.sidebar_source_plan = None;
         self.sidebar_source_loading = None;
+        self.active_task_list_compact = false;
+        self.plan_sidebar_dismissed_turn = None;
         self.load_direct_binding(id);
         self.load_handoff_origin(id);
         self.load_message_pins(id);
@@ -1370,6 +1380,11 @@ impl Shell {
                     plan_implemented = Some(plan.id);
                     submit_mode = InteractionMode::Default;
                     self.mode_tasks.insert(id, InteractionMode::Default);
+                    // Upstream `useChatTurnFollowUps`: implementing (default
+                    // mode) opens the plan sidebar optimistically — the turn
+                    // produces the task steps it displays.
+                    self.plan_sidebar_open = true;
+                    self.plan_sidebar_dismissed_turn = None;
                 }
             }
         }

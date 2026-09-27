@@ -9,7 +9,7 @@ Detailed parity evidence lives in:
 
 ## Current status
 
-- Shipped feature slices: **115**
+- Shipped feature slices: **116**
 - Major remaining: **0**
 - Smaller remaining: **0**
 - Acceptance/integration remaining: **0**
@@ -736,6 +736,15 @@ Verification receipts:
   the prompt dispatch completes, so the sidebar auto-opens on the source plan
   mid-turn (upstream `planSidebarOpenOnNextThreadRef` ordering). See the
   [batch 59 receipt](docs/verification/parity-2026-09-26-batch59.md).
+- Batch 60 ports upstream turn task lists (`turn.tasks.updated`): ACP
+  `session/plan` updates now carry `explanation` and tag the owning turn,
+  `Thread::active_task_list` mirrors `deriveActiveTaskListState` visibility
+  rules, the composer gains the upstream "N out of M tasks completed" card
+  (open-sidebar + collapse, hidden while the sidebar is open), the plan
+  sidebar gains the timestamp + explanation + "Steps" status rows, Implement
+  sends open the sidebar optimistically, and the transcript renders the
+  upstream keep-latest summary row. See the
+  [batch 60 receipt](docs/verification/parity-2026-09-26-batch60.md).
 
 
 ## How to update this roadmap

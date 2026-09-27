@@ -125,6 +125,7 @@ impl Shell {
                             .child(self.followups_view(cx)),
                     )
                     .children(self.plan_follow_up_banner())
+                    .children(self.active_task_list_card(cx))
                     .child(
                         div()
                             .relative()
