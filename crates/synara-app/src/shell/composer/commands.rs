@@ -57,7 +57,6 @@ const SETTINGS_SECTIONS: &[(&str, &str)] = &[
     ("mcp", "MCP connections"),
     ("providers", "Agent providers"),
     ("models", "Models and writing"),
-    ("direct-models", "Direct model providers"),
     ("project-import", "Project import"),
     ("skills", "Agent skills"),
     ("worktrees", "Managed worktrees"),
@@ -305,7 +304,6 @@ fn settings_section(name: &str) -> Option<settings::Section> {
         "mcp" => settings::Section::Mcp,
         "providers" => settings::Section::Providers,
         "models" => settings::Section::Models,
-        "direct-models" => settings::Section::DirectModels,
         "project-import" => settings::Section::ProjectImport,
         "skills" => settings::Section::Skills,
         "worktrees" => settings::Section::Worktrees,
@@ -740,8 +738,8 @@ mod tests {
             );
         }
         assert_eq!(
-            parse("/synara/settings   direct-models  "),
-            Some(Ok(ParsedCommand::SettingsSection("direct-models")))
+            parse("/synara/settings   usage  "),
+            Some(Ok(ParsedCommand::SettingsSection("usage")))
         );
         for text in [
             "/synara/settings unknown",

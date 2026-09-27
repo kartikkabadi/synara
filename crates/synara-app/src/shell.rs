@@ -14,7 +14,6 @@ mod controls;
 mod conversation;
 mod debug_mode;
 mod device;
-mod direct_models;
 mod dock;
 mod drafts;
 mod editors;
@@ -130,7 +129,6 @@ enum Update {
     Recap(Box<recap::Reply>),
     Checkpoints(Box<checkpoints::Reply>),
     InlineComments(Box<inline_comments::Reply>),
-    DirectModels(Box<direct_models::Reply>),
     Autonomy(Box<autonomy::Reply>),
     ProjectImport(Box<project_import::Reply>),
     Automations(Box<automations::Reply>),
@@ -253,7 +251,6 @@ pub struct Shell {
     navigation: navigation::NavigationState,
     settings: settings::SettingsState,
     integrations: integrations::IntegrationState,
-    direct_models: direct_models::DirectModelState,
     autonomy: autonomy::AutonomyView,
     project_import: project_import::ImportState,
     close: CloseState,
@@ -547,7 +544,6 @@ impl Shell {
             navigation: navigation::NavigationState::new(cx),
             settings: settings::SettingsState::new(bootstrap.settings, cx),
             integrations: integrations::IntegrationState::new(cx),
-            direct_models: direct_models::DirectModelState::new(cx),
             autonomy: autonomy::AutonomyView::new(cx),
             project_import: project_import::ImportState::new(cx),
             close: CloseState::Open,
@@ -674,10 +670,7 @@ impl Shell {
         if self.followup_navigation_blocked(cx) {
             return false;
         }
-        if self.integrations.pending()
-            || self.direct_models.pending()
-            || self.project_import.pending()
-        {
+        if self.integrations.pending() || self.project_import.pending() {
             self.notice=Some("Finish the integration operation or discard its open Settings form/review before closing.".into());
             cx.notify();
             return false;
@@ -1003,7 +996,6 @@ impl Shell {
         self.plan_sidebar_dismissed_turn = None;
         self.dispatch_text = None;
         self.pending_steer = None;
-        self.load_direct_binding(id);
         self.load_handoff_origin(id);
         self.load_message_pins(id);
         self.load_attachments(id);
@@ -1323,14 +1315,10 @@ impl Shell {
         }
         tracing::debug!(target: "synara_ui_layout",
             task_selected = self.selected.is_some(), loading_thread = self.loading_task.is_some(),
-            loading_route = self.direct_route_loading(),
             loading_draft = self.selected.is_some_and(|t| self.draft_state.loading.contains(&t)),
             attachment_pending = self.attachment_send_blocked(), goal_pending = self.goal_send_pending(cx),
             composing = self.composer.read(cx).is_composing(), controls_blocked = self.controls_blocked(),
             "composer-send-attempt");
-        if self.direct_route_loading() {
-            return;
-        }
         if self.close != CloseState::Open
             || self.terminal_closing
             || self.loading_task.is_some()
@@ -1657,7 +1645,6 @@ impl Shell {
     fn receive(&mut self, update: Update, cx: &mut Context<Self>) {
         match update {
             Update::Noop => {}
-            Update::DirectModels(reply) => self.direct_model_reply(*reply, cx),
             Update::Autonomy(reply) => self.autonomy_reply(*reply, cx),
             Update::ProjectImport(reply) => self.import_reply(*reply, cx),
             Update::Integrations(reply) => self.integration_reply(*reply, cx),

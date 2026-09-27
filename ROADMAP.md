@@ -772,6 +772,16 @@ Verification receipts:
   `TextDelta` events on a sink that keeps the transcript clean. The
   editor's completion section is now a plain toggle, no model picker. See
   the [batch 63 receipt](docs/verification/parity-2026-09-26-batch63.md).
+- Batch 64 completes the `direct_models` excision (stages 2–5 wholesale):
+  the direct chat route, composer route controls and `uses_direct_model`
+  gates, `HandoffTarget::Direct`, the settings section + `/synara/settings
+  direct-models` alias, server direct dispatch, the `task-direct-model:`
+  producer reads, and the `synara-model` crate itself are all deleted —
+  upstream has no direct-provider surface (`ProviderKind` is agent CLIs
+  only). Decode-compat shims stay (`ThreadEvent::DirectModelRoute`, the
+  turn fields, the three pref keys as `serde_json::Value`) so old
+  databases and backups still open. See the
+  [batch 64 receipt](docs/verification/parity-2026-09-27-batch64.md).
 
 
 ## How to update this roadmap

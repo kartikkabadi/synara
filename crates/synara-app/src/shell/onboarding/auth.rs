@@ -305,9 +305,9 @@ impl Shell {
         agent: &str,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
-        let current = self.task().filter(|task| {
-            task.agent_id == agent && task.state != TaskState::Archived && !self.uses_direct_model()
-        });
+        let current = self
+            .task()
+            .filter(|task| task.agent_id == agent && task.state != TaskState::Archived);
         let Some(task) = current else {
             let agent = agent.to_owned();
             return ui::button(

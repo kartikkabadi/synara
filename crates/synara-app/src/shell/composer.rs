@@ -16,8 +16,7 @@ impl Shell {
         // up, an empty draft still sends — it submits the implementation prompt.
         let plan_follow_up = self.show_plan_follow_up();
         let disabled = !busy
-            && (self.direct_route_loading()
-                || self.loading_task.is_some()
+            && (self.loading_task.is_some()
                 || self
                     .selected
                     .is_some_and(|t| self.draft_state.loading.contains(&t))
@@ -157,13 +156,9 @@ impl Shell {
                             .items_end()
                             .justify_between()
                             .gap_1()
-                            .child(div().flex_1().min_w_0().child(
-                                if self.uses_direct_model() || self.direct_route_loading() {
-                                    self.direct_model_controls(cx)
-                                } else {
-                                    self.session_controls(cx)
-                                },
-                            ))
+                            .child(
+                                div().flex_1().min_w_0().child(self.session_controls(cx)),
+                            )
                             .children(self.voice.recording_status().map(|(duration, level)| {
                                 div()
                                     .id("voice-recording-status")

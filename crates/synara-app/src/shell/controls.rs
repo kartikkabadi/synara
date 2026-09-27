@@ -399,7 +399,7 @@ fn cycle_model_action(choices: &[(Choice, ControlAction)], forward: bool) -> Opt
 
 impl Shell {
     pub(super) fn cycle_session_model(&mut self, forward: bool, cx: &mut Context<Self>) -> bool {
-        if self.controls_blocked() || self.uses_direct_model() || self.loading_task.is_some() {
+        if self.controls_blocked() || self.loading_task.is_some() {
             return false;
         }
         let models = self.control_choices(ControlKind::Model);
@@ -449,11 +449,7 @@ impl Shell {
             Some("model.previous") => false,
             _ => return false,
         };
-        if self.uses_direct_model() {
-            self.cycle_direct_model_for_shortcut(forward, cx)
-        } else {
-            self.cycle_session_model(forward, cx)
-        }
+        self.cycle_session_model(forward, cx)
     }
 
     pub(in crate::shell) fn control_choices(

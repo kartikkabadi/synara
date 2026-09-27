@@ -2,8 +2,6 @@ mod autonomy;
 pub use autonomy::*;
 mod imports;
 pub use imports::*;
-mod direct_models;
-pub use direct_models::*;
 mod automations;
 pub mod pull_requests;
 pub use automations::*;

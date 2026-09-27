@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::automations::*;
-use crate::{AgentProfile, DirectModelBinding, WorkspaceError, WorkspaceResult, default_profiles};
+use crate::{AgentProfile, WorkspaceError, WorkspaceResult, default_profiles};
 const KEY: &str = "automation-ledger-v1";
 fn read(connection: &Connection) -> WorkspaceResult<AutomationLedger> {
     let data: Option<String> = connection
@@ -78,23 +78,6 @@ fn continuation_target_identity(
     {
         return Err(invalid(
             "Automation continuation target must be unarchived, in the selected project, and use the selected ACP agent.",
-        ));
-    }
-    let raw_binding: Option<String> = connection
-        .query_row(
-            "SELECT data FROM preferences WHERE key=?1",
-            [format!("task-direct-model:{id}")],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let binding = raw_binding
-        .as_deref()
-        .map(decode::<Option<DirectModelBinding>>)
-        .transpose()?
-        .flatten();
-    if binding.is_some() {
-        return Err(invalid(
-            "Automation continuation currently supports ACP-owned target conversations only.",
         ));
     }
     Ok(task)

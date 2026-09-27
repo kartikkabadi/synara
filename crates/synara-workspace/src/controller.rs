@@ -1,6 +1,6 @@
 mod browser;
 mod checkpoints;
-mod direct_models;
+mod evaluation;
 mod gateway;
 mod handoff;
 mod integrations;
@@ -215,7 +215,6 @@ impl Controller {
         let _integrations = self.integrations_gate.read().await;
         let slot = self.slot(id).await?;
         let _gate = slot.creation.lock().await;
-        self.require_agent_route(id).await?;
         let task = self.workspace.task(id).await?;
         let profile = self.profile(&task.agent_id).await?;
         {
@@ -405,9 +404,6 @@ impl Controller {
         } else {
             Prompt::text(text)
         };
-        if let Some(binding) = self.workspace.direct_model_binding(id).await? {
-            return self.submit_direct(id, binding, prompt, cancellation).await;
-        }
         let session = tokio::select! {
             biased;
             () = cancellation.cancelled() => return Err(AgentError::Cancelled.into()),
@@ -505,7 +501,6 @@ impl Controller {
         let _ownership = PromptOwnership(slot.clone());
         {
             let _creation = slot.creation.lock().await;
-            self.require_agent_route(id).await?;
             let task = self.workspace.task(id).await?;
             let profile = self.profile(&task.agent_id).await?;
             let connection = self.connection_for(&task, &slot, &profile, false).await?;
@@ -577,7 +572,6 @@ impl Controller {
         }
         let _ownership = PromptOwnership(slot.clone());
         let _gate = slot.creation.lock().await;
-        self.require_agent_route(id).await?;
         let old = slot.live.lock().map_err(|_| WorkspaceError::Worker)?.take();
         if let Some(old) = old {
             old.session.close().await?;
@@ -595,7 +589,6 @@ impl Controller {
         let _ownership = PromptOwnership(slot.clone());
         {
             let _gate = slot.creation.lock().await;
-            self.require_agent_route(id).await?;
             let task = self.workspace.task(id).await?;
             let profile = self.profile(&task.agent_id).await?;
             slot.live.lock().map_err(|_| WorkspaceError::Worker)?.take();
@@ -612,7 +605,6 @@ impl Controller {
         let _ownership = PromptOwnership(slot.clone());
         {
             let _gate = slot.creation.lock().await;
-            self.require_agent_route(id).await?;
             let old = slot.live.lock().map_err(|_| WorkspaceError::Worker)?.take();
             if let Some(old) = old {
                 old.session.close().await?;

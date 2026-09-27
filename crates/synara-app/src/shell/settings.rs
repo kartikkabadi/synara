@@ -30,7 +30,6 @@ pub(super) enum Section {
     Mcp,
     Providers,
     Models,
-    DirectModels,
     ProjectImport,
     Skills,
     Worktrees,
@@ -255,9 +254,6 @@ impl Shell {
         }
         if section == Section::Worktrees {
             self.prepare_worktree_settings(cx);
-        }
-        if section == Section::DirectModels {
-            self.load_direct_models(cx);
         }
         if matches!(section, Section::Plugins | Section::Mcp | Section::Skills)
             && !self.integrations.loaded()
@@ -702,7 +698,6 @@ impl Shell {
             Section::Privacy => self.privacy_settings(cx),
             Section::Usage => self.usage_settings(),
             Section::Models => self.model_settings(cx),
-            Section::DirectModels => self.direct_model_settings(cx),
             Section::ProjectImport => self.project_import_settings(cx),
             Section::System => div()
                 .child(self.system_settings(cx))

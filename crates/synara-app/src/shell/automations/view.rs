@@ -195,7 +195,7 @@ impl Shell {
                 .children((editor.mode == AutomationMode::Heartbeat).then(|| div().flex().flex_col().gap_1()
                     .child(div().text_sm().child("Heartbeat target conversation"))
                     .child(div().flex().flex_wrap().gap_1().children(heartbeat_targets))
-                    .child(div().text_sm().text_color(rgb(palette().muted)).child("The target must stay idle, unarchived, in this project, use the selected ACP agent, have no direct-model route, no unsent draft or pending attachments, and not already be owned by another automation run."))))
+                    .child(div().text_sm().text_color(rgb(palette().muted)).child("The target must stay idle, unarchived, in this project, use the selected ACP agent, no unsent draft or pending attachments, and not already be owned by another automation run."))))
                 .child(div().text_sm().text_color(rgb(palette().muted)).child("Standalone creates a fresh owned conversation for every run. Heartbeat continues the selected existing conversation. Dedicated creates one automation-owned conversation on its first run and reuses it thereafter; its target cannot be imported from another task."))
                 .child(state.heartbeat_cooldown.clone())
                 .child(div().text_sm().text_color(rgb(palette().muted)).child("Continuation cooldown applies to Heartbeat and Dedicated targets after recent external activity. The automation's own previous completed run does not throttle its next scheduled wake. Use 0 to disable the cooldown."))

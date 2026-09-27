@@ -414,7 +414,6 @@ async fn execution_deadline_cancels_and_drains_the_native_owner() {
             task.id,
             "deadline".into(),
             None,
-            None,
             CancellationToken::new(),
             view.clone(),
             Duration::from_millis(100),
