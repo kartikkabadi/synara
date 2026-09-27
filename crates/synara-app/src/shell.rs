@@ -1924,6 +1924,11 @@ impl Shell {
                         if let Some(changed) = changed {
                             self.replace_task(changed);
                         }
+                        if let Some((pending_task, mode)) = self.controls.pending_mode.take()
+                            && pending_task == task
+                        {
+                            self.catalog.runtime_modes.insert(task, mode);
+                        }
                         if self.selected == Some(task) {
                             self.details = details;
                             self.error = None;

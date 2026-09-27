@@ -52,6 +52,9 @@ pub struct Catalog {
     /// TaskId → last visit stamp (upstream `lastVisitedAt`), for the
     /// unread-completed sidebar badge.
     pub visited: HashMap<TaskId, i64>,
+    /// TaskId → last chosen provider session mode (upstream `runtimeMode`),
+    /// for the composer access button's persisted label.
+    pub runtime_modes: HashMap<TaskId, String>,
 }
 /// A Git-linked worktree mapped to the registered project's directory within it.
 /// `path` is the directory Synara will use as this task's working directory.
@@ -1344,11 +1347,13 @@ fn catalog(store: &Store) -> WorkspaceResult<Catalog> {
     }
     tasks.sort_by_key(|task| std::cmp::Reverse(task.updated_at_ms));
     let visited = store.task_visits()?;
+    let runtime_modes = store.task_runtime_modes()?;
     Ok(Catalog {
         workspaces,
         projects,
         tasks,
         visited,
+        runtime_modes,
     })
 }
 fn catalog_name(value: &str, kind: &str) -> WorkspaceResult<String> {

@@ -92,6 +92,9 @@ pub(super) struct ControlState {
     pub composer_bounds: Rc<Cell<Bounds<Pixels>>>,
     pending: HashSet<TaskId>,
     extras_windows: bool,
+    /// Mode id waiting on a successful dispatch; folded into
+    /// `catalog.runtime_modes` when ControlFinished lands.
+    pub pending_mode: Option<(TaskId, String)>,
 }
 impl ControlState {
     pub fn new(cx: &mut Context<Shell>) -> Self {
@@ -104,6 +107,7 @@ impl ControlState {
             }),
             pending: HashSet::new(),
             extras_windows: false,
+            pending_mode: None,
         }
     }
     pub fn is_open(&self) -> bool {
@@ -454,15 +458,36 @@ impl Shell {
         if kind == ControlKind::Access {
             let modes = self.control_choices(ControlKind::Mode);
             if modes.is_empty() {
-                return vec![(
-                    Choice {
-                        label: "Ask for approval".into(),
-                        detail: "Always ask to edit external files and use the internet".into(),
-                        selected: true,
-                        ..Default::default()
-                    },
-                    ControlAction::AccessInfo,
-                )];
+                // Upstream's access picker lists the three runtime modes even
+                // before a session exists — the choice is draft state, applied
+                // when the session starts (DEFAULT_RUNTIME_MODE = full-access).
+                let Some(task) = self.task() else {
+                    return vec![(
+                        Choice {
+                            label: "Ask for approval".into(),
+                            detail: "Always ask to edit external files and use the internet".into(),
+                            selected: true,
+                            ..Default::default()
+                        },
+                        ControlAction::AccessInfo,
+                    )];
+                };
+                let stored = self.catalog.runtime_modes.get(&task.id).cloned();
+                return ["approval-required", "auto", "full-access"]
+                    .into_iter()
+                    .map(|id| {
+                        let (label, detail) = access_mode_copy(id).unwrap_or((id, ""));
+                        (
+                            Choice {
+                                label: label.into(),
+                                detail: detail.into(),
+                                selected: stored.as_deref().unwrap_or("full-access") == id,
+                                ..Default::default()
+                            },
+                            ControlAction::Mode(id.into()),
+                        )
+                    })
+                    .collect();
             }
             return modes
                 .into_iter()
@@ -1050,6 +1075,9 @@ impl Shell {
     ) {
         self.controls.pending.insert(task);
         self.error = None;
+        if let ControlAction::Mode(mode) = &action {
+            self.controls.pending_mode = Some((task, mode.clone()));
+        }
         let controller = self.controller.clone();
         self.job(async move {
             let result = match action {
@@ -1068,7 +1096,25 @@ impl Shell {
                     unreachable!("project controls are handled before session dispatch")
                 }
                 ControlAction::Agent(agent) => controller.switch_agent(task, agent).await.map(Some),
-                ControlAction::Mode(mode) => controller.set_mode(task, mode).await.map(|_| None),
+                ControlAction::Mode(mode) => {
+                    // Apply to a live session only when it advertises the mode;
+                    // the choice itself is per-thread state that persists and
+                    // re-applies on session creation (upstream `runtimeMode`).
+                    let advertised = controller
+                        .details(task)
+                        .await
+                        .ok()
+                        .flatten()
+                        .is_some_and(|d| d.configuration.modes.iter().any(|m| m.id == mode));
+                    if advertised {
+                        controller.set_mode(task, mode.clone()).await?;
+                    }
+                    controller
+                        .workspace
+                        .save_task_runtime_mode(task, mode)
+                        .await
+                        .map(|_| None)
+                }
                 ControlAction::Model(model) => {
                     controller.set_model(task, model).await.map(|_| None)
                 }
@@ -1220,20 +1266,31 @@ impl Shell {
             .gap_1()
             .min_w_0()
             .child(self.control_trigger(ControlKind::Extras, String::new(), true, cx))
-            .child(
-                self.control_trigger(
-                    ControlKind::Access,
+            .child(self.control_trigger(
+                ControlKind::Access,
+                // Upstream shows the thread's persisted `runtimeMode` label on
+                // the composer button even before a session exists.
+                if self.control_choices(ControlKind::Mode).is_empty() {
+                    self.task()
+                        .and_then(|task| self.catalog.runtime_modes.get(&task.id))
+                        .map(|mode| {
+                            access_mode_copy(mode)
+                                .map(|(label, _)| label.to_owned())
+                                .unwrap_or_else(|| mode.clone())
+                        })
+                        .unwrap_or_else(|| "Ask for approval".into())
+                } else {
                     self.control_choices(ControlKind::Access)
                         .iter()
                         .find(|(choice, _)| choice.selected)
                         .map_or_else(
                             || "Ask for approval".into(),
                             |(choice, _)| choice.label.clone(),
-                        ),
-                    true,
-                    cx,
-                ),
-            )
+                        )
+                },
+                true,
+                cx,
+            ))
             .children(self.context_meter(cx))
             .child(div().flex_1())
             .child(self.control_trigger(ControlKind::Agent, label, !self.profiles.is_empty(), cx))

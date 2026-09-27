@@ -9,7 +9,7 @@ Detailed parity evidence lives in:
 
 ## Current status
 
-- Shipped feature slices: **109**
+- Shipped feature slices: **110**
 - Major remaining: **0**
 - Smaller remaining: **0**
 - Acceptance/integration remaining: **0**
@@ -689,6 +689,12 @@ Verification receipts:
   deleted), capped at `THREAD_NOTES_MAX_CHARS = 16_384`, and the notes dialog
   drops the checklist editor, folder picker, and prompt-insert buttons. See
   the [batch 53 receipt](docs/verification/parity-2026-09-26-batch53.md).
+- Batch 54 lands per-task runtime-mode persistence (upstream
+  `thread.runtimeMode`): the Access picker lists the three canonical modes
+  pre-session, picks persist to `task-runtime-mode:{id}` preferences and are
+  re-applied to (re)created sessions, and the composer button shows the stored
+  or `full-access` default label. See the
+  [batch 54 receipt](docs/verification/parity-2026-09-26-batch54.md).
 
 
 ## How to update this roadmap

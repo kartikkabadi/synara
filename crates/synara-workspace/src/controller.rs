@@ -281,6 +281,27 @@ impl Controller {
             let _ = session.close().await;
             return Err(error);
         }
+        // Upstream `thread.runtimeMode`: the last chosen provider session mode
+        // rides the thread and is re-applied to each (re)created session. Only
+        // modes the provider still advertises are applied.
+        if let Some(mode) = self.workspace.task_runtime_mode(id).await? {
+            let config = session.configuration();
+            if config.modes.iter().any(|m| m.id == mode)
+                && config.current_mode.as_deref() != Some(mode.as_str())
+                && session.set_mode(&mode).await.is_err()
+            {
+                self.workspace
+                    .record(
+                        task.thread_id,
+                        ThreadEvent::Notice {
+                            message: format!(
+                                "The saved session mode '{mode}' could not be applied to this session."
+                            ),
+                        },
+                    )
+                    .await?;
+            }
+        }
         *slot.live.lock().map_err(|_| WorkspaceError::Worker)? = Some(LiveSession {
             profile,
             session: session.clone(),
