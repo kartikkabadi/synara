@@ -12,6 +12,9 @@ impl Shell {
     ) -> gpui::AnyElement {
         let busy = self.selected.is_some_and(|task| self.busy.contains(&task));
         let native_command = self.native_command_draft(cx);
+        // Upstream `showPlanFollowUpPrompt`: while the "Plan ready" banner is
+        // up, an empty draft still sends — it submits the implementation prompt.
+        let plan_follow_up = self.show_plan_follow_up();
         let disabled = !busy
             && (self.direct_route_loading()
                 || self.loading_task.is_some()
@@ -22,7 +25,7 @@ impl Shell {
                 || (!native_command && self.controls_blocked())
                 || self.attachment_send_blocked()
                 || (!native_command && self.attachment_capability_error().is_some())
-                || self.composer.read(cx).text().trim().is_empty());
+                || (!plan_follow_up && self.composer.read(cx).text().trim().is_empty()));
         let composer_bounds = self.controls.composer_bounds.clone();
         div()
             .relative()
@@ -121,6 +124,7 @@ impl Shell {
                             .child(self.appsnap_view(cx))
                             .child(self.followups_view(cx)),
                     )
+                    .children(self.plan_follow_up_banner())
                     .child(
                         div()
                             .relative()

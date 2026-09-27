@@ -411,6 +411,17 @@ pub enum ThreadEvent {
     PlanChanged {
         entries: Vec<PlanEntry>,
     },
+    /// Upstream `thread.proposed-plan.upsert`: a plan-mode turn produced a
+    /// `<proposed_plan>` block; record/replace the plan keyed by `plan.id`.
+    ProposedPlan {
+        plan: crate::ProposedPlan,
+    },
+    /// Upstream `thread.proposed-plan.implemented`: marks a proposed plan as
+    /// implemented by the turn that carried `sourceProposedPlan`.
+    ProposedPlanImplemented {
+        plan_id: String,
+        implementation_thread_id: crate::ThreadId,
+    },
     UsageChanged {
         usage: Usage,
     },

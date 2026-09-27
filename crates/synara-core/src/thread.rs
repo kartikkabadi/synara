@@ -53,6 +53,7 @@ pub enum TranscriptItem {
     Tool { id: String },
     Permission { id: String },
     Input { id: String },
+    Plan { index: usize },
     Notice { text: String, is_error: bool },
 }
 
@@ -85,6 +86,9 @@ pub struct Thread {
     pub inputs: BTreeMap<String, UserInputRequest>,
     pub timeline: Vec<TranscriptItem>,
     pub plan: Vec<PlanEntry>,
+    /// Upstream `OrchestrationThread.proposedPlans`: proposed-plan records
+    /// extracted from plan-mode turns (`turn.proposed.completed` events).
+    pub proposed_plans: Vec<ProposedPlan>,
     pub usage: Usage,
     pub configuration: SessionConfiguration,
     pub commands: Vec<SlashCommand>,
@@ -115,6 +119,7 @@ impl Thread {
             inputs: BTreeMap::new(),
             timeline: vec![],
             plan: vec![],
+            proposed_plans: vec![],
             usage: Usage::default(),
             configuration: SessionConfiguration::default(),
             commands: vec![],
@@ -177,6 +182,7 @@ impl Thread {
                 self.permissions.clear();
                 self.inputs.clear();
                 self.plan.clear();
+                self.proposed_plans.clear();
                 self.commands.clear();
                 self.pending_acp_routes.clear();
                 self.text_bytes = 0;
@@ -339,6 +345,43 @@ impl Thread {
                 self.inputs.remove(id);
             }
             ThreadEvent::PlanChanged { entries } => self.plan.clone_from(entries),
+            ThreadEvent::ProposedPlan { plan } => {
+                // Upstream `thread.proposed-plan.upsert`: keyed by plan id, the
+                // timeline row appears once on first upsert.
+                if let Some(existing) = self
+                    .proposed_plans
+                    .iter_mut()
+                    .find(|existing| existing.id == plan.id)
+                {
+                    *existing = plan.clone();
+                } else {
+                    let index = self.proposed_plans.len();
+                    self.proposed_plans.push(plan.clone());
+                    self.timeline.push(TranscriptItem::Plan { index });
+                }
+                if let Some(message) = self
+                    .messages
+                    .iter_mut()
+                    .rev()
+                    .find(|message| message.role == Role::Assistant)
+                {
+                    message.text = strip_proposed_plan_blocks_from_text(&message.text);
+                }
+            }
+            ThreadEvent::ProposedPlanImplemented {
+                plan_id,
+                implementation_thread_id,
+            } => {
+                if let Some(plan) = self
+                    .proposed_plans
+                    .iter_mut()
+                    .find(|plan| plan.id == *plan_id)
+                {
+                    plan.implemented_at_ms = Some(envelope.timestamp_ms);
+                    plan.implementation_thread_id = Some(*implementation_thread_id);
+                    plan.updated_at_ms = envelope.timestamp_ms;
+                }
+            }
             ThreadEvent::UsageChanged { usage } => {
                 self.usage = usage.clone();
                 if let Some(turn) = self

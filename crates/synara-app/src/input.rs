@@ -124,6 +124,12 @@ impl TextEntry {
         (font * 1.5).max(18.)
     }
 
+    pub fn placeholder(&self) -> &str {
+        &self.placeholder
+    }
+    pub fn set_placeholder(&mut self, placeholder: &str) {
+        self.placeholder = placeholder.into();
+    }
     pub fn new(placeholder: &str, mode: EntryMode, height: f32, cx: &mut Context<Self>) -> Self {
         Self {
             buffer: TextBuffer::default(),

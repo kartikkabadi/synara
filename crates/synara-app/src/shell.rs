@@ -34,6 +34,7 @@ mod organization;
 mod overview;
 mod panels;
 mod project_import;
+mod proposed_plan;
 mod pull_requests;
 mod recap;
 mod registry;
@@ -298,6 +299,9 @@ pub struct Shell {
     focus_composer: bool,
     transcript: transcript::TranscriptState,
     expanded_activity: HashSet<(ThreadId, String)>,
+    /// Upstream `ProposedPlanCard` expanded state — plan ids showing the full
+    /// markdown body instead of the collapsed preview.
+    expanded_plans: HashSet<String>,
     pending: HashMap<InteractionKey, UiInteraction>,
     forms: HashMap<InteractionKey, FormState>,
     files: Vec<FileEntry>,
@@ -570,6 +574,7 @@ impl Shell {
             focus_composer: false,
             transcript: transcript::TranscriptState::new(),
             expanded_activity: HashSet::new(),
+            expanded_plans: HashSet::new(),
             pending: HashMap::new(),
             forms: HashMap::new(),
             files: vec![],
@@ -1324,7 +1329,28 @@ impl Shell {
         if self.consume_native_command(cx) {
             return;
         }
-        let text = self.composer.read(cx).text().to_owned();
+        let mut text = self.composer.read(cx).text().to_owned();
+        // Upstream `onSubmitPlanFollowUp` + `resolvePlanFollowUpSubmission`: when
+        // the plan-ready banner is showing, an empty draft sends the
+        // implementation prompt in default mode; any draft text stays a
+        // plan-mode refinement.
+        let mut plan_implemented: Option<String> = None;
+        let mut submit_mode = self.mode_tasks.get(&id).copied().unwrap_or_default();
+        if self.show_plan_follow_up()
+            && let Some(plan) = self.actionable_proposed_plan()
+        {
+            match synara_core::resolve_plan_follow_up_submission(&text, &plan.plan_markdown) {
+                synara_core::PlanFollowUpSubmission::Refine { text: refined } => {
+                    text = refined;
+                }
+                synara_core::PlanFollowUpSubmission::Implement { text: prompt } => {
+                    text = prompt;
+                    plan_implemented = Some(plan.id);
+                    submit_mode = InteractionMode::Default;
+                    self.mode_tasks.insert(id, InteractionMode::Default);
+                }
+            }
+        }
         if text.trim().is_empty() {
             return;
         }
@@ -1334,12 +1360,21 @@ impl Shell {
             cx.notify();
             return;
         }
-        let attachment_submission = self.attachment_submission(&text);
+        // `submit_prompt_owned` prefixes the interaction-mode shim before the
+        // user `TextDelta` lands; draft acknowledgement matches the echoed
+        // transcript text, so record the wire form here.
+        let draft_text = self.composer.read(cx).text().to_owned();
+        let wire_text = synara_workspace::with_interaction_prompt(submit_mode, &text);
+        let attachment_submission = self.attachment_submission(&wire_text);
         if let Some((_, display)) = &attachment_submission {
-            self.draft_state
-                .submitted_with_display(id, text.clone(), display.clone());
+            self.draft_state.submitted_with_display(
+                id,
+                draft_text,
+                wire_text.clone(),
+                display.clone(),
+            );
         } else {
-            self.draft_state.submitted(id, text.clone());
+            self.draft_state.submitted(id, draft_text, wire_text);
         }
         self.goal_manual_send(id, &text, cx);
         self.busy.insert(id);
@@ -1357,8 +1392,28 @@ impl Shell {
         let hub_thread = self
             .task()
             .is_some_and(|task| task.scope == TaskScope::Studio);
+        let implementing_thread = self.task().map(|task| task.thread_id);
         self.job(async move {
             let result = async {
+                // Upstream `markSourceProposedPlanImplemented`: the dispatch
+                // carries `sourceProposedPlan`, so the plan is marked when the
+                // implementing turn starts — before the prompt lands.
+                if let (Some(plan_id), Some(thread_id)) = (plan_implemented, implementing_thread) {
+                    controller
+                        .workspace
+                        .set_interaction_mode(id, InteractionMode::Default)
+                        .await?;
+                    controller
+                        .workspace
+                        .record(
+                            thread_id,
+                            ThreadEvent::ProposedPlanImplemented {
+                                plan_id,
+                                implementation_thread_id: thread_id,
+                            },
+                        )
+                        .await?;
+                }
                 if untitled {
                     let title_text = if hub_thread {
                         text.rsplit_once("\nTask:\n")
@@ -2025,6 +2080,9 @@ impl Shell {
                 self.error = Some(error);
             }
         }
+        // The plan-ready banner and the follow-up placeholder follow thread,
+        // busy, and interaction-mode state — resync after every update.
+        self.sync_plan_composer(cx);
         cx.notify();
     }
     fn refresh_git_if_visible(&mut self, cx: &mut Context<Self>) {

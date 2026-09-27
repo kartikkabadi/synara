@@ -499,6 +499,42 @@ impl Controller {
                         },
                     )
                     .await?;
+                // Upstream CodexAdapter: `extractProposedPlanMarkdown` runs on
+                // the finished turn's text unconditionally (not gated on plan
+                // mode), then `thread.proposed-plan.upsert` records it.
+                if let Some(plan_markdown) = self
+                    .workspace
+                    .thread(task.thread_id)
+                    .await
+                    .ok()
+                    .and_then(|thread| {
+                        thread
+                            .messages
+                            .iter()
+                            .rev()
+                            .find(|message| message.role == Role::Assistant)
+                            .and_then(|message| extract_proposed_plan_markdown(&message.text))
+                    })
+                {
+                    let now = crate::now_ms();
+                    let _ = self
+                        .workspace
+                        .record(
+                            task.thread_id,
+                            ThreadEvent::ProposedPlan {
+                                plan: ProposedPlan {
+                                    id: format!("plan:{}:turn:{turn}", task.thread_id),
+                                    turn_id: Some(turn.clone()),
+                                    plan_markdown,
+                                    implemented_at_ms: None,
+                                    implementation_thread_id: None,
+                                    created_at_ms: now,
+                                    updated_at_ms: now,
+                                },
+                            },
+                        )
+                        .await;
+                }
                 Ok(reason)
             }
             Err(error) => {

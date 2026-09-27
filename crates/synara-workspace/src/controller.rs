@@ -383,10 +383,8 @@ impl Controller {
         }
         // Upstream parity: the per-task interaction mode prefixes the
         // provider-bound prompt; the stored/transcript text stays the user's own.
-        let text = crate::storage::with_interaction_prompt(
-            self.workspace.interaction_mode(id).await?,
-            &text,
-        );
+        let interaction_mode = self.workspace.interaction_mode(id).await?;
+        let text = crate::storage::with_interaction_prompt(interaction_mode, &text);
         let slot = self.slot(id).await?;
         if slot.active.swap(true, Ordering::AcqRel) {
             return Err(AgentError::Busy.into());
@@ -437,6 +435,44 @@ impl Controller {
                 },
             )
             .await;
+        // Upstream `turn.proposed.completed` → `thread.proposed-plan.upsert`:
+        // OpenCodeAdapter extracts `<proposed_plan>` from the finished turn's
+        // text only when `activeInteractionMode === "plan"`. The turn id comes
+        // from `thread.turns` (`session.prompt()` resolves with the stopReason,
+        // not a turn id); upstream ids are `plan:{threadId}:turn:{turnId}`.
+        if interaction_mode == crate::storage::InteractionMode::Plan
+            && let Some(thread) = self.workspace.thread(thread_id).await.ok().as_ref()
+            && let Some(plan_markdown) = thread
+                .messages
+                .iter()
+                .rev()
+                .find(|message| message.role == Role::Assistant)
+                .and_then(|message| extract_proposed_plan_markdown(&message.text))
+        {
+            let turn_id = thread
+                .turns
+                .last()
+                .map(|finished| finished.id.clone())
+                .unwrap_or_else(|| turn.clone());
+            let now = crate::now_ms();
+            let _ = self
+                .workspace
+                .record(
+                    thread_id,
+                    ThreadEvent::ProposedPlan {
+                        plan: ProposedPlan {
+                            id: format!("plan:{thread_id}:turn:{turn_id}"),
+                            turn_id: Some(turn_id),
+                            plan_markdown,
+                            implemented_at_ms: None,
+                            implementation_thread_id: None,
+                            created_at_ms: now,
+                            updated_at_ms: now,
+                        },
+                    },
+                )
+                .await;
+        }
         Ok(turn)
     }
 

@@ -13,6 +13,8 @@ enum RowKey {
     Notice(usize),
     Activity(String),
     Plan,
+    /// Proposed-plan card row (upstream `proposed-plan:{id}` timeline key).
+    ProposedPlan(String),
     /// Live in-flight-turn row at the transcript tail (upstream's `working`
     /// row — the "Thinking"/"Starting…" shimmer while a turn runs).
     Working,
@@ -42,6 +44,13 @@ fn row_key(thread: &Thread, index: usize) -> RowKey {
         TranscriptItem::Tool { id } => RowKey::Tool(id.clone()),
         TranscriptItem::Permission { id } => RowKey::Permission(id.clone()),
         TranscriptItem::Input { id } => RowKey::Input(id.clone()),
+        TranscriptItem::Plan { index } => RowKey::ProposedPlan(
+            thread
+                .proposed_plans
+                .get(*index)
+                .map(|plan| plan.id.clone())
+                .unwrap_or_else(|| index.to_string()),
+        ),
         TranscriptItem::Notice { .. } => RowKey::Notice(index),
     }
 }
@@ -86,6 +95,9 @@ fn projected_rows(thread: &Thread, working: bool) -> Vec<(RowKey, RenderRow)> {
             }
             TranscriptItem::Permission { id } => thread.permissions.contains_key(id),
             TranscriptItem::Input { id } => thread.inputs.contains_key(id),
+            // Plan rows are their own timeline row — they flush pending work
+            // groups upstream, never collapse into an activity summary.
+            TranscriptItem::Plan { index } => thread.proposed_plans.get(*index).is_some(),
             _ => true,
         };
         if visible {
@@ -240,6 +252,12 @@ impl TranscriptState {
                 self.invalidate(&RowKey::Input(request.id.clone()))
             }
             Some(ThreadEvent::PlanChanged { .. }) => self.invalidate(&RowKey::Plan),
+            Some(ThreadEvent::ProposedPlan { plan }) => {
+                self.invalidate(&RowKey::ProposedPlan(plan.id.clone()))
+            }
+            Some(ThreadEvent::ProposedPlanImplemented { plan_id, .. }) => {
+                self.invalidate(&RowKey::ProposedPlan(plan_id.clone()))
+            }
             Some(
                 ThreadEvent::PromptFinished { .. }
                 | ThreadEvent::CancellationRequested

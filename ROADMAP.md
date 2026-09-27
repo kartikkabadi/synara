@@ -9,7 +9,7 @@ Detailed parity evidence lives in:
 
 ## Current status
 
-- Shipped feature slices: **112**
+- Shipped feature slices: **113**
 - Major remaining: **0**
 - Smaller remaining: **0**
 - Acceptance/integration remaining: **0**
@@ -709,6 +709,15 @@ Verification receipts:
   ("Turn plan mode on/off"), and the click-to-clear mode badge generalized to
   show `Plan`/`Debug`. See the
   [batch 56 receipt](docs/verification/parity-2026-09-26-batch56.md).
+- Batch 57 lands upstream's Plan Ready follow-up: `<proposed_plan>` blocks
+  extracted from settled plan-mode turns into per-thread `ProposedPlan`
+  records (`plan:{threadId}:turn:{turnId}`), a composer "Plan ready" banner
+  (empty submit → `PLEASE IMPLEMENT THIS PLAN:` + markdown in Default mode;
+  non-empty → plan-mode refinement), the `ProposedPlanImplemented` event, and
+  the transcript plan card (badge, title, collapsible markdown, copy/download).
+  Fixes a batch-56 defect where mode-shim'd sends never cleared the composer
+  draft (draft-ack now matches the transcript echo, not the raw draft). See
+  the [batch 57 receipt](docs/verification/parity-2026-09-26-batch57.md).
 
 
 ## How to update this roadmap

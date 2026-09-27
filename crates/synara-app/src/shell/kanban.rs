@@ -274,7 +274,11 @@ impl Shell {
             return;
         }
         self.drafts.insert(id, text.clone());
-        self.draft_state.submitted(id, text.clone());
+        let echo = synara_workspace::with_interaction_prompt(
+            self.mode_tasks.get(&id).copied().unwrap_or_default(),
+            &text,
+        );
+        self.draft_state.submitted(id, text.clone(), echo);
         self.busy.insert(id);
         self.error = None;
         self.notice = None;

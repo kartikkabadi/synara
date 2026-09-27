@@ -184,6 +184,12 @@ impl Shell {
             TranscriptItem::Message { index: message } => {
                 self.message_row(&thread.messages[*message], index, cx)
             }
+            TranscriptItem::Plan { index } => {
+                let Some(plan) = thread.proposed_plans.get(*index) else {
+                    return div().into_any_element();
+                };
+                self.plan_row(plan, cx)
+            }
             TranscriptItem::Tool { id } => {
                 let Some(tool) = thread.tools.get(id) else {
                     return div().into_any_element();
