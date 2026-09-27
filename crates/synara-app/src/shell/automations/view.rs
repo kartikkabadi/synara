@@ -130,45 +130,6 @@ impl Shell {
                     cx.notify();
                 }))
             });
-            let completion_models = state
-                .direct_models
-                .providers
-                .iter()
-                .flat_map(|provider| {
-                    provider.models.iter().filter_map(move |model| {
-                        if model.capabilities.structured_output != synara_model::Support::Supported
-                        {
-                            return None;
-                        }
-                        let selection = ModelSelection {
-                            history_turns: Some(0),
-                            provider_id: provider.id.clone(),
-                            model_id: model.id.clone(),
-                            max_output_tokens: model
-                                .capabilities
-                                .max_output_tokens
-                                .unwrap_or(512)
-                                .clamp(1, 512)
-                                as u32,
-                            reasoning_effort: None,
-                            output: synara_model::OutputFormat::Text,
-                        };
-                        Some((format!("{} / {}", provider.name, model.name), selection))
-                    })
-                })
-                .enumerate()
-                .map(|(i, (label, selection))| {
-                    let selected = editor.completion_selection.as_ref() == Some(&selection);
-                    ui::button(("auto-completion-model", i), label, selected).on_click(cx.listener(
-                        move |this, _, _, cx| {
-                            if let Some(editor) = &mut this.automations.editor {
-                                editor.completion_selection = Some(selection.clone());
-                                editor.edit_revision = editor.edit_revision.wrapping_add(1);
-                            }
-                            cx.notify();
-                        },
-                    ))
-                });
             let heartbeat_targets = self
                 .catalog
                 .tasks
@@ -240,19 +201,26 @@ impl Shell {
                 .child(div().text_sm().text_color(rgb(palette().muted)).child("Continuation cooldown applies to Heartbeat and Dedicated targets after recent external activity. The automation's own previous completed run does not throttle its next scheduled wake. Use 0 to disable the cooldown."))
                 .child(div().text_sm().child("Completion policy"))
                 .child(div().flex().flex_wrap().gap_1()
-                    .child(ui::button("auto-completion-none", "No AI stop check", editor.completion_selection.is_none())
+                    .child(ui::button("auto-completion-none", "No AI stop check", !editor.completion_evaluated)
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Some(editor)=&mut this.automations.editor {
-                                editor.completion_selection=None;
+                                editor.completion_evaluated=false;
                                 editor.edit_revision=editor.edit_revision.wrapping_add(1);
                             }
                             cx.notify();
                         })))
-                    .children(completion_models))
-                .children(editor.completion_selection.is_some().then(|| div().flex().flex_col().gap_1()
+                    .child(ui::button("auto-completion-eval", "AI stop check", editor.completion_evaluated)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if let Some(editor)=&mut this.automations.editor {
+                                editor.completion_evaluated=!editor.completion_evaluated;
+                                editor.edit_revision=editor.edit_revision.wrapping_add(1);
+                            }
+                            cx.notify();
+                        }))))
+                .children(editor.completion_evaluated.then(|| div().flex().flex_col().gap_1()
                     .child(state.completion_stop_when.clone())
                     .child(state.completion_threshold.clone())
-                    .child(div().text_sm().text_color(rgb(palette().muted)).child("The stop evaluator is a separately reviewed direct-model request. It receives only the saved stop condition, automation instructions, exact run prompt and this run's assistant output. No tools, ACP session state, approvals, files or hidden reasoning are provided. A failed or timed-out check never disables the automation; a matching result disables only if this exact policy revision is still current."))))
+                    .child(div().text_sm().text_color(rgb(palette().muted)).child("After a successful run, the automation's agent receives a separate evaluation prompt containing only the saved stop condition, automation instructions, exact run prompt and this run's assistant output. A failed or timed-out check never disables the automation; a matching result disables only if this exact policy revision is still current."))))
                 .child(state.schedule.clone()).child(state.timezone.clone())
                 .child(div().text_sm().text_color(rgb(palette().muted)).child("Schedules: every 1m through every 10080m, daily HH:MM, weekdays HH:MM, weekly mon HH:MM, or cron followed by five fields: minute hour day-of-month month day-of-week. Cron supports lists, ranges, steps, and sun through sat names, with an eight-year search horizon. If both day-of-month and weekday are constrained, either match runs. Time uses UTC, a fixed offset, or an IANA zone. A spring-forward gap skips that wall-clock slot; a fall-back fold runs at the earlier occurrence once. Saved schedule, timezone, and next run appear in the automation row."))
                 .child(state.max_runs.clone()).child(state.failure_limit.clone()).child(state.max_runtime.clone())

@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 
 pub(super) struct AutomationsView {
     ledger: AutomationLedger,
-    direct_models: ProviderSettings,
     scheduler: Arc<AutomationScheduler>,
     loaded: bool,
     loading: bool,
@@ -43,7 +42,7 @@ struct Editor {
     missed: MissedRunPolicy,
     mode: AutomationMode,
     target_task: Option<TaskId>,
-    completion_selection: Option<ModelSelection>,
+    completion_evaluated: bool,
 }
 #[derive(Clone)]
 enum Pending {
@@ -127,7 +126,7 @@ impl AutomationsView {
         .collect();
         Self {
             ledger: AutomationLedger::default(),
-            direct_models: ProviderSettings::default(),
+
             scheduler: Arc::new(AutomationScheduler::new(controller)),
             loaded: false,
             loading: false,
@@ -168,15 +167,7 @@ impl Drop for AutomationsView {
 pub(super) enum Reply {
     Loaded {
         generation: u64,
-        result: Result<
-            (
-                AutomationLedger,
-                Catalog,
-                Vec<AgentProfile>,
-                ProviderSettings,
-            ),
-            String,
-        >,
+        result: Result<(AutomationLedger, Catalog, Vec<AgentProfile>), String>,
     },
     Changed(Result<(), String>),
     Finished(Result<(), String>),
@@ -215,7 +206,6 @@ impl Shell {
                     workspace.automations().await?,
                     workspace.catalog().await?,
                     workspace.profiles().await?,
-                    workspace.direct_model_settings().await?,
                 ))
             }
             .await
@@ -262,9 +252,8 @@ impl Shell {
                     return;
                 }
                 match result {
-                    Ok((ledger, catalog, profiles, direct_models)) => {
+                    Ok((ledger, catalog, profiles)) => {
                         self.automations.ledger = ledger;
-                        self.automations.direct_models = direct_models;
                         self.automations.loaded = true;
                         self.catalog = catalog;
                         self.profiles = profiles;
@@ -349,18 +338,14 @@ impl Shell {
             completion_threshold,
         ) = match definition {
             Some(d) => {
-                let (completion_selection, completion_stop_when, completion_threshold) =
+                let (completion_evaluated, completion_stop_when, completion_threshold) =
                     match &d.completion_policy {
-                        AutomationCompletionPolicy::None => (None, String::new(), "0.8".into()),
+                        AutomationCompletionPolicy::None => (false, String::new(), "0.8".into()),
                         AutomationCompletionPolicy::AiEvaluated {
                             stop_when,
                             confidence_threshold,
-                            evaluator,
-                        } => (
-                            Some(evaluator.selection.clone()),
-                            stop_when.clone(),
-                            confidence_threshold.to_string(),
-                        ),
+                            ..
+                        } => (true, stop_when.clone(), confidence_threshold.to_string()),
                     };
                 (
                     Editor {
@@ -372,7 +357,7 @@ impl Shell {
                         missed: d.missed,
                         mode: d.mode,
                         target_task: d.target_task_id,
-                        completion_selection,
+                        completion_evaluated,
                     },
                     d.title,
                     d.instructions,
@@ -398,7 +383,7 @@ impl Shell {
                     missed: MissedRunPolicy::Skip,
                     mode: AutomationMode::Standalone,
                     target_task: None,
-                    completion_selection: None,
+                    completion_evaluated: false,
                 },
                 String::new(),
                 String::new(),
@@ -513,7 +498,7 @@ impl Shell {
             return;
         };
         let result = (|| -> WorkspaceResult<_> {
-            let completion_policy = if let Some(selection) = editor.completion_selection.clone() {
+            let completion_policy = if editor.completion_evaluated {
                 let stop_when = self
                     .automations
                     .completion_stop_when
@@ -529,12 +514,10 @@ impl Shell {
                 let confidence_threshold = parse_completion_threshold(
                     self.automations.completion_threshold.read(cx).text(),
                 )?;
-                let evaluator =
-                    DirectModelBinding::reviewed(&self.automations.direct_models, selection)?;
                 AutomationCompletionPolicy::AiEvaluated {
                     stop_when,
                     confidence_threshold,
-                    evaluator,
+                    evaluator: None,
                 }
             } else {
                 AutomationCompletionPolicy::None

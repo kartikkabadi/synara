@@ -2,7 +2,7 @@
 //! Loading records never executes them. The scheduler must be explicitly armed
 //! each process session. Claims and owned conversation creation are atomic.
 mod scheduler;
-use crate::{DirectModelBinding, WorkspaceError, WorkspaceResult, WorkspaceService, now_ms};
+use crate::{WorkspaceError, WorkspaceResult, WorkspaceService, now_ms};
 use jiff::{
     Timestamp,
     tz::{Offset, TimeZone},
@@ -488,7 +488,9 @@ pub enum AutomationCompletionPolicy {
     AiEvaluated {
         stop_when: String,
         confidence_threshold: f32,
-        evaluator: DirectModelBinding,
+        /// Removed direct-model evaluator binding: retained so stored policies decode.
+        #[serde(default, skip_serializing)]
+        evaluator: Option<serde_json::Value>,
     },
 }
 
@@ -581,16 +583,13 @@ impl AutomationDefinition {
             AutomationCompletionPolicy::AiEvaluated {
                 stop_when,
                 confidence_threshold,
-                evaluator,
+                ..
             } => {
                 if stop_when.trim().is_empty()
                     || stop_when.len() > 2000
                     || stop_when.contains('\0')
                     || !confidence_threshold.is_finite()
                     || !(0.0..=1.0).contains(confidence_threshold)
-                    || evaluator.selection.history_turns != Some(0)
-                    || evaluator.selection.max_output_tokens == 0
-                    || evaluator.selection.max_output_tokens > 2048
                 {
                     return Err(invalid(
                         "Invalid AI-evaluated automation completion policy.",

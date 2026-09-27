@@ -1,5 +1,5 @@
 use super::*;
-use crate::{DirectModelBinding, ModelSelection, ProviderSettings, WorkspaceService};
+use crate::WorkspaceService;
 use std::sync::Arc;
 async fn setup(
     path: Option<std::path::PathBuf>,
@@ -1217,35 +1217,13 @@ async fn live_history_pruning_preserves_cumulative_run_limit_and_conversations()
 }
 
 async fn reviewed_completion_policy(
-    service: &WorkspaceService,
+    _service: &WorkspaceService,
     stop_when: &str,
 ) -> AutomationCompletionPolicy {
-    let mut profile = synara_model::custom_profile_example();
-    profile.models[0].capabilities.structured_output = synara_model::Support::Supported;
-    profile.models[0].capabilities.max_output_tokens = Some(512);
-    let settings = service
-        .save_direct_model_settings(ProviderSettings {
-            revision: 0,
-            providers: vec![profile.clone()],
-        })
-        .await
-        .unwrap();
-    let evaluator = DirectModelBinding::reviewed(
-        &settings,
-        ModelSelection {
-            history_turns: Some(0),
-            provider_id: profile.id.clone(),
-            model_id: profile.models[0].id.clone(),
-            max_output_tokens: 128,
-            reasoning_effort: None,
-            output: synara_model::OutputFormat::Text,
-        },
-    )
-    .unwrap();
     AutomationCompletionPolicy::AiEvaluated {
         stop_when: stop_when.into(),
         confidence_threshold: 0.8,
-        evaluator,
+        evaluator: None,
     }
 }
 
@@ -1351,14 +1329,10 @@ async fn stale_completion_evaluation_cannot_disable_edited_policy() {
         .unwrap();
 
     let mut changed = service.automations().await.unwrap().definitions.remove(0);
-    let evaluator = match &changed.completion_policy {
-        AutomationCompletionPolicy::AiEvaluated { evaluator, .. } => evaluator.clone(),
-        AutomationCompletionPolicy::None => panic!("reviewed policy expected"),
-    };
     changed.completion_policy = AutomationCompletionPolicy::AiEvaluated {
         stop_when: "New stop condition".into(),
         confidence_threshold: 0.8,
-        evaluator,
+        evaluator: None,
     };
     service
         .save_automation(changed.clone(), Some(changed.revision))

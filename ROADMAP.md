@@ -9,7 +9,7 @@ Detailed parity evidence lives in:
 
 ## Current status
 
-- Shipped feature slices: **117**
+- Shipped feature slices: **118**
 - Major remaining: **0**
 - Smaller remaining: **0**
 - Acceptance/integration remaining: **0**
@@ -762,6 +762,16 @@ Verification receipts:
   direct chat route + composer controls + `uses_direct_model` gates,
   (4) remove the settings section + catalog, (5) drop storage tables. See the
   [batch 62 review](docs/verification/parity-2026-09-26-batch62.md).
+- Batch 63 lands stage 1 of the `direct_models` excision: `AiEvaluated`
+  drops the Rust-only `evaluator: DirectModelBinding` (upstream shape is
+  `{type, stopWhen, confidenceThreshold}`); stored rows still decode via a
+  `#[serde(default, skip_serializing)]` shim (the `hub_revision`
+  precedent). Evaluation now runs on a throwaway ACP session owned by the
+  run's agent profile — matching upstream's separate
+  `ProviderTextGeneration` call — with reply text captured from
+  `TextDelta` events on a sink that keeps the transcript clean. The
+  editor's completion section is now a plain toggle, no model picker. See
+  the [batch 63 receipt](docs/verification/parity-2026-09-26-batch63.md).
 
 
 ## How to update this roadmap

@@ -4,10 +4,7 @@
 
 use super::*;
 use crate::automations::*;
-use crate::{
-    AgentProfile, DirectModelBinding, ProviderSettings, WorkspaceError, WorkspaceResult,
-    default_profiles,
-};
+use crate::{AgentProfile, DirectModelBinding, WorkspaceError, WorkspaceResult, default_profiles};
 const KEY: &str = "automation-ledger-v1";
 fn read(connection: &Connection) -> WorkspaceResult<AutomationLedger> {
     let data: Option<String> = connection
@@ -60,51 +57,6 @@ fn context(
     )?;
     Ok((project, decode(&workspace)?))
 }
-fn validate_completion_policy(
-    connection: &Connection,
-    definition: &AutomationDefinition,
-) -> WorkspaceResult<()> {
-    let AutomationCompletionPolicy::AiEvaluated { evaluator, .. } = &definition.completion_policy
-    else {
-        return Ok(());
-    };
-    let raw: Option<String> = connection
-        .query_row(
-            "SELECT data FROM preferences WHERE key='direct-model-providers-v1'",
-            [],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let settings: ProviderSettings = raw.as_deref().map(decode).transpose()?.unwrap_or_default();
-    settings
-        .validate()
-        .map_err(|error| invalid(error.to_string()))?;
-    let profile = evaluator.profile(&settings)?;
-    let mut selection = evaluator.selection.clone();
-    selection.output = synara_model::OutputFormat::JsonSchema {
-        name: "automation_completion".into(),
-        schema: serde_json::json!({
-            "type":"object",
-            "additionalProperties":false,
-            "required":["stopMatched","confidence","reason"],
-            "properties":{
-                "stopMatched":{"type":"boolean"},
-                "confidence":{"type":"number"},
-                "reason":{"type":"string","maxLength":2000}
-            }
-        }),
-    };
-    selection.max_output_tokens = selection.max_output_tokens.min(512);
-    synara_model::validate_request(
-        profile,
-        &selection.request(vec![synara_model::Message::text(
-            synara_model::MessageRole::User,
-            "Validate automation completion evaluator".into(),
-        )]),
-    )
-    .map_err(|error| invalid(error.to_string()))
-}
-
 fn continuation_target_identity(
     connection: &Connection,
     definition: &AutomationDefinition,
@@ -214,7 +166,6 @@ impl Store {
         definition: &AutomationDefinition,
     ) -> WorkspaceResult<()> {
         context(&self.connection, definition)?;
-        validate_completion_policy(&self.connection, definition)?;
         match (definition.mode, definition.target_task_id) {
             (AutomationMode::Heartbeat, Some(target)) => {
                 continuation_target_identity(&self.connection, definition, target)?;
