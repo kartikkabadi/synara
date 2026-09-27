@@ -45,7 +45,7 @@ impl Shell {
             strip = strip.child(el);
             any = true;
         }
-        if let Some(el) = self.debug_compact(cx) {
+        if let Some(el) = self.mode_compact(cx) {
             strip = strip.child(el);
             any = true;
         }

@@ -66,7 +66,7 @@ const SETTINGS_SECTIONS: &[(&str, &str)] = &[
     ("workflows", "Subagents and workflows"),
 ];
 const COMMANDS: &[(&str, &str, Command)] = &[
-    ("plan", "Select the advertised ACP Plan mode", Command::Plan),
+    ("plan", "Switch this thread into plan mode", Command::Plan),
     (
         "model next",
         "Select the next advertised ACP model (Alt+])",
@@ -79,12 +79,12 @@ const COMMANDS: &[(&str, &str, Command)] = &[
     ),
     (
         "debug",
-        "Turn on the evidence-first Debug interaction mode",
+        "Switch this thread into evidence-first debug mode",
         Command::Debug,
     ),
     (
         "default",
-        "Return to the default interaction mode",
+        "Switch this thread back to normal chat mode",
         Command::Default,
     ),
     (
@@ -363,10 +363,10 @@ impl Shell {
                 }
             },
             ParsedCommand::Native(command) => match command {
-                Command::Plan => self.native_plan_mode(cx),
+                Command::Plan => self.plan_mode_command(cx),
                 Command::ModelNext => self.cycle_session_model(true, cx),
                 Command::ModelPrevious => self.cycle_session_model(false, cx),
-                Command::Debug => self.debug_mode_command(true, cx),
+                Command::Debug => self.debug_mode_command(cx),
                 Command::Default => self.default_mode_command(cx),
                 Command::Goal => {
                     self.open_goals(cx);

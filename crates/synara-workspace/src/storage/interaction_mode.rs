@@ -1,6 +1,7 @@
 //! Per-task provider interaction mode. Upstream parity: `OrchestrationThread.interactionMode`
-//! persists on the thread and `withProviderDebugModePrompt` injects the Debug instructions
-//! at provider dispatch. Provider-owned session modes (e.g. Plan) stay on the session.
+//! persists on the thread and `withProviderDebugModePrompt`/`withProviderPlanModePrompt`
+//! inject the mode instructions at provider dispatch. Provider-owned session modes
+//! advertised over ACP stay on the session and are separate from these.
 use super::*;
 use crate::{WorkspaceError, WorkspaceResult, WorkspaceService};
 use serde::{Deserialize, Serialize};
@@ -9,17 +10,23 @@ use serde::{Deserialize, Serialize};
 /// (apps/server/src/provider/debugMode.ts).
 pub const DEBUG_MODE_PROMPT_PREFIX: &str = "<synara_debug_mode>\nYou are operating in Synara Debug mode. Diagnose the reported defect using this evidence-first loop: observe -> reproduce -> investigate -> fix -> verify.\n\n- Inspect the real current state before editing. Reproduce locally when possible and collect relevant logs, errors, and stack traces.\n- Form testable hypotheses and use evidence to narrow them. Fix the smallest root cause rather than masking symptoms.\n- Add or update a regression test when practical. Run an appropriate verification and confirm the original symptom before declaring the bug resolved. Never claim success without verification.\n- Preserve the current runtime permission mode. Debug does not grant extra access and is not Plan mode.\n- If reproduction requires the user, give exact steps and say what must remain open. When a structured user-input tool is available, ask one reproduction question with the choices \"Reproduced\", \"Could not reproduce\", and \"Cancel\". If the provider cannot pause for structured input, send the same instructions as normal text, end the turn, and continue only after the user's next message.\n- Do not imply Synara can observe external actions. If browser state, terminal output, logs, or another required signal is inaccessible, ask the user for that evidence.\n- If blocked, report what was inspected, the evidence obtained, the remaining uncertainty, and the next concrete step.\n</synara_debug_mode>";
 
+/// Verbatim upstream `PROVIDER_PLAN_MODE_PROMPT_PREFIX`
+/// (apps/server/src/provider/planMode.ts).
+pub const PLAN_MODE_PROMPT_PREFIX: &str = "Synara plan mode is active.\nDo not implement or mutate files in this turn. You may inspect or ask targeted questions as needed.\nWhen you are ready to present the final plan, wrap only the final plan markdown in these exact tags:\n<proposed_plan>\nplan content\n</proposed_plan>\nUse at most one proposed_plan block. Keep the tags in English exactly as shown.";
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InteractionMode {
     #[default]
     Default,
+    Plan,
     Debug,
 }
 impl InteractionMode {
     pub fn label(self) -> &'static str {
         match self {
             Self::Default => "Default",
+            Self::Plan => "Plan",
             Self::Debug => "Debug",
         }
     }
@@ -33,6 +40,26 @@ pub fn with_debug_prompt(mode: InteractionMode, text: &str) -> String {
         DEBUG_MODE_PROMPT_PREFIX.to_owned()
     } else {
         format!("{DEBUG_MODE_PROMPT_PREFIX}\n\n{text}")
+    }
+}
+/// Mirrors upstream `withProviderPlanModePrompt`: plan-only.
+pub fn with_plan_prompt(mode: InteractionMode, text: &str) -> String {
+    if mode != InteractionMode::Plan {
+        return text.to_owned();
+    }
+    let text = text.trim();
+    if text.is_empty() {
+        PLAN_MODE_PROMPT_PREFIX.to_owned()
+    } else {
+        format!("{PLAN_MODE_PROMPT_PREFIX}\n\nUser request:\n{text}")
+    }
+}
+/// Applies the persisted per-task interaction-mode prompt shim.
+pub fn with_interaction_prompt(mode: InteractionMode, text: &str) -> String {
+    match mode {
+        InteractionMode::Plan => with_plan_prompt(mode, text),
+        InteractionMode::Debug => with_debug_prompt(mode, text),
+        InteractionMode::Default => text.to_owned(),
     }
 }
 fn key(task: TaskId) -> String {
@@ -196,6 +223,43 @@ mod tests {
         assert_eq!(
             with_debug_prompt(InteractionMode::Debug, ""),
             DEBUG_MODE_PROMPT_PREFIX
+        );
+    }
+    #[test]
+    fn plan_prompt_prefix_matches_upstream_contract() {
+        assert_eq!(
+            with_interaction_prompt(InteractionMode::Default, "fix it"),
+            "fix it"
+        );
+        let once = with_plan_prompt(InteractionMode::Plan, "fix it");
+        assert!(once.starts_with(PLAN_MODE_PROMPT_PREFIX));
+        assert!(once.ends_with("User request:\nfix it"));
+        assert_eq!(
+            with_plan_prompt(InteractionMode::Plan, ""),
+            PLAN_MODE_PROMPT_PREFIX
+        );
+        assert_eq!(
+            with_interaction_prompt(InteractionMode::Plan, "  fix it  "),
+            format!("{PLAN_MODE_PROMPT_PREFIX}\n\nUser request:\nfix it")
+        );
+        assert_eq!(with_plan_prompt(InteractionMode::Debug, "fix it"), "fix it");
+    }
+    #[tokio::test]
+    async fn plan_mode_round_trips_per_task() {
+        let (_d, w, t) = setup().await;
+        w.set_interaction_mode(t.id, InteractionMode::Plan)
+            .await
+            .unwrap();
+        assert_eq!(
+            w.interaction_mode(t.id).await.unwrap(),
+            InteractionMode::Plan
+        );
+        w.set_interaction_mode(t.id, InteractionMode::Default)
+            .await
+            .unwrap();
+        assert_eq!(
+            w.interaction_mode(t.id).await.unwrap(),
+            InteractionMode::Default
         );
     }
 }

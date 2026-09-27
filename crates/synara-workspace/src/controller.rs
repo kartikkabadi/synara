@@ -381,10 +381,12 @@ impl Controller {
                 "prompt must contain text and fit within 1 MiB".into(),
             ));
         }
-        // Upstream parity: Debug interaction mode prefixes the provider-bound
-        // prompt; the stored/transcript text stays the user's own.
-        let text =
-            crate::storage::with_debug_prompt(self.workspace.interaction_mode(id).await?, &text);
+        // Upstream parity: the per-task interaction mode prefixes the
+        // provider-bound prompt; the stored/transcript text stays the user's own.
+        let text = crate::storage::with_interaction_prompt(
+            self.workspace.interaction_mode(id).await?,
+            &text,
+        );
         let slot = self.slot(id).await?;
         if slot.active.swap(true, Ordering::AcqRel) {
             return Err(AgentError::Busy.into());

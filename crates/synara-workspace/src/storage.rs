@@ -4,7 +4,10 @@ mod imports;
 mod integrations;
 mod interaction_mode;
 mod workflows;
-pub use interaction_mode::{DEBUG_MODE_PROMPT_PREFIX, InteractionMode, with_debug_prompt};
+pub use interaction_mode::{
+    DEBUG_MODE_PROMPT_PREFIX, InteractionMode, PLAN_MODE_PROMPT_PREFIX, with_debug_prompt,
+    with_interaction_prompt, with_plan_prompt,
+};
 mod goals;
 pub use goals::{
     GOAL_MAX_FOLLOWUPS, GOAL_PURSUIT_LIMIT_MS, GoalAchievement, GoalDecision, GoalEdit, GoalStatus,

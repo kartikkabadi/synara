@@ -450,7 +450,7 @@ impl Shell {
             Action::Recap => self.open_recap(cx),
             Action::Goals => self.open_goals(cx),
             Action::DebugMode => {
-                self.debug_mode_command(true, cx);
+                self.debug_mode_command(cx);
             }
             Action::Handoff => self.open_handoff_menu(window, cx),
             Action::ToggleZen => self.toggle_zen(cx),

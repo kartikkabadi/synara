@@ -122,9 +122,9 @@ enum Update {
     Releases(Result<NativeVersionHistory, String>),
     NativeBuildIntegrity(Result<NativeBuildIntegrity, String>),
     Goals(Box<goals::Reply>),
-    DebugMode {
+    InteractionMode {
         task: TaskId,
-        debug: bool,
+        mode: InteractionMode,
     },
     Recap(Box<recap::Reply>),
     Checkpoints(Box<checkpoints::Reply>),
@@ -220,7 +220,7 @@ enum Update {
 pub struct Shell {
     releases: releases::ReleasesState,
     goals: goals::GoalsState,
-    debug_tasks: HashSet<TaskId>,
+    mode_tasks: HashMap<TaskId, InteractionMode>,
     recap: recap::RecapState,
     checkpoints: checkpoints::CheckpointState,
     inline_comments: inline_comments::InlineState,
@@ -497,7 +497,7 @@ impl Shell {
             revisions: revisions::RevisionState::new(),
             handoff: handoff::HandoffState::default(),
             side_chats: side_chats::SideChatState::new(cx),
-            debug_tasks: HashSet::new(),
+            mode_tasks: HashMap::new(),
             recap: recap::RecapState::new(cx),
             checkpoints: checkpoints::CheckpointState::default(),
             inline_comments: inline_comments::InlineState::new(cx),
@@ -962,7 +962,7 @@ impl Shell {
         self.load_attachments(id);
         self.load_followups(id);
         self.load_goals(id, cx);
-        self.load_debug_mode(id, cx);
+        self.load_interaction_mode(id, cx);
         self.load_recap(id);
         self.load_inline_comments(id, cx);
         self.load_side_chats(id, cx);
@@ -1570,7 +1570,7 @@ impl Shell {
             Update::AppSnap(reply) => self.appsnap_reply(*reply, cx),
             Update::Attachments(reply) => self.attachment_reply(*reply, cx),
             Update::RichMedia(reply) => self.media_reply(*reply, cx),
-            Update::DebugMode { task, debug } => self.debug_mode_reply(task, debug, cx),
+            Update::InteractionMode { task, mode } => self.interaction_mode_reply(task, mode, cx),
             Update::Releases(result) => self.releases_reply(result, cx),
             Update::NativeBuildIntegrity(result) => self.native_build_integrity_reply(result, cx),
             Update::Recap(reply) => self.recap_reply(*reply, cx),

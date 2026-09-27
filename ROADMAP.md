@@ -9,7 +9,7 @@ Detailed parity evidence lives in:
 
 ## Current status
 
-- Shipped feature slices: **111**
+- Shipped feature slices: **112**
 - Major remaining: **0**
 - Smaller remaining: **0**
 - Acceptance/integration remaining: **0**
@@ -700,6 +700,15 @@ Verification receipts:
   `formatDuration` verbatim) and the tail working row (`Starting {agent}…` while
   connecting, `Thinking` while busy) with a reduce-motion-gated pulse.
   See the [batch 55 receipt](docs/verification/parity-2026-09-26-batch55.md).
+- Batch 56 lands upstream's Plan interaction mode: `InteractionMode::Plan`
+  (upstream `ProviderInteractionMode = ["default","plan","debug"]`), the
+  verbatim `PROVIDER_PLAN_MODE_PROMPT_PREFIX` prompt shim
+  (`{prefix}\n\nUser request:\n{text}`) applied to provider-bound sends, the
+  `/synara/plan` command rewired from the divergent ACP session-mode pick to
+  upstream's interaction-mode semantics, the extras "Plan mode" toggle row
+  ("Turn plan mode on/off"), and the click-to-clear mode badge generalized to
+  show `Plan`/`Debug`. See the
+  [batch 56 receipt](docs/verification/parity-2026-09-26-batch56.md).
 
 
 ## How to update this roadmap

@@ -55,6 +55,7 @@ impl ControlKind {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub(in crate::shell) enum ControlAction {
+    PlanMode,
     DebugMode,
     Project(ProjectId),
     BrowseWorkspace,
@@ -561,18 +562,12 @@ impl Shell {
                 }
                 return rows;
             }
-            let modes = self.control_choices(ControlKind::Mode);
-            let plan = modes
-                .iter()
-                .find(|(choice, _)| choice.label.eq_ignore_ascii_case("plan"));
-            let in_plan = plan.is_some_and(|(choice, _)| choice.selected);
-            let target = if in_plan {
-                modes
-                    .iter()
-                    .find(|(choice, _)| !choice.label.eq_ignore_ascii_case("plan"))
-            } else {
-                plan
-            };
+            let in_plan = self
+                .selected
+                .is_some_and(|task| self.mode_tasks.get(&task) == Some(&InteractionMode::Plan));
+            let in_debug = self
+                .selected
+                .is_some_and(|task| self.mode_tasks.get(&task) == Some(&InteractionMode::Debug));
             let mut rows = vec![
                 (
                     Choice {
@@ -614,22 +609,21 @@ impl Shell {
                     label: "Plan mode".into(),
                     detail: format!("Turn plan mode {}", if in_plan { "off" } else { "on" }),
                     icon: Some(ui::Glyph::Plan),
-                    unavailable: target
+                    selected: in_plan,
+                    unavailable: self
+                        .selected
                         .is_none()
-                        .then(|| "Connect an agent that advertises a plan mode.".into()),
+                        .then(|| "Select a task first.".into()),
                     ..Default::default()
                 },
-                target.map_or(ControlAction::Unavailable, |(_, action)| action.clone()),
+                ControlAction::PlanMode,
             ));
             rows.push((
                 Choice {
                     label: "Debug mode".into(),
-                    detail: "Send provider prompts with the evidence-first Debug instructions"
-                        .into(),
+                    detail: format!("Turn debug mode {}", if in_debug { "off" } else { "on" }),
                     icon: Some(ui::Glyph::Debug),
-                    selected: self
-                        .selected
-                        .is_some_and(|task| self.debug_tasks.contains(&task)),
+                    selected: in_debug,
                     unavailable: self
                         .selected
                         .is_none()
@@ -975,11 +969,36 @@ impl Shell {
             return;
         }
         match action {
+            ControlAction::PlanMode => {
+                let Some(task) = self.selected else {
+                    return;
+                };
+                let on = self.mode_tasks.get(&task) != Some(&InteractionMode::Plan);
+                self.set_interaction_mode(
+                    task,
+                    if on {
+                        InteractionMode::Plan
+                    } else {
+                        InteractionMode::Default
+                    },
+                    cx,
+                );
+                return;
+            }
             ControlAction::DebugMode => {
-                let on = !self
-                    .selected
-                    .is_some_and(|task| self.debug_tasks.contains(&task));
-                self.debug_mode_command(on, cx);
+                let Some(task) = self.selected else {
+                    return;
+                };
+                let on = self.mode_tasks.get(&task) != Some(&InteractionMode::Debug);
+                self.set_interaction_mode(
+                    task,
+                    if on {
+                        InteractionMode::Debug
+                    } else {
+                        InteractionMode::Default
+                    },
+                    cx,
+                );
                 return;
             }
             ControlAction::Project(id) => {
@@ -1037,36 +1056,6 @@ impl Shell {
         };
         self.apply_session_control(task, action, cx);
     }
-    pub(in crate::shell) fn native_plan_mode(&mut self, cx: &mut Context<Self>) -> bool {
-        let Some(task) = self.selected else {
-            return false;
-        };
-        if self.controls_blocked() || self.uses_direct_model() {
-            self.error = Some(
-                "Plan mode requires an idle connected ACP session advertising that mode.".into(),
-            );
-            return false;
-        }
-        let Some((choice, action)) = self
-            .control_choices(ControlKind::Mode)
-            .into_iter()
-            .find(|(choice, _)| choice.label.eq_ignore_ascii_case("plan"))
-        else {
-            self.error = Some(
-                "This session does not advertise a Plan mode. No mode or prompt was changed."
-                    .into(),
-            );
-            return false;
-        };
-        if let Some(reason) = choice.unavailable {
-            self.error = Some(reason);
-            return false;
-        }
-        if !choice.selected {
-            self.apply_session_control(task, action, cx);
-        }
-        true
-    }
     pub(in crate::shell) fn apply_session_control(
         &mut self,
         task: TaskId,
@@ -1082,6 +1071,7 @@ impl Shell {
         self.job(async move {
             let result = match action {
                 ControlAction::Project(_)
+                | ControlAction::PlanMode
                 | ControlAction::DebugMode
                 | ControlAction::BrowseWorkspace
                 | ControlAction::AttachFiles
