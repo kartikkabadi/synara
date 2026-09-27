@@ -319,6 +319,12 @@ pub struct Shell {
     /// Upstream `planSidebarDismissedForTurnRef`: records the turn key when the
     /// sidebar is closed so a later auto-open does not fight the dismissal.
     plan_sidebar_dismissed_turn: Option<String>,
+    /// Upstream queued-turn dispatch: the text a drain/steer passes to the next
+    /// `send_prompt` instead of the live composer draft.
+    dispatch_text: Option<String>,
+    /// Upstream `QueuedSteerGate`: a Steer request waiting for the interrupted
+    /// turn to settle before its text dispatches.
+    pending_steer: Option<(TaskId, String)>,
     pending: HashMap<InteractionKey, UiInteraction>,
     forms: HashMap<InteractionKey, FormState>,
     files: Vec<FileEntry>,
@@ -599,6 +605,8 @@ impl Shell {
             sidebar_source_loading: None,
             active_task_list_compact: false,
             plan_sidebar_dismissed_turn: None,
+            dispatch_text: None,
+            pending_steer: None,
             pending: HashMap::new(),
             forms: HashMap::new(),
             files: vec![],
@@ -993,6 +1001,8 @@ impl Shell {
         self.sidebar_source_loading = None;
         self.active_task_list_compact = false;
         self.plan_sidebar_dismissed_turn = None;
+        self.dispatch_text = None;
+        self.pending_steer = None;
         self.load_direct_binding(id);
         self.load_handoff_origin(id);
         self.load_message_pins(id);
@@ -1354,14 +1364,22 @@ impl Shell {
             cx.notify();
             return;
         };
-        if self.busy.contains(&id) || self.connecting.contains(&id) || self.controls.is_pending(id)
-        {
+        if self.busy.contains(&id) || self.connecting.contains(&id) {
+            // Upstream `enqueueQueuedTurn` (`useChatTurnSubmission`): a submit
+            // while a turn is in flight stores the draft as a queued turn.
+            self.queue_current_draft(cx);
+            return;
+        }
+        if self.controls.is_pending(id) {
             return;
         }
         if self.consume_native_command(cx) {
             return;
         }
-        let mut text = self.composer.read(cx).text().to_owned();
+        let mut text = self
+            .dispatch_text
+            .take()
+            .unwrap_or_else(|| self.composer.read(cx).text().to_owned());
         // Upstream `onSubmitPlanFollowUp` + `resolvePlanFollowUpSubmission`: when
         // the plan-ready banner is showing, an empty draft sends the
         // implementation prompt in default mode; any draft text stays a
@@ -1957,6 +1975,7 @@ impl Shell {
                 self.finish_attachment_submission(task, error.is_none());
                 self.busy.remove(&task);
                 self.sync_working_row();
+                self.maybe_drain_followups(task, cx);
                 if self.selected == Some(task) {
                     self.details = details;
                     self.error = error.clone();

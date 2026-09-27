@@ -9,7 +9,7 @@ Detailed parity evidence lives in:
 
 ## Current status
 
-- Shipped feature slices: **116**
+- Shipped feature slices: **117**
 - Major remaining: **0**
 - Smaller remaining: **0**
 - Acceptance/integration remaining: **0**
@@ -745,6 +745,13 @@ Verification receipts:
   sends open the sidebar optimistically, and the transcript renders the
   upstream keep-latest summary row. See the
   [batch 60 receipt](docs/verification/parity-2026-09-26-batch60.md).
+- Batch 61 replaces the manual follow-ups draft shelf with upstream's queued
+  turns (`composerDraftStore.queuedTurns` + `ComposerQueuedHeader` +
+  `queuedComposerDrain`): a send while a turn is in flight enqueues the
+  draft, stacked preview rows sit above the composer with Steer/Delete/Edit
+  (Steer maps to upstream's non-steerable-provider interrupt→redispatch),
+  and the head auto-dispatches on settle — still sqlite-persisted. See the
+  [batch 61 receipt](docs/verification/parity-2026-09-26-batch61.md).
 
 
 ## How to update this roadmap

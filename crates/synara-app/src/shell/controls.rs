@@ -69,7 +69,6 @@ pub(in crate::shell) enum ControlAction {
     ExtrasBack,
     ImplementPlanNewThread,
     Goal,
-    Followups,
     Unavailable,
     AccessInfo,
     Connect,
@@ -636,24 +635,6 @@ impl Shell {
                 },
                 ControlAction::DebugMode,
             ));
-            let saved = self.followups.saved_count();
-            rows.push((
-                Choice {
-                    label: "Follow-ups".into(),
-                    detail: match saved {
-                        0 => "Saved follow-up drafts".into(),
-                        1 => "1 saved follow-up draft".into(),
-                        n => format!("{n} saved follow-up drafts"),
-                    },
-                    icon: Some(ui::Glyph::Clock),
-                    selected: self.followups.is_open(),
-                    unavailable: self
-                        .selected
-                        .is_none()
-                        .then(|| "Select a task first.".into()),
-                },
-                ControlAction::Followups,
-            ));
             return rows;
         }
         // Upstream: the empty-draft plan follow-up submit is a split button
@@ -1065,10 +1046,7 @@ impl Shell {
                 self.implement_plan_in_new_thread(cx);
                 return;
             }
-            ControlAction::Followups => {
-                self.toggle_followups(cx);
-                return;
-            }
+
             ControlAction::Connect => {
                 self.connect("connect", cx);
                 return;
@@ -1105,7 +1083,6 @@ impl Shell {
                 | ControlAction::ExtrasBack
                 | ControlAction::ImplementPlanNewThread
                 | ControlAction::Goal
-                | ControlAction::Followups
                 | ControlAction::Unavailable
                 | ControlAction::AccessInfo
                 | ControlAction::Connect => {
