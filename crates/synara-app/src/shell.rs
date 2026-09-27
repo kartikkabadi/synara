@@ -160,6 +160,7 @@ enum Update {
     DraftLoaded(TaskId, Result<String, String>),
     DraftSaved(TaskId, Option<String>),
     Voice(Box<voice::Reply>),
+    SidebarSourcePlan(String, Option<ProposedPlan>),
     Registry(Box<registry::RegistryReply>),
     Catalog(Catalog),
     WorkspaceAdded(Project, Catalog),
@@ -302,6 +303,16 @@ pub struct Shell {
     /// Upstream `ProposedPlanCard` expanded state — plan ids showing the full
     /// markdown body instead of the collapsed preview.
     expanded_plans: HashSet<String>,
+    /// Upstream `planSidebarOpen` / `planSidebarOpenOnNextThreadRef`.
+    plan_sidebar_open: bool,
+    plan_sidebar_open_next: bool,
+    /// Upstream `PlanSidebar`'s `proposedPlanExpanded` local state.
+    plan_sidebar_expanded: bool,
+    /// Source-thread plan resolved for the sidebar while an implementation
+    /// turn is unsettled (upstream reads it off the source thread's
+    /// `proposedPlans` in the shared read model; here it is fetched lazily).
+    sidebar_source_plan: Option<ProposedPlan>,
+    sidebar_source_loading: Option<String>,
     pending: HashMap<InteractionKey, UiInteraction>,
     forms: HashMap<InteractionKey, FormState>,
     files: Vec<FileEntry>,
@@ -575,6 +586,11 @@ impl Shell {
             transcript: transcript::TranscriptState::new(),
             expanded_activity: HashSet::new(),
             expanded_plans: HashSet::new(),
+            plan_sidebar_open: false,
+            plan_sidebar_open_next: false,
+            plan_sidebar_expanded: false,
+            sidebar_source_plan: None,
+            sidebar_source_loading: None,
             pending: HashMap::new(),
             forms: HashMap::new(),
             files: vec![],
@@ -961,6 +977,12 @@ impl Shell {
         self.chat_tools.reset_selection();
         self.studio.reset();
         self.explorer.reset_search();
+        // Upstream: `planSidebarOpen` resets to `planSidebarOpenOnNextThreadRef`
+        // on thread change; the sidebar's expanded plan section remounts.
+        self.plan_sidebar_open = std::mem::take(&mut self.plan_sidebar_open_next);
+        self.plan_sidebar_expanded = false;
+        self.sidebar_source_plan = None;
+        self.sidebar_source_loading = None;
         self.load_direct_binding(id);
         self.load_handoff_origin(id);
         self.load_message_pins(id);
@@ -1744,6 +1766,12 @@ impl Shell {
                     self.error = Some(error);
                 }
             }
+            Update::SidebarSourcePlan(plan_id, plan) => {
+                if self.sidebar_source_loading.as_deref() == Some(plan_id.as_str()) {
+                    self.sidebar_source_loading = None;
+                    self.sidebar_source_plan = plan;
+                }
+            }
             Update::ThreadLoaded(task, thread) => {
                 if self.loading_task == Some(task.id) {
                     self.loading_task = None;
@@ -1758,6 +1786,7 @@ impl Shell {
                     self.thread = Some(*thread);
                     self.replace_task(task);
                     self.sync_transcript_media(cx);
+                    self.maybe_load_sidebar_source(cx);
                 }
             }
             Update::Event(envelope) => {
@@ -1798,6 +1827,7 @@ impl Shell {
                         let working = self.working_label().is_some();
                         self.transcript.sync(thread, Some(&envelope.event), working);
                     }
+                    self.maybe_load_sidebar_source(cx);
                     if let Some(thread) = &self.thread
                         && let Some(task) = self
                             .catalog

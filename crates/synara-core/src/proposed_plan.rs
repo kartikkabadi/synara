@@ -18,6 +18,14 @@ pub struct ProposedPlan {
     pub updated_at_ms: i64,
 }
 
+/// Upstream `SourceProposedPlanReference`: attached to the turn that
+/// implements a plan, pointing back at the source thread's plan record.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceProposedPlan {
+    pub thread_id: crate::ThreadId,
+    pub plan_id: String,
+}
+
 /// Upstream `PROPOSED_PLAN_BLOCK_REGEX` match: first
 /// `<proposed_plan>\s*(…)\s*</proposed_plan>` capture, trimmed, non-empty.
 pub fn extract_proposed_plan_markdown(text: &str) -> Option<String> {
@@ -162,6 +170,58 @@ pub fn has_actionable_proposed_plan(plan: Option<&ProposedPlan>) -> bool {
 
 /// Upstream `findLatestProposedPlan`: prefer a plan from the latest turn, else
 /// the most recently updated plan overall (updatedAt, then id).
+/// Upstream `findSidebarProposedPlan`: while the implementation turn is
+/// unsettled, resolve the plan through the turn's `sourceProposedPlan`
+/// reference from the source thread's records; otherwise the active thread's
+/// latest unimplemented plan.
+pub fn find_sidebar_proposed_plan<'a>(
+    proposed_plans: &'a [ProposedPlan],
+    source_plans: &'a [ProposedPlan],
+    latest_turn: Option<&'a crate::thread::TurnSummary>,
+) -> Option<&'a ProposedPlan> {
+    if let Some(turn) = latest_turn {
+        let settled = turn.finished_at_ms.is_some() || turn.failed;
+        if !settled
+            && let Some(source) = &turn.source_proposed_plan
+            && let Some(plan) = source_plans.iter().find(|plan| plan.id == source.plan_id)
+        {
+            return Some(plan);
+        }
+    }
+    let unimplemented: Vec<&'a ProposedPlan> = proposed_plans
+        .iter()
+        .filter(|plan| plan.implemented_at_ms.is_none())
+        .collect();
+    find_latest_proposed_plan_refs(unimplemented, latest_turn.map(|turn| turn.id.as_str()))
+}
+
+fn find_latest_proposed_plan_refs<'a>(
+    plans: Vec<&'a ProposedPlan>,
+    latest_turn_id: Option<&str>,
+) -> Option<&'a ProposedPlan> {
+    let by_recency = |plans: &mut Vec<&'a ProposedPlan>| {
+        plans.sort_by(|left, right| {
+            left.updated_at_ms
+                .cmp(&right.updated_at_ms)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+    };
+    if let Some(turn_id) = latest_turn_id {
+        let mut matching: Vec<&'a ProposedPlan> = plans
+            .iter()
+            .copied()
+            .filter(|plan| plan.turn_id.as_deref() == Some(turn_id))
+            .collect();
+        if !matching.is_empty() {
+            by_recency(&mut matching);
+            return matching.pop();
+        }
+    }
+    let mut plans = plans;
+    by_recency(&mut plans);
+    plans.pop()
+}
+
 pub fn find_latest_proposed_plan<'a>(
     proposed_plans: &'a [ProposedPlan],
     latest_turn_id: Option<&str>,

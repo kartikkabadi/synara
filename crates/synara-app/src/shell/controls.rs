@@ -1308,6 +1308,8 @@ impl Shell {
                 cx,
             ))
             .children(self.context_meter(cx))
+            // Upstream `sidebarAction`: "Plan details"/"Tasks" sidebar toggle.
+            .children(self.plan_sidebar_toggle(cx))
             .child(div().flex_1())
             .child(self.control_trigger(ControlKind::Agent, label, !self.profiles.is_empty(), cx))
             .into_any_element()

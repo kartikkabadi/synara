@@ -7,8 +7,8 @@ use gpui::{ClickEvent, ClipboardItem, FontWeight};
 use synara_core::{
     ProposedPlan, build_plan_implementation_prompt, build_plan_implementation_thread_title,
     build_proposed_plan_markdown_filename, collapsed_proposed_plan_preview,
-    find_latest_proposed_plan, has_actionable_proposed_plan, normalize_plan_markdown_for_export,
-    proposed_plan_title, strip_displayed_plan_markdown,
+    find_latest_proposed_plan, find_sidebar_proposed_plan, has_actionable_proposed_plan,
+    normalize_plan_markdown_for_export, proposed_plan_title, strip_displayed_plan_markdown,
 };
 
 /// Upstream `truncateTitle`: trim, then cut at 50 chars and append "...".
@@ -301,6 +301,296 @@ impl super::Shell {
             )
             .into_any_element()
     }
+    /// Upstream `findSidebarProposedPlan`: while the implementation turn is
+    /// unsettled, resolve the plan through `source_proposed_plan` against the
+    /// fetched source thread; otherwise this thread's latest unimplemented plan.
+    pub(super) fn sidebar_proposed_plan(&self) -> Option<ProposedPlan> {
+        let thread = self.thread.as_ref()?;
+        find_sidebar_proposed_plan(
+            &thread.proposed_plans,
+            self.sidebar_source_plan.as_slice(),
+            thread.turns.last(),
+        )
+        .cloned()
+    }
+    /// The port holds only the active thread, so the source thread's plan is
+    /// loaded lazily (upstream resolves it synchronously from `threads[]`).
+    pub(super) fn maybe_load_sidebar_source(&mut self, cx: &mut Context<Self>) {
+        let source = self
+            .thread
+            .as_ref()
+            .and_then(|thread| thread.turns.last())
+            .filter(|turn| turn.finished_at_ms.is_none() && !turn.failed)
+            .and_then(|turn| turn.source_proposed_plan.clone());
+        let Some(source) = source else {
+            return;
+        };
+        if self
+            .sidebar_source_plan
+            .as_ref()
+            .is_some_and(|plan| plan.id == source.plan_id)
+            || self.sidebar_source_loading.as_deref() == Some(source.plan_id.as_str())
+        {
+            return;
+        }
+        self.sidebar_source_loading = Some(source.plan_id.clone());
+        let workspace = self.controller.workspace.clone();
+        self.job(async move {
+            let plan = workspace
+                .thread(source.thread_id)
+                .await
+                .ok()
+                .and_then(|thread| {
+                    thread
+                        .proposed_plans
+                        .into_iter()
+                        .find(|plan| plan.id == source.plan_id)
+                });
+            Ok(super::Update::SidebarSourcePlan(
+                source.plan_id.clone(),
+                plan,
+            ))
+        });
+        cx.notify();
+    }
+    /// Upstream `setPlanSidebarOpen(!planSidebarOpen)`.
+    pub(super) fn toggle_plan_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.plan_sidebar_open = !self.plan_sidebar_open;
+        cx.notify();
+    }
+    /// Upstream `ChatComposerFooter`'s `sidebarAction`: a ghost button with the
+    /// sidebar icon + "Plan details"/"Tasks" label, rendered when a sidebar
+    /// plan exists or the sidebar is open; toggles to "Hide …" while open.
+    pub(super) fn plan_sidebar_toggle(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let has_plan = self.sidebar_proposed_plan().is_some();
+        if !has_plan && !self.plan_sidebar_open {
+            return None;
+        }
+        let base = if has_plan { "Plan details" } else { "Tasks" };
+        let label = if self.plan_sidebar_open {
+            format!("Hide {base}")
+        } else {
+            base.to_owned()
+        };
+        let title: SharedString = format!(
+            "{} {} sidebar",
+            if self.plan_sidebar_open {
+                "Hide"
+            } else {
+                "Show"
+            },
+            base.to_lowercase()
+        )
+        .into();
+        Some(
+            ui::button_shell("plan-sidebar-toggle", title.clone(), false)
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .text_size(px(14.))
+                .px_2()
+                .py_1()
+                .bg(gpui::rgba(0))
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.toggle_plan_sidebar(cx);
+                }))
+                .child(ui::icon(Glyph::PanelRight))
+                .child(label)
+                .into_any_element(),
+        )
+    }
+    /// Upstream `PlanSidebar.tsx`: a `w-[340px]` right-side panel with a
+    /// "Plan" badge header (copy/download + close actions) and a collapsible
+    /// "Full Plan" markdown body. The upstream "Steps" section feeds from
+    /// `turn.tasks.updated`, which the port does not implement.
+    pub(super) fn plan_sidebar(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let plan = self.sidebar_proposed_plan();
+        let accent = palette().focus;
+        let header_actions = div().flex().items_center().gap_1();
+        let header_actions = if let Some(plan) = &plan {
+            let copy_markdown = plan.plan_markdown.clone();
+            let download_markdown = plan.plan_markdown.clone();
+            let download_filename = build_proposed_plan_markdown_filename(&plan.plan_markdown);
+            let download_root = self.task().map(|task| task.working_directory.clone());
+            header_actions
+                .child(
+                    ui::chrome_button(
+                        "sidebar-copy-plan",
+                        "Copy plan",
+                        Glyph::Copy,
+                        false,
+                        cx.listener(move |this, _: &(), _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(copy_markdown.clone()));
+                            this.notice = Some("Plan copied as markdown".into());
+                            cx.notify();
+                        }),
+                    )
+                    .size(px(24.)),
+                )
+                .child(
+                    ui::chrome_button(
+                        "sidebar-download-plan",
+                        "Download plan",
+                        Glyph::Attach,
+                        download_root.is_none(),
+                        cx.listener(move |this, _: &(), _, cx| {
+                            let Some(root) = download_root.clone() else {
+                                return;
+                            };
+                            let path = root.join(&download_filename);
+                            let text = normalize_plan_markdown_for_export(&download_markdown);
+                            this.job(async move {
+                                std::fs::write(&path, text).map_err(|error| {
+                                    synara_workspace::WorkspaceError::Invalid(error.to_string())
+                                })?;
+                                Ok(super::Update::Done(format!(
+                                    "Plan saved to {}",
+                                    path.display()
+                                )))
+                            });
+                            cx.notify();
+                        }),
+                    )
+                    .size(px(24.)),
+                )
+        } else {
+            header_actions
+        };
+        let header = div()
+            .h(px(48.))
+            .px_3()
+            .flex()
+            .items_center()
+            .justify_between()
+            .border_b_1()
+            .border_color(rgb(palette().border))
+            .child(
+                div().flex().items_center().gap_2().child(
+                    div()
+                        .px_2()
+                        .py_0p5()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(gpui::rgba((accent << 8) | 0x33))
+                        .bg(gpui::rgba((accent << 8) | 0x19))
+                        .text_size(px(ui::ui_font_size() - 1.))
+                        .text_color(rgb(accent))
+                        .child("Plan"),
+                ),
+            )
+            .child(
+                header_actions.child(
+                    ui::chrome_button(
+                        "plan-sidebar-close",
+                        "Close sidebar",
+                        Glyph::PanelRight,
+                        false,
+                        cx.listener(|this, _: &(), _, cx| {
+                            this.plan_sidebar_open = false;
+                            cx.notify();
+                        }),
+                    )
+                    .size(px(24.)),
+                ),
+            );
+        let body = div()
+            .id("plan-sidebar-body")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .p_3()
+            .flex()
+            .flex_col()
+            .gap_3();
+        let body = if let Some(plan) = plan {
+            let title =
+                proposed_plan_title(&plan.plan_markdown).unwrap_or_else(|| "Full Plan".into());
+            let expanded = self.plan_sidebar_expanded;
+            body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .id("plan-sidebar-full-plan")
+                            .role(gpui::Role::Button)
+                            .aria_label(if expanded {
+                                "Collapse plan"
+                            } else {
+                                "Expand plan"
+                            })
+                            .tab_index(0)
+                            .flex()
+                            .items_center()
+                            .gap_1p5()
+                            .rounded_md()
+                            .py_1()
+                            .text_size(px(ui::ui_font_size()))
+                            .font_weight(FontWeight::MEDIUM)
+                            .cursor_pointer()
+                            .hover(|style| style.bg(rgb(palette().hover)))
+                            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                this.plan_sidebar_expanded = !this.plan_sidebar_expanded;
+                                cx.notify();
+                            }))
+                            .child(ui::icon(if expanded {
+                                Glyph::Chevron
+                            } else {
+                                Glyph::ChevronRight
+                            }))
+                            .child(title),
+                    )
+                    .when(expanded, |section| {
+                        section.child(
+                            div()
+                                .rounded_md()
+                                .border_1()
+                                .border_color(rgb(palette().border))
+                                .bg(rgb(palette().canvas))
+                                .p_3()
+                                .child(ui::markdown::render(
+                                    &plan.plan_markdown,
+                                    "plan-sidebar-full",
+                                )),
+                        )
+                    }),
+            )
+        } else {
+            body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap_1()
+                    .py_8()
+                    .child(
+                        div()
+                            .text_size(px(ui::ui_font_size()))
+                            .text_color(rgb(palette().muted))
+                            .child("No active plan yet."),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(ui::ui_font_size() - 1.))
+                            .text_color(rgb(palette().muted))
+                            .child("Plans will appear here when generated."),
+                    ),
+            )
+        };
+        div()
+            .w(px(340.))
+            .flex_shrink_0()
+            .h_full()
+            .border_l_1()
+            .border_color(rgb(palette().border))
+            .bg(gpui::rgba((palette().overlay << 8) | 0x80))
+            .flex()
+            .flex_col()
+            .child(header)
+            .child(body)
+            .into_any_element()
+    }
     /// Upstream `onImplementPlanInNewThread` (useChatTurnFollowUps): create a
     /// same-project thread titled `Implement {plan title}`, dispatch the
     /// `PLEASE IMPLEMENT THIS PLAN:` prompt in default mode, and mark the
@@ -330,32 +620,65 @@ impl super::Shell {
         let workspace = self.controller.workspace.clone();
         let controller = self.controller.clone();
         let revision = self.selection_revision;
+        let runtime = self.runtime.clone();
+        let sender = self.sender.clone();
         self.creating_task = true;
+        // Upstream `planSidebarOpenOnNextThreadRef`: the plan sidebar opens
+        // automatically when the implementation thread is selected.
+        self.plan_sidebar_open_next = true;
         self.job(async move {
             let result = async {
                 let created = workspace
                     .create_scoped_task(project, title, agent, TaskScope::Project)
                     .await?;
-                let submitted = async {
+                let records = async {
                     workspace
                         .record(
                             source_thread,
                             ThreadEvent::ProposedPlanImplemented {
-                                plan_id,
+                                plan_id: plan_id.clone(),
                                 implementation_thread_id: created.thread_id,
                             },
                         )
                         .await?;
-                    controller.submit(created.id, prompt).await?;
+                    // Upstream `turn.start`'s `sourceProposedPlan` param: the
+                    // implementing turn on the new thread points back at the
+                    // source plan (consumed by the next `PromptStarted`).
+                    workspace
+                        .record(
+                            created.thread_id,
+                            ThreadEvent::ProposedPlanSource {
+                                source_thread,
+                                plan_id,
+                            },
+                        )
+                        .await?;
                     Ok::<_, WorkspaceError>(())
                 }
                 .await;
-                if let Err(error) = submitted {
+                if let Err(error) = records {
                     // Upstream deletes the half-created thread when the
                     // implementation dispatch fails.
                     let _ = workspace.delete_task(created.id).await;
                     return Err(error);
                 }
+                // Upstream selects the new thread, then dispatches
+                // `turn.start` — the run continues after navigation while the
+                // plan sidebar shows the source plan. Detached so `submit`'s
+                // end-to-end await does not postpone `TaskCreated`.
+                runtime.spawn({
+                    let workspace = workspace.clone();
+                    async move {
+                        if let Err(error) = controller.submit(created.id, prompt).await {
+                            let _ = workspace.delete_task(created.id).await;
+                            let _ = sender
+                                .send(super::Update::TaskCreationFailed(format!(
+                                    "Could not start implementation thread: {error}"
+                                )))
+                                .await;
+                        }
+                    }
+                });
                 let catalog = workspace.catalog().await?;
                 Ok::<_, WorkspaceError>((created, catalog))
             }

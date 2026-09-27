@@ -26,6 +26,9 @@ pub struct TurnSummary {
     pub acp_model_id: Option<String>,
     /// Latest usage reported while this turn was active.
     pub usage: Option<Usage>,
+    /// Upstream `OrchestrationLatestTurn.sourceProposedPlan`: set only on the
+    /// turn that implements a proposed plan, pointing at the source plan.
+    pub source_proposed_plan: Option<crate::SourceProposedPlan>,
 }
 
 /// Metadata of the latest durable replacement of a tool's output, not authorship.
@@ -99,6 +102,7 @@ pub struct Thread {
     max_events: usize,
     activity: ThreadActivity,
     pending_acp_routes: HashMap<String, (String, Option<String>)>,
+    pending_source_plan: Option<crate::SourceProposedPlan>,
     replay_backup: Option<Box<Thread>>,
 }
 
@@ -130,6 +134,7 @@ impl Thread {
             max_events: 200_000,
             activity: ThreadActivity::new("New task".into()),
             pending_acp_routes: HashMap::new(),
+            pending_source_plan: None,
             replay_backup: None,
         }
     }
@@ -231,6 +236,18 @@ impl Thread {
                     acp_agent_id,
                     acp_model_id,
                     usage: None,
+                    // Upstream: the implementing turn carries
+                    // `sourceProposedPlan` from its `turn.start` params.
+                    source_proposed_plan: self.pending_source_plan.take(),
+                });
+            }
+            ThreadEvent::ProposedPlanSource {
+                source_thread,
+                plan_id,
+            } => {
+                self.pending_source_plan = Some(crate::SourceProposedPlan {
+                    thread_id: *source_thread,
+                    plan_id: plan_id.clone(),
                 });
             }
             ThreadEvent::TextDelta {

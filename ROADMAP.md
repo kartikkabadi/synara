@@ -9,7 +9,7 @@ Detailed parity evidence lives in:
 
 ## Current status
 
-- Shipped feature slices: **114**
+- Shipped feature slices: **115**
 - Major remaining: **0**
 - Smaller remaining: **0**
 - Acceptance/integration remaining: **0**
@@ -726,6 +726,16 @@ Verification receipts:
   prompt in Default mode, and records `ProposedPlanImplemented` on the source
   thread (upstream `sourceProposedPlan`). See the
   [batch 58 receipt](docs/verification/parity-2026-09-26-batch58.md).
+- Batch 59 lands upstream's plan sidebar (`PlanSidebar` +
+  `findSidebarProposedPlan`): the implementing turn carries
+  `source_proposed_plan` (new `ProposedPlanSource` thread event, consumed by
+  `PromptStarted`), the composer gains the "Plan details"/"Tasks" sidebar
+  toggle, and a `w-[340px]` right panel shows the accent "Plan" badge,
+  copy/download actions, and a collapsible "Full Plan" markdown section with
+  the upstream empty state. "Implement in a new thread" now navigates before
+  the prompt dispatch completes, so the sidebar auto-opens on the source plan
+  mid-turn (upstream `planSidebarOpenOnNextThreadRef` ordering). See the
+  [batch 59 receipt](docs/verification/parity-2026-09-26-batch59.md).
 
 
 ## How to update this roadmap

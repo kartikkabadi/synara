@@ -111,19 +111,34 @@ impl Shell {
             self.virtual_transcript(cx)
         });
         root = root.child(self.composer_panel(window, cx));
-        if cx.reduce_motion() {
-            return root.into_any_element();
+        let content: gpui::AnyElement = if cx.reduce_motion() {
+            root.into_any_element()
+        } else {
+            root.with_animation(
+                SharedString::from(format!("conversation-entry-{}", thread.id)),
+                Animation::new(crate::ui::motion::pane_duration())
+                    .with_easing(crate::ui::motion::ease_out),
+                |el, progress| {
+                    tracing::debug!(target: "synara_ui_layout", surface = "conversation", progress, "motion-frame");
+                    el.opacity(progress)
+                },
+            )
+            .into_any_element()
+        };
+        // Upstream `PlanSidebar` mounts to the right of the conversation when
+        // `planSidebarOpen` holds.
+        if !self.plan_sidebar_open {
+            return content;
         }
-        root.with_animation(
-            SharedString::from(format!("conversation-entry-{}", thread.id)),
-            Animation::new(crate::ui::motion::pane_duration())
-                .with_easing(crate::ui::motion::ease_out),
-            |el, progress| {
-                tracing::debug!(target: "synara_ui_layout", surface = "conversation", progress, "motion-frame");
-                el.opacity(progress)
-            },
-        )
-        .into_any_element()
+        div()
+            .flex()
+            .flex_row()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .child(content)
+            .child(self.plan_sidebar(cx))
+            .into_any_element()
     }
     /// Upstream `resolveWorkingLabel`: connecting shows `Starting {agent}…`,
     /// otherwise an in-flight turn reads `Thinking`.

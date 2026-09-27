@@ -484,6 +484,7 @@ mod tests {
             acp_agent_id: None,
             acp_model_id: None,
             usage: None,
+            source_proposed_plan: None,
         });
         let rows = projected_rows(&thread, false);
         assert_eq!(rows.len(), 2);

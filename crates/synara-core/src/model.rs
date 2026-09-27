@@ -422,6 +422,14 @@ pub enum ThreadEvent {
         plan_id: String,
         implementation_thread_id: crate::ThreadId,
     },
+    /// Upstream `thread.turn.start`'s `sourceProposedPlan` param: recorded on
+    /// the implementation thread ahead of its first prompt; the next
+    /// `PromptStarted` consumes it onto the new turn (mirroring the turn-level
+    /// `SourceProposedPlanReference`).
+    ProposedPlanSource {
+        source_thread: crate::ThreadId,
+        plan_id: String,
+    },
     UsageChanged {
         usage: Usage,
     },
