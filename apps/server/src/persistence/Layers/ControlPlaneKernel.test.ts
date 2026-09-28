@@ -1,0 +1,252 @@
+import { assert, describe, expect, it } from "@effect/vitest";
+import { Effect, Exit, Layer, ServiceMap, type Scope } from "effect";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, vi } from "vitest";
+
+import { ServerConfig, controlPlaneKernelMode, type ServerConfigShape } from "../../config.ts";
+import {
+  ControlPlaneKernel,
+  ControlPlaneKernelError,
+  type ControlPlaneKernelShape,
+} from "../Services/ControlPlaneKernel.ts";
+import {
+  ControlPlaneKernelLive,
+  isControlPlaneAddonFailure,
+  loadControlPlaneAddon,
+  makeControlPlaneKernelAtPath,
+} from "./ControlPlaneKernel.ts";
+
+describe("controlPlaneKernelMode", () => {
+  it("defaults to off", () => {
+    expect(controlPlaneKernelMode({})).toBe("off");
+    expect(controlPlaneKernelMode({ SYNARA_CONTROL_PLANE_KERNEL: "" })).toBe("off");
+    expect(controlPlaneKernelMode({ SYNARA_CONTROL_PLANE_KERNEL: "bogus" })).toBe("off");
+  });
+
+  it("parses shadow and on, tolerating case and whitespace", () => {
+    expect(controlPlaneKernelMode({ SYNARA_CONTROL_PLANE_KERNEL: "shadow" })).toBe("shadow");
+    expect(controlPlaneKernelMode({ SYNARA_CONTROL_PLANE_KERNEL: " ON " })).toBe("on");
+  });
+});
+
+const withTempDir = (use: (dir: string) => void) => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "synara-control-plane-startup-"));
+  try {
+    use(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
+
+const expectKernelFailure = <A>(
+  effect: Effect.Effect<A, ControlPlaneKernelError, Scope.Scope>,
+  code: string,
+  detailIncludes: string,
+) => {
+  const exit = Effect.runSyncExit(Effect.scoped(effect));
+  assert.isTrue(Exit.isFailure(exit));
+  assert.include(String(exit), code);
+  assert.include(String(exit), detailIncludes);
+};
+
+const buildLiveKernel = (stateDir: string) =>
+  Effect.gen(function* () {
+    const services = yield* Layer.build(
+      ControlPlaneKernelLive.pipe(
+        Layer.provide(Layer.succeed(ServerConfig, { stateDir } as ServerConfigShape)),
+      ),
+    );
+    return ServiceMap.getUnsafe(services, ControlPlaneKernel);
+  });
+
+// These handshake/rollout tests do not need the real native addon: they use
+// a nonexistent addon path ("unavailable") and stub .cjs modules missing
+// methods ("incompatible"), so they run unconditionally.
+describe("ControlPlaneKernel startup (fail-closed rollout)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("off never attempts to load the addon", () => {
+    withTempDir((dir) => {
+      const probePath = path.join(dir, "probe-addon.cjs");
+      const markerPath = path.join(dir, "addon-loaded.marker");
+      writeFileSync(
+        probePath,
+        `require("node:fs").writeFileSync(${JSON.stringify(markerPath)}, "loaded");\n` +
+          `module.exports = { Store: { open() { throw new Error("unused"); } }, newId() { return ""; } };\n`,
+      );
+      vi.stubEnv("SYNARA_CONTROL_PLANE_KERNEL", "off");
+      vi.stubEnv("SYNARA_CONTROL_PLANE_ADDON_PATH", probePath);
+      const kernel = Effect.runSync(Effect.scoped(buildLiveKernel(dir)));
+      assert.equal(kernel.mode, "off");
+      assert.isFalse(existsSync(markerPath));
+    });
+  });
+
+  it.each(["shadow", "on"] as const)(
+    "%s with an unavailable addon fails layer construction",
+    (mode) => {
+      withTempDir((dir) => {
+        vi.stubEnv("SYNARA_CONTROL_PLANE_KERNEL", mode);
+        vi.stubEnv("SYNARA_CONTROL_PLANE_ADDON_PATH", path.join(dir, "missing-addon.node"));
+        expectKernelFailure(buildLiveKernel(dir), "AddonUnavailable", "missing-addon.node");
+      });
+    },
+  );
+
+  it.each(["shadow", "on"] as const)(
+    "%s with an incompatible addon (missing exports) fails layer construction",
+    (mode) => {
+      withTempDir((dir) => {
+        const stubPath = path.join(dir, "stub-addon.cjs");
+        writeFileSync(stubPath, "module.exports = { Store: {} };\n");
+        vi.stubEnv("SYNARA_CONTROL_PLANE_KERNEL", mode);
+        vi.stubEnv("SYNARA_CONTROL_PLANE_ADDON_PATH", stubPath);
+        expectKernelFailure(buildLiveKernel(dir), "AddonIncompatible", "Store.open");
+      });
+    },
+  );
+
+  it("a store instance missing methods fails the open handshake", () => {
+    withTempDir((dir) => {
+      const stubPath = path.join(dir, "stub-store.cjs");
+      writeFileSync(
+        stubPath,
+        `module.exports = { Store: { open() { return { close() {} }; } }, newId() { return ""; } };\n`,
+      );
+      vi.stubEnv("SYNARA_CONTROL_PLANE_ADDON_PATH", stubPath);
+      expectKernelFailure(
+        makeControlPlaneKernelAtPath(path.join(dir, "control-plane.db"), "shadow"),
+        "AddonIncompatible",
+        "commit",
+      );
+    });
+  });
+});
+
+// The native minisqlite-node addon is not packaged as an npm dependency yet;
+// these smoke tests run wherever the addon is resolvable (locally via
+// SYNARA_CONTROL_PLANE_ADDON_PATH) and are skipped elsewhere.
+const addonProbe = loadControlPlaneAddon();
+const addonAvailable = !isControlPlaneAddonFailure(addonProbe);
+
+describe.skipIf(!addonAvailable)("ControlPlaneKernel (native addon smoke)", () => {
+  const withTempKernel = <A, E>(use: (kernel: ControlPlaneKernelShape) => Effect.Effect<A, E>) =>
+    Effect.gen(function* () {
+      const dir = mkdtempSync(path.join(os.tmpdir(), "synara-control-plane-"));
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+      );
+      const kernel = yield* makeControlPlaneKernelAtPath(
+        path.join(dir, "control-plane.db"),
+        "shadow",
+      );
+      return yield* use(kernel);
+    }).pipe(Effect.scoped);
+
+  it.effect("opens a store, commits atomically, claims and acks a job", () =>
+    withTempKernel((kernel) =>
+      Effect.gen(function* () {
+        const now = Date.now();
+        const payload = new TextEncoder().encode(JSON.stringify({ step: "rescue-checkpoint" }));
+
+        yield* kernel.commit({
+          committedAtMs: now,
+          expectedStreamVersions: [{ streamId: "threads/t-1", version: 0 }],
+          events: [
+            {
+              streamId: "threads/t-1",
+              eventType: "thread.revert.started",
+              occurredAtMs: now,
+              payload,
+            },
+          ],
+          projectionPatches: [
+            {
+              projection: "thread-revert",
+              expectedVersion: 0,
+              puts: [{ key: new TextEncoder().encode("t-1"), value: payload }],
+            },
+          ],
+          enqueueJobs: [
+            {
+              queue: "checkpoint-revert",
+              partitionKey: "thread:t-1",
+              payload,
+            },
+          ],
+        });
+
+        assert.equal(yield* kernel.streamVersion("threads/t-1"), 1);
+        assert.equal(yield* kernel.projectionVersion("thread-revert"), 1);
+        const entry = yield* kernel.projectionGet({
+          projection: "thread-revert",
+          key: new TextEncoder().encode("t-1"),
+        });
+        assert.isNotNull(entry);
+
+        const claim = yield* kernel.claimJobs({
+          queue: "checkpoint-revert",
+          workerId: "worker-test",
+          nowMs: now,
+          leaseMs: 30_000,
+          limit: 1,
+        });
+        assert.equal(claim.jobs.length, 1);
+        const job = claim.jobs[0]!;
+
+        yield* kernel.extendLease({
+          jobId: job.jobId,
+          leaseToken: job.leaseToken,
+          newExpiryMs: now + 60_000,
+          nowMs: now,
+        });
+
+        yield* kernel.commit({
+          committedAtMs: now + 1,
+          ackJobs: [{ jobId: job.jobId, leaseToken: job.leaseToken }],
+        });
+
+        const succeeded = yield* kernel.jobs({
+          queue: "checkpoint-revert",
+          state: "succeeded",
+          limit: 10,
+        });
+        assert.equal(succeeded.length, 1);
+
+        const events = yield* kernel.eventsAfter({ after: 0, limit: 10 });
+        assert.equal(events.length, 1);
+        assert.equal(events[0]?.eventType, "thread.revert.started");
+
+        const id = yield* kernel.newId();
+        assert.match(id, /^[0-9a-f]{32}$/);
+      }),
+    ),
+  );
+
+  it.effect("surfaces optimistic-concurrency conflicts as typed errors", () =>
+    withTempKernel((kernel) =>
+      Effect.gen(function* () {
+        const now = Date.now();
+        const exit = yield* Effect.exit(
+          kernel.commit({
+            committedAtMs: now,
+            expectedStreamVersions: [{ streamId: "threads/t-1", version: 7 }],
+            events: [
+              {
+                streamId: "threads/t-1",
+                eventType: "thread.revert.started",
+                occurredAtMs: now,
+              },
+            ],
+          }),
+        );
+        assert.isTrue(Exit.isFailure(exit));
+        assert.include(String(exit), "Conflict");
+      }),
+    ),
+  );
+});
