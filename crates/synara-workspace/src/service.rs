@@ -1388,7 +1388,8 @@ pub(crate) fn project_directory(
             if !project.relative_directory.as_os_str().is_empty() {
                 fs.entries(&project.relative_directory)?;
             }
-            Ok(path)
+            normalized_absolute(&path)
+                .ok_or_else(|| WorkspaceError::Invalid("invalid project directory".into()))
         }
         WorkspaceLocation::Ssh { root, .. } => {
             if !root.starts_with('/') || root.contains('\0') {
