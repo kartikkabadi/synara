@@ -51,6 +51,7 @@ enum ChoiceKind {
     Projects,
     Threads,
     DarkTheme,
+    SidebarLayout,
 }
 pub(super) struct SettingsPopup {
     view: Entity<ChoiceMenu>,
@@ -542,6 +543,17 @@ impl Shell {
                                 this.settings.value.general.oldest_threads_first,
                             ),
                         ],
+                        ChoiceKind::SidebarLayout => vec![
+                            (
+                                "Classic".into(),
+                                this.settings.value.general.sidebar_layout
+                                    == SidebarLayout::Classic,
+                            ),
+                            (
+                                "Rail".into(),
+                                this.settings.value.general.sidebar_layout == SidebarLayout::Rail,
+                            ),
+                        ],
                         ChoiceKind::DarkTheme => vec![
                             (
                                 "Synara".into(),
@@ -587,6 +599,13 @@ impl Shell {
                                     }
                                     ChoiceKind::Threads => {
                                         settings.general.oldest_threads_first = index == 1
+                                    }
+                                    ChoiceKind::SidebarLayout => {
+                                        settings.general.sidebar_layout = if index == 1 {
+                                            SidebarLayout::Rail
+                                        } else {
+                                            SidebarLayout::Classic
+                                        }
                                     }
                                     ChoiceKind::DarkTheme => {
                                         settings.appearance.dark_theme = if index == 1 {
@@ -827,7 +846,8 @@ impl Shell {
                 .child(row("New threads", "Standalone chats get their own local working directory. Use a project’s compose button to work in that project.", "Local"))
                 .child(row("Getting started", "Replay the guided setup for agents, appearance, and projects.", ui::button("settings-guide", "Replay setup", false).on_click(cx.listener(|this, _, _, cx| this.replay_onboarding(cx))))))
             .child(heading("Sidebar organization"))
-            .child(card().child(row("Project order", "Controls how projects are arranged in the main sidebar.", self.choice_button("project-order", if general.alphabetical_projects { "Alphabetical" } else { "Manual order" }.into(), ChoiceKind::Projects, cx)))
+            .child(card().child(row("Sidebar layout", "Classic keeps the full sidebar; Rail shows a compact icon strip with a slide-out panel.", self.choice_button("sidebar-layout", if general.sidebar_layout == SidebarLayout::Rail { "Rail" } else { "Classic" }.into(), ChoiceKind::SidebarLayout, cx)))
+                .child(row("Project order", "Controls how projects are arranged in the main sidebar.", self.choice_button("project-order", if general.alphabetical_projects { "Alphabetical" } else { "Manual order" }.into(), ChoiceKind::Projects, cx)))
                 .child(row("Thread order", "Controls how threads are arranged inside each project and the Chats list.", self.choice_button("thread-order", if general.oldest_threads_first { "Oldest first" } else { "Recently active" }.into(), ChoiceKind::Threads, cx))))
             .child(heading("Startup"))
             .child(row("Restore last chat", "Reopen the last selected chat and its saved draft on next launch. When off, start without selecting a chat. Never automatically starts a prompt, shell or device helper.", self.toggle("restore-last-chat", "Restore last chat", general.restore_last_chat, |settings| settings.general.restore_last_chat = !settings.general.restore_last_chat, cx)))

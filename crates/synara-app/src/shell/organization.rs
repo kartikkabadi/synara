@@ -38,7 +38,7 @@ impl OrganizationState {
         }
     }
 }
-fn symbol_glyph(symbol: SpaceSymbol) -> Glyph {
+pub(super) fn symbol_glyph(symbol: SpaceSymbol) -> Glyph {
     match symbol {
         SpaceSymbol::Folder => Glyph::Folder,
         SpaceSymbol::Star => Glyph::Star,
@@ -212,7 +212,7 @@ impl Shell {
             window.focus(focus, cx);
         }
     }
-    fn select_space(&mut self, id: Option<String>, cx: &mut Context<Self>) {
+    pub(super) fn select_space(&mut self, id: Option<String>, cx: &mut Context<Self>) {
         if self.organization.saving || !self.organization.loaded {
             return;
         }

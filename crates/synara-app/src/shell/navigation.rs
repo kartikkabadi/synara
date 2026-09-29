@@ -85,6 +85,13 @@ impl Shell {
     }
 
     pub(super) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        // Upstream `handleSidebarOpenChange`: under the rail the toggle routes
+        // through `set_sidebar_open` so a hidden panel re-selects its item.
+        if self.rail_enabled() {
+            let open = !self.navigation.visible;
+            self.set_sidebar_open(open, cx);
+            return;
+        }
         self.navigation.visible = !self.navigation.visible;
         self.navigation.drawer.set_open(
             self.navigation.visible,
@@ -218,7 +225,12 @@ impl Shell {
         );
     }
 
-    fn thread_row(&self, task: &Task, nested: bool, cx: &mut Context<Self>) -> gpui::AnyElement {
+    pub(super) fn thread_row(
+        &self,
+        task: &Task,
+        nested: bool,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
         let id = task.id;
         let index = self
             .catalog
@@ -489,7 +501,10 @@ impl Shell {
                         .relative()
                         .child(ui::layout_probe("new-thread")),
                     )
-                    .when(!studio, |nav| {
+                    // Upstream `panelSidebarNavIds`: under the rail the panel
+                    // sidebar keeps only the new-thread action — the rail owns
+                    // the destination rows.
+                    .when(!studio && !self.rail_enabled(), |nav| {
                         nav.child(
                             ui::action(
                                 "kanban-navigation",
@@ -960,7 +975,7 @@ impl Shell {
         .into_any_element()
     }
 
-    fn new_project_chat(&mut self, project: ProjectId, cx: &mut Context<Self>) {
+    pub(super) fn new_project_chat(&mut self, project: ProjectId, cx: &mut Context<Self>) {
         if self.hub_navigation_blocked(cx) {
             return;
         }

@@ -154,6 +154,13 @@ impl AutomationsView {
             _subscriptions: subscriptions,
         }
     }
+    /// Rail panel reads the same ledger the manager edits.
+    pub(super) fn ledger(&self) -> &AutomationLedger {
+        &self.ledger
+    }
+    pub(super) fn loaded(&self) -> bool {
+        self.loaded
+    }
     pub(super) fn retire(&self) {
         self.scheduler.arm(false);
         self.scheduler.stop();

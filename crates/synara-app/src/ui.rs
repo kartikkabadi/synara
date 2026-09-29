@@ -1,7 +1,7 @@
 //! Native presentation primitives. Product state and operations stay in the controller.
 mod icons;
 pub mod markdown;
-pub use icons::{Glyph, central_icon, icon, provider_glyph};
+pub use icons::{Glyph, central_fill_icon, central_icon, icon, provider_glyph};
 pub mod menu;
 pub mod metrics;
 pub mod motion;

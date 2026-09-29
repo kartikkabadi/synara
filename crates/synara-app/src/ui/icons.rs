@@ -152,8 +152,19 @@ pub fn icon(glyph: Glyph) -> Svg {
 /// A vendored upstream `central-icons-reversed` asset by name (the same set
 /// Edit-project pickers offer upstream).
 pub fn central_icon(name: &str) -> Svg {
+    central_icon_variant(name, false)
+}
+
+/// The solid `central-icons-fill` counterpart of `central_icon` — the rail's
+/// active tab uses it just as upstream's `variant="fill"` assets do.
+pub fn central_fill_icon(name: &str) -> Svg {
+    central_icon_variant(name, true)
+}
+
+fn central_icon_variant(name: &str, fill: bool) -> Svg {
+    let dir = if fill { "central-fill" } else { "central" };
     svg()
-        .path(format!("icons/central/{name}.svg"))
+        .path(format!("icons/{dir}/{name}.svg"))
         .size(px(16.))
         .flex_shrink_0()
         .text_color(rgb(super::palette().muted))
@@ -409,6 +420,60 @@ pub(super) fn load(path: &str) -> Option<Cow<'static, [u8]>> {
         }
         "icons/central/lightning.svg" => {
             include_bytes!("../../assets/icons/central/lightning.svg")
+        }
+        "icons/central/home-roof-door.svg" => {
+            include_bytes!("../../assets/icons/central/home-roof-door.svg")
+        }
+        "icons/central/folders.svg" => {
+            include_bytes!("../../assets/icons/central/folders.svg")
+        }
+        "icons/central/columns-3-wide.svg" => {
+            include_bytes!("../../assets/icons/central/columns-3-wide.svg")
+        }
+        "icons/central/pull-request.svg" => {
+            include_bytes!("../../assets/icons/central/pull-request.svg")
+        }
+        "icons/central/clock.svg" => {
+            include_bytes!("../../assets/icons/central/clock.svg")
+        }
+        "icons/central/images-1.svg" => {
+            include_bytes!("../../assets/icons/central/images-1.svg")
+        }
+        "icons/central/settings-gear-4.svg" => {
+            include_bytes!("../../assets/icons/central/settings-gear-4.svg")
+        }
+        "icons/central/dot-grid-1x3-horizontal.svg" => {
+            include_bytes!("../../assets/icons/central/dot-grid-1x3-horizontal.svg")
+        }
+        "icons/central/black-hole.svg" => {
+            include_bytes!("../../assets/icons/central/black-hole.svg")
+        }
+        "icons/central-fill/home-roof-door.svg" => {
+            include_bytes!("../../assets/icons/central-fill/home-roof-door.svg")
+        }
+        "icons/central-fill/folders.svg" => {
+            include_bytes!("../../assets/icons/central-fill/folders.svg")
+        }
+        "icons/central-fill/columns-3-wide.svg" => {
+            include_bytes!("../../assets/icons/central-fill/columns-3-wide.svg")
+        }
+        "icons/central-fill/pull-request.svg" => {
+            include_bytes!("../../assets/icons/central-fill/pull-request.svg")
+        }
+        "icons/central-fill/clock.svg" => {
+            include_bytes!("../../assets/icons/central-fill/clock.svg")
+        }
+        "icons/central-fill/images-1.svg" => {
+            include_bytes!("../../assets/icons/central-fill/images-1.svg")
+        }
+        "icons/central-fill/settings-gear-4.svg" => {
+            include_bytes!("../../assets/icons/central-fill/settings-gear-4.svg")
+        }
+        "icons/central-fill/dot-grid-1x3-horizontal.svg" => {
+            include_bytes!("../../assets/icons/central-fill/dot-grid-1x3-horizontal.svg")
+        }
+        "icons/central-fill/black-hole.svg" => {
+            include_bytes!("../../assets/icons/central-fill/black-hole.svg")
         }
         "icons/tabler/alert-circle.svg" => {
             include_bytes!("../../assets/icons/tabler/alert-circle.svg")

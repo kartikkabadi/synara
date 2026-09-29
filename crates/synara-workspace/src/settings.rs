@@ -123,6 +123,17 @@ pub struct GeneralSettings {
     pub restore_last_chat: bool,
     /// Off by default: archiving a task keeps its managed worktree for recovery.
     pub delete_worktree_on_archive: bool,
+    /// `classic` keeps the single sidebar column; `rail` shows the fixed icon
+    /// strip plus a collapsible panel column (upstream `sidebarLayout`).
+    pub sidebar_layout: synara_core::SidebarLayout,
+    /// Space/project keys pinned under the rail's section items.
+    pub rail_shortcuts: Vec<String>,
+    /// User ordering for the rail's section items; missing ids keep the
+    /// default trailing order.
+    pub rail_item_order: Vec<String>,
+    /// Rail items the user hides from Customize. Studio ships hidden since the
+    /// section is also reachable from the rail's "…" menu.
+    pub hidden_rail_items: Vec<String>,
 }
 impl Default for GeneralSettings {
     fn default() -> Self {
@@ -135,6 +146,10 @@ impl Default for GeneralSettings {
             oldest_threads_first: false,
             restore_last_chat: true,
             delete_worktree_on_archive: false,
+            sidebar_layout: synara_core::SidebarLayout::Classic,
+            rail_shortcuts: Vec::new(),
+            rail_item_order: Vec::new(),
+            hidden_rail_items: vec!["studio".to_owned()],
         }
     }
 }

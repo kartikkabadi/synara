@@ -36,6 +36,7 @@ mod project_import;
 mod project_ui;
 mod proposed_plan;
 mod pull_requests;
+mod rail;
 mod recap;
 mod registry;
 mod releases;
@@ -251,6 +252,7 @@ pub struct Shell {
     kanban: kanban::KanbanState,
     controls: controls::ControlState,
     navigation: navigation::NavigationState,
+    rail: rail::RailState,
     settings: settings::SettingsState,
     integrations: integrations::IntegrationState,
     autonomy: autonomy::AutonomyView,
@@ -545,6 +547,7 @@ impl Shell {
             kanban: kanban::KanbanState::default(),
             controls: controls::ControlState::new(cx),
             navigation: navigation::NavigationState::new(cx),
+            rail: rail::RailState::new(),
             settings: settings::SettingsState::new(bootstrap.settings, cx),
             integrations: integrations::IntegrationState::new(cx),
             autonomy: autonomy::AutonomyView::new(cx),
@@ -1099,7 +1102,7 @@ impl Shell {
             Ok(Update::WorkspaceAdded(project, workspace.catalog().await?))
         });
     }
-    fn browse_workspace(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn browse_workspace(&mut self, cx: &mut Context<Self>) {
         let picker = cx.prompt_for_paths(gpui::PathPromptOptions {
             files: false,
             directories: true,

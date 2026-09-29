@@ -481,8 +481,13 @@ impl Render for Shell {
         if !cx.reduce_motion() && self.transcript.advance_animations(now) {
             window.request_animation_frame();
         }
+        // Upstream `railShellStore.reconcile` runs as a passive effect on every
+        // commit; the Rust shell does the same each render while rail is on.
+        if self.rail_enabled() {
+            self.reconcile_rail(cx);
+        }
         let sidebar_fraction = if cx.reduce_motion() {
-            if self.navigation.visible { 1.0 } else { 0.0 }
+            if self.rail_drawer_open() { 1.0 } else { 0.0 }
         } else {
             if self.navigation.drawer.running(now) {
                 window.request_animation_frame();
@@ -675,6 +680,7 @@ impl Render for Shell {
                     .flex()
                     .flex_1()
                     .min_h_0()
+                    .children(self.rail_enabled().then(|| self.rail_strip(cx)))
                     .children((sidebar_fraction > 0.0).then(|| {
                         div()
                             .id("sidebar-drawer")
@@ -691,7 +697,9 @@ impl Render for Shell {
                                     .bottom_0()
                                     .left(px(ui::SIDEBAR_WIDTH * (sidebar_fraction - 1.0)))
                                     .w(px(ui::SIDEBAR_WIDTH))
-                                    .child(if self.panel == Panel::Settings {
+                                    .child(if self.rail_enabled() {
+                                        self.rail_panel_content(cx)
+                                    } else if self.panel == Panel::Settings {
                                         self.settings_sidebar(cx)
                                     } else {
                                         self.sidebar(cx)
@@ -771,6 +779,12 @@ impl Render for Shell {
             .when(self.explorer.modal_open(), |el| {
                 el.child(self.file_action_overlay(cx))
             })
+            .children(self.rail.more_open.then(|| self.rail_more_overlay(cx)))
+            .children(
+                self.rail
+                    .customize_open
+                    .then(|| self.rail_customize_overlay(cx)),
+            )
             .children(self.navigation.menu_open.then(|| self.tools_overlay(cx)))
             .children(self.controls.is_open().then(|| self.control_overlay(cx)))
             .children(self.revisions.open().then(|| self.revision_overlay(cx)))
