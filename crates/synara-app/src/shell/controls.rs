@@ -653,7 +653,7 @@ impl Shell {
                 .map(|project| {
                     (
                         Choice {
-                            label: project.name.clone(),
+                            label: self.project_name(project).to_string(),
                             detail: String::new(),
                             selected: self.project == Some(project.id),
                             ..Default::default()
@@ -1302,7 +1302,7 @@ impl Shell {
                 .find(|project| Some(project.id) == self.project)
                 .map_or_else(
                     || "Work in a project".to_owned(),
-                    |project| project.name.clone(),
+                    |project| self.project_name(project).to_string(),
                 )
         };
         self.control_trigger(ControlKind::Project, label, true, cx)

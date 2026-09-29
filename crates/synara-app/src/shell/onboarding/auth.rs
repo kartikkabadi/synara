@@ -209,6 +209,7 @@ impl Shell {
                     .onboarding_tasks
                     .insert(task.agent_id.clone(), task.id);
                 self.catalog = catalog;
+                self.refresh_project_ui(cx);
                 if self.selection_revision == revision && self.select_task(task.id, cx) {
                     self.set_panel(Panel::Settings, cx);
                     self.open_settings_section(settings::Section::Onboarding, cx);

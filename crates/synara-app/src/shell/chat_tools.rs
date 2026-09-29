@@ -1245,7 +1245,10 @@ impl Shell {
                     .projects
                     .iter()
                     .find(|project| project.id == task.project_id)
-                    .map_or("Missing project", |project| project.name.as_str());
+                    .map_or_else(
+                        || "Missing project".to_owned(),
+                        |project| self.project_name(project).to_string(),
+                    );
                 let agent = self
                     .profiles
                     .iter()

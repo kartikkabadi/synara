@@ -446,6 +446,7 @@ impl Render for Shell {
             && !self.controls.is_open()
             && self.kanban.dialog.is_none()
             && self.organization.dialog.is_none()
+            && self.project_ui.dialog.is_none()
             && self.saved_context.dialog.is_none()
             && !self.explorer.modal_open()
             && !self.environment.menu_open()
@@ -467,6 +468,7 @@ impl Render for Shell {
             self.restore_environment_focus(window, cx);
         }
         self.restore_organization_focus(window, cx);
+        self.restore_project_ui_focus(window, cx);
         self.restore_saved_context_focus(window, cx);
         self.restore_hub_focus(window, cx);
         self.restore_revision_focus(window, cx);
@@ -541,6 +543,7 @@ impl Render for Shell {
                 let key = event.keystroke.key.as_str();
                 if this.kanban.dialog.is_some()
                     || this.organization.dialog.is_some()
+                    || this.project_ui.dialog.is_some()
                     || this.saved_context.dialog.is_some()
                     || this.revisions.open()
                     || this.handoff.open()
@@ -763,6 +766,7 @@ impl Render for Shell {
             )
             .children(self.kanban.dialog.clone())
             .children(self.organization.dialog.clone())
+            .children(self.project_ui.dialog.clone())
             .children(self.saved_context.dialog.clone())
             .when(self.explorer.modal_open(), |el| {
                 el.child(self.file_action_overlay(cx))

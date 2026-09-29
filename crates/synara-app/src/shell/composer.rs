@@ -25,6 +25,17 @@ impl Shell {
                 || self.attachment_send_blocked()
                 || (!native_command && self.attachment_capability_error().is_some())
                 || (!plan_follow_up && self.composer.read(cx).text().trim().is_empty()));
+        // Upstream `shouldHandlePromptHistoryNavigationKey`: recall keys are
+        // inert while a send is in flight or the composer is gated on a
+        // pending approval/input — same sources that drive `disabled` above.
+        let history_enabled = self.selected.is_some_and(|task| {
+            !self.busy.contains(&task)
+                && !self.connecting.contains(&task)
+                && !self.controls.is_pending(task)
+        });
+        self.composer.update(cx, |entry, _| {
+            entry.set_prompt_history_enabled(history_enabled)
+        });
         let composer_bounds = self.controls.composer_bounds.clone();
         div()
             .relative()

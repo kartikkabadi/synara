@@ -2,11 +2,13 @@ mod automations;
 mod imports;
 mod integrations;
 mod interaction_mode;
+mod project_ui;
 mod workflows;
 pub use interaction_mode::{
     DEBUG_MODE_PROMPT_PREFIX, InteractionMode, PLAN_MODE_PROMPT_PREFIX, with_debug_prompt,
     with_interaction_prompt, with_plan_prompt,
 };
+pub use project_ui::ProjectUi;
 mod goals;
 pub use goals::{
     GOAL_MAX_FOLLOWUPS, GOAL_PURSUIT_LIMIT_MS, GoalAchievement, GoalDecision, GoalEdit, GoalStatus,
@@ -598,6 +600,13 @@ PRAGMA user_version=2;")?;
         self.connection.execute("INSERT INTO preferences(key,data) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET data=excluded.data",params![key,encode(value)?])?;
         Ok(())
     }
+    /// Resettable renderer state (e.g. a cleared project appearance) removes
+    /// the row entirely so storage holds no residue of the default.
+    pub fn delete_preference(&self, key: &str) -> StorageResult<()> {
+        self.connection
+            .execute("DELETE FROM preferences WHERE key=?1", [key])?;
+        Ok(())
+    }
     fn query_json<T: serde::de::DeserializeOwned, P: rusqlite::Params>(
         &self,
         sql: &str,
@@ -675,6 +684,7 @@ fn valid_preference_key(key: &str) -> bool {
         .or_else(|| key.strip_prefix("task-context:"))
         .or_else(|| key.strip_prefix("task-attachments:"))
         .or_else(|| key.strip_prefix("task-followups:"))
+        .or_else(|| key.strip_prefix("project-ui:"))
         .or_else(|| key.strip_prefix("thread-origin:"))
         .or_else(|| key.strip_prefix("side-selection:"))
         .or_else(|| key.strip_prefix("hub:"))

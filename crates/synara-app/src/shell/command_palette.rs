@@ -421,7 +421,7 @@ impl Shell {
         {
             add(
                 3,
-                project.name.clone(),
+                self.project_name(project).to_string(),
                 "Project".into(),
                 Glyph::Folder,
                 Action::Project(project.id),

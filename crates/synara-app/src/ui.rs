@@ -1,7 +1,7 @@
 //! Native presentation primitives. Product state and operations stay in the controller.
 mod icons;
 pub mod markdown;
-pub use icons::{Glyph, icon, provider_glyph};
+pub use icons::{Glyph, central_icon, icon, provider_glyph};
 pub mod menu;
 pub mod metrics;
 pub mod motion;
@@ -50,6 +50,10 @@ pub struct Palette {
     /// Awaiting-input row dot (upstream indigo-300/90 dark,
     /// indigo-500 light).
     pub awaiting: u32,
+    /// Whether this palette is a dark theme — project accent colors pick
+    /// their dark variant from it (upstream `projectColorValue` uses the
+    /// light/dark Tailwind pair).
+    pub dark: bool,
 }
 pub const DARK: Palette = Palette {
     canvas: 0x272731,
@@ -66,6 +70,7 @@ pub const DARK: Palette = Palette {
     notice_surface: 0x303a4a,
     pending: 0xe7c24a,
     awaiting: 0x98a6e8,
+    dark: true,
 };
 
 pub const LIGHT: Palette = Palette {
@@ -83,6 +88,7 @@ pub const LIGHT: Palette = Palette {
     notice_surface: 0xe6edf7,
     pending: 0xd97706,
     awaiting: 0x6366f1,
+    dark: false,
 };
 // Synara currently owns one application window. All native views, including
 // menus and text entries, paint on the UI thread and share its current palette.
@@ -132,6 +138,7 @@ pub fn configure(
         DARK
     };
     let mut palette = personalization::colorway(palette, appearance.personalization.colorway, dark);
+    palette.dark = dark;
     if let Some(accent) = appearance.personalization.accent {
         palette.focus = personalization::readable_accent(accent, palette.canvas);
     }
@@ -282,6 +289,49 @@ pub fn header_action(
             cx.stop_propagation();
         })
         .children(glyph.map(icon))
+        .child(div().flex_1().min_w_0().text_ellipsis().child(label))
+}
+
+/// `action` with a caller-provided leading element — project rows render a
+/// favicon or appearance glyph instead of a `Glyph`.
+pub fn action_icon(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    icon: Option<gpui::AnyElement>,
+    selected: bool,
+    activate: impl Fn(&(), &mut Window, &mut gpui::App) + 'static,
+) -> Stateful<Div> {
+    let label = label.into();
+    div()
+        .id(id)
+        .role(gpui::Role::Button)
+        .aria_label(label.clone())
+        .tab_index(0)
+        .h(px(row_height()))
+        .min_w_0()
+        .px_2()
+        .flex()
+        .items_center()
+        .gap(px(6.))
+        .rounded_md()
+        .border_1()
+        .border_color(rgba(0x00000000))
+        .bg(rgba(if selected {
+            (palette().selected << 8) | 0xff
+        } else {
+            0
+        }))
+        .text_color(rgb(palette().text))
+        .text_size(px(ui_font_size()))
+        .cursor_pointer()
+        .hover(|style| style.bg(rgb(palette().hover)))
+        .active(|style| style.bg(rgb(palette().selected)))
+        .focus_visible(|style| style.border_color(rgb(palette().focus)))
+        .on_click(move |_, window, cx| {
+            activate(&(), window, cx);
+            cx.stop_propagation();
+        })
+        .children(icon)
         .child(div().flex_1().min_w_0().text_ellipsis().child(label))
 }
 

@@ -112,7 +112,10 @@ impl Shell {
                         .rows
                         .iter()
                         .find(|h| Some(h.profile.project) == hub)
-                        .map_or_else(|| p.name.clone(), |h| h.profile.name.clone()),
+                        .map_or_else(
+                            || self.project_name(p).to_string(),
+                            |h| h.profile.name.clone(),
+                        ),
                 )
             })
             .collect();

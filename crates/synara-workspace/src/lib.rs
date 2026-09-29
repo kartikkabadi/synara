@@ -11,6 +11,8 @@ mod integrations;
 pub use integrations::*;
 mod device_capture;
 pub use device_capture::*;
+mod favicon;
+pub use favicon::*;
 mod hubs;
 pub use hubs::*;
 mod environment;

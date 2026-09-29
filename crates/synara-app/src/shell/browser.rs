@@ -482,6 +482,14 @@ impl Shell {
                         Some(id) == self.browser.selected,
                         cx.listener(move |this, _: &(), _, cx| this.browser_select(id, cx)),
                     )
+                    // Upstream: middle-click closes the tab (and selects
+                    // nothing), same as the explicit close action.
+                    .on_mouse_down(
+                        gpui::MouseButton::Middle,
+                        cx.listener(move |this, _: &gpui::MouseDownEvent, _, cx| {
+                            this.browser_close_tab(id, cx);
+                        }),
+                    )
                     .relative()
                     .child(ui::layout_probe_slot("browser-tab", slot)),
                 )

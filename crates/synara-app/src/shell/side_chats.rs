@@ -527,6 +527,7 @@ impl Shell {
                 match result {
                     Ok((task, thread, stored_draft, catalog)) => {
                         self.catalog = catalog;
+                        self.refresh_project_ui(cx);
                         if self.side_chats.parent != Some(parent)
                             || self.side_chats.generation != generation
                         {

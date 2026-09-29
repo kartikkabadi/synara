@@ -141,6 +141,7 @@ impl Shell {
             self.snapshot_draft(cx);
             self.selected = None;
             self.thread = None;
+            self.refresh_prompt_history(cx);
             self.details = None;
             self.trace.clear();
             self.reset_editor_tabs();
@@ -342,7 +343,7 @@ impl Shell {
             })
             .collect();
         if self.settings.value.general.alphabetical_projects {
-            projects.sort_by_key(|project| project.name.to_lowercase());
+            projects.sort_by_key(|project| self.project_name(project).to_lowercase());
         }
         projects.sort_by_key(|project| !self.pinned_project(project.id));
         let project_start = page_start(self.navigation.project_page, projects.len());
@@ -675,7 +676,19 @@ impl Shell {
                                                 WorkspaceLocation::Ssh { root, .. } => root.clone(),
                                             })
                                             .unwrap_or_default();
-                                        let name = project.name.clone();
+                                        let name = self.project_name(project);
+                                        let icon = self.project_icon(
+                                            project,
+                                            open,
+                                            project_ui::ProjectGlyphPresentation::Badge,
+                                        );
+                                        let appearance = self
+                                            .project_ui
+                                            .uis
+                                            .get(&project.id)
+                                            .and_then(|ui| ui.appearance.clone());
+                                        let favicon =
+                                            self.project_ui.favicons.get(&project.id).cloned();
                                         div()
                                             .id(SharedString::from(format!("project-group-{id}")))
                                             .flex()
@@ -686,12 +699,12 @@ impl Shell {
                                                     .items_center()
                                                     .group("project-row")
                                                     .child(
-                                                        ui::action(
+                                                        ui::action_icon(
                                                             SharedString::from(format!(
                                                                 "project-{id}"
                                                             )),
-                                                            project.name.clone(),
-                                                            Some(Glyph::Folder),
+                                                            name.clone(),
+                                                            Some(icon),
                                                             false,
                                                             cx.listener(
                                                                 move |this, _: &(), _, cx| {
@@ -712,12 +725,35 @@ impl Shell {
                                                         .flex_1()
                                                         .tooltip(move |_, cx| {
                                                             cx.new(|_| ProjectTip {
-                                                                name: name.clone(),
+                                                                name: name.to_string(),
                                                                 path: path.clone(),
                                                                 count,
+                                                                appearance: appearance.clone(),
+                                                                favicon: favicon.clone(),
                                                             })
                                                             .into()
                                                         }),
+                                                    )
+                                                    .child(
+                                                        ui::chrome_button(
+                                                            "project-edit",
+                                                            "Edit project",
+                                                            Glyph::Pencil,
+                                                            false,
+                                                            cx.listener(
+                                                                move |this, _: &(), window, cx| {
+                                                                    this.open_project_edit(
+                                                                        id, window, cx,
+                                                                    );
+                                                                },
+                                                            ),
+                                                        )
+                                                        .size(px(24.))
+                                                        .opacity(0.)
+                                                        .group_hover("project-row", |style| {
+                                                            style.opacity(1.)
+                                                        })
+                                                        .focus_visible(|style| style.opacity(1.)),
                                                     )
                                                     .child(
                                                         ui::chrome_button(
@@ -955,6 +991,7 @@ impl Shell {
         self.snapshot_draft(cx);
         self.selected = None;
         self.thread = None;
+        self.refresh_prompt_history(cx);
         self.reset_editor_tabs();
         self.document = None;
         self.files.clear();
@@ -969,6 +1006,8 @@ struct ProjectTip {
     name: String,
     path: String,
     count: usize,
+    appearance: Option<ProjectAppearance>,
+    favicon: Option<Arc<gpui::Image>>,
 }
 impl Render for ProjectTip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
@@ -988,7 +1027,12 @@ impl Render for ProjectTip {
                 div()
                     .flex()
                     .gap_2()
-                    .child(ui::icon(Glyph::Folder))
+                    .child(project_ui::project_glyph(
+                        self.appearance.as_ref(),
+                        self.favicon.as_ref(),
+                        false,
+                        project_ui::ProjectGlyphPresentation::Badge,
+                    ))
                     .child(self.name.clone()),
             )
             .child(

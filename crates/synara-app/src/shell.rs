@@ -33,6 +33,7 @@ mod organization;
 mod overview;
 mod panels;
 mod project_import;
+mod project_ui;
 mod proposed_plan;
 mod pull_requests;
 mod recap;
@@ -133,6 +134,7 @@ enum Update {
     ProjectImport(Box<project_import::Reply>),
     Automations(Box<automations::Reply>),
     PullRequests(Box<pull_requests::Reply>),
+    ProjectUi(Box<project_ui::ProjectUiReply>),
     BrowserConfigured(TaskId, Result<(), String>),
     Integrations(Box<integrations::Reply>),
     Revision(Box<revisions::Reply>),
@@ -260,6 +262,7 @@ pub struct Shell {
     runtime: Handle,
     sender: async_channel::Sender<Update>,
     catalog: Catalog,
+    project_ui: project_ui::ProjectUiState,
     profiles: Vec<AgentProfile>,
     scratch_directory: PathBuf,
     creating_task: bool,
@@ -553,6 +556,7 @@ impl Shell {
             runtime,
             sender,
             catalog: bootstrap.catalog,
+            project_ui: project_ui::ProjectUiState::new(),
             profiles: bootstrap.profiles,
             scratch_directory: bootstrap.scratch_directory,
             creating_task: false,
@@ -618,6 +622,7 @@ impl Shell {
         };
         this.load_releases(cx);
         this.load_organization();
+        this.refresh_project_ui(cx);
         this.load_hubs();
         this.composer.update(cx, |entry, _| {
             entry.set_send_on_enter(this.settings.value.chat.send_on_enter);
@@ -916,6 +921,18 @@ impl Shell {
             self.catalog.tasks.insert(0, task);
         }
     }
+    /// Upstream `updateComposerPromptHistory`: composer Up/Down recalls the
+    /// selected task's sent prompts (newest first, capped at 100). History is
+    /// task-scoped state inside the entry, like the undo stack.
+    fn refresh_prompt_history(&mut self, cx: &mut Context<Self>) {
+        let history = self
+            .thread
+            .as_ref()
+            .map(|thread| derive_prompt_history(&thread.messages))
+            .unwrap_or_default();
+        self.composer
+            .update(cx, |entry, _| entry.set_prompt_history(history));
+    }
     fn select_task(&mut self, id: TaskId, cx: &mut Context<Self>) -> bool {
         if self.autonomy_navigation_blocked(cx) {
             return false;
@@ -1009,6 +1026,7 @@ impl Shell {
         self.details = None;
         self.trace.clear();
         self.thread = Some(Thread::new(task.thread_id));
+        self.refresh_prompt_history(cx);
         self.sync_transcript_media(cx);
         self.error = None;
         self.composer.update(cx, |entry, cx| {
@@ -1690,6 +1708,7 @@ impl Shell {
             Update::Voice(reply) => self.apply_voice_reply(*reply, cx),
             Update::Registry(reply) => self.registry_reply(*reply, cx),
             Update::Automations(reply) => self.automation_reply(*reply, cx),
+            Update::ProjectUi(reply) => self.project_ui_reply(*reply, cx),
             Update::Goals(reply) => self.goals_reply(*reply, cx),
             Update::Tick => {
                 self.tick_voice(cx);
@@ -1729,9 +1748,13 @@ impl Shell {
                 self.poll();
                 return;
             }
-            Update::Catalog(catalog) => self.catalog = catalog,
+            Update::Catalog(catalog) => {
+                self.catalog = catalog;
+                self.refresh_project_ui(cx);
+            }
             Update::WorkspaceAdded(project, catalog) => {
                 self.catalog = catalog;
+                self.refresh_project_ui(cx);
                 if self.settings.value.onboarding.started
                     && !self.settings.value.onboarding.completed
                 {
@@ -1755,6 +1778,7 @@ impl Shell {
                 self.cancel_voice_operation(false);
                 self.selected = None;
                 self.thread = None;
+                self.refresh_prompt_history(cx);
                 self.reset_editor_tabs();
                 self.document = None;
                 self.files.clear();
@@ -1765,6 +1789,7 @@ impl Shell {
             Update::TaskCreated(task, catalog, revision) => {
                 self.creating_task = false;
                 self.catalog = catalog;
+                self.refresh_project_ui(cx);
                 if self.task_title.read(cx).text().trim() == task.title.trim() {
                     self.task_title.update(cx, |entry, cx| entry.clear(cx));
                 }
@@ -1804,6 +1829,7 @@ impl Shell {
                     let working = self.working_label().is_some();
                     self.transcript.sync(&thread, None, working);
                     self.thread = Some(*thread);
+                    self.refresh_prompt_history(cx);
                     self.replace_task(task);
                     self.sync_transcript_media(cx);
                     self.maybe_load_sidebar_source(cx);
@@ -1846,6 +1872,18 @@ impl Shell {
                     if let Some(thread) = &self.thread {
                         let working = self.working_label().is_some();
                         self.transcript.sync(thread, Some(&envelope.event), working);
+                    }
+                    if matches!(
+                        &envelope.event,
+                        ThreadEvent::TextDelta {
+                            role: Role::User,
+                            ..
+                        } | ThreadEvent::ImageMessage {
+                            role: Role::User,
+                            ..
+                        }
+                    ) {
+                        self.refresh_prompt_history(cx);
                     }
                     self.maybe_load_sidebar_source(cx);
                     if let Some(thread) = &self.thread

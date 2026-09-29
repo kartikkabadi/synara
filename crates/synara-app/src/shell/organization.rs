@@ -158,15 +158,28 @@ impl Shell {
         self.settings.popup = None;
         self.navigation.menu_open = false;
         self.focus_composer = false;
-        let projects = self
+        let projects: Vec<Project> = self
             .catalog
             .projects
             .iter()
             .filter(|project| !self.is_chat_workspace(project))
             .cloned()
             .collect();
-        let dialog =
-            cx.new(|cx| OrganizationDialog::new(self.organization.value.clone(), projects, cx));
+        let looks = projects
+            .iter()
+            .map(|project| {
+                (
+                    project.id,
+                    (
+                        self.project_ui.uis.get(&project.id).cloned(),
+                        self.project_ui.favicons.get(&project.id).cloned(),
+                    ),
+                )
+            })
+            .collect();
+        let dialog = cx.new(|cx| {
+            OrganizationDialog::new(self.organization.value.clone(), projects, looks, cx)
+        });
         self.organization.subscription = Some(cx.subscribe(&dialog, |this, _, event, cx| {
             match event {
                 DialogEvent::Edit(edit) => this.edit_organization(edit.clone(), cx),

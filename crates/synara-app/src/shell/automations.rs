@@ -256,6 +256,7 @@ impl Shell {
                         self.automations.ledger = ledger;
                         self.automations.loaded = true;
                         self.catalog = catalog;
+                        self.refresh_project_ui(cx);
                         self.profiles = profiles;
                     }
                     Err(error) => {

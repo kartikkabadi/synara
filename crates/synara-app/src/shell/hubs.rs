@@ -170,6 +170,7 @@ impl Shell {
             self.selected = None;
             self.loading_task = None;
             self.thread = None;
+            self.refresh_prompt_history(cx);
             self.details = None;
             self.project = Some(project);
             self.reset_editor_tabs();
@@ -370,6 +371,7 @@ impl Shell {
                         self.hubs.rows = rows;
                         self.hubs.loaded = true;
                         self.catalog = catalog;
+                        self.refresh_project_ui(cx);
                         self.hubs.error = None;
                         if self.hubs.reload {
                             self.hubs.reload = false;
