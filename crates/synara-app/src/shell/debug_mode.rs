@@ -109,6 +109,7 @@ impl Shell {
                     }
                 }),
             )
+            .child(ui::layout_probe("interaction-mode-off"))
             .into_any_element(),
         )
     }
