@@ -28,8 +28,12 @@ opt-in worktree removal on Archive, persisted provider catalog, Oh My Pi
 profile) and the rest are confirmed equivalent or not applicable. Batches 44–64
 continued the audit through `a33435c18`; batch 65 audited the 33 commits in
 `a33435c18..ec3b1f6ef9` and ported prompt-history recall, middle-click tab
-close, and the project name/appearance + favicon set — the nine-commit
-rail-layout cluster is staged for a dedicated batch.
+close, and the project name/appearance + favicon set. Batch 66 ported the
+nine-commit rail-layout cluster: the alternate sidebar layout (icon rail +
+collapsible panel column) with ordered/hideable items, space + project
+shortcuts, the "…" and Customize popovers, rail panels for home/spaces/
+automations, and the "Sidebar layout" preference — all upstream-committed
+rail work is now ported.
 
 Current continuation status: A05 authenticated browser acceptance passed on exact
 candidate `163d59cf1eaba301e413f1d02848a4d4cb397f69`, and A09 provider
