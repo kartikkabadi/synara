@@ -21,11 +21,15 @@ The execution inventory is **complete**. The 19 open verification gates are
 larger evidence/acceptance buckets and are not a feature count or a reason to
 reopen implemented roadmap work.
 
-Current upstream reference: `Emanuele-web04/synara@a33435c18474eb7816582004e45f87382965ac8d` (v0.9.2).
+Current upstream reference: `Emanuele-web04/synara@ec3b1f6ef9c2f656f26dd9711339fe1265d8cb5c`.
 The twenty-two commits that landed after the earlier `eaa61ed` pin were audited
 in batch 43: four product changes are ported (credential-redaction tables,
 opt-in worktree removal on Archive, persisted provider catalog, Oh My Pi
-profile) and the rest are confirmed equivalent or not applicable.
+profile) and the rest are confirmed equivalent or not applicable. Batches 44–64
+continued the audit through `a33435c18`; batch 65 audited the 33 commits in
+`a33435c18..ec3b1f6ef9` and ported prompt-history recall, middle-click tab
+close, and the project name/appearance + favicon set — the nine-commit
+rail-layout cluster is staged for a dedicated batch.
 
 Current continuation status: A05 authenticated browser acceptance passed on exact
 candidate `163d59cf1eaba301e413f1d02848a4d4cb397f69`, and A09 provider
