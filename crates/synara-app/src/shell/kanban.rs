@@ -408,6 +408,7 @@ impl Shell {
                         self.error = Some(format!("Could not refresh Kanban: {error}"));
                     }
                 }
+                self.reconcile_hub_task_inspection();
             }
         }
         cx.notify();
@@ -449,6 +450,7 @@ impl Shell {
     }
     pub(super) fn kanban_back(&mut self, cx: &mut Context<Self>) {
         if self.navigation.studio {
+            self.clear_hub_task_inspection();
             self.set_panel(Panel::Hubs, cx);
             return;
         }
