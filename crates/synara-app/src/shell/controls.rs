@@ -628,6 +628,7 @@ impl Shell {
                         .selected
                         .is_none()
                         .then(|| "Select a task first.".into()),
+                    ..Default::default()
                 },
                 ControlAction::DebugMode,
             ));
@@ -656,6 +657,7 @@ impl Shell {
                             label: self.project_name(project).to_string(),
                             detail: String::new(),
                             selected: self.project == Some(project.id),
+                            custom_icon: Some(self.project_choice_icon(project)),
                             ..Default::default()
                         },
                         ControlAction::Project(project.id),

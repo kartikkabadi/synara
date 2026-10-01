@@ -119,6 +119,16 @@ impl Shell {
                 )
             })
             .collect();
+        let project_icons = projects
+            .iter()
+            .filter_map(|(id, _)| {
+                self.catalog
+                    .projects
+                    .iter()
+                    .find(|project| project.id == *id)
+                    .map(|project| (*id, self.project_choice_icon(project)))
+            })
+            .collect();
         if projects.is_empty() {
             self.notice = Some("Open a project before creating a Kanban task.".into());
             self.browse_workspace(cx);
@@ -148,6 +158,7 @@ impl Shell {
                 },
                 cx,
             )
+            .with_project_icons(project_icons)
         });
         self.kanban.dialog_hub = hub;
         self.kanban.subscription = Some(cx.subscribe(&dialog, |this, _, event, cx| {

@@ -5,7 +5,7 @@
 use super::*;
 use crate::ui::central_icon;
 use gpui::{AnyElement, FocusHandle};
-use std::path::Path;
+use std::{path::Path, rc::Rc};
 mod dialog;
 use dialog::{DialogEvent, EditProjectDialog};
 
@@ -15,6 +15,36 @@ use dialog::{DialogEvent, EditProjectDialog};
 pub(super) enum ProjectGlyphPresentation {
     Badge,
     Favicon,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProjectGlyphSource {
+    Emoji,
+    CentralIcon,
+    Favicon,
+    Folder,
+    FolderBadge,
+}
+
+fn project_glyph_source(
+    appearance: Option<&ProjectAppearance>,
+    has_favicon: bool,
+    presentation: ProjectGlyphPresentation,
+) -> ProjectGlyphSource {
+    if matches!(appearance, Some(ProjectAppearance::Emoji { .. })) {
+        return ProjectGlyphSource::Emoji;
+    }
+    if matches!(
+        appearance,
+        Some(ProjectAppearance::Icon { icon, .. }) if icon != DEFAULT_PROJECT_ICON
+    ) {
+        return ProjectGlyphSource::CentralIcon;
+    }
+    match presentation {
+        ProjectGlyphPresentation::Favicon if has_favicon => ProjectGlyphSource::Favicon,
+        ProjectGlyphPresentation::Favicon => ProjectGlyphSource::Folder,
+        ProjectGlyphPresentation::Badge => ProjectGlyphSource::FolderBadge,
+    }
 }
 
 pub(super) struct ProjectUiState {
@@ -97,14 +127,7 @@ pub(super) fn project_glyph(
         _ => None,
     };
     let tint = color.map_or_else(|| rgb(crate::ui::palette().muted), |c| rgb(c.rgb(dark)));
-    if let Some(ProjectAppearance::Emoji { emoji }) = appearance {
-        return emoji_glyph(emoji);
-    }
-    if let Some(ProjectAppearance::Icon { icon, .. }) = appearance
-        && icon != DEFAULT_PROJECT_ICON
-    {
-        return central_icon(icon).text_color(tint).into_any_element();
-    }
+    let source = project_glyph_source(appearance, favicon.is_some(), presentation);
     let folder = || {
         central_icon(if expanded {
             "folder-open-front"
@@ -113,30 +136,44 @@ pub(super) fn project_glyph(
         })
         .text_color(tint)
     };
-    match presentation {
-        ProjectGlyphPresentation::Favicon => favicon
-            .map(|image| {
-                gpui::img(image.clone())
-                    .size(px(16.))
-                    .rounded(px(2.))
-                    .flex_shrink_0()
-                    .into_any_element()
-            })
-            .unwrap_or_else(|| folder().into_any_element()),
-        ProjectGlyphPresentation::Badge => div()
-            .relative()
-            .flex_shrink_0()
-            .child(folder())
-            .children(favicon.map(|image| {
-                gpui::img(image.clone())
-                    .absolute()
-                    .right(px(-4.))
-                    .bottom(px(-4.))
-                    .size(px(12.))
-                    .rounded(px(4.))
-            }))
-            .into_any_element(),
+    match source {
+        ProjectGlyphSource::Emoji => {
+            if let Some(ProjectAppearance::Emoji { emoji }) = appearance {
+                return emoji_glyph(emoji);
+            }
+        }
+        ProjectGlyphSource::CentralIcon => {
+            if let Some(ProjectAppearance::Icon { icon, .. }) = appearance {
+                return central_icon(icon).text_color(tint).into_any_element();
+            }
+        }
+        ProjectGlyphSource::Favicon => {
+            return favicon
+                .map(|image| {
+                    gpui::img(image.clone())
+                        .size(px(16.))
+                        .rounded(px(2.))
+                        .flex_shrink_0()
+                        .into_any_element()
+                })
+                .unwrap_or_else(|| folder().into_any_element());
+        }
+        ProjectGlyphSource::Folder => return folder().into_any_element(),
+        ProjectGlyphSource::FolderBadge => {}
     }
+    div()
+        .relative()
+        .flex_shrink_0()
+        .child(folder())
+        .children(favicon.map(|image| {
+            gpui::img(image.clone())
+                .absolute()
+                .right(px(-4.))
+                .bottom(px(-4.))
+                .size(px(12.))
+                .rounded(px(4.))
+        }))
+        .into_any_element()
 }
 
 impl Shell {
@@ -163,6 +200,25 @@ impl Shell {
             expanded,
             presentation,
         )
+    }
+    /// Snapshot only the owned project look needed by a virtualized choice
+    /// row. The menu invokes this recipe while rendering instead of retaining
+    /// an `AnyElement` or borrowing Shell state.
+    pub(super) fn project_choice_icon(&self, project: &Project) -> crate::ui::menu::ChoiceIcon {
+        let appearance = self
+            .project_ui
+            .uis
+            .get(&project.id)
+            .and_then(|ui| ui.appearance.clone());
+        let favicon = self.project_ui.favicons.get(&project.id).cloned();
+        Rc::new(move || {
+            project_glyph(
+                appearance.as_ref(),
+                favicon.as_ref(),
+                false,
+                ProjectGlyphPresentation::Favicon,
+            )
+        })
     }
     /// Local project roots only — a favicon resolves by reading files under the
     /// project directory, which a remote workspace's root cannot offer here.
@@ -330,5 +386,58 @@ impl Shell {
                 window.focus(&focus, cx);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn icon(name: &str) -> ProjectAppearance {
+        ProjectAppearance::Icon {
+            icon: name.into(),
+            color: None,
+        }
+    }
+
+    #[test]
+    fn project_glyph_source_prefers_emoji_then_custom_central_icon() {
+        let emoji = ProjectAppearance::Emoji {
+            emoji: "🚀".into()
+        };
+        assert_eq!(
+            project_glyph_source(Some(&emoji), true, ProjectGlyphPresentation::Favicon,),
+            ProjectGlyphSource::Emoji
+        );
+
+        let central = icon("rocket");
+        assert_eq!(
+            project_glyph_source(Some(&central), true, ProjectGlyphPresentation::Favicon,),
+            ProjectGlyphSource::CentralIcon
+        );
+    }
+
+    #[test]
+    fn default_project_glyph_uses_favicon_only_for_primary_favicon_rows() {
+        assert_eq!(
+            project_glyph_source(None, true, ProjectGlyphPresentation::Favicon),
+            ProjectGlyphSource::Favicon
+        );
+        assert_eq!(
+            project_glyph_source(
+                Some(&icon(DEFAULT_PROJECT_ICON)),
+                true,
+                ProjectGlyphPresentation::Favicon,
+            ),
+            ProjectGlyphSource::Favicon
+        );
+        assert_eq!(
+            project_glyph_source(None, false, ProjectGlyphPresentation::Favicon),
+            ProjectGlyphSource::Folder
+        );
+        assert_eq!(
+            project_glyph_source(None, true, ProjectGlyphPresentation::Badge),
+            ProjectGlyphSource::FolderBadge
+        );
     }
 }

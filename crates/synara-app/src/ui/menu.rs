@@ -7,7 +7,13 @@ use gpui::{
     ScrollStrategy, Subscription, UniformListScrollHandle, uniform_list,
 };
 pub use models::{ModelRow, ModelSource};
+use std::rc::Rc;
 use synara_workspace::SessionModelPreset;
+
+/// An owned render recipe for a choice's leading element. The recipe keeps
+/// choice state data (rather than a borrowed or already-consumed AnyElement)
+/// and builds the element when the virtualized row is rendered.
+pub type ChoiceIcon = Rc<dyn Fn() -> gpui::AnyElement + 'static>;
 
 #[derive(Default)]
 pub struct Choice {
@@ -15,6 +21,7 @@ pub struct Choice {
     pub detail: String,
     pub selected: bool,
     pub icon: Option<Glyph>,
+    pub custom_icon: Option<ChoiceIcon>,
     pub unavailable: Option<String>,
 }
 #[derive(Clone)]
@@ -445,18 +452,25 @@ impl Render for ChoiceMenu {
                                             }))
                                             .cursor_pointer()
                                             .hover(|style| style.bg(rgb(palette().hover)))
-                                            .child(if let Some(glyph) = choice.icon {
-                                                super::icon(glyph)
-                                                    .size(scaled(14.))
-                                                    .into_any_element()
-                                            } else {
-                                                div()
-                                                    .w(scaled(14.))
-                                                    .children(choice.selected.then(|| {
-                                                        super::icon(Glyph::Check).size(scaled(14.))
-                                                    }))
-                                                    .into_any_element()
-                                            })
+                                            .child(
+                                                if let Some(render_icon) =
+                                                    choice.custom_icon.as_ref()
+                                                {
+                                                    render_icon()
+                                                } else if let Some(glyph) = choice.icon {
+                                                    super::icon(glyph)
+                                                        .size(scaled(14.))
+                                                        .into_any_element()
+                                                } else {
+                                                    div()
+                                                        .w(scaled(14.))
+                                                        .children(choice.selected.then(|| {
+                                                            super::icon(Glyph::Check)
+                                                                .size(scaled(14.))
+                                                        }))
+                                                        .into_any_element()
+                                                },
+                                            )
                                             .child(
                                                 div()
                                                     .flex_1()
@@ -494,9 +508,12 @@ impl Render for ChoiceMenu {
                                                     ),
                                             )
                                             .children(
-                                                (choice.selected && choice.icon.is_some()).then(
-                                                    || super::icon(Glyph::Check).size(scaled(14.)),
-                                                ),
+                                                (choice.selected
+                                                    && (choice.icon.is_some()
+                                                        || choice.custom_icon.is_some()))
+                                                .then(|| {
+                                                    super::icon(Glyph::Check).size(scaled(14.))
+                                                }),
                                             )
                                             .when_some(choice.unavailable.clone(), |el, reason| {
                                                 el.tooltip(move |_, cx| {
