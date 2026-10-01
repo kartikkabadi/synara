@@ -993,6 +993,7 @@ impl Shell {
         self.controls.retire();
         self.navigation.record_task(id);
         self.selected = Some(id);
+        self.reveal_selected_task(id, &task, cx);
         // Upstream markThreadVisited — client-side stamp for the
         // unread-completed badge on other rows.
         let visited_at = now_ms();

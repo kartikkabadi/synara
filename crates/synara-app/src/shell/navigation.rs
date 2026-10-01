@@ -3,6 +3,7 @@ use crate::ui::{self, Glyph, palette};
 use gpui::FocusHandle;
 
 const PAGE_SIZE: usize = 64;
+const TASK_PAGE_SIZE: usize = 5;
 
 /// Presentation-only disclosure, paging and focus. Catalog/task state is never duplicated here.
 pub(super) struct NavigationState {
@@ -76,6 +77,49 @@ impl NavigationState {
 
 fn page_start(page: usize, count: usize) -> usize {
     page.min(count.saturating_sub(1) / PAGE_SIZE) * PAGE_SIZE
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SidebarRevealState {
+    projects_open: bool,
+    chats_open: bool,
+    project_page: usize,
+    task_page: usize,
+    collapsed_projects: HashSet<ProjectId>,
+}
+
+/// Return the first page that can contain an item without moving backwards.
+/// Projects use fixed pages; task lists use the existing progressive "show more"
+/// size, so both can share the same boundary calculation.
+fn reveal_page(current_page: usize, item_index: usize, page_size: usize) -> usize {
+    current_page.max(item_index / page_size.max(1))
+}
+
+/// Pure navigation-only reveal. The caller supplies the already-filtered sidebar
+/// order so stable ids, rather than render positions or titles, decide what opens.
+fn reveal_sidebar_task(
+    mut state: SidebarRevealState,
+    task_id: TaskId,
+    project: Option<(ProjectId, &[ProjectId], &[TaskId])>,
+    chat_task_ids: &[TaskId],
+) -> SidebarRevealState {
+    if let Some((project_id, project_ids, project_task_ids)) = project {
+        state.projects_open = true;
+        state.collapsed_projects.remove(&project_id);
+        if let Some(project_index) = project_ids.iter().position(|id| *id == project_id) {
+            state.project_page = reveal_page(state.project_page, project_index, PAGE_SIZE);
+        }
+        if let Some(task_index) = project_task_ids.iter().position(|id| *id == task_id) {
+            state.task_page = reveal_page(state.task_page, task_index, TASK_PAGE_SIZE);
+        }
+        return state;
+    }
+
+    state.chats_open = true;
+    if let Some(task_index) = chat_task_ids.iter().position(|id| *id == task_id) {
+        state.task_page = reveal_page(state.task_page, task_index, TASK_PAGE_SIZE);
+    }
+    state
 }
 
 impl Shell {
@@ -274,6 +318,108 @@ impl Shell {
         .children(self.thread_status_dot(task))
         .into_any_element()
     }
+
+    /// Reveal the selected task in the same ordered lists rendered by the
+    /// sidebar. This is an explicit navigation transition, not render-time
+    /// reconciliation, so collapsed sections and pagination remain stable until
+    /// a user selects a task.
+    pub(super) fn reveal_selected_task(
+        &mut self,
+        task_id: TaskId,
+        task: &Task,
+        cx: &mut Context<Self>,
+    ) {
+        // Hubs own their own sidebar disclosure and paging; do not route their
+        // selection through the classic Projects/Chats navigation state.
+        if task.scope == TaskScope::Studio {
+            return;
+        }
+        let query = if self.navigation.search_open {
+            self.navigation.search.read(cx).text().trim().to_lowercase()
+        } else {
+            String::new()
+        };
+        let mut tasks: Vec<_> = self
+            .catalog
+            .tasks
+            .iter()
+            .filter(|candidate| {
+                candidate.state != TaskState::Archived
+                    && (candidate.scope == TaskScope::Studio) == self.navigation.studio
+                    // Keep the selected row discoverable while its draft is being
+                    // restored; the regular sidebar still hides untouched drafts
+                    // when they are not the active task.
+                    && (candidate.id == task_id
+                        || !(candidate.state == TaskState::Ready
+                            && matches!(
+                                candidate.title.as_str(),
+                                "New task" | "New thread" | "New studio chat"
+                            )
+                            && self.drafts.get(&candidate.id).is_none_or(String::is_empty)
+                            && (self.selected != Some(candidate.id)
+                                || self.composer.read(cx).text().is_empty())))
+                    && (query.is_empty() || candidate.title.to_lowercase().contains(&query))
+            })
+            .collect();
+        tasks.sort_by_key(|candidate| std::cmp::Reverse(candidate.updated_at_ms));
+        if self.settings.value.general.oldest_threads_first {
+            tasks.reverse();
+        }
+
+        let mut projects: Vec<_> = self
+            .catalog
+            .projects
+            .iter()
+            .filter(|project| {
+                !self.is_chat_workspace(project) && self.project_in_active_space(project.id)
+            })
+            .collect();
+        if self.settings.value.general.alphabetical_projects {
+            projects.sort_by_key(|project| self.project_name(project).to_lowercase());
+        }
+        projects.sort_by_key(|project| !self.pinned_project(project.id));
+
+        let project_ids: Vec<_> = projects.iter().map(|project| project.id).collect();
+        let project_task_ids: Vec<_> = tasks
+            .iter()
+            .filter(|candidate| {
+                candidate.scope == TaskScope::Project
+                    && candidate.project_id == task.project_id
+                    && !self.pinned_thread(candidate.id)
+            })
+            .map(|candidate| candidate.id)
+            .collect();
+        let chat_task_ids: Vec<_> = tasks
+            .iter()
+            .filter(|candidate| {
+                candidate.scope != TaskScope::Project && !self.pinned_thread(candidate.id)
+            })
+            .map(|candidate| candidate.id)
+            .collect();
+        let project = (task.scope == TaskScope::Project).then_some((
+            task.project_id,
+            project_ids.as_slice(),
+            project_task_ids.as_slice(),
+        ));
+        let state = reveal_sidebar_task(
+            SidebarRevealState {
+                projects_open: self.navigation.projects_open,
+                chats_open: self.navigation.chats_open,
+                project_page: self.navigation.project_page,
+                task_page: self.navigation.task_page,
+                collapsed_projects: self.navigation.collapsed_projects.clone(),
+            },
+            task_id,
+            project,
+            &chat_task_ids,
+        );
+        self.navigation.projects_open = state.projects_open;
+        self.navigation.chats_open = state.chats_open;
+        self.navigation.project_page = state.project_page;
+        self.navigation.task_page = state.task_page;
+        self.navigation.collapsed_projects = state.collapsed_projects;
+    }
+
     /// Upstream trailing status, in priority order: pending approval (amber)
     /// → awaiting input (indigo) → working/connecting (focus dot).
     fn thread_status_dot(&self, task: &Task) -> Option<gpui::AnyElement> {
@@ -363,7 +509,7 @@ impl Shell {
             .navigation
             .task_page
             .saturating_add(1)
-            .saturating_mul(5);
+            .saturating_mul(TASK_PAGE_SIZE);
         let pinned: Vec<_> = tasks
             .iter()
             .filter(|task| self.pinned_thread(task.id))
@@ -1073,6 +1219,17 @@ impl Render for ProjectTip {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn reveal_state() -> SidebarRevealState {
+        SidebarRevealState {
+            projects_open: false,
+            chats_open: false,
+            project_page: 0,
+            task_page: 0,
+            collapsed_projects: HashSet::new(),
+        }
+    }
+
     #[test]
     fn navigation_pages_are_bounded_and_clamped_after_catalog_changes() {
         assert_eq!(page_start(0, 0), 0);
@@ -1080,5 +1237,71 @@ mod tests {
         assert_eq!(page_start(1, PAGE_SIZE + 1), PAGE_SIZE);
         assert_eq!(page_start(usize::MAX, 3), 0);
         assert_eq!(page_start(1000, 129), 128);
+    }
+
+    #[test]
+    fn revealing_chats_advances_at_show_more_boundaries_without_moving_back() {
+        let chat_ids: Vec<_> = (0..11).map(|_| TaskId::new()).collect();
+
+        let before_boundary = reveal_sidebar_task(reveal_state(), chat_ids[4], None, &chat_ids);
+        assert!(before_boundary.chats_open);
+        assert_eq!(before_boundary.task_page, 0);
+
+        let at_boundary = reveal_sidebar_task(reveal_state(), chat_ids[5], None, &chat_ids);
+        assert_eq!(at_boundary.task_page, 1);
+
+        let already_revealed = reveal_sidebar_task(
+            SidebarRevealState {
+                task_page: 3,
+                ..reveal_state()
+            },
+            chat_ids[0],
+            None,
+            &chat_ids,
+        );
+        assert_eq!(already_revealed.task_page, 3);
+    }
+
+    #[test]
+    fn revealing_project_tasks_advances_project_and_task_page_boundaries() {
+        let project_ids: Vec<_> = (0..65).map(|_| ProjectId::new()).collect();
+        let task_ids: Vec<_> = (0..6).map(|_| TaskId::new()).collect();
+
+        let before_project_boundary = reveal_sidebar_task(
+            reveal_state(),
+            task_ids[4],
+            Some((project_ids[63], &project_ids, &task_ids)),
+            &[],
+        );
+        assert_eq!(before_project_boundary.project_page, 0);
+        assert_eq!(before_project_boundary.task_page, 0);
+
+        let at_both_boundaries = reveal_sidebar_task(
+            reveal_state(),
+            task_ids[5],
+            Some((project_ids[64], &project_ids, &task_ids)),
+            &[],
+        );
+        assert_eq!(at_both_boundaries.project_page, 1);
+        assert_eq!(at_both_boundaries.task_page, 1);
+    }
+
+    #[test]
+    fn revealing_a_collapsed_project_reopens_projects_and_expands_that_project() {
+        let project_id = ProjectId::new();
+        let task_id = TaskId::new();
+        let mut state = reveal_state();
+        state.collapsed_projects.insert(project_id);
+
+        let revealed = reveal_sidebar_task(
+            state,
+            task_id,
+            Some((project_id, &[project_id], &[task_id])),
+            &[],
+        );
+
+        assert!(revealed.projects_open);
+        assert!(!revealed.chats_open);
+        assert!(!revealed.collapsed_projects.contains(&project_id));
     }
 }
