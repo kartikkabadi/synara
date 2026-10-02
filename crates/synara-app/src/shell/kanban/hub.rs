@@ -182,21 +182,27 @@ impl Shell {
         let command_id = SharedString::from(format!("hub-inspector-command-{id}"));
         div()
             .id("hub-task-inspector")
-            .role(gpui::Role::Group)
+            // Keep the inspector as a supplementary, edge-attached surface. It
+            // follows the Kobra Sheet geometry without becoming modal: the task
+            // list remains visible and selectable behind it.
+            .role(gpui::Role::Dialog)
             .aria_label(format!("Task details for {}", task.title))
+            .aria_description("Supplementary task details and actions")
+            .absolute()
+            .top(px(12.))
+            .bottom(px(12.))
+            .right(px(12.))
             .w(px(320.))
-            .h_full()
+            .max_w_full()
             .min_h_0()
-            .flex_shrink_0()
-            .overflow_y_scroll()
+            .overflow_hidden()
             .rounded_xl()
             .border_1()
             .border_color(rgb(palette().border))
             .bg(rgb(palette().overlay))
-            .p_3()
+            .shadow_lg()
             .flex()
             .flex_col()
-            .gap_3()
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
                 if event.keystroke.key == "escape" {
                     this.clear_hub_task_inspection();
@@ -206,82 +212,97 @@ impl Shell {
             }))
             .child(
                 div()
-                    .flex()
-                    .items_start()
-                    .gap_2()
+                    .relative()
+                    .px_4()
+                    .py_4()
+                    .pr_12()
+                    .border_b_1()
+                    .border_color(rgb(palette().border))
                     .child(
                         div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(px(16.))
-                                    .text_ellipsis()
-                                    .child(task.title.clone()),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(11.))
-                                    .text_color(rgb(palette().muted))
-                                    .child("Task details"),
-                            ),
+                            .text_size(px(16.))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_ellipsis()
+                            .child(task.title.clone()),
                     )
-                    .child(ui::chrome_button(
-                        "hub-task-inspector-close",
-                        "Close task details",
-                        Glyph::Close,
-                        false,
-                        cx.listener(|this, _: &(), _, cx| {
-                            this.clear_hub_task_inspection();
-                            cx.notify();
-                        }),
-                    )),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
                     .child(
                         div()
-                            .text_size(px(12.))
-                            .text_color(rgb(status_color))
-                            .child(status),
-                    )
-                    .child(div().flex_1())
-                    .child(ui::icon(self.agent_glyph(&task.agent_id)).size(px(14.)))
-                    .child(
-                        div()
-                            .min_w_0()
+                            .mt_1()
                             .text_size(px(12.))
                             .text_color(rgb(palette().muted))
-                            .text_ellipsis()
-                            .child(agent),
+                            .child("Task details"),
+                    )
+                    .child(
+                        ui::chrome_button(
+                            "hub-task-inspector-close",
+                            "Close task details",
+                            Glyph::Close,
+                            false,
+                            cx.listener(|this, _: &(), _, cx| {
+                                this.clear_hub_task_inspection();
+                                cx.notify();
+                            }),
+                        )
+                        .absolute()
+                        .top(px(12.))
+                        .right(px(12.)),
                     ),
             )
-            .child(Self::hub_task_field("Hub", hub))
-            .child(Self::hub_task_field(
-                "Working directory",
-                task.working_directory.display().to_string(),
-            ))
             .child(
                 div()
+                    .id("hub-task-inspector-body")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .p_4()
                     .flex()
-                    .flex_wrap()
-                    .gap_2()
-                    .child(ui::action(
-                        open_id,
-                        "Open conversation",
-                        Some(Glyph::Chat),
-                        false,
-                        cx.listener(move |this, _: &(), _, cx| {
-                            if this.select_task(id, cx) {
-                                this.show_conversation(cx);
-                            }
-                        }),
+                    .flex_col()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_size(px(12.))
+                                    .text_color(rgb(status_color))
+                                    .child(status),
+                            )
+                            .child(div().flex_1())
+                            .child(ui::icon(self.agent_glyph(&task.agent_id)).size(px(14.)))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .text_size(px(12.))
+                                    .text_color(rgb(palette().muted))
+                                    .text_ellipsis()
+                                    .child(agent),
+                            ),
+                    )
+                    .child(Self::hub_task_field("Hub", hub))
+                    .child(Self::hub_task_field(
+                        "Working directory",
+                        task.working_directory.display().to_string(),
                     ))
-                    .children((group < 2).then(|| {
-                        ui::action(
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap_2()
+                            .child(ui::action(
+                                open_id,
+                                "Open conversation",
+                                Some(Glyph::Chat),
+                                false,
+                                cx.listener(move |this, _: &(), _, cx| {
+                                    if this.select_task(id, cx) {
+                                        this.show_conversation(cx);
+                                    }
+                                }),
+                            ))
+                            .children((group < 2).then(|| {
+                                ui::action(
                             command_id,
                             if group == 0 {
                                 "Run saved draft"
@@ -302,10 +323,15 @@ impl Shell {
                                 }
                             }),
                         )
-                    })),
+                            })),
+                    ),
             )
             .child(
                 div()
+                    .px_4()
+                    .py_3()
+                    .border_t_1()
+                    .border_color(rgb(palette().border))
                     .text_size(px(11.))
                     .text_color(rgb(palette().muted))
                     .child("Status follows the task lifecycle; actions use the existing conversation controls."),
@@ -375,7 +401,14 @@ impl Shell {
             .collect();
         let cap = state.limit.max(60);
         let inspected = self.inspected_hub_task();
-        div().id("hub-task-board").flex_1().min_h_0().min_w_0().flex().flex_col()
+        div()
+            .id("hub-task-board")
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .min_w_0()
+            .flex()
+            .flex_col()
             .child(div().px_3().py_2().flex().items_center().flex_wrap().gap_2()
                 .child(ui::action("hub-board-home", "Overview", Some(Glyph::Back), false,
                     cx.listener(|this, _: &(), _, cx| this.set_panel(Panel::Hubs, cx))))
@@ -536,8 +569,9 @@ impl Shell {
                                  )
                              })),
                      )
-                     .children(inspected.map(|task| self.hub_task_inspector(task, cx))),
-             )
+                      ,
+              )
+              .children(inspected.map(|task| self.hub_task_inspector(task, cx)))
             .child(div().px_4().py_2().border_t_1().border_color(rgb(palette().border)).text_size(px(11.))
                 .text_color(rgb(palette().muted)).child("Task state comes from the agent lifecycle. Run is explicit, and opening a task never approves its requests."))
             .into_any_element()
