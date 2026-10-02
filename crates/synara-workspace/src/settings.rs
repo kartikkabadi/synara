@@ -9,7 +9,7 @@ pub use keybindings::*;
 mod device;
 pub use device::DeviceSettings;
 mod chat;
-pub use chat::ChatSettings;
+pub use chat::{ChatSettings, VoiceEnterBehavior};
 
 pub const SETTINGS_VERSION: u32 = 1;
 pub const TASKS_VIEW_MODE_VERSION: u32 = 1;

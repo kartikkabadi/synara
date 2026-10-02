@@ -52,6 +52,7 @@ enum ChoiceKind {
     Threads,
     DarkTheme,
     SidebarLayout,
+    VoiceEnter,
 }
 pub(super) struct SettingsPopup {
     view: Entity<ChoiceMenu>,
@@ -566,6 +567,18 @@ impl Shell {
                                     == DarkThemePreference::Dracula,
                             ),
                         ],
+                        ChoiceKind::VoiceEnter => vec![
+                            (
+                                "Stop and transcribe".into(),
+                                this.settings.value.chat.voice_enter_behavior
+                                    == VoiceEnterBehavior::Stop,
+                            ),
+                            (
+                                "Stop and send".into(),
+                                this.settings.value.chat.voice_enter_behavior
+                                    == VoiceEnterBehavior::Send,
+                            ),
+                        ],
                     };
                     let providers: Vec<_> = this
                         .profiles
@@ -612,6 +625,13 @@ impl Shell {
                                             DarkThemePreference::Dracula
                                         } else {
                                             DarkThemePreference::Synara
+                                        }
+                                    }
+                                    ChoiceKind::VoiceEnter => {
+                                        settings.chat.voice_enter_behavior = if index == 1 {
+                                            VoiceEnterBehavior::Send
+                                        } else {
+                                            VoiceEnterBehavior::Stop
                                         }
                                     }
                                 },

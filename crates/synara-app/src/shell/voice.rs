@@ -54,6 +54,7 @@ impl DraftStamp {
 pub(super) struct Reply {
     pub operation: u64,
     pub stamp: DraftStamp,
+    pub send_after_transcription: bool,
     pub result: Result<String, String>,
 }
 
@@ -756,12 +757,58 @@ fn draft_matches(
         && text == stamp.draft_text
 }
 
+pub(super) fn recording_enter_should_stop(
+    recording: bool,
+    key: &str,
+    is_held: bool,
+    prefer_character_input: bool,
+    is_composing: bool,
+    command: bool,
+    shift: bool,
+    alt: bool,
+) -> bool {
+    recording
+        && key == "enter"
+        && !is_held
+        && !prefer_character_input
+        && !is_composing
+        && !command
+        && !shift
+        && !alt
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TranscriptDisposition {
+    DraftOnly,
+    Send,
+}
+
+fn transcript_disposition(
+    send_after_transcription: bool,
+    draft_unchanged: bool,
+) -> Option<TranscriptDisposition> {
+    draft_unchanged.then_some(if send_after_transcription {
+        TranscriptDisposition::Send
+    } else {
+        TranscriptDisposition::DraftOnly
+    })
+}
+
 impl Shell {
     pub(super) fn voice_primary(&mut self, cx: &mut Context<Self>) {
         if self.voice.recording() {
-            self.stop_voice_recording(cx);
+            self.stop_voice_recording(cx, false);
         } else if !self.voice.active() {
             self.start_voice_recording(cx);
+        }
+    }
+
+    pub(super) fn voice_enter(&mut self, cx: &mut Context<Self>) {
+        if self.voice.recording() {
+            self.stop_voice_recording(
+                cx,
+                self.settings.value.chat.voice_enter_behavior == VoiceEnterBehavior::Send,
+            );
         }
     }
 
@@ -822,7 +869,7 @@ impl Shell {
                 self.voice.set_message(error, true);
                 cx.notify();
             }
-            Some(Ok(())) => self.stop_voice_recording(cx),
+            Some(Ok(())) => self.stop_voice_recording(cx, false),
             None => {
                 if self.voice.recording() {
                     cx.notify();
@@ -878,7 +925,7 @@ impl Shell {
         cx.notify();
     }
 
-    fn stop_voice_recording(&mut self, cx: &mut Context<Self>) {
+    fn stop_voice_recording(&mut self, cx: &mut Context<Self>, send_after_transcription: bool) {
         let Phase::Recording {
             operation,
             recorder,
@@ -909,7 +956,14 @@ impl Shell {
                     operation,
                     cancel: cancel.clone(),
                 };
-                self.voice.set_message("Transcribing with ChatGPT. The recording is uploaded for transcription only; Synara will not send it as a message.", false);
+                self.voice.set_message(
+                    if send_after_transcription {
+                        "Transcribing with ChatGPT. The unchanged draft will be sent when transcription finishes."
+                    } else {
+                        "Transcribing with ChatGPT. The recording is uploaded for transcription only; Synara will not send it as a message."
+                    },
+                    false,
+                );
                 let sender = self.sender.clone();
                 self.runtime.spawn(async move {
                     let result = transcribe(wav, clip.duration_ms, cancel).await;
@@ -917,6 +971,7 @@ impl Shell {
                         .send(Update::Voice(Box::new(Reply {
                             operation,
                             stamp,
+                            send_after_transcription,
                             result,
                         })))
                         .await;
@@ -940,10 +995,13 @@ impl Shell {
                 let revision = self.selection_revision;
                 let epoch = self.draft_state.version(reply.stamp.task);
                 let current_text = self.composer.read(cx).text().to_owned();
-                if !draft_matches(&reply.stamp, task, project, revision, epoch, &current_text) {
+                let Some(disposition) = transcript_disposition(
+                    reply.send_after_transcription,
+                    draft_matches(&reply.stamp, task, project, revision, epoch, &current_text),
+                ) else {
                     self.voice.set_message("The draft changed while transcription was running, so the transcript was not inserted. Your current draft is untouched.", true);
                     return;
-                }
+                };
                 let mut next = reply.stamp.draft_text;
                 if !next.is_empty() && !next.ends_with(char::is_whitespace) {
                     next.push('\n');
@@ -960,10 +1018,19 @@ impl Shell {
                 // through the same task draft store before returning control to the user.
                 self.flush_drafts(true);
                 self.focus_composer = true;
-                self.voice.set_message(
-                    "Transcript added to the unsent draft. Review it, then choose Send when ready.",
-                    false,
-                );
+                match disposition {
+                    TranscriptDisposition::DraftOnly => self.voice.set_message(
+                        "Transcript added to the unsent draft. Review it, then choose Send when ready.",
+                        false,
+                    ),
+                    TranscriptDisposition::Send => {
+                        self.voice.set_message(
+                            "Transcript added to the draft. Sending through the normal composer path.",
+                            false,
+                        );
+                        self.send_prompt(cx);
+                    }
+                }
             }
         }
         cx.notify();
@@ -1028,6 +1095,51 @@ mod tests {
     }
 
     #[test]
+    fn plain_enter_stops_recording_without_stealing_ime_or_modified_input() {
+        assert!(recording_enter_should_stop(
+            true, "enter", false, false, false, false, false, false
+        ));
+        for (held, prefer_character_input, is_composing, command, shift, alt) in [
+            (true, false, false, false, false, false),
+            (false, true, false, false, false, false),
+            (false, false, true, false, false, false),
+            (false, false, false, true, false, false),
+            (false, false, false, false, true, false),
+            (false, false, false, false, false, true),
+        ] {
+            assert!(!recording_enter_should_stop(
+                true,
+                "enter",
+                held,
+                prefer_character_input,
+                is_composing,
+                command,
+                shift,
+                alt,
+            ));
+        }
+        assert!(!recording_enter_should_stop(
+            false, "enter", false, false, false, false, false, false
+        ));
+        assert!(!recording_enter_should_stop(
+            true, "escape", false, false, false, false, false, false
+        ));
+    }
+
+    #[test]
+    fn auto_send_requires_an_unchanged_draft_and_preserves_stop_only_mode() {
+        assert_eq!(
+            transcript_disposition(false, true),
+            Some(TranscriptDisposition::DraftOnly)
+        );
+        assert_eq!(
+            transcript_disposition(true, true),
+            Some(TranscriptDisposition::Send)
+        );
+        assert_eq!(transcript_disposition(true, false), None);
+    }
+
+    #[test]
     fn late_or_cancelled_results_cannot_replace_a_changed_draft() {
         let stamp = DraftStamp {
             task: TaskId::new(),
@@ -1076,6 +1188,7 @@ mod tests {
             12,
             "newer draft"
         ));
+        assert_eq!(transcript_disposition(true, false), None);
     }
 
     #[test]

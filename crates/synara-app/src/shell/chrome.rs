@@ -625,6 +625,22 @@ impl Render for Shell {
                 {
                     return;
                 }
+                if this.composer.read(cx).focus_handle(cx).is_focused(window)
+                    && voice::recording_enter_should_stop(
+                        this.voice.recording(),
+                        key,
+                        event.is_held,
+                        event.prefer_character_input,
+                        this.composer.read(cx).is_composing(),
+                        modifiers.control || modifiers.platform,
+                        modifiers.shift,
+                        modifiers.alt,
+                    )
+                {
+                    this.voice_enter(cx);
+                    cx.stop_propagation();
+                    return;
+                }
                 if !this
                     .terminal_view
                     .read(cx)
