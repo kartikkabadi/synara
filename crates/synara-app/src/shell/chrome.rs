@@ -88,10 +88,8 @@ impl Shell {
         let navigation_width = (ui::SIDEBAR_WIDTH * sidebar_fraction).max(208.);
         let has_chat = !self.environment.maximized
             && (self.panel == Panel::Conversation || docked)
-            && self
-                .thread
-                .as_ref()
-                .is_some_and(|thread| !thread.timeline.is_empty());
+            && self.task().is_some();
+        let has_thread_tabs = has_chat && self.open_thread_tab_count() > 0;
         let title = self
             .task()
             .map_or("New thread", |task| task.title.as_str())
@@ -184,7 +182,7 @@ impl Shell {
                             )
                         }),
                     )
-                    .child(
+                    .children((!has_thread_tabs).then(|| {
                         div()
                             .id("window-drag-region")
                             .h_full()
@@ -214,15 +212,37 @@ impl Shell {
                                             .child(format!("{} tasks", self.kanban_count())),
                                     )
                             }))
-                            .children(has_chat.then(|| ui::icon(self.selected_agent_glyph())))
-                            .children(has_chat.then(|| {
+                            .children(
+                                (has_chat && !has_thread_tabs)
+                                    .then(|| ui::icon(self.selected_agent_glyph())),
+                            )
+                            .children((has_chat && !has_thread_tabs).then(|| {
                                 div()
                                     .min_w_0()
                                     .text_ellipsis()
                                     .text_size(px(15.))
                                     .child(title)
-                            })),
-                    )
+                            }))
+                    }))
+                    .children(has_thread_tabs.then(|| self.open_thread_tabs_strip(cx)))
+                    .children(has_thread_tabs.then(|| {
+                        // Keep a small client-decoration drag handle after the
+                        // scrollable strip. Tab chips own their pointer input;
+                        // the handle preserves window movement without making
+                        // a tab click ambiguous.
+                        div()
+                            .id("window-drag-region-tabs")
+                            .h_full()
+                            .w(px(24.))
+                            .flex_shrink_0()
+                            .on_mouse_down(gpui::MouseButton::Left, |event, window, _| {
+                                if event.click_count == 2 {
+                                    window.zoom_window();
+                                } else {
+                                    window.start_window_move();
+                                }
+                            })
+                    }))
                     .children(
                         (self.panel == Panel::Kanban && !self.navigation.studio)
                             .then(|| self.tasks_view_switcher(cx)),

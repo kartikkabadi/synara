@@ -660,6 +660,7 @@ fn valid_preference_key(key: &str) -> bool {
             | "integrations"
             | "model-favorites"
             | "environment-layout"
+            | "open-thread-tabs"
             | "workspace-organization"
             | "automation-ledger-v1"
     ) {

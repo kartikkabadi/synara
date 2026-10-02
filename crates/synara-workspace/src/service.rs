@@ -1335,7 +1335,7 @@ impl EventSink for WorkspaceService {
         result.map(|_| ()).map_err(|_| AgentError::EventDelivery)
     }
 }
-fn catalog(store: &Store) -> WorkspaceResult<Catalog> {
+pub(crate) fn catalog(store: &Store) -> WorkspaceResult<Catalog> {
     let workspaces = store.workspaces()?;
     let mut projects = vec![];
     let mut tasks = vec![];

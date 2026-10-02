@@ -380,6 +380,12 @@ impl Shell {
                             return;
                         }
                         if let Some((task, revision, home)) = self.hubs.pending_selection.take() {
+                            let pending_close = self.open_threads.pending_close;
+                            let close_after_selection = open_threads::pending_close_matches(
+                                pending_close,
+                                self.selected,
+                                revision,
+                            );
                             if revision == self.selection_revision && self.select_task(task, cx) {
                                 self.hubs.selected = self.task().map(|t| t.project_id);
                                 if home {
@@ -388,14 +394,24 @@ impl Shell {
                                 } else {
                                     self.show_conversation(cx);
                                 }
+                                if close_after_selection {
+                                    if let Some(pending) = pending_close {
+                                        self.close_open_thread_tab_identity(pending.task, cx);
+                                    }
+                                    self.open_threads.pending_close = None;
+                                }
                             } else {
+                                self.open_threads.pending_close = None;
                                 self.notice = Some(
                                     "Hub work was saved. Open it from Hubs when ready.".into(),
                                 );
                             }
                         }
                     }
-                    Err(error) => self.hubs.error = Some(error),
+                    Err(error) => {
+                        self.open_threads.pending_close = None;
+                        self.hubs.error = Some(error);
+                    }
                 }
             }
             Reply::Created(result, revision) => {
@@ -425,7 +441,10 @@ impl Shell {
                         }
                         self.load_hubs();
                     }
-                    Err(error) => self.hubs.error = Some(error),
+                    Err(error) => {
+                        self.open_threads.pending_close = None;
+                        self.hubs.error = Some(error);
+                    }
                 }
             }
             Reply::Saved(result) => {
@@ -468,7 +487,10 @@ impl Shell {
                         self.hubs.pending_selection = Some((task.id, revision, false));
                         self.load_hubs();
                     }
-                    Err(error) => self.hubs.error = Some(error),
+                    Err(error) => {
+                        self.open_threads.pending_close = None;
+                        self.hubs.error = Some(error);
+                    }
                 }
             }
         }

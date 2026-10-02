@@ -17,6 +17,8 @@ mod hubs;
 pub use hubs::*;
 mod environment;
 pub use environment::*;
+mod open_threads;
+pub use open_threads::*;
 mod profiles;
 mod service;
 mod settings;

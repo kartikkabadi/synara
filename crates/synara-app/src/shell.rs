@@ -29,6 +29,7 @@ mod kanban;
 mod messages;
 mod navigation;
 mod onboarding;
+mod open_threads;
 mod organization;
 mod overview;
 mod panels;
@@ -78,6 +79,7 @@ pub struct Bootstrap {
     pub catalog: Catalog,
     pub profiles: Vec<AgentProfile>,
     pub selection: Selection,
+    pub open_thread_tabs: LoadedOpenThreadTabs,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Panel {
@@ -157,6 +159,7 @@ enum Update {
     Organization(Box<organization::OrganizationReply>),
     ChatTools(Box<chat_tools::Reply>),
     EnvironmentSaved(Option<String>),
+    OpenThreadTabsSaved(Option<String>),
     Kanban(Box<kanban::KanbanReply>),
     DraftLoaded(TaskId, Result<String, String>),
     DraftSaved(TaskId, Option<String>),
@@ -249,6 +252,7 @@ pub struct Shell {
     organization: organization::OrganizationState,
     chat_tools: chat_tools::ChatTools,
     environment: environment::EnvironmentState,
+    open_threads: open_threads::OpenThreadState,
     kanban: kanban::KanbanState,
     controls: controls::ControlState,
     navigation: navigation::NavigationState,
@@ -546,6 +550,7 @@ impl Shell {
             organization: organization::OrganizationState::new(cx),
             chat_tools: chat_tools::ChatTools::new(cx),
             environment: environment::EnvironmentState::new(bootstrap.environment, cx),
+            open_threads: open_threads::OpenThreadState::new(bootstrap.open_thread_tabs, cx),
             kanban: kanban::KanbanState::default(),
             controls: controls::ControlState::new(cx),
             navigation: navigation::NavigationState::new(cx),
@@ -626,6 +631,7 @@ impl Shell {
             _updates: updates,
             _subscriptions: subscriptions,
         };
+        this.reconcile_open_thread_tabs(cx);
         this.load_releases(cx);
         this.load_organization();
         this.refresh_project_ui(cx);
@@ -754,6 +760,7 @@ impl Shell {
         if self.terminal_layout_quitting
             || self.terminal_closing
             || self.draft_state.quitting
+            || self.open_threads.quitting
             || self.environment.quitting
         {
             return false;
@@ -801,6 +808,9 @@ impl Shell {
             return;
         }
         if self.save_drafts_before_quit(cx) {
+            return;
+        }
+        if self.save_open_thread_tabs_before_quit() {
             return;
         }
         self.device.retire();
@@ -995,6 +1005,7 @@ impl Shell {
         }
         self.controls.retire();
         self.navigation.record_task(id);
+        self.record_open_thread_tab(id, cx);
         self.selected = Some(id);
         self.reveal_selected_task(id, &task, cx);
         // Upstream markThreadVisited — client-side stamp for the
@@ -1709,6 +1720,7 @@ impl Shell {
             Update::Organization(reply) => self.organization_reply(*reply, cx),
             Update::ChatTools(reply) => self.chat_tools_reply(*reply, cx),
             Update::EnvironmentSaved(error) => self.environment_saved(error, cx),
+            Update::OpenThreadTabsSaved(error) => self.open_thread_tabs_saved(error, cx),
             Update::Kanban(reply) => self.kanban_reply(*reply, cx),
             Update::DraftLoaded(task, result) => self.restore_draft(task, result, cx),
             Update::DraftSaved(task, error) => self.draft_saved(task, error, cx),
@@ -1741,6 +1753,7 @@ impl Shell {
                 self.poll_kanban();
                 self.flush_drafts(false);
                 self.flush_environment(false);
+                self.flush_open_thread_tabs(false);
                 let previous = self.pending.len();
                 self.pending.retain(|key, interaction| {
                     if !interaction.is_active() {
@@ -1757,10 +1770,12 @@ impl Shell {
             }
             Update::Catalog(catalog) => {
                 self.catalog = catalog;
+                self.reconcile_open_thread_tabs(cx);
                 self.refresh_project_ui(cx);
             }
             Update::WorkspaceAdded(project, catalog) => {
                 self.catalog = catalog;
+                self.reconcile_open_thread_tabs(cx);
                 self.refresh_project_ui(cx);
                 if self.settings.value.onboarding.started
                     && !self.settings.value.onboarding.completed
@@ -1796,18 +1811,33 @@ impl Shell {
             Update::TaskCreated(task, catalog, revision) => {
                 self.creating_task = false;
                 self.catalog = catalog;
+                self.reconcile_open_thread_tabs(cx);
                 self.refresh_project_ui(cx);
                 if self.task_title.read(cx).text().trim() == task.title.trim() {
                     self.task_title.update(cx, |entry, cx| entry.clear(cx));
                 }
+                let pending_close = self.open_threads.pending_close;
+                let close_after_selection =
+                    open_threads::pending_close_matches(pending_close, self.selected, revision);
                 if revision == self.selection_revision && self.select_task(task.id, cx) {
                     self.set_panel(Panel::Conversation, cx);
+                    if close_after_selection {
+                        if let Some(pending) = pending_close {
+                            self.close_open_thread_tab_identity(pending.task, cx);
+                        }
+                        self.open_threads.pending_close = None;
+                    }
                 } else {
+                    // The creation result lost its navigation revision (or a
+                    // different task is now selected), so an active-tab close
+                    // must not be applied to a later, unrelated creation.
+                    self.open_threads.pending_close = None;
                     self.notice = Some("The new thread and its draft were saved. Open it from thread search when ready.".into());
                 }
             }
             Update::TaskCreationFailed(error) => {
                 self.creating_task = false;
+                self.open_threads.pending_close = None;
                 self.error = Some(error);
             }
             Update::ThreadLoadFailed(task, error) => {
