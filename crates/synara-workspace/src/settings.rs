@@ -12,6 +12,7 @@ mod chat;
 pub use chat::ChatSettings;
 
 pub const SETTINGS_VERSION: u32 = 1;
+pub const TASKS_VIEW_MODE_VERSION: u32 = 1;
 const MAX_FONT_FAMILY_BYTES: usize = 256;
 const MAX_KEYBINDINGS: usize = 256;
 const MAX_BINDING_BYTES: usize = 128;
@@ -78,6 +79,31 @@ pub struct KeyBinding {
     pub shortcut: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TasksViewMode {
+    #[default]
+    Kanban,
+    List,
+}
+
+/// The Tasks route's presentation preference has its own version so a future
+/// view migration can recover this small value without changing task state.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TasksViewPreference {
+    pub version: u32,
+    pub mode: TasksViewMode,
+}
+impl Default for TasksViewPreference {
+    fn default() -> Self {
+        Self {
+            version: TASKS_VIEW_MODE_VERSION,
+            mode: TasksViewMode::Kanban,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AppSettings {
@@ -134,6 +160,9 @@ pub struct GeneralSettings {
     /// Rail items the user hides from Customize. Studio ships hidden since the
     /// section is also reachable from the rail's "…" menu.
     pub hidden_rail_items: Vec<String>,
+    /// The Tasks route keeps the existing Kanban presentation unless the user
+    /// explicitly chooses the list projection.
+    pub tasks_view_mode: TasksViewPreference,
 }
 impl Default for GeneralSettings {
     fn default() -> Self {
@@ -150,6 +179,7 @@ impl Default for GeneralSettings {
             rail_shortcuts: Vec::new(),
             rail_item_order: Vec::new(),
             hidden_rail_items: vec!["studio".to_owned()],
+            tasks_view_mode: TasksViewPreference::default(),
         }
     }
 }
@@ -189,6 +219,11 @@ impl AppSettings {
         if self.version != SETTINGS_VERSION {
             return Err(WorkspaceError::Invalid(
                 "unsupported settings schema version".into(),
+            ));
+        }
+        if self.general.tasks_view_mode.version != TASKS_VIEW_MODE_VERSION {
+            return Err(WorkspaceError::Invalid(
+                "unsupported Tasks view preference version".into(),
             ));
         }
         if self
@@ -413,6 +448,7 @@ mod tests {
         changed.general.alphabetical_projects = true;
         changed.general.show_studio = false;
         changed.general.provider_order = vec!["claude".into(), "codex".into()];
+        changed.general.tasks_view_mode.mode = TasksViewMode::List;
         changed.profile = ProfileSettings {
             name: "Native user".into(),
             username: "native".into(),
@@ -425,6 +461,39 @@ mod tests {
         service.save_settings(changed.clone()).await.unwrap();
         assert_eq!(service.settings().await.unwrap().settings, changed);
         assert!(service.settings().await.unwrap().existed);
+    }
+
+    #[test]
+    fn task_view_preference_defaults_for_legacy_settings_and_recovers_invalid_versions() {
+        let legacy: AppSettings =
+            serde_json::from_value(serde_json::json!({"version": 1})).unwrap();
+        assert_eq!(
+            legacy.general.tasks_view_mode,
+            TasksViewPreference::default()
+        );
+        legacy.validate().unwrap();
+
+        let store = Store::memory().unwrap();
+        store
+            .set_preference(
+                "settings",
+                &serde_json::json!({
+                    "version": 1,
+                    "general": {
+                        "tasks_view_mode": {"version": 99, "mode": "list"}
+                    }
+                }),
+            )
+            .unwrap();
+        let recovered = load(&store).unwrap();
+        assert_eq!(
+            recovered.recovery,
+            Some(SettingsRecovery::InvalidCurrentVersion)
+        );
+        assert_eq!(
+            recovered.settings.general.tasks_view_mode,
+            TasksViewPreference::default()
+        );
     }
 
     #[tokio::test]

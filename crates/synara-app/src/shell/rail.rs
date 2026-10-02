@@ -55,7 +55,7 @@ fn rail_item_label(id: RailItemId) -> &'static str {
     match id {
         RailItemId::Panel(RailPanelItemId::Home) => "Home",
         RailItemId::Panel(RailPanelItemId::Spaces) => "Spaces",
-        RailItemId::Route(RailRouteItemId::Kanban) => "Kanban",
+        RailItemId::Route(RailRouteItemId::Kanban) => "Tasks",
         RailItemId::Route(RailRouteItemId::PullRequests) => "Pull requests",
         RailItemId::Route(RailRouteItemId::Automations) => "Automations",
         RailItemId::Route(RailRouteItemId::Studio) => "Studio",

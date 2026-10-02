@@ -9,6 +9,70 @@ impl Shell {
         cx.notify();
     }
 
+    fn tasks_view_switcher(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let selected = self.settings.value.general.tasks_view_mode.mode;
+        div()
+            .id("tasks-view-switcher")
+            .role(gpui::Role::TabList)
+            .aria_label("Tasks view")
+            .aria_description("Left and right select List or Kanban")
+            .tab_group()
+            .h(px(30.))
+            .p(px(2.))
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(palette().border))
+            .bg(rgb(palette().canvas))
+            .flex()
+            .items_center()
+            .children(
+                [
+                    (TasksViewMode::List, "List", 0usize),
+                    (TasksViewMode::Kanban, "Kanban", 1usize),
+                ]
+                .into_iter()
+                .map(|(mode, label, index)| {
+                    let active = selected == mode;
+                    let id = if mode == TasksViewMode::List {
+                        "tasks-view-list"
+                    } else {
+                        "tasks-view-kanban"
+                    };
+                    ui::button_shell(id, label, active)
+                        .role(gpui::Role::Tab)
+                        .aria_label(label)
+                        .aria_selected(active)
+                        .aria_description("Use Left or Right to change the Tasks view")
+                        .track_focus(&self.tasks_view_focus[index])
+                        .tab_stop(active)
+                        .h(px(24.))
+                        .px_2()
+                        .py_0()
+                        .text_size(px(12.))
+                        .when(!active, |button| button.bg(gpui::rgba(0)))
+                        .on_key_down(cx.listener(
+                            move |this, event: &gpui::KeyDownEvent, window, cx| {
+                                let modifiers = event.keystroke.modifiers;
+                                if modifiers.alt || modifiers.control || modifiers.platform {
+                                    return;
+                                }
+                                let mode = match event.keystroke.key.as_str() {
+                                    "left" if index > 0 => TasksViewMode::List,
+                                    "right" if index == 0 => TasksViewMode::Kanban,
+                                    _ => return,
+                                };
+                                this.set_tasks_view_mode(mode, window, cx);
+                                cx.stop_propagation();
+                            },
+                        ))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.set_tasks_view_mode(mode, window, cx);
+                        }))
+                }),
+            )
+            .into_any_element()
+    }
+
     fn toolbar(
         &self,
         sidebar_fraction: f32,
@@ -158,6 +222,10 @@ impl Shell {
                                     .text_size(px(15.))
                                     .child(title)
                             })),
+                    )
+                    .children(
+                        (self.panel == Panel::Kanban && !self.navigation.studio)
+                            .then(|| self.tasks_view_switcher(cx)),
                     )
                     .children((self.panel == Panel::Kanban).then(|| {
                         ui::action(

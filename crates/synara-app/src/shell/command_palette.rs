@@ -222,8 +222,8 @@ impl Shell {
                 Action::Panel(Panel::SideChats),
             ),
             (
-                "Kanban",
-                "Projects and tasks · Ctrl/Cmd+9",
+                "Tasks",
+                "List and project boards · Ctrl/Cmd+9",
                 Glyph::Kanban,
                 Action::Panel(Panel::Kanban),
             ),

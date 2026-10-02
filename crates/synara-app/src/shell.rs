@@ -297,6 +297,7 @@ pub struct Shell {
     panel: Panel,
     dock_panel: Panel,
     dock_motion: crate::ui::motion::Drawer,
+    tasks_view_focus: [gpui::FocusHandle; 2],
     error: Option<String>,
     notice: Option<String>,
     focus_composer: bool,
@@ -507,6 +508,7 @@ impl Shell {
         );
         let show_onboarding =
             bootstrap.settings.onboarding.started && !bootstrap.settings.onboarding.completed;
+        let tasks_view_focus = std::array::from_fn(|_| cx.focus_handle());
         let mut this = Self {
             goals: goals::GoalsState::new(cx),
             releases: releases::ReleasesState::default(),
@@ -595,6 +597,7 @@ impl Shell {
             },
             dock_panel: Panel::Dock,
             dock_motion: crate::ui::motion::Drawer::new(false),
+            tasks_view_focus,
             error: None,
             notice: None,
             focus_composer: false,

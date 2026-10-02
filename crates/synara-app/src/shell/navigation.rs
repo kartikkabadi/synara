@@ -654,7 +654,7 @@ impl Shell {
                         nav.child(
                             ui::action(
                                 "kanban-navigation",
-                                "Kanban",
+                                "Tasks",
                                 Some(Glyph::Kanban),
                                 self.panel == Panel::Kanban,
                                 cx.listener(|this, _: &(), _, cx| {
