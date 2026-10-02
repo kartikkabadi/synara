@@ -73,6 +73,7 @@ struct Command {
     title: String,
     detail: String,
     glyph: Glyph,
+    custom_icon: Option<ui::menu::ChoiceIcon>,
     action: Action,
 }
 impl Shell {
@@ -128,16 +129,31 @@ impl Shell {
             _ => (0, query.as_str()),
         };
         let mut commands = Vec::new();
+        let project_icons: Vec<_> = self
+            .catalog
+            .projects
+            .iter()
+            .filter(|project| !self.is_chat_workspace(project))
+            .map(|project| (project.id, self.project_choice_icon(project)))
+            .collect();
         let mut add = |category: u8, title: String, detail: String, glyph, action| {
             if kind != 0 && kind != category {
                 return;
             }
             let haystack = format!("{title} {detail}").to_lowercase();
             if query.split_whitespace().all(|word| haystack.contains(word)) {
+                let custom_icon = match &action {
+                    Action::Project(id) => project_icons
+                        .iter()
+                        .find(|(project_id, _)| project_id == id)
+                        .map(|(_, icon)| icon.clone()),
+                    _ => None,
+                };
                 commands.push(Command {
                     title,
                     detail,
                     glyph,
+                    custom_icon,
                     action,
                 });
             }
@@ -598,7 +614,12 @@ impl Shell {
                 .child(div().id("command-palette-results").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.command_palette.scroll).px_2()
                     .children(commands.iter().enumerate().skip(first).map(|(index, command)| {
                         let action = command.action.clone();
-                        ui::action(("command", index), command.title.clone(), Some(command.glyph), index == self.command_palette.selected,
+                        let icon = command
+                            .custom_icon
+                            .as_ref()
+                            .map(|recipe| recipe())
+                            .or_else(|| Some(ui::icon(command.glyph).into_any_element()));
+                        ui::action_icon(("command", index), command.title.clone(), icon, index == self.command_palette.selected,
                             cx.listener(move |this, _: &(), window, cx| this.execute_palette_command(action.clone(), window, cx)))
                             .w_full().h(px(38.)).min_w_0().child(div().flex_1())
                             .child(div().max_w(px(230.)).text_ellipsis().text_size(px(11.)).text_color(rgb(palette().muted)).child(command.detail.clone()))
