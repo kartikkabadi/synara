@@ -6,6 +6,7 @@ pub mod menu;
 pub mod metrics;
 pub mod motion;
 mod personalization;
+mod theme;
 pub use personalization::{
     canvas_background, chat_width, code_font_size, glass_edge, motion_multiplier, row_height,
     settings_row_padding, surface, terminal_font_size, ui_font_size,
@@ -119,24 +120,28 @@ pub fn configure(
         ThemePreference::Light => false,
         ThemePreference::Dark => true,
     };
-    let palette = if !dark {
-        LIGHT
-    } else if appearance.dark_theme == DarkThemePreference::Dracula {
-        Palette {
-            canvas: 0x282a36,
-            sidebar: 0x252731,
-            overlay: 0x30323f,
-            hover: 0x30323c,
-            selected: 0x393b49,
-            border: 0x393b46,
-            text: 0xf8f8f2,
-            muted: 0xa4a3ae,
-            focus: 0xff79c6,
-            ..DARK
+    // Electron theme packs project onto the same semantic palette. `None`
+    // (legacy settings or an explicit clear) keeps the native palettes.
+    let palette = theme::configure(appearance, dark).unwrap_or_else(|| {
+        if !dark {
+            LIGHT
+        } else if appearance.dark_theme == DarkThemePreference::Dracula {
+            Palette {
+                canvas: 0x282a36,
+                sidebar: 0x252731,
+                overlay: 0x30323f,
+                hover: 0x30323c,
+                selected: 0x393b49,
+                border: 0x393b46,
+                text: 0xf8f8f2,
+                muted: 0xa4a3ae,
+                focus: 0xff79c6,
+                ..DARK
+            }
+        } else {
+            DARK
         }
-    } else {
-        DARK
-    };
+    });
     let mut palette = personalization::colorway(palette, appearance.personalization.colorway, dark);
     palette.dark = dark;
     if let Some(accent) = appearance.personalization.accent {

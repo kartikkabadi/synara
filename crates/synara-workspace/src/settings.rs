@@ -10,6 +10,8 @@ mod device;
 pub use device::DeviceSettings;
 mod chat;
 pub use chat::{ChatSettings, VoiceEnterBehavior};
+mod theme;
+pub use theme::*;
 
 pub const SETTINGS_VERSION: u32 = 1;
 pub const TASKS_VIEW_MODE_VERSION: u32 = 1;
@@ -55,7 +57,11 @@ pub enum DarkThemePreference {
     Dracula,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+fn default_electron_theme() -> Option<ThemePreferences> {
+    Some(ThemePreferences::default())
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AppearanceSettings {
     #[serde(default)]
@@ -70,6 +76,25 @@ pub struct AppearanceSettings {
     pub reduced_motion: bool,
     #[serde(default)]
     pub high_contrast: bool,
+    /// Electron-parity theme packs (upstream `synara:theme` localStorage).
+    /// `None` keeps the legacy native palette: files written before the field
+    /// existed stay on the palette they rendered with.
+    #[serde(default)]
+    pub electron_theme: Option<ThemePreferences>,
+}
+
+impl Default for AppearanceSettings {
+    fn default() -> Self {
+        Self {
+            personalization: Personalization::default(),
+            dark_theme: DarkThemePreference::default(),
+            theme: ThemePreference::default(),
+            fonts: FontPreferences::default(),
+            reduced_motion: false,
+            high_contrast: false,
+            electron_theme: default_electron_theme(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
