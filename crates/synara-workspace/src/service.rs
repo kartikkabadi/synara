@@ -84,6 +84,14 @@ pub struct WorkspaceService {
     events: broadcast::Sender<EventEnvelope>,
     worktree_lifecycle: Arc<tokio::sync::Mutex<()>>,
 }
+
+/// Where a scoped task is placed: an already-linked worktree directory and, for
+/// managed checkouts, the branch that owns it.
+#[derive(Default)]
+struct ScopedTaskPlacement {
+    selected_directory: Option<(PathBuf, PathBuf)>,
+    managed_branch: Option<(String, bool)>,
+}
 impl WorkspaceService {
     /// Explicitly requested backup. No automatic export, upload, or process launch.
     pub async fn backup_to(
@@ -519,8 +527,15 @@ impl WorkspaceService {
         scope: TaskScope,
         draft: String,
     ) -> WorkspaceResult<Task> {
-        self.create_scoped_task_at(project, title, agent_id, scope, draft, None, None)
-            .await
+        self.create_scoped_task_at(
+            project,
+            title,
+            agent_id,
+            scope,
+            draft,
+            ScopedTaskPlacement::default(),
+        )
+        .await
     }
 
     /// Create a new unsent branch draft in an existing, unassigned linked
@@ -569,8 +584,10 @@ impl WorkspaceService {
             agent_id,
             scope,
             draft,
-            Some((worktree.path, worktree.repository_path)),
-            None,
+            ScopedTaskPlacement {
+                selected_directory: Some((worktree.path, worktree.repository_path)),
+                managed_branch: None,
+            },
         )
         .await
     }
@@ -589,9 +606,12 @@ impl WorkspaceService {
         agent_id: String,
         scope: TaskScope,
         draft: String,
-        selected_directory: Option<(PathBuf, PathBuf)>,
-        managed_branch: Option<(String, bool)>,
+        placement: ScopedTaskPlacement,
     ) -> WorkspaceResult<Task> {
+        let ScopedTaskPlacement {
+            selected_directory,
+            managed_branch,
+        } = placement;
         if draft.len() > 1024 * 1024 {
             return Err(WorkspaceError::Invalid("Task draft exceeds 1 MiB".into()));
         }

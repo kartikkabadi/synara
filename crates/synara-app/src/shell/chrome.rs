@@ -647,14 +647,16 @@ impl Render for Shell {
                 }
                 if this.composer.read(cx).focus_handle(cx).is_focused(window)
                     && voice::recording_enter_should_stop(
-                        this.voice.recording(),
                         key,
-                        event.is_held,
-                        event.prefer_character_input,
-                        this.composer.read(cx).is_composing(),
-                        modifiers.control || modifiers.platform,
-                        modifiers.shift,
-                        modifiers.alt,
+                        voice::EnterStopProbe {
+                            recording: this.voice.recording(),
+                            is_held: event.is_held,
+                            prefer_character_input: event.prefer_character_input,
+                            is_composing: this.composer.read(cx).is_composing(),
+                            command: modifiers.control || modifiers.platform,
+                            shift: modifiers.shift,
+                            alt: modifiers.alt,
+                        },
                     )
                 {
                     this.voice_enter(cx);

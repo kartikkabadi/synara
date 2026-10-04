@@ -174,7 +174,7 @@ impl Drop for AutomationsView {
 pub(super) enum Reply {
     Loaded {
         generation: u64,
-        result: Result<(AutomationLedger, Catalog, Vec<AgentProfile>), String>,
+        result: Result<Box<(AutomationLedger, Catalog, Vec<AgentProfile>)>, String>,
     },
     Changed(Result<(), String>),
     Finished(Result<(), String>),
@@ -216,7 +216,8 @@ impl Shell {
                 ))
             }
             .await
-            .map_err(|e| e.to_string());
+            .map_err(|e| e.to_string())
+            .map(Box::new);
             Ok(Update::Automations(Box::new(Reply::Loaded {
                 generation,
                 result,
@@ -259,7 +260,8 @@ impl Shell {
                     return;
                 }
                 match result {
-                    Ok((ledger, catalog, profiles)) => {
+                    Ok(loaded) => {
+                        let (ledger, catalog, profiles) = *loaded;
                         self.automations.ledger = ledger;
                         self.automations.loaded = true;
                         self.catalog = catalog;

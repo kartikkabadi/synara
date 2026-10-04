@@ -211,9 +211,9 @@ impl Shell {
                         })))
                     .child(ui::button("auto-completion-eval", "AI stop check", editor.completion_evaluated)
                         .on_click(cx.listener(|this, _, _, cx| {
-                            if let Some(editor)=&mut this.automations.editor {
-                                editor.completion_evaluated=!editor.completion_evaluated;
-                                editor.edit_revision=editor.edit_revision.wrapping_add(1);
+                            if let Some(editor) = &mut this.automations.editor {
+                                editor.completion_evaluated = !editor.completion_evaluated;
+                                editor.edit_revision = editor.edit_revision.wrapping_add(1);
                             }
                             cx.notify();
                         }))))

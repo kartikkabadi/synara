@@ -757,24 +757,28 @@ fn draft_matches(
         && text == stamp.draft_text
 }
 
-pub(super) fn recording_enter_should_stop(
-    recording: bool,
-    key: &str,
-    is_held: bool,
-    prefer_character_input: bool,
-    is_composing: bool,
-    command: bool,
-    shift: bool,
-    alt: bool,
-) -> bool {
-    recording
+/// The unmodified-enter conditions around a recording stop: anything that
+/// makes this Enter something other than a plain press must not stop it.
+#[derive(Clone, Copy)]
+pub(super) struct EnterStopProbe {
+    pub recording: bool,
+    pub is_held: bool,
+    pub prefer_character_input: bool,
+    pub is_composing: bool,
+    pub command: bool,
+    pub shift: bool,
+    pub alt: bool,
+}
+
+pub(super) fn recording_enter_should_stop(key: &str, probe: EnterStopProbe) -> bool {
+    probe.recording
         && key == "enter"
-        && !is_held
-        && !prefer_character_input
-        && !is_composing
-        && !command
-        && !shift
-        && !alt
+        && !probe.is_held
+        && !probe.prefer_character_input
+        && !probe.is_composing
+        && !probe.command
+        && !probe.shift
+        && !probe.alt
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1096,34 +1100,49 @@ mod tests {
 
     #[test]
     fn plain_enter_stops_recording_without_stealing_ime_or_modified_input() {
-        assert!(recording_enter_should_stop(
-            true, "enter", false, false, false, false, false, false
-        ));
-        for (held, prefer_character_input, is_composing, command, shift, alt) in [
-            (true, false, false, false, false, false),
-            (false, true, false, false, false, false),
-            (false, false, true, false, false, false),
-            (false, false, false, true, false, false),
-            (false, false, false, false, true, false),
-            (false, false, false, false, false, true),
+        let plain = EnterStopProbe {
+            recording: true,
+            is_held: false,
+            prefer_character_input: false,
+            is_composing: false,
+            command: false,
+            shift: false,
+            alt: false,
+        };
+        assert!(recording_enter_should_stop("enter", plain));
+        for probe in [
+            EnterStopProbe {
+                is_held: true,
+                ..plain
+            },
+            EnterStopProbe {
+                prefer_character_input: true,
+                ..plain
+            },
+            EnterStopProbe {
+                is_composing: true,
+                ..plain
+            },
+            EnterStopProbe {
+                command: true,
+                ..plain
+            },
+            EnterStopProbe {
+                shift: true,
+                ..plain
+            },
+            EnterStopProbe { alt: true, ..plain },
         ] {
-            assert!(!recording_enter_should_stop(
-                true,
-                "enter",
-                held,
-                prefer_character_input,
-                is_composing,
-                command,
-                shift,
-                alt,
-            ));
+            assert!(!recording_enter_should_stop("enter", probe));
         }
         assert!(!recording_enter_should_stop(
-            false, "enter", false, false, false, false, false, false
+            "enter",
+            EnterStopProbe {
+                recording: false,
+                ..plain
+            }
         ));
-        assert!(!recording_enter_should_stop(
-            true, "escape", false, false, false, false, false, false
-        ));
+        assert!(!recording_enter_should_stop("escape", plain));
     }
 
     #[test]

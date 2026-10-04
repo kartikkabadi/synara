@@ -99,12 +99,11 @@ impl OpenThreadTabs {
             .iter()
             .position(|candidate| *candidate == task)?;
         let mut remaining = self.task_ids.iter().copied();
-        let successor = remaining.nth(index + 1).or_else(|| {
+        remaining.nth(index + 1).or_else(|| {
             (index > 0)
                 .then(|| self.task_ids.get(index - 1).copied())
                 .flatten()
-        });
-        successor
+        })
     }
 }
 

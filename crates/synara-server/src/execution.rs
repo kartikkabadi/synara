@@ -247,12 +247,14 @@ pub(super) async fn dispatch_post(
     let worker = tokio::spawn(run_task(
         runtime.controller.clone(),
         runtime.workspace.clone(),
-        id,
-        payload.text,
-        payload.expected_remote,
-        cancellation.clone(),
-        view.clone(),
-        RUN_TIMEOUT,
+        RunTaskJob {
+            id,
+            text: payload.text,
+            expected_remote: payload.expected_remote,
+            cancellation: cancellation.clone(),
+            view: view.clone(),
+            run_timeout: RUN_TIMEOUT,
+        },
     ));
     runs.insert(
         id,
@@ -265,16 +267,25 @@ pub(super) async fn dispatch_post(
     RunView::new("running").response(202)
 }
 
-async fn run_task(
-    controller: Arc<Controller>,
-    workspace: WorkspaceService,
+/// One agent run's inputs: what was submitted and how the observer reports back.
+struct RunTaskJob {
     id: TaskId,
     text: String,
     expected_remote: Option<String>,
     cancellation: CancellationToken,
     view: Arc<StdMutex<RunView>>,
     run_timeout: Duration,
-) {
+}
+
+async fn run_task(controller: Arc<Controller>, workspace: WorkspaceService, job: RunTaskJob) {
+    let RunTaskJob {
+        id,
+        text,
+        expected_remote,
+        cancellation,
+        view,
+        run_timeout,
+    } = job;
     let current_remote = async {
         let task = workspace.task(id).await?;
         let location = workspace.workspace_for_task(&task).await?;

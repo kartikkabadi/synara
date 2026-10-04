@@ -303,8 +303,10 @@ impl WorkspaceService {
                 source.agent_id,
                 source.scope,
                 draft,
-                Some((directory, plan.destination.clone())),
-                Some((plan.branch.clone(), plan.remote)),
+                ScopedTaskPlacement {
+                    selected_directory: Some((directory, plan.destination.clone())),
+                    managed_branch: Some((plan.branch.clone(), plan.remote)),
+                },
             )
             .await
         }
@@ -445,14 +447,16 @@ impl WorkspaceService {
             current_source.agent_id,
             current_source.scope,
             draft,
-            Some((worktree.path, worktree.repository_path)),
-            Some((
-                worktree
-                    .branch
-                    .clone()
-                    .ok_or_else(|| invalid("the recovered worktree branch disappeared"))?,
-                matches!(current_workspace.location, WorkspaceLocation::Ssh { .. }),
-            )),
+            ScopedTaskPlacement {
+                selected_directory: Some((worktree.path, worktree.repository_path)),
+                managed_branch: Some((
+                    worktree
+                        .branch
+                        .clone()
+                        .ok_or_else(|| invalid("the recovered worktree branch disappeared"))?,
+                    matches!(current_workspace.location, WorkspaceLocation::Ssh { .. }),
+                )),
+            },
         )
         .await
     }

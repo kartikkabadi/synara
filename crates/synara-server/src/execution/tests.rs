@@ -411,12 +411,14 @@ async fn execution_deadline_cancels_and_drains_the_native_owner() {
         run_task(
             controller,
             workspace,
-            task.id,
-            "deadline".into(),
-            None,
-            CancellationToken::new(),
-            view.clone(),
-            Duration::from_millis(100),
+            RunTaskJob {
+                id: task.id,
+                text: "deadline".into(),
+                expected_remote: None,
+                cancellation: CancellationToken::new(),
+                view: view.clone(),
+                run_timeout: Duration::from_millis(100),
+            },
         ),
     )
     .await

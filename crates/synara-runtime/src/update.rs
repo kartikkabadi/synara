@@ -349,8 +349,7 @@ impl UpdateHandoff {
         // portable permissions object.
         fs::set_permissions(&self.staged_artifact, current_metadata.permissions())?;
 
-        fs::rename(&self.current_executable, &self.rollback_copy)
-            .map_err(|error| RuntimeError::Io(error))?;
+        fs::rename(&self.current_executable, &self.rollback_copy).map_err(RuntimeError::Io)?;
 
         if let Err(error) = fs::rename(&self.staged_artifact, &self.current_executable) {
             if fs::rename(&self.rollback_copy, &self.current_executable).is_err() {
