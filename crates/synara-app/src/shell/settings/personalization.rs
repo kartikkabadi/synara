@@ -194,7 +194,7 @@ impl Shell {
                     .size_full()
                     .object_fit(fit)
             }))
-            .child(div().absolute().inset_0().bg(ui::canvas_background()))
+            .child(div().absolute().inset_0().bg(ui::shell_background()))
             .children((style.material == SurfaceMaterial::Glass).then(|| {
                 div()
                     .absolute()

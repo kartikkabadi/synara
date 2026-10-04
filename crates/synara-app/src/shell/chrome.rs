@@ -85,7 +85,18 @@ impl Shell {
             return self.zen_toolbar(viewport_width, maximized, cx);
         }
         let docked = dock_width > 0.;
-        let navigation_width = (ui::SIDEBAR_WIDTH * sidebar_fraction).max(208.);
+        // The top strip spans the rail + panel column upstream; the leading
+        // controls stay pinned to the traffic-light gutter in either state.
+        let navigation_width = (if self.rail_enabled() {
+            rail::RAIL_WIDTH
+        } else {
+            0.
+        }) + ui::SIDEBAR_WIDTH * sidebar_fraction;
+        let leading_inset = if cfg!(target_os = "macos") {
+            ui::TRAFFIC_LIGHT_GUTTER
+        } else {
+            16.
+        };
         let has_chat = !self.environment.maximized
             && (self.panel == Panel::Conversation || docked)
             && self.task().is_some();
@@ -94,6 +105,9 @@ impl Shell {
             .task()
             .map_or("New thread", |task| task.title.as_str())
             .to_owned();
+        // Cluster: toggle (28) + 2px + nav box (-4px, 32+2+32) = 92px wide.
+        // Past its end the route header keeps `px-5` (20px) of leading space.
+        let content_padding_left = (leading_inset + 100. - navigation_width).max(20.);
         div()
             .id("window-toolbar")
             .relative()
@@ -101,60 +115,79 @@ impl Shell {
             .flex_shrink_0()
             .flex()
             .items_center()
-            .border_b_1()
-            .border_color(gpui::rgba(0xffffff06))
             .child(
                 div()
+                    .id("window-drag-region-nav")
                     .w(px(navigation_width))
                     .flex_shrink_0()
-                    .px_3()
+                    .h_full()
+                    .on_mouse_down(gpui::MouseButton::Left, |event, window, _| {
+                        if event.click_count == 2 {
+                            window.zoom_window();
+                        } else {
+                            window.start_window_move();
+                        }
+                    }),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(px(leading_inset))
+                    .top_0()
+                    .h_full()
                     .flex()
                     .items_center()
-                    .gap_1()
-                    .child(ui::chrome_button(
+                    .gap(px(2.))
+                    .child(self.strip_button(
                         "sidebar-toggle",
-                        "Toggle sidebar",
-                        Glyph::Panel,
+                        "Toggle thread sidebar",
+                        "Toggle thread sidebar",
+                        if self.rail_drawer_open() || sidebar_fraction > 0.5 {
+                            Glyph::LayoutLeft
+                        } else {
+                            Glyph::LayoutAlignLeft
+                        },
+                        16.,
+                        28.,
                         false,
                         cx.listener(|this, _: &(), _, cx| this.toggle_sidebar(cx)),
                     ))
-                    .child(ui::chrome_button(
-                        "command-palette",
-                        "Commands (Ctrl/Cmd+Shift+P)",
-                        Glyph::Shortcut,
-                        false,
-                        cx.listener(|this, _: &(), window, cx| {
-                            this.open_command_palette(window, cx)
-                        }),
-                    ))
-                    .child(ui::chrome_button(
-                        "zen-mode",
-                        "Zen mode · Ctrl/Cmd+Alt+Z",
-                        Glyph::Goal,
-                        self.settings.saving,
-                        cx.listener(|this, _: &(), _, cx| this.toggle_zen(cx)),
-                    ))
-                    .child(ui::chrome_button(
-                        "active-tasks",
-                        "Active tasks and pending decisions",
-                        Glyph::Bell,
-                        false,
-                        cx.listener(|this, _: &(), window, cx| this.open_attention(window, cx)),
-                    ))
-                    .child(ui::chrome_button(
-                        "history-back",
-                        "Go back",
-                        Glyph::Back,
-                        self.navigation.history_index == 0,
-                        cx.listener(|this, _: &(), _, cx| this.history_back(true, cx)),
-                    ))
-                    .child(ui::chrome_button(
-                        "history-forward",
-                        "Go forward",
-                        Glyph::Forward,
-                        self.navigation.history_index + 1 >= self.navigation.history.len(),
-                        cx.listener(|this, _: &(), _, cx| this.history_back(false, cx)),
-                    )),
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(2.))
+                            .ml(px(-4.))
+                            .child(self.strip_button(
+                                "history-back",
+                                "Back",
+                                if cfg!(target_os = "macos") {
+                                    "Back (⌘[)".to_owned()
+                                } else {
+                                    "Back (Alt+Left)".to_owned()
+                                },
+                                Glyph::Back,
+                                24.,
+                                32.,
+                                self.navigation.history_index == 0,
+                                cx.listener(|this, _: &(), _, cx| this.history_back(true, cx)),
+                            ))
+                            .child(self.strip_button(
+                                "history-forward",
+                                "Forward",
+                                if cfg!(target_os = "macos") {
+                                    "Forward (⌘])".to_owned()
+                                } else {
+                                    "Forward (Alt+Right)".to_owned()
+                                },
+                                Glyph::Forward,
+                                24.,
+                                32.,
+                                self.navigation.history_index + 1
+                                    >= self.navigation.history.len(),
+                                cx.listener(|this, _: &(), _, cx| this.history_back(false, cx)),
+                            )),
+                    ),
             )
             .child(
                 div()
@@ -164,8 +197,8 @@ impl Shell {
                     .h_full()
                     .flex()
                     .items_center()
-                    .pl_4()
-                    .pr_2()
+                    .pl(px(content_padding_left))
+                    .pr(px(if docked { 20. } else { 23. }))
                     .gap_2()
                     .when(!docked && !cfg!(target_os = "macos"), |el| el.pr(px(152.)))
                     .when(docked && self.environment.maximized, |el| {
@@ -261,28 +294,21 @@ impl Shell {
                     .children(
                         (!matches!(self.panel, Panel::Settings | Panel::Kanban | Panel::Hubs))
                             .then(|| {
-                                ui::chrome_button(
-                                    "Terminal",
-                                    "Terminal",
-                                    Glyph::Dock,
-                                    false,
-                                    cx.listener(|this, _: &(), _, cx| {
-                                        if this.panel == Panel::Terminal {
-                                            this.hide_environment(cx);
-                                        } else {
-                                            this.set_panel(Panel::Terminal, cx);
-                                        }
-                                    }),
-                                )
-                            }),
-                    )
-                    .children(
-                        (!matches!(self.panel, Panel::Settings | Panel::Kanban | Panel::Hubs))
-                            .then(|| {
-                                ui::chrome_button(
-                                    "Files",
-                                    "Toggle workspace pane",
-                                    Glyph::PanelRight,
+                                self.strip_button(
+                                    "right-sidebar-toggle",
+                                    "Toggle right sidebar",
+                                    if docked {
+                                        "Close right sidebar"
+                                    } else {
+                                        "Open right sidebar"
+                                    },
+                                    if docked {
+                                        Glyph::LayoutRight
+                                    } else {
+                                        Glyph::LayoutAlignRight
+                                    },
+                                    16.,
+                                    28.,
                                     false,
                                     cx.listener(|this, _: &(), _, cx| {
                                         if this.dock_open() {
@@ -292,7 +318,6 @@ impl Shell {
                                         }
                                     }),
                                 )
-                                .when(docked, |el| el.bg(rgb(palette().overlay)))
                             }),
                     ),
             )
@@ -353,6 +378,53 @@ impl Shell {
                     )
             }))
             .into_any_element()
+    }
+
+    /// Upstream's leading-controls ghost buttons (`SidebarTrigger` /
+    /// `AppNavigationButtons`): fixed square, 8px radius, ink-tinted hover,
+    /// muted glyph, separate tooltip and accessible name.
+    fn strip_button(
+        &self,
+        id: &'static str,
+        aria: &'static str,
+        tooltip: impl Into<SharedString>,
+        glyph: Glyph,
+        icon_size: f32,
+        size: f32,
+        disabled: bool,
+        activate: impl Fn(&(), &mut Window, &mut gpui::App) + 'static,
+    ) -> Stateful<Div> {
+        let tooltip = tooltip.into();
+        div()
+            .id(id)
+            .role(gpui::Role::Button)
+            .aria_label(aria)
+            .when(disabled, |el| el.aria_description("Currently unavailable"))
+            .tab_index(0)
+            .size(px(size))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(8.))
+            .border_1()
+            .border_color(rgba(0))
+            .cursor_pointer()
+            .hover(|style| style.bg(ui::hover_fill()))
+            .focus_visible(|style| style.border_color(rgb(palette().focus)))
+            .when(disabled, |el| el.opacity(0.5).cursor_default())
+            .tooltip(move |_, cx| cx.new(|_| ui::Tooltip(tooltip.clone())).into())
+            .on_click(move |_, window, cx| {
+                if !disabled {
+                    activate(&(), window, cx);
+                }
+            })
+            .child(
+                ui::icon(glyph)
+                    .size(px(icon_size))
+                    .text_color(rgba((palette().muted << 8) | 0xbf)),
+            )
+            .child(ui::layout_probe(id))
     }
 
     fn tools_overlay(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
@@ -801,23 +873,49 @@ impl Render for Shell {
                                     .bottom_0()
                                     .left(px(ui::SIDEBAR_WIDTH * (sidebar_fraction - 1.0)))
                                     .w(px(ui::SIDEBAR_WIDTH))
-                                    .child(if self.rail_enabled() {
-                                        self.rail_panel_content(cx)
-                                    } else if self.panel == Panel::Settings {
-                                        self.settings_sidebar(cx)
-                                    } else {
-                                        self.sidebar(cx)
-                                    }),
+                                    .child(
+                                        // `.app-rail-panel`: the block's left
+                                        // end — panel tone, left corners,
+                                        // hairline on the outer three sides.
+                                        div()
+                                            .h_full()
+                                            .mb(px(ui::INSET_GAP))
+                                            .bg(ui::surface(palette().sidebar))
+                                            .border_l(px(0.5))
+                                            .border_y(px(0.5))
+                                            .border_color(ui::inset_border())
+                                            .rounded_l(px(ui::INSET_RADIUS))
+                                            .overflow_hidden()
+                                            .child(if self.rail_enabled() {
+                                                self.rail_panel_content(cx)
+                                            } else if self.panel == Panel::Settings {
+                                                self.settings_sidebar(cx)
+                                            } else {
+                                                self.sidebar(cx)
+                                            }),
+                                    ),
                             )
                             .child(ui::layout_probe("sidebar-drawer"))
                     }))
                     .child(
                         div()
+                            .id("content-card")
                             .flex()
                             .flex_col()
                             .flex_1()
                             .min_w_0()
                             .min_h_0()
+                            .relative()
+                            .mr(px(ui::INSET_GAP))
+                            .mb(px(ui::INSET_GAP))
+                            .bg(ui::surface(palette().canvas))
+                            .border(px(0.5))
+                            .border_color(ui::inset_border())
+                            .rounded_r(px(ui::INSET_RADIUS))
+                            .when(sidebar_fraction <= 0.5, |card| {
+                                card.rounded_l(px(ui::INSET_RADIUS))
+                            })
+                            .overflow_hidden()
                             .children(self.hubs.error_message().map(|error| {
                                 div()
                                     .px_4()

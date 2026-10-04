@@ -8,7 +8,7 @@ pub mod motion;
 mod personalization;
 pub use personalization::{
     canvas_background, chat_width, code_font_size, glass_edge, motion_multiplier, row_height,
-    settings_row_padding, surface, terminal_font_size, ui_font_size,
+    settings_row_padding, shell_background, surface, terminal_font_size, ui_font_size,
 };
 pub mod task_dialog;
 use gpui::{
@@ -20,14 +20,18 @@ pub const MENU_WIDTH: f32 = 304.0;
 pub const MENU_ROW_HEIGHT: f32 = 42.0;
 pub const MENU_MAX_HEIGHT: f32 = 294.0;
 pub const SIDEBAR_WIDTH: f32 = 256.0;
-pub const CHROME_HEIGHT: f32 = 46.0;
-pub const UI_FONT: &str = if cfg!(target_os = "windows") {
-    "Segoe UI"
-} else if cfg!(target_os = "macos") {
-    "Helvetica Neue"
-} else {
-    "Liberation Sans"
-};
+/// Upstream `CHAT_SURFACE_HEADER_HEIGHT_PX` — the top strip / route header band.
+pub const CHROME_HEIGHT: f32 = 44.0;
+/// Upstream `MAC_DESKTOP_TOP_BAR_TRAFFIC_LIGHT_GUTTER_CSS_PX`: leading inset
+/// past the macOS traffic-light cluster on the desktop top band.
+pub const TRAFFIC_LIGHT_GUTTER: f32 = 90.0;
+/// Upstream `--app-rail-inset-radius` (`--radius` 0.625rem * 1.3).
+pub const INSET_RADIUS: f32 = 13.0;
+/// Upstream `--app-rail-inset-gap`: the shell gap at the block's right/bottom.
+pub const INSET_GAP: f32 = 3.0;
+/// Upstream's system UI stack (`-apple-system`, `Segoe UI`, `system-ui`):
+/// GPUI's `.SystemUIFont` resolves to the same per-platform family.
+pub const UI_FONT: &str = ".SystemUIFont";
 
 /// Semantic material roles, not per-screen RGB literals.
 #[derive(Clone, Copy)]
@@ -55,16 +59,21 @@ pub struct Palette {
     /// light/dark Tailwind pair).
     pub dark: bool,
 }
+/// Upstream default Codex dark theme (`theme.seed.generated.ts` codex.dark:
+/// surface #111111, ink #fcfcfc, accent #0169cc) composed over the surface
+/// with `buildDarkDerivedTokens` (contrast 0): secondary fills are 4–9% ink
+/// tints, the border is 10% ink, secondary text 65% ink, the focus ring the
+/// accent mixed 30% toward white.
 pub const DARK: Palette = Palette {
-    canvas: 0x272731,
-    sidebar: 0x25252f,
-    overlay: 0x30303a,
-    hover: 0x2e2e38,
-    selected: 0x383843,
-    border: 0x34343f,
-    text: 0xe8e6e1,
-    muted: 0xa19fa9,
-    focus: 0x9bb6e8,
+    canvas: 0x111111,
+    sidebar: 0x151515,
+    overlay: 0x1e1e1e,
+    hover: 0x1f1f1f,
+    selected: 0x262626,
+    border: 0x292929,
+    text: 0xfcfcfc,
+    muted: 0xa9a9a9,
+    focus: 0x4d96db,
     error: 0xffb9c0,
     error_surface: 0x432c35,
     notice_surface: 0x303a4a,
@@ -73,16 +82,18 @@ pub const DARK: Palette = Palette {
     dark: true,
 };
 
+/// Upstream default Codex light theme (codex.light: surface #ffffff,
+/// ink #0d0d0d, accent #0169cc) with `buildLightDerivedTokens`.
 pub const LIGHT: Palette = Palette {
-    canvas: 0xfafafa,
-    sidebar: 0xf3f3f3,
-    overlay: 0xf0f0f0,
-    hover: 0xececec,
-    selected: 0xe1e1e5,
-    border: 0xdddddf,
-    text: 0x26262a,
-    muted: 0x6d6d76,
-    focus: 0x825b9e,
+    canvas: 0xffffff,
+    sidebar: 0xffffff,
+    overlay: 0xffffff,
+    hover: 0xf7f7f7,
+    selected: 0xf2f2f2,
+    border: 0xe9e9e9,
+    text: 0x0d0d0d,
+    muted: 0x626262,
+    focus: 0x0169cc,
     error: 0x99283b,
     error_surface: 0xffe4e8,
     notice_surface: 0xe6edf7,
@@ -99,6 +110,26 @@ thread_local! {
 }
 pub fn palette() -> Palette {
     PALETTE.with(std::cell::Cell::get)
+}
+/// Upstream `--app-rail-shell-tone`: the band+rail tone behind the inset
+/// block — surface mixed toward white in dark themes, black in light.
+pub fn shell_tone() -> u32 {
+    let palette = palette();
+    let anchor = if palette.dark { 0xffffff } else { 0x000000 };
+    mix_rgb(palette.canvas, anchor, if palette.dark { 0.05 } else { 0.03 })
+}
+/// Upstream `--app-rail-inset-border`: the block/tab hairline — 9% ink in
+/// dark themes, 10% in light.
+pub fn inset_border() -> gpui::Rgba {
+    rgba((palette().text << 8) | if palette().dark { 0x17 } else { 0x1a })
+}
+fn mix_rgb(a: u32, b: u32, amount: f32) -> u32 {
+    let channel = |shift| {
+        let a = ((a >> shift) & 0xff_u32) as f32;
+        let b = ((b >> shift) & 0xff_u32) as f32;
+        (a + (b - a) * amount).round() as u32
+    };
+    (channel(16) << 16) | (channel(8) << 8) | channel(0)
 }
 pub fn ui_font() -> SharedString {
     UI_FAMILY.with(|family| family.borrow().clone())
@@ -447,7 +478,21 @@ pub fn layout_probe_slot(id: &'static str, slot: usize) -> impl IntoElement {
     }, |_, _, _, _| {}).absolute().top_0().left_0().size_full()
 }
 
-/// Quiet chrome action; its accessible name remains available without a text label.
+/// Upstream button-secondary ink fills (a fraction of the text color):
+/// resting 4%, hover 6%, pressed 9% (`buildDarkDerivedTokens`, contrast 0).
+pub fn secondary_fill() -> Rgba {
+    rgba((palette().text << 8) | 0x0a)
+}
+pub fn hover_fill() -> Rgba {
+    rgba((palette().text << 8) | 0x0f)
+}
+pub fn active_fill() -> Rgba {
+    rgba((palette().text << 8) | 0x17)
+}
+
+/// Quiet chrome action matching upstream's `CHAT_HEADER_ICON_CONTROL` —
+/// 28px, 8px radius, transparent until hovered; its accessible name remains
+/// available without a text label.
 pub fn chrome_button(
     id: &'static str,
     label: &'static str,
@@ -456,8 +501,10 @@ pub fn chrome_button(
     activate: impl Fn(&(), &mut Window, &mut gpui::App) + 'static,
 ) -> Stateful<Div> {
     icon_button(id, label, glyph, disabled, activate)
-        .rounded_md()
+        .size(px(28.))
+        .rounded(px(8.))
         .bg(rgba(0))
+        .hover(|style| style.bg(hover_fill()))
         .child(layout_probe(id))
 }
 

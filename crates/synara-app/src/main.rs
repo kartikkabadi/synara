@@ -191,6 +191,11 @@ fn run() -> Result<()> {
                 },
                 move |window, cx| {
                     window.set_window_title("Synara");
+                    // Upstream `getMacTrafficLightPosition()`: x is the light
+                    // inset from the window edge, y centers the 14px cluster
+                    // on the 44px top strip.
+                    #[cfg(target_os = "macos")]
+                    window.set_traffic_light_position(gpui::point(px(16.), px(15.)));
                     let shell = cx.new(|cx| {
                         shell::Shell::new(app_controller, handle, bootstrap, interactions, cx)
                     });

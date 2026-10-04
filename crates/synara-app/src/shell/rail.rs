@@ -8,8 +8,8 @@ use super::*;
 use crate::ui::{self, Glyph, palette};
 use gpui::{Div, Stateful, rgba};
 
-/// Upstream `--app-rail-width: 3.25rem` at the 16px root.
-const RAIL_WIDTH: f32 = 52.;
+/// Upstream `--app-rail-width: calc(3.25rem - 1px)` at the 16px root.
+pub(super) const RAIL_WIDTH: f32 = 51.;
 const RAIL_BUTTON: f32 = 36.;
 /// Page size shared with the classic sidebar's project/thread paging.
 const RAIL_PAGE_SIZE: usize = 5;
@@ -1544,27 +1544,13 @@ impl Shell {
     }
 }
 
-/// `--app-rail-shell-tone`: the rail strip sits a shade off the sidebar
+/// `--app-rail-shell-tone`: the rail strip sits a shade off the content
 /// surface — lightened in dark themes, darkened in light.
 fn rail_shell_tone() -> u32 {
-    let palette = palette();
-    mix_color(
-        palette.sidebar,
-        palette.text,
-        if palette.dark { 0.05 } else { 0.03 },
-    )
+    ui::shell_tone()
 }
 /// `--app-rail-inset-border`: the hairline between the rail's items and
 /// shortcuts.
 fn rail_inset_border() -> gpui::Rgba {
-    rgba((palette().text << 8) | if palette().dark { 0x17 } else { 0x1a })
-}
-
-fn mix_color(a: u32, b: u32, amount: f32) -> u32 {
-    let channel = |shift| {
-        let a = ((a >> shift) & 0xff_u32) as f32;
-        let b = ((b >> shift) & 0xff_u32) as f32;
-        (a + (b - a) * amount).round() as u32
-    };
-    (channel(16) << 16) | (channel(8) << 8) | channel(0)
+    ui::inset_border()
 }

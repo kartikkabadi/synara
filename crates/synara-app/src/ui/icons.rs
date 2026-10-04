@@ -19,6 +19,10 @@ pub enum Glyph {
     More,
     Panel,
     PanelRight,
+    LayoutLeft,
+    LayoutAlignLeft,
+    LayoutRight,
+    LayoutAlignRight,
     Dock,
     Terminal,
     Files,
@@ -90,6 +94,10 @@ impl Glyph {
             Self::More => "icons/tabler/dots.svg",
             Self::Panel => "icons/synara/sidebar-simple-left-wide.svg",
             Self::PanelRight => "icons/synara/sidebar-simple-right-wide.svg",
+            Self::LayoutLeft => "icons/synara/layout-left.svg",
+            Self::LayoutAlignLeft => "icons/synara/layout-align-left.svg",
+            Self::LayoutRight => "icons/synara/layout-right.svg",
+            Self::LayoutAlignRight => "icons/synara/layout-align-right.svg",
             Self::Dock => "icons/synara/window.svg",
             Self::Terminal => "icons/synara/console.svg",
             Self::Files => "icons/tabler/file.svg",
@@ -259,6 +267,18 @@ pub(super) fn load(path: &str) -> Option<Cow<'static, [u8]>> {
         }
         "icons/synara/shield-code.svg" => {
             include_bytes!("../../assets/icons/synara/shield-code.svg")
+        }
+        "icons/synara/layout-left.svg" => {
+            include_bytes!("../../assets/icons/synara/layout-left.svg")
+        }
+        "icons/synara/layout-align-left.svg" => {
+            include_bytes!("../../assets/icons/synara/layout-align-left.svg")
+        }
+        "icons/synara/layout-right.svg" => {
+            include_bytes!("../../assets/icons/synara/layout-right.svg")
+        }
+        "icons/synara/layout-align-right.svg" => {
+            include_bytes!("../../assets/icons/synara/layout-align-right.svg")
         }
         "icons/synara/sidebar-simple-left-wide.svg" => {
             include_bytes!("../../assets/icons/synara/sidebar-simple-left-wide.svg")

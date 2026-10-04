@@ -91,6 +91,11 @@ fn canvas_percent(style: &Personalization) -> u8 {
 pub fn canvas_background() -> Rgba {
     STYLE.with(|style| alpha(super::palette().canvas, canvas_percent(&style.borrow())))
 }
+/// The window coat upstream paints under the whole shell (`--app-rail-shell-background`):
+/// same coverage math as `canvas_background`, tinted by the shell tone.
+pub fn shell_background() -> Rgba {
+    STYLE.with(|style| alpha(super::shell_tone(), canvas_percent(&style.borrow())))
+}
 pub fn surface(color: u32) -> Rgba {
     STYLE.with(|style| {
         let style = style.borrow();
