@@ -9,7 +9,7 @@ paths assume it is copied to `~/parity` (see `CONTEXT.md`).
   `seed.py` is unverified: its acceptance run never finished.
 - `checklist/`: `extract.py` builds `items.json` (routes, components, settings, keybindings) from
   upstream main `5f2ee77ae`; `map_status.py` wrote the first-pass `status.json`
-  (73 done, 304 partial, 768 missing of 1145). `score.py` was not written yet.
+  (52 done, 286 partial, 807 missing of 1145). `score.py` was not written yet.
 - `pieces/*/PIECE.md`: 28 judgeable pieces with scope, upstream sources and required states.
 - `briefs/`: builder and blind-critic briefs used per round.
 
