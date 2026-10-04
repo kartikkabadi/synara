@@ -662,6 +662,18 @@
    "path": "icons/central/lightning.svg",
    "source": "https://github.com/Emanuele-web04/synara/blob/ec3b1f6ef9/apps/web/public/central-icons-reversed/lightning.svg",
    "sha256": "398b85003fa045fd3a2907e5a308c8aad50f7b5847420f8d61685caff286d642"
+  },
+  {
+   "glyph": "Central:arrow-rotate-counter-clockwise",
+   "path": "icons/central/arrow-rotate-counter-clockwise.svg",
+   "source": "https://github.com/Emanuele-web04/synara/blob/ec3b1f6ef9/apps/web/public/central-icons-reversed/arrow-rotate-counter-clockwise.svg",
+   "sha256": "19b7c30f44d411fbe461eb283f0a968ec0b085a8b7a0950e6f6e162ac02a5d59"
+  },
+  {
+   "glyph": "Central:computer-use",
+   "path": "icons/central/computer-use.svg",
+   "source": "https://github.com/Emanuele-web04/synara/blob/ec3b1f6ef9/apps/web/public/central-icons-reversed/computer-use.svg",
+   "sha256": "25fad1b40089b007c259638112ff24f7c177a616aaa3e204108a1e1c82eaf4b5"
   }
  ]
 }

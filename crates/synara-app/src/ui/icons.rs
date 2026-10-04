@@ -370,6 +370,12 @@ pub(super) fn load(path: &str) -> Option<Cow<'static, [u8]>> {
         "icons/central/light-bulb.svg" => {
             include_bytes!("../../assets/icons/central/light-bulb.svg")
         }
+        "icons/central/arrow-rotate-counter-clockwise.svg" => {
+            include_bytes!("../../assets/icons/central/arrow-rotate-counter-clockwise.svg")
+        }
+        "icons/central/computer-use.svg" => {
+            include_bytes!("../../assets/icons/central/computer-use.svg")
+        }
         "icons/central/star.svg" => {
             include_bytes!("../../assets/icons/central/star.svg")
         }

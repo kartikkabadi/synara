@@ -10,6 +10,7 @@ const fn item(
     label: &'static str,
     icon: Glyph,
     description: &'static str,
+    badge: Option<&'static str>,
 ) -> SectionInfo {
     SectionInfo {
         section,
@@ -18,18 +19,16 @@ const fn item(
         label,
         icon,
         description,
+        badge,
     }
 }
 
+/// Upstream `SETTINGS_NAV_GROUPS` order.
+pub(super) const GROUPS: &[&str] =
+    &["Personal", "Integrations", "Coding", "System", "Archived"];
+
+/// Upstream `SETTINGS_NAV_ITEMS`: ids and copy match the reference exactly.
 pub(super) const SECTIONS: &[SectionInfo] = &[
-    item(
-        Section::Onboarding,
-        "onboarding",
-        "Personal",
-        "Getting started",
-        Glyph::Help,
-        "Replay the welcome tour, check local agent commands, and set up your workspace.",
-    ),
     item(
         Section::General,
         "general",
@@ -37,6 +36,7 @@ pub(super) const SECTIONS: &[SectionInfo] = &[
         "General",
         Glyph::Settings,
         "Choose defaults for new chats, navigation, and the Environment panel.",
+        None,
     ),
     item(
         Section::Profile,
@@ -45,6 +45,7 @@ pub(super) const SECTIONS: &[SectionInfo] = &[
         "Profile",
         Glyph::User,
         "Your local activity, streaks, and a shareable stats card.",
+        None,
     ),
     item(
         Section::Appearance,
@@ -53,6 +54,7 @@ pub(super) const SECTIONS: &[SectionInfo] = &[
         "Appearance",
         Glyph::Palette,
         "Customize the theme, typography, density, and time format.",
+        None,
     ),
     item(
         Section::Notifications,
@@ -61,6 +63,7 @@ pub(super) const SECTIONS: &[SectionInfo] = &[
         "Notifications",
         Glyph::Bell,
         "Choose how Synara tells you when work finishes or needs attention.",
+        None,
     ),
     item(
         Section::Behavior,
@@ -69,14 +72,16 @@ pub(super) const SECTIONS: &[SectionInfo] = &[
         "Chat behavior",
         Glyph::Sliders,
         "Control live responses, follow-ups, review defaults, and safety confirmations.",
+        None,
     ),
     item(
         Section::Keybindings,
-        "keybindings",
+        "shortcuts",
         "Personal",
         "Keybindings",
         Glyph::Shortcut,
-        "Capture, customize, and add shortcuts for every Synara command.",
+        "Change, add, or remove the shortcut for every Synara command.",
+        None,
     ),
     item(
         Section::Usage,
@@ -85,6 +90,7 @@ pub(super) const SECTIONS: &[SectionInfo] = &[
         "Usage & limits",
         Glyph::Gauge,
         "See remaining quota and credits for every signed-in provider.",
+        None,
     ),
     item(
         Section::AppSnap,
@@ -93,6 +99,7 @@ pub(super) const SECTIONS: &[SectionInfo] = &[
         "AppSnap",
         Glyph::Capture,
         "Capture another app's frontmost window directly into a task.",
+        None,
     ),
     item(
         Section::Computer,
@@ -101,14 +108,16 @@ pub(super) const SECTIONS: &[SectionInfo] = &[
         "Computer use",
         Glyph::Window,
         "Let agents see and control this computer's desktop, and check backend status.",
+        Some("Beta"),
     ),
     item(
         Section::Mcp,
-        "mcp",
+        "integrations",
         "Integrations",
         "MCP connections",
         Glyph::Plugin,
         "Give Codex, Claude, and other local agents scoped access to Synara tasks.",
+        None,
     ),
     item(
         Section::Providers,
@@ -117,6 +126,7 @@ pub(super) const SECTIONS: &[SectionInfo] = &[
         "Agent providers",
         Glyph::Puzzle,
         "Choose visible coding agents and manage their installed CLI tools.",
+        None,
     ),
     item(
         Section::Models,
@@ -125,6 +135,7 @@ pub(super) const SECTIONS: &[SectionInfo] = &[
         "Models & writing",
         Glyph::Brain,
         "Choose the model used for Git writing and add custom model slugs.",
+        None,
     ),
     item(
         Section::Skills,
@@ -133,6 +144,7 @@ pub(super) const SECTIONS: &[SectionInfo] = &[
         "Agent skills",
         Glyph::Blocks,
         "Review reusable workflows discovered across all configured providers.",
+        None,
     ),
     item(
         Section::Worktrees,
@@ -141,14 +153,16 @@ pub(super) const SECTIONS: &[SectionInfo] = &[
         "Managed worktrees",
         Glyph::BranchSimple,
         "Review and clean up isolated workspaces created by Synara.",
+        None,
     ),
     item(
         Section::System,
-        "system",
+        "advanced",
         "System",
         "System tools",
         Glyph::Toolbox,
         "Manage sessions, recovery tools, low-level keybindings, and version details.",
+        None,
     ),
     item(
         Section::Archived,
@@ -157,74 +171,28 @@ pub(super) const SECTIONS: &[SectionInfo] = &[
         "Archived threads",
         Glyph::Archive,
         "Find and restore threads you previously archived.",
-    ),
-    // Native-specific capabilities remain reachable from System tools and search.
-    // They do not displace the reference's primary navigation or lose saved state.
-    item(
-        Section::ProjectImport,
-        "project-import",
-        "Integrations",
-        "Project import",
-        Glyph::Folder,
-        "Discover and review local Codex or Claude histories. Import unsent standalone chats without changing source files.",
-    ),
-    item(
-        Section::Device,
-        "device",
-        "Integrations",
-        "Device / capture",
-        Glyph::Window,
-        "Installed device helpers, captures, permissions and supported controls.",
-    ),
-    item(
-        Section::Plugins,
-        "plugins",
-        "Integrations",
-        "Plugins & integrations",
-        Glyph::Plugin,
-        "Synara-managed integrations and reported agent capabilities, with explicit ownership.",
-    ),
-    item(
-        Section::Privacy,
-        "privacy",
-        "System",
-        "Privacy & security",
-        Glyph::Settings,
-        "Local data, protocol diagnostics, secret-store status and safe deletion.",
-    ),
-    item(
-        Section::Workflows,
-        "workflows",
-        "Integrations",
-        "Subagents & workflows",
-        Glyph::Blocks,
-        "Create reviewed child-agent workflows, follow dependencies and usage, pause or stop, and review incoming client requests.",
+        None,
     ),
 ];
 
-pub(super) fn primary_section(section: Section) -> bool {
-    !matches!(
-        section,
-        Section::ProjectImport
-            | Section::Device
-            | Section::Plugins
-            | Section::Privacy
-            | Section::Workflows
-    )
-}
+/// The onboarding flow still drives `Section::Onboarding`; it is not a settings
+/// nav entry upstream, so it carries its own panel copy instead of a SECTIONS
+/// row.
+pub(super) const ONBOARDING: SectionInfo = SectionInfo {
+    section: Section::Onboarding,
+    id: "onboarding",
+    group: "",
+    label: "Getting started",
+    icon: Glyph::Help,
+    description: "Replay the welcome tour, check local agent commands, and set up your workspace.",
+    badge: None,
+};
 
-/// Preserve native accessibility/test identities while exposing the reference taxonomy.
-#[cfg(test)]
-pub(super) fn reference_section_id(section: Section) -> &'static str {
-    match section {
-        Section::Keybindings => "shortcuts",
-        Section::Mcp => "integrations",
-        Section::System => "advanced",
-        _ => SECTIONS
-            .iter()
-            .find(|item| item.section == section)
-            .map_or("general", |item| item.id),
-    }
+pub(super) fn section_info(section: Section) -> &'static SectionInfo {
+    SECTIONS
+        .iter()
+        .find(|item| item.section == section)
+        .unwrap_or(&ONBOARDING)
 }
 
 #[cfg(test)]
@@ -233,16 +201,14 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
-    fn primary_navigation_includes_onboarding_before_sixteen_reference_sections() {
+    fn navigation_matches_the_reference_taxonomy() {
         let actual: Vec<_> = SECTIONS
             .iter()
-            .filter(|item| primary_section(item.section))
-            .map(|item| (reference_section_id(item.section), item.group, item.label))
+            .map(|item| (item.id, item.group, item.label))
             .collect();
         assert_eq!(
             actual,
             vec![
-                ("onboarding", "Personal", "Getting started"),
                 ("general", "Personal", "General"),
                 ("profile", "Personal", "Profile"),
                 ("appearance", "Personal", "Appearance"),
@@ -264,23 +230,16 @@ mod tests {
     }
 
     #[test]
-    fn native_extensions_and_stable_control_ids_are_preserved() {
+    fn ids_are_unique_and_computer_carries_the_beta_badge() {
         let ids: HashSet<_> = SECTIONS.iter().map(|item| item.id).collect();
         assert_eq!(ids.len(), SECTIONS.len());
-        assert_eq!(SECTIONS.len(), 22);
-        for id in [
-            "workflows",
-            "project-import",
-            "device",
-            "privacy",
-            "plugins",
-        ] {
-            let item = SECTIONS.iter().find(|item| item.id == id).unwrap();
-            assert!(!primary_section(item.section));
-            assert!(!item.description.is_empty());
-        }
-        for id in ["keybindings", "mcp", "system"] {
-            assert!(ids.contains(id));
-        }
+        assert_eq!(SECTIONS.len(), 16);
+        assert_eq!(
+            SECTIONS
+                .iter()
+                .find(|item| item.badge.is_some())
+                .map(|item| (item.id, item.badge)),
+            Some(("computer", Some("Beta")))
+        );
     }
 }

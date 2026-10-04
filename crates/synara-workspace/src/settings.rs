@@ -135,6 +135,36 @@ pub struct OnboardingSettings {
     pub completed: bool,
 }
 
+/// Upstream `sidebarProjectSortOrder` (appSettings.ts): project rows in the
+/// main sidebar. Wire values are the upstream literals.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectSortOrder {
+    UpdatedAt,
+    CreatedAt,
+    #[default]
+    Manual,
+}
+
+/// Upstream `sidebarThreadSortOrder`: thread rows inside each project and the
+/// Chats list.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThreadSortOrder {
+    #[default]
+    UpdatedAt,
+    CreatedAt,
+}
+
+/// Upstream `defaultThreadEnvMode`: workspace mode chosen for new draft threads.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThreadEnvMode {
+    #[default]
+    Local,
+    Worktree,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct GeneralSettings {
@@ -142,13 +172,30 @@ pub struct GeneralSettings {
     /// User ordering for provider pickers; unlisted providers retain their
     /// registry order and are appended when discovered.
     pub provider_order: Vec<String>,
+    /// Workspace mode applied to newly created draft threads.
+    pub default_thread_env_mode: ThreadEnvMode,
     pub show_chats: bool,
+    /// Upstream `showGroupsSection`: the Hubs tab in the sidebar switcher.
     pub show_studio: bool,
-    pub alphabetical_projects: bool,
-    pub oldest_threads_first: bool,
+    /// Upstream `showAutomationRunThreads`.
+    pub show_automation_run_threads: bool,
+    pub project_order: ProjectSortOrder,
+    pub thread_order: ThreadSortOrder,
+    /// Upstream `anchorSentMessagesToTop`.
+    pub anchor_sent_messages_to_top: bool,
     pub restore_last_chat: bool,
     /// Off by default: archiving a task keeps its managed worktree for recovery.
     pub delete_worktree_on_archive: bool,
+    /// Upstream `showEnvironment*` keys: which sections the chat Environment
+    /// panel draws. Persisted here even where the panel has not landed them.
+    pub show_environment_usage: bool,
+    pub show_environment_repository: bool,
+    pub show_environment_pull_request: bool,
+    pub show_environment_editor: bool,
+    pub show_environment_recap: bool,
+    pub show_environment_pinned: bool,
+    pub show_environment_instructions: bool,
+    pub show_environment_notepad: bool,
     /// `classic` keeps the single sidebar column; `rail` shows the fixed icon
     /// strip plus a collapsible panel column (upstream `sidebarLayout`).
     pub sidebar_layout: synara_core::SidebarLayout,
@@ -169,12 +216,23 @@ impl Default for GeneralSettings {
         Self {
             default_provider: None,
             provider_order: Vec::new(),
+            default_thread_env_mode: ThreadEnvMode::Local,
             show_chats: true,
             show_studio: true,
-            alphabetical_projects: false,
-            oldest_threads_first: false,
+            show_automation_run_threads: true,
+            project_order: ProjectSortOrder::Manual,
+            thread_order: ThreadSortOrder::UpdatedAt,
+            anchor_sent_messages_to_top: true,
             restore_last_chat: true,
             delete_worktree_on_archive: false,
+            show_environment_usage: true,
+            show_environment_repository: true,
+            show_environment_pull_request: true,
+            show_environment_editor: true,
+            show_environment_recap: true,
+            show_environment_pinned: true,
+            show_environment_instructions: false,
+            show_environment_notepad: false,
             sidebar_layout: synara_core::SidebarLayout::Classic,
             rail_shortcuts: Vec::new(),
             rail_item_order: Vec::new(),
@@ -445,7 +503,7 @@ mod tests {
         let mut changed = loaded.settings;
         changed.appearance.theme = ThemePreference::Dark;
         changed.appearance.dark_theme = DarkThemePreference::Dracula;
-        changed.general.alphabetical_projects = true;
+        changed.general.project_order = ProjectSortOrder::CreatedAt;
         changed.general.show_studio = false;
         changed.general.provider_order = vec!["claude".into(), "codex".into()];
         changed.general.tasks_view_mode.mode = TasksViewMode::List;
