@@ -42,6 +42,8 @@ import {
 const EXCLUDED_STATE_ENTRIES = new Set([
   "logs",
   "diagnostics",
+  "environment-id",
+  "device-boot-ownership.json",
   "server-runtime.json",
   "quit-resume.json",
   // Beta regenerates its own environment identity on first start (see
