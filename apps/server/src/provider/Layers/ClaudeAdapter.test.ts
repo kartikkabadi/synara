@@ -23,7 +23,18 @@ import {
 } from "@synara/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import { assessClaudeCache } from "@synara/shared/claudeCache";
-import { Deferred, Effect, Exit, Fiber, Layer, Option, Queue, Random, Stream } from "effect";
+import {
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Queue,
+  Random,
+  Schema,
+  Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 import { afterEach, beforeEach, vi } from "vitest";
 
@@ -71,6 +82,7 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   }> = [];
   private done = false;
   private failure: unknown | undefined;
+  private pendingNext: Promise<IteratorResult<SDKMessage>> | undefined;
 
   public readonly interruptCalls: Array<void> = [];
   public readonly stopTaskCalls: Array<string> = [];
@@ -228,12 +240,21 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
             value: undefined,
           });
         }
-        return new Promise((resolve, reject) => {
+        const pending = new Promise<IteratorResult<SDKMessage>>((resolve, reject) => {
           this.waiters.push({
             resolve,
             reject,
           });
         });
+        this.pendingNext = pending;
+        return pending;
+      },
+      // The SDK query is an async generator: `return()` settles only after the pending
+      // `next()` does, so a consumer that awaits it while Claude is idle waits until
+      // something else (close, a message) settles that read.
+      return: async () => {
+        await this.pendingNext?.catch(() => undefined);
+        return { done: true, value: undefined };
       },
     };
   }
@@ -723,6 +744,29 @@ describe("Claude Synara harness policy", () => {
 });
 
 describe("ClaudeAdapterLive", () => {
+  it.effect("grants a multi-folder project's extra folders as additional directories", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        cwd: "/tmp/repos/web",
+        additionalDirectories: ["/tmp/repos/api", "/tmp/repos/shared"],
+        runtimeMode: "full-access",
+      });
+
+      assert.deepEqual(harness.getLastCreateQueryInput()?.options.additionalDirectories, [
+        "/tmp/repos/web",
+        "/tmp/repos/api",
+        "/tmp/repos/shared",
+      ]);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("passes provider instance environment to temporary command discovery", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
@@ -746,43 +790,46 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("keeps command discovery caches and homes isolated by provider instance id", () => {
-    const harness = makeMultiQueryHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-      if (!adapter.listCommands) {
-        assert.fail("Expected ClaudeAdapter to expose command discovery");
-      }
-      const sharedInput = {
-        provider: "claudeAgent" as const,
-        cwd: "/tmp/claude-work",
-        environment: { ANTHROPIC_AUTH_TOKEN: "shared-token" },
-      };
-      yield* adapter.listCommands({ ...sharedInput, instanceId: "claude_work_a" });
-      yield* adapter.listCommands({ ...sharedInput, instanceId: "claude_work_b" });
+  it.effect(
+    "keeps command discovery caches and account directories isolated by provider instance id",
+    () => {
+      const harness = makeMultiQueryHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        if (!adapter.listCommands) {
+          assert.fail("Expected ClaudeAdapter to expose command discovery");
+        }
+        const sharedInput = {
+          provider: "claudeAgent" as const,
+          cwd: "/tmp/claude-work",
+          environment: { ANTHROPIC_AUTH_TOKEN: "shared-token" },
+        };
+        yield* adapter.listCommands({ ...sharedInput, instanceId: "claude_work_a" });
+        yield* adapter.listCommands({ ...sharedInput, instanceId: "claude_work_b" });
 
-      assert.equal(harness.createInputs.length, 2);
-      assert.equal(
-        harness.createInputs[0]?.options.env?.HOME,
-        claudeIsolatedHomePath({
-          isolationRootDir: "/tmp/userdata",
-          providerInstanceId: "claude_work_a",
-        }),
+        assert.equal(harness.createInputs.length, 2);
+        for (const [index, instanceId] of ["claude_work_a", "claude_work_b"].entries()) {
+          const env = harness.createInputs[index]?.options.env;
+          const accountHome = claudeIsolatedHomePath({
+            isolationRootDir: "/tmp/userdata",
+            providerInstanceId: instanceId,
+          });
+          if (process.platform === "darwin") {
+            assert.equal(env?.CLAUDE_CONFIG_DIR, path.join(accountHome, ".claude"));
+            assert.equal(env?.CLAUDE_SECURESTORAGE_CONFIG_DIR, env?.CLAUDE_CONFIG_DIR);
+            assert.notEqual(env?.HOME, accountHome);
+          } else {
+            assert.equal(env?.HOME, accountHome);
+          }
+        }
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
       );
-      assert.equal(
-        harness.createInputs[1]?.options.env?.HOME,
-        claudeIsolatedHomePath({
-          isolationRootDir: "/tmp/userdata",
-          providerInstanceId: "claude_work_b",
-        }),
-      );
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
+    },
+  );
 
-  it.effect("starts an environment-only runtime in its Synara-scoped home", () => {
+  it.effect("starts an environment-only runtime with its Synara-scoped account directories", () => {
     const harness = makeHarness();
     return Effect.acquireUseRelease(
       Effect.sync(() => {
@@ -811,14 +858,18 @@ describe("ClaudeAdapterLive", () => {
           });
 
           const queryEnv = harness.getLastCreateQueryInput()?.options.env;
-          assert.equal(
-            queryEnv?.HOME,
-            claudeIsolatedHomePath({
-              isolationRootDir: "/tmp/userdata",
-              providerInstanceId: "claude_work",
-            }),
-          );
-          assert.equal(queryEnv?.CLAUDE_CONFIG_DIR, undefined);
+          const accountHome = claudeIsolatedHomePath({
+            isolationRootDir: "/tmp/userdata",
+            providerInstanceId: "claude_work",
+          });
+          if (process.platform === "darwin") {
+            assert.equal(queryEnv?.CLAUDE_CONFIG_DIR, path.join(accountHome, ".claude"));
+            assert.equal(queryEnv?.CLAUDE_SECURESTORAGE_CONFIG_DIR, queryEnv?.CLAUDE_CONFIG_DIR);
+            assert.notEqual(queryEnv?.HOME, accountHome);
+          } else {
+            assert.equal(queryEnv?.HOME, accountHome);
+            assert.equal(queryEnv?.CLAUDE_CONFIG_DIR, undefined);
+          }
           assert.equal(queryEnv?.ANTHROPIC_AUTH_TOKEN, "work-token");
         }),
       (previous) =>
@@ -1250,6 +1301,48 @@ describe("ClaudeAdapterLive", () => {
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(layer),
+    );
+  });
+
+  it.effect("applies the managed-account launch environment to the Claude SDK env", () => {
+    const harness = makeHarness();
+    const previousAuthToken = process.env.ANTHROPIC_AUTH_TOKEN;
+    process.env.ANTHROPIC_AUTH_TOKEN = "inherited-token";
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+        accountLaunch: {
+          ordinal: 1,
+          generation: 1,
+          profilePath: "/accounts/claudeAgent/1/agent",
+          environment: {
+            CLAUDE_CONFIG_DIR: "/accounts/claudeAgent/1/agent",
+            ANTHROPIC_API_KEY: "sk-ant-managed",
+            ANTHROPIC_AUTH_TOKEN: "",
+          },
+        },
+      });
+
+      const env = harness.getLastCreateQueryInput()?.options.env;
+      assert.isDefined(env);
+      assert.equal(env?.CLAUDE_CONFIG_DIR, "/accounts/claudeAgent/1/agent");
+      assert.equal(env?.ANTHROPIC_API_KEY, "sk-ant-managed");
+      assert.isFalse(env !== undefined && "ANTHROPIC_AUTH_TOKEN" in env);
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (previousAuthToken === undefined) {
+            delete process.env.ANTHROPIC_AUTH_TOKEN;
+          } else {
+            process.env.ANTHROPIC_AUTH_TOKEN = previousAuthToken;
+          }
+        }),
+      ),
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
     );
   });
 
@@ -2755,6 +2848,7 @@ describe("ClaudeAdapterLive", () => {
         usage: { total_tokens: 123, tool_uses: 4, duration_ms: 987 },
         session_id: "sdk-session-subagent",
         uuid: "task-progress-subagent-1",
+        summary: "  Reviewing the migration.\n",
       } as unknown as SDKMessage);
 
       harness.query.emit({
@@ -2764,7 +2858,7 @@ describe("ClaudeAdapterLive", () => {
         tool_use_id: "tool-task-1",
         status: "completed",
         output_file: "/tmp/task-1-output.md",
-        summary: "Reviewed the migration.",
+        summary: "  Reviewed the migration.\n",
         session_id: "sdk-session-subagent",
         uuid: "task-notification-1",
       } as unknown as SDKMessage);
@@ -2840,6 +2934,17 @@ describe("ClaudeAdapterLive", () => {
           event.type === "thread.token-usage.updated" && event.payload.usage.usedTokens === 123,
       );
       assert.equal(taskUsage?.type, "thread.token-usage.updated");
+
+      const taskProgress = runtimeEvents.find((event) => event.type === "task.progress");
+      assert.equal(taskProgress?.type, "task.progress");
+      if (taskProgress?.type === "task.progress") {
+        assert.equal(taskProgress.payload.summary, "Reviewing the migration.");
+      }
+      const taskCompleted = runtimeEvents.find((event) => event.type === "task.completed");
+      assert.equal(taskCompleted?.type, "task.completed");
+      if (taskCompleted?.type === "task.completed") {
+        assert.equal(taskCompleted.payload.summary, "Reviewed the migration.");
+      }
 
       const childTurnCompleted = childEvents.find((event) => event.type === "turn.completed");
       assert.equal(childTurnCompleted?.type, "turn.completed");
@@ -3855,6 +3960,7 @@ describe("ClaudeAdapterLive", () => {
           ),
         );
 
+      const nextCallsBeforeTaskStart = harness.query.iteratorNextCalls;
       harness.query.emit({
         type: "system",
         subtype: "task_started",
@@ -3865,6 +3971,15 @@ describe("ClaudeAdapterLive", () => {
         session_id: "sdk-session-steer",
         uuid: "task-started-steer-1",
       } as unknown as SDKMessage);
+      // Wait for the stream handler to register the subagent run before steering it:
+      // it pulls the next SDK message only after handling this one.
+      for (
+        let i = 0;
+        i < 10_000 && harness.query.iteratorNextCalls <= nextCallsBeforeTaskStart;
+        i += 1
+      ) {
+        yield* Effect.yieldNow;
+      }
 
       // No pending steer: the hook stays a clean passthrough.
       assert.deepEqual(yield* invokeHook("task-steer-1"), {});
@@ -3935,6 +4050,7 @@ describe("ClaudeAdapterLive", () => {
         runtimeMode: "full-access",
       });
 
+      const nextCallsBeforeTaskStart = harness.query.iteratorNextCalls;
       harness.query.emit({
         type: "system",
         subtype: "task_started",
@@ -3945,6 +4061,15 @@ describe("ClaudeAdapterLive", () => {
         session_id: "sdk-session-steer-attach",
         uuid: "task-started-steer-attach-1",
       } as unknown as SDKMessage);
+      // Wait for the stream handler to register the subagent run before steering it:
+      // it pulls the next SDK message only after handling this one.
+      for (
+        let i = 0;
+        i < 10_000 && harness.query.iteratorNextCalls <= nextCallsBeforeTaskStart;
+        i += 1
+      ) {
+        yield* Effect.yieldNow;
+      }
 
       const hook = harness.getLastCreateQueryInput()?.options.hooks?.PreToolUse?.[0]?.hooks[0];
       assert.isDefined(hook);
@@ -4332,6 +4457,81 @@ describe("ClaudeAdapterLive", () => {
       yield* adapter.stopTask(session.threadId, "wf-1");
       assert.deepEqual(harness.query.stopTaskCalls, ["wf-1"]);
       assert.equal(harness.query.interruptCalls.length, 0);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("trims task event strings so untrimmed SDK descriptions stay journalable", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil(
+          (event) => event.type === "task.updated" && event.payload.taskId === "bash-untrimmed",
+        ),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+      harness.query.emit({
+        type: "system",
+        subtype: "task_started",
+        task_id: "bash-untrimmed",
+        tool_use_id: "toolu-bash-untrimmed",
+        task_type: "local_bash",
+        description: "bun run test\n",
+        session_id: "sdk-session-untrimmed",
+        uuid: "bash-untrimmed-started",
+      } as unknown as SDKMessage);
+      harness.query.emit({
+        type: "system",
+        subtype: "task_progress",
+        task_id: "bash-untrimmed",
+        description: "  bun run test \n",
+        last_tool_name: "Bash ",
+        session_id: "sdk-session-untrimmed",
+        uuid: "bash-untrimmed-progress",
+      } as unknown as SDKMessage);
+      harness.query.emit({
+        type: "system",
+        subtype: "task_updated",
+        task_id: "bash-untrimmed",
+        patch: { status: "failed", error: "exit code 1\n" },
+        session_id: "sdk-session-untrimmed",
+        uuid: "bash-untrimmed-updated",
+      } as unknown as SDKMessage);
+
+      const taskEvents = Array.from(yield* Fiber.join(runtimeEventsFiber)).filter(
+        (event) =>
+          (event.type === "task.started" ||
+            event.type === "task.progress" ||
+            event.type === "task.updated") &&
+          event.payload.taskId === "bash-untrimmed",
+      );
+      assert.deepEqual(
+        taskEvents.map((event) => event.type),
+        ["task.started", "task.progress", "task.updated"],
+      );
+      for (const event of taskEvents) {
+        const encoded = yield* Schema.encodeEffect(ProviderRuntimeEvent)(event).pipe(Effect.exit);
+        assert.equal(Exit.isSuccess(encoded), true, `${event.type} must encode`);
+        if (event.type === "task.started" || event.type === "task.progress") {
+          assert.equal(event.payload.description, "bun run test");
+        }
+        if (event.type === "task.progress") {
+          assert.equal(event.payload.lastToolName, "Bash");
+        }
+        if (event.type === "task.updated") {
+          assert.equal(event.payload.error, "exit code 1");
+        }
+      }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -5590,6 +5790,35 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(layer),
+    );
+  });
+
+  it.effect("stops an idle session without waiting on the SDK query's pending read", () => {
+    // Regression: quit left Claude running. Interrupting the stream awaited the SDK
+    // generator's return(), which queues behind a read that never settles while
+    // Claude is idle, so teardown never reached query.close() or the process tree.
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+      for (let i = 0; i < 10_000 && harness.query.iteratorNextCalls === 0; i += 1) {
+        yield* Effect.yieldNow;
+      }
+
+      const stopping = yield* adapter.stopSession(THREAD_ID).pipe(Effect.forkChild);
+      for (let i = 0; i < 10_000 && stopping.pollUnsafe() === undefined; i += 1) {
+        yield* Effect.yieldNow;
+      }
+
+      assert.notEqual(stopping.pollUnsafe(), undefined, "stopSession must not hang");
+      assert.equal(harness.query.closeCalls, 1);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
     );
   });
 

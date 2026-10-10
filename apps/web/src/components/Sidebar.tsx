@@ -1,3 +1,5 @@
+import { ProviderAccountMenu } from "./ProviderAccountMenu";
+import { UsersIcon } from "~/lib/icons";
 import { useProjectImportDialogStore } from "~/projectImport/projectImportDialogStore";
 // FILE: Sidebar.tsx
 // Purpose: Renders the project/thread sidebar, including row status, sorting, and thread actions.
@@ -196,6 +198,8 @@ import {
   pullRequestQueryKeys,
 } from "../lib/pullRequestReactQuery";
 import { prefetchModelsForNewThread } from "../lib/providerModelPrefetch";
+import { resolveProviderDiscoveryCwd } from "../lib/providerDiscovery";
+import { modelQueryOptionsForProviderInstance } from "../hooks/useProviderModelCatalog";
 import {
   hasReconciledServerProviderStatuses,
   serverConfigQueryOptions,
@@ -278,7 +282,7 @@ import {
 } from "./SidebarActivityView";
 import { DesktopUpdateRailButton } from "./DesktopUpdateRailButton";
 import { SidebarIconButton, sidebarIconButtonSlotClass } from "./SidebarIconButton";
-import { useAnnouncementSheetSlot, useAnnouncementSheetSlotStore } from "./announcementSheetSlot";
+import { OneTimeCoachmark, TASKS_COACHMARK } from "./OneTimeCoachmark";
 import { SidebarLeadingIcon } from "./SidebarLeadingIcon";
 import { SidebarPrimaryAction } from "./SidebarPrimaryAction";
 import { RailAutomationsPanel } from "./RailAutomationsPanel";
@@ -439,7 +443,6 @@ import {
   DISCLOSURE_INNER_CLASS,
 } from "~/lib/disclosureMotion";
 import { createClientPointMenuAnchor } from "~/lib/clientPointMenuAnchor";
-import { resolveThreadModelSummary } from "~/lib/threadModelSummary";
 import {
   canCreateThreadHandoff,
   canContinueThreadHandoff,
@@ -451,7 +454,7 @@ import {
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { beginThreadDrag, endThreadDrag } from "../lib/threadDrag";
 import { useDiffRouteSearch } from "../hooks/useDiffRouteSearch";
-import { normalizeSettingsSection } from "../settingsNavigation";
+import { normalizeSettingsSection, type SettingsSectionId } from "../settingsNavigation";
 import {
   sidebarHoverRevealHideClassName,
   SIDEBAR_HEADER_ROW_CLASS_NAME,
@@ -480,6 +483,7 @@ import {
   useSidebarProjectRunController,
 } from "../hooks/useSidebarProjectRunController";
 import { useSidebarThreadActions } from "../hooks/useSidebarThreadActions";
+import { useThreadActionShortcuts } from "../hooks/useThreadActionShortcuts";
 import { usePinnedProjectAgentsStore } from "../pinnedProjectAgentsStore";
 import { usePinnedProjectsStore } from "../pinnedProjectsStore";
 import { reconcileOptimisticPinState } from "../pinning.logic";
@@ -1149,26 +1153,6 @@ function SortableProjectItem({
  * Header Activity toggle: a bell that lights up in the accent tone while the
  * Activity view is on, with an unread dot when completions are waiting.
  */
-const ACTIVITY_ONBOARDING_STORAGE_KEY = "synara:activity-onboarding:v1";
-const ACTIVITY_ONBOARDING_DURATION_MS = 8_000;
-
-function shouldShowActivityOnboarding(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return window.localStorage.getItem(ACTIVITY_ONBOARDING_STORAGE_KEY) !== "seen";
-  } catch {
-    return true;
-  }
-}
-
-function markActivityOnboardingSeen() {
-  try {
-    window.localStorage.setItem(ACTIVITY_ONBOARDING_STORAGE_KEY, "seen");
-  } catch {
-    // Storage can be unavailable in private or restricted browser contexts.
-  }
-}
-
 export function SidebarActivityBellButton({
   active,
   showUnreadDot,
@@ -1180,55 +1164,27 @@ export function SidebarActivityBellButton({
   shortcutLabel: string | null;
   onClick: () => void;
 }) {
-  const [onboardingVisible, setOnboardingVisible] = useState(shouldShowActivityOnboarding);
-  const [tooltipOpen, setTooltipOpen] = useState(false);
-  const startupSettled = useAnnouncementSheetSlotStore((state) => state.startupSettled);
-  const { open: onboardingOpen } = useAnnouncementSheetSlot(onboardingVisible && startupSettled);
-
-  useEffect(() => {
-    if (!onboardingOpen) return;
-    markActivityOnboardingSeen();
-    const timeout = window.setTimeout(() => {
-      setOnboardingVisible(false);
-      setTooltipOpen(false);
-    }, ACTIVITY_ONBOARDING_DURATION_MS);
-    return () => window.clearTimeout(timeout);
-  }, [onboardingOpen]);
-
-  const dismissOnboarding = () => {
-    if (onboardingVisible) markActivityOnboardingSeen();
-    setOnboardingVisible(false);
-    setTooltipOpen(false);
-  };
-
   return (
-    <Tooltip
-      open={onboardingVisible ? onboardingOpen : tooltipOpen}
-      onOpenChange={(open) => {
-        if (onboardingVisible) return;
-        setTooltipOpen(open);
-      }}
+    <OneTimeCoachmark
+      storageKey="synara:activity-onboarding:v1"
+      title="Activity"
+      description="See running tasks, completed work, and anything that needs your attention."
+      tooltip={`Activity view${shortcutLabel ? ` (${shortcutLabel})` : ""}`}
+      tooltipSide="bottom"
     >
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            aria-label={active ? "Switch to classic view" : "Switch to activity view"}
-            aria-pressed={active}
-            onClick={() => {
-              dismissOnboarding();
-              onClick();
-            }}
-            className={cn(
-              "relative inline-flex shrink-0 cursor-pointer items-center justify-center transition-colors",
-              sidebarIconButtonSlotClass("header"),
-              SIDEBAR_ROW_FOCUS_CLASS_NAME,
-              active
-                ? "bg-[color-mix(in_srgb,var(--color-text-accent)_15%,transparent)] text-[var(--color-text-accent)]"
-                : "sidebar-icon-button text-muted-foreground/75 hover:text-foreground",
-            )}
-          />
-        }
+      <button
+        type="button"
+        aria-label={active ? "Switch to classic view" : "Switch to activity view"}
+        aria-pressed={active}
+        onClick={onClick}
+        className={cn(
+          "relative inline-flex shrink-0 cursor-pointer items-center justify-center transition-colors",
+          sidebarIconButtonSlotClass("header"),
+          SIDEBAR_ROW_FOCUS_CLASS_NAME,
+          active
+            ? "bg-[color-mix(in_srgb,var(--color-text-accent)_15%,transparent)] text-[var(--color-text-accent)]"
+            : "sidebar-icon-button text-muted-foreground/75 hover:text-foreground",
+        )}
       >
         <BellIcon className={sidebarGlyphClass("leading")} />
         {showUnreadDot ? (
@@ -1237,29 +1193,8 @@ export function SidebarActivityBellButton({
             className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-[var(--color-text-accent)] ring-2 ring-[var(--sidebar-background,var(--background))]"
           />
         ) : null}
-      </TooltipTrigger>
-      <TooltipPopup
-        side={onboardingVisible ? "right" : "bottom"}
-        align={onboardingVisible ? "start" : "center"}
-        sideOffset={onboardingVisible ? 8 : 4}
-        className={cn(
-          onboardingVisible &&
-            "max-w-64 border-[var(--color-text-accent)] bg-[var(--color-text-accent)] text-white shadow-lg",
-        )}
-        viewportClassName={cn(onboardingVisible && "px-3 py-2.5")}
-      >
-        {onboardingVisible ? (
-          <div className="text-left">
-            <div className="text-ui leading-snug font-semibold">Activity</div>
-            <div className="mt-0.5 text-ui-sm leading-4 text-white/85">
-              See running tasks, completed work, and anything that needs your attention.
-            </div>
-          </div>
-        ) : (
-          `Activity view${shortcutLabel ? ` (${shortcutLabel})` : ""}`
-        )}
-      </TooltipPopup>
-    </Tooltip>
+      </button>
+    </OneTimeCoachmark>
   );
 }
 
@@ -1451,7 +1386,7 @@ export default function Sidebar() {
         }
       : null;
   }, [automationListQuery.data]);
-  // Tasks is Beta-only: Stable never subscribes to or reads to-dos (the server refuses them).
+  // Subscribe to Tasks unless the connected server has refused it.
   const tasksSurfaceEnabled = useTasksSurfaceEnabled();
   useTodoEventSubscription(tasksSurfaceEnabled);
   const tasksNeedingAttentionCount = useTasksNeedingAttentionCount(tasksSurfaceEnabled);
@@ -1633,6 +1568,11 @@ export default function Sidebar() {
   const [createProjectDialogOpen, setCreateProjectDialogOpen] = useState(false);
   const [createProjectSpaceId, setCreateProjectSpaceId] = useState<SpaceId | null | undefined>();
   const [searchPaletteOpen, setSearchPaletteOpen] = useState(false);
+  const [automationCreateOpen, setAutomationCreateOpen] = useState(false);
+  useEffect(() => {
+    // Match the dialog's previous panel-local lifetime when leaving Automations.
+    if (!isOnAutomations) setAutomationCreateOpen(false);
+  }, [isOnAutomations]);
   const openFeedbackDialog = useFeedbackDialogStore((state) => state.openDialog);
   const [searchPaletteMode, setSearchPaletteMode] = useState<SidebarSearchPaletteMode>("search");
   const projectAdditionLockRef = useRef(false);
@@ -1850,6 +1790,26 @@ export default function Sidebar() {
       return next;
     });
   }, []);
+  const handleMarkThreadUnread = useCallback(
+    (threadId: ThreadId) => {
+      clearDismissedThreadStatus(threadId);
+      markThreadUnread(threadId);
+    },
+    [clearDismissedThreadStatus, markThreadUnread],
+  );
+  const canSnoozeThread = useCallback(
+    (
+      thread: Pick<
+        SidebarThreadSummary,
+        "id" | "projectId" | "parentThreadId" | "sidechatSourceThreadId" | "sidechatContext"
+      >,
+    ) =>
+      !thread.parentThreadId &&
+      !groupProjectIdSet.has(thread.projectId) &&
+      !coordinatorThreadIds.has(thread.id) &&
+      !isSidechatThread(thread),
+    [groupProjectIdSet, coordinatorThreadIds],
+  );
   const resolveThreadStatusForSidebar = useCallback(
     (thread: SidebarThreadSummary) =>
       resolveThreadStatusPill({
@@ -1976,6 +1936,18 @@ export default function Sidebar() {
     sidebarTreeThreads,
     sidebarThreadSummaryById,
     threadsHydrated,
+  });
+  useThreadActionShortcuts({
+    enabled: !isOnSettings,
+    keybindings,
+    routeThreadId,
+    activeSplitView,
+    threadById: sidebarThreadSummaryById,
+    terminalStateByThreadId,
+    canSnooze: canSnoozeThread,
+    onArchive: confirmAndArchiveThread,
+    onSnooze: setSnoozeDialogThreadId,
+    onMarkUnread: handleMarkThreadUnread,
   });
   const snoozedSidebarThreads = useMemo(
     () =>
@@ -2641,7 +2613,11 @@ export default function Sidebar() {
   const addProjectFromPath = useCallback(
     async (
       rawCwd: string,
-      options: { createIfMissing?: boolean; spaceId?: SpaceId | null } = {},
+      options: {
+        createIfMissing?: boolean;
+        spaceId?: SpaceId | null;
+        additionalFolders?: ReadonlyArray<string>;
+      } = {},
     ) => {
       const cwd = rawCwd.trim();
       if (!cwd) {
@@ -2658,10 +2634,13 @@ export default function Sidebar() {
       // makes the entire Sidebar bail out of compilation — silently, since `panicThreshold`
       // is unset. Nested function bodies are lowered separately and are unaffected, and the
       // catch below still sees every rejection. See Sidebar.compiler.test.ts.
+      const additionalFolders = options.additionalFolders ?? [];
       const runAddProject = async () => {
         const existing = findWorkspaceRootMatch(projects, cwd, (project) => project.cwd);
+        // A multi-folder project never reopens an existing one: that would drop its extra
+        // folders. The create below reports the conflict instead.
         const existingRecovery = await recoverExistingAddProjectTarget({
-          existingProjectId: existing?.id,
+          existingProjectId: additionalFolders.length > 0 ? undefined : existing?.id,
           workspaceRoot: cwd,
           recoverByProjectId: (projectId) => recoverExistingProjectFromServer(api, projectId),
           recoverByWorkspaceRoot: (workspaceRoot) =>
@@ -2678,6 +2657,7 @@ export default function Sidebar() {
         const creationResult = await createOrRecoverProjectFromPath({
           api,
           workspaceRoot: cwd,
+          ...(additionalFolders.length > 0 ? { additionalFolders } : {}),
           ...(options.createIfMissing === undefined
             ? {}
             : { createIfMissing: options.createIfMissing }),
@@ -3301,11 +3281,7 @@ export default function Sidebar() {
           hasPendingUserInput,
         });
       const threadStatus = threadSummary ? resolveThreadStatusForSidebar(threadSummary) : null;
-      const canSnooze =
-        !thread.parentThreadId &&
-        !groupProjectIdSet.has(thread.projectId) &&
-        !coordinatorThreadIds.has(threadId) &&
-        !isSidechatThread(thread);
+      const canSnooze = canSnoozeThread(thread);
       const handoffTargets = canHandoff
         ? resolveAvailableHandoffTargets({
             sourceProvider: thread.modelSelection.provider,
@@ -3538,8 +3514,7 @@ export default function Sidebar() {
       }
 
       if (clicked === "mark-unread") {
-        clearDismissedThreadStatus(threadId);
-        markThreadUnread(threadId);
+        handleMarkThreadUnread(threadId);
         return;
       }
       if (clicked === "clear-notification") {
@@ -3688,20 +3663,20 @@ export default function Sidebar() {
     },
     [
       appSettings,
+      canSnoozeThread,
       confirmAndArchiveThread,
       confirmAndDeleteThread,
       coordinatorThreadIds,
       copyPathToClipboard,
       copyThreadIdToClipboard,
-      clearDismissedThreadStatus,
       clearThreadNotification,
       continueHandoffInThread,
       continueThreadAsGroup,
       forkThread,
       groupProjectIdSet,
       handoffThread,
-      markThreadUnread,
       moveThreadToGroup,
+      handleMarkThreadUnread,
       navigate,
       openRenameThreadDialog,
       pinnedThreadIdSet,
@@ -3747,8 +3722,7 @@ export default function Sidebar() {
 
       if (clicked === "mark-unread") {
         for (const id of ids) {
-          clearDismissedThreadStatus(id);
-          markThreadUnread(id);
+          handleMarkThreadUnread(id);
         }
         clearSelection();
         return;
@@ -3819,9 +3793,8 @@ export default function Sidebar() {
       appSettings.confirmThreadDelete,
       archiveThread,
       clearSelection,
-      clearDismissedThreadStatus,
       deleteThread,
-      markThreadUnread,
+      handleMarkThreadUnread,
       removeFromSelection,
       selectedThreadIds,
     ],
@@ -4022,6 +3995,7 @@ export default function Sidebar() {
           await addProjectFromPath(value.workspaceRoot, {
             createIfMissing: value.createIfMissing,
             spaceId: value.spaceId,
+            additionalFolders: value.additionalFolders,
           });
         }
       };
@@ -4332,7 +4306,7 @@ export default function Sidebar() {
       tasks: {
         icon: TasksIcon,
         label: "Tasks",
-        // Beta's Tasks entry stands for both views: the list and the Kanban board.
+        // The Tasks entry stands for both views: the list and the Kanban board.
         active: isOnTasks || isOnKanban,
         badge: tasksAttentionBadge,
         onClick: () => {
@@ -5034,7 +5008,7 @@ export default function Sidebar() {
       slotOccupied: Boolean(input.threadJumpLabel),
     });
     return (
-      <div className="relative flex min-w-0 items-center justify-end gap-[3px] group-hover/thread-row:min-w-12 group-focus-within/thread-row:min-w-12">
+      <div className="relative flex min-w-0 items-center justify-end gap-2 group-hover/thread-row:min-w-12 group-focus-within/thread-row:min-w-12">
         {input.rightMetaChips.length > 0 ? (
           <div className={cn("shrink-0", THREAD_ROW_META_CHIP_HOVER_FADE_CLASS_NAME)}>
             <SidebarMetaChipStack chips={input.rightMetaChips} />
@@ -5174,6 +5148,7 @@ export default function Sidebar() {
         className={cn(SIDEBAR_HOVER_CARD_SURFACE_CLASS_NAME, "whitespace-normal leading-tight")}
       >
         <ThreadHoverCardContent
+          threadId={thread.id}
           title={thread.title}
           timeLabel={formatRelativeTime(thread.updatedAt ?? thread.createdAt)}
           projectName={hoverMetadata.projectName}
@@ -5184,7 +5159,18 @@ export default function Sidebar() {
           worktreeName={hoverMetadata.worktreeName}
           pullRequest={prByThreadId.get(thread.id) ?? null}
           onOpenPullRequest={openPrLink}
-          model={resolveThreadModelSummary(thread.modelSelection)}
+          model={thread.modelSelection}
+          modelCatalogQueryOptions={modelQueryOptionsForProviderInstance({
+            provider: thread.modelSelection.provider,
+            instanceId: thread.modelSelection.instanceId ?? thread.modelSelection.provider,
+            settings: appSettings,
+            enabled: false,
+            cwd: resolveProviderDiscoveryCwd({
+              activeThreadWorktreePath: thread.worktreePath,
+              activeProjectCwd: hoverProject?.cwd ?? null,
+              serverCwd,
+            }),
+          })}
           status={hoverStatus}
         />
       </TooltipPopup>
@@ -6754,6 +6740,34 @@ export default function Sidebar() {
     ...railAvailability,
   });
   const railItems: AppRailItem[] = railVisibleItemIds.map(railItemFor);
+  const searchPaletteNavigationActions: SidebarSearchAction[] = (
+    ["inbox", "kanban", "studio", "automations"] as const
+  )
+    .filter((id) => isRailItemAvailable(id, railAvailability))
+    .map((id) => {
+      const item = railItemFor(id);
+      return {
+        id: `go-${id}`,
+        label: `Go to ${item.label}`,
+        description: `Open ${item.label}.`,
+        keywords: [item.label, "go", "navigate"],
+        run: item.onSelect,
+        icon: item.glyphs.idle,
+      };
+    });
+  if (projects.length > 0) {
+    searchPaletteNavigationActions.push({
+      id: "new-automation",
+      label: "New automation",
+      description: "Schedule a recurring task.",
+      keywords: ["automation", "create", "new", "schedule"],
+      icon: AddPlusIcon,
+      run: () => {
+        railItemFor("automations").onSelect();
+        setAutomationCreateOpen(true);
+      },
+    });
+  }
   const railShortcutItems: AppRailItem[] = railShortcuts.flatMap((shortcut): AppRailItem[] => {
     if (shortcut.kind === "space") {
       return [
@@ -6942,6 +6956,9 @@ export default function Sidebar() {
             void navigate({ to: "/settings", search: { section: "usage" } });
           }}
         />
+        <ProviderAccountMenu triggerClassName="sidebar-icon-button inline-flex size-9 items-center justify-center rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground">
+          <UsersIcon className="size-4" />
+        </ProviderAccountMenu>
         <SidebarHelpMenu inRail {...sidebarHelpMenuProps} />
         {showDesktopUpdateButton && desktopUpdateState ? (
           <DesktopUpdateRailButton
@@ -7049,7 +7066,10 @@ export default function Sidebar() {
                 />
               </SidebarGroup>
             ) : showRailAutomationsPanel ? (
-              <RailAutomationsPanel />
+              <RailAutomationsPanel
+                createOpen={automationCreateOpen}
+                onCreateOpenChange={setAutomationCreateOpen}
+              />
             ) : (
               <>
                 <div
@@ -7102,6 +7122,7 @@ export default function Sidebar() {
                           return (
                             <SidebarPrimaryAction
                               key={id}
+                              {...(id === "tasks" ? { coachmark: TASKS_COACHMARK } : {})}
                               icon={item.icon}
                               {...(item.iconClassName ? { iconClassName: item.iconClassName } : {})}
                               label={item.label}
@@ -7985,7 +8006,7 @@ export default function Sidebar() {
               setSearchPaletteMode("search");
             }
           }}
-          actions={searchPaletteActions}
+          actions={[...searchPaletteActions, ...searchPaletteNavigationActions]}
           projects={searchPaletteProjects}
           projectById={projectById}
           onCreateChat={() =>
@@ -7996,8 +8017,15 @@ export default function Sidebar() {
           onCreateThread={handlePrimaryNewThread}
           onAddProjectPath={addProjectFromPath}
           homeDir={homeDir}
-          onOpenSettings={() => {
-            void navigate({ to: "/settings" });
+          onOpenSettings={(section, options) => {
+            void navigate({
+              to: "/settings",
+              search: (previous) => ({
+                ...previous,
+                section: section === "general" ? undefined : section,
+                target: options?.target,
+              }),
+            });
           }}
           onOpenFeedback={() => openFeedbackDialog()}
           onOpenUsageSettings={() => {
@@ -8047,7 +8075,7 @@ function SidebarSearchPaletteController(props: {
   onCreateThread: () => void;
   onAddProjectPath: (path: string, options?: { createIfMissing?: boolean }) => Promise<void>;
   homeDir: string | null;
-  onOpenSettings: () => void;
+  onOpenSettings: (section?: SettingsSectionId, options?: { target?: string }) => void;
   onOpenFeedback: () => void;
   onOpenUsageSettings: () => void;
   onOpenProject: (projectId: string) => void;

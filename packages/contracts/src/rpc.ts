@@ -253,6 +253,25 @@ import {
 } from "./orchestration";
 import { ProviderCompactThreadInput } from "./provider";
 import {
+  PROVIDER_ACCOUNTS_WS_METHODS,
+  ProviderAccountsBeginConnectInput,
+  ProviderAccountsBeginConnectResult,
+  ProviderAccountsConnectStatus,
+  ProviderAccountsDisconnectBindingInput,
+  ProviderAccountsDoctorReport,
+  ProviderAccountsGetThreadBindingInput,
+  ProviderAccountsHideInput,
+  ProviderAccountsRebindThreadInput,
+  ProviderAccountsIntegrationStatus,
+  ProviderAccountsLaunchInput,
+  ProviderAccountsLaunchResult,
+  ProviderAccountsOperationInput,
+  ProviderAccountsSetActiveInput,
+  ProviderAccountsSnapshot,
+  ProviderAccountsThreadBinding,
+  ProviderAccountsUpdateCliIntegrationInput,
+} from "./providerAccounts";
+import {
   ProviderGetComposerCapabilitiesInput,
   ProviderComposerCapabilities,
   ProviderListAgentsInput,
@@ -304,6 +323,7 @@ import {
 } from "./project";
 import {
   ServerConfig,
+  ServerRuntimeStatus,
   ServerConfigStreamEvent,
   ServerDiagnosticsResult,
   ServerReadThreadDiagnosticsInput,
@@ -321,6 +341,7 @@ import {
   ServerListProviderUsageResult,
   ServerLifecycleStreamEvent,
   ServerGetSettingsResult,
+  ServerKeepAwakeUpdatedPayload,
   ServerListLocalServersResult,
   ServerListWorktreesResult,
   ServerProviderUpdateError,
@@ -366,6 +387,9 @@ import {
   WsBootstrapNegotiateResult,
   WsCompatibilityError,
 } from "./wsCompatibility";
+
+/** Retry only the affected orchestration subscription from its last applied cursor. */
+export const ORCHESTRATION_STREAM_OVERFLOW_CODE = "ORCHESTRATION_STREAM_OVERFLOW";
 
 export class WsRpcError extends Schema.TaggedErrorClass<WsRpcError>()("WsRpcError", {
   message: Schema.String,
@@ -479,6 +503,12 @@ export const WsOrchestrationGetThreadDetailSnapshotRpc = Rpc.make(
     error: WsRpcError,
   },
 );
+
+export const WsOrchestrationSearchThreadsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.searchThreads, {
+  payload: OrchestrationRpcSchemas.searchThreads.input,
+  success: OrchestrationRpcSchemas.searchThreads.output,
+  error: WsRpcError,
+});
 
 export const WsOrchestrationReplayEventsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.replayEvents, {
   payload: OrchestrationRpcSchemas.replayEvents.input,
@@ -1307,6 +1337,12 @@ export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTermina
   stream: true,
 });
 
+export const WsServerGetRuntimeStatusRpc = Rpc.make(WS_METHODS.serverGetRuntimeStatus, {
+  payload: Schema.Struct({}),
+  success: ServerRuntimeStatus,
+  error: WsRpcError,
+});
+
 export const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
   payload: Schema.Struct({}),
   success: ServerConfig,
@@ -1521,6 +1557,13 @@ export const WsSubscribeServerSettingsRpc = Rpc.make(WS_METHODS.subscribeServerS
   stream: true,
 });
 
+export const WsSubscribeServerKeepAwakeRpc = Rpc.make(WS_METHODS.subscribeServerKeepAwake, {
+  payload: Schema.Struct({}),
+  success: ServerKeepAwakeUpdatedPayload,
+  error: WsRpcError,
+  stream: true,
+});
+
 export const WsProviderGetComposerCapabilitiesRpc = Rpc.make(
   WS_METHODS.providerGetComposerCapabilities,
   {
@@ -1577,6 +1620,111 @@ export const WsProviderListAgentsRpc = Rpc.make(WS_METHODS.providerListAgents, {
   success: ProviderListAgentsResult,
   error: WsRpcError,
 });
+
+export const WsProviderAccountsGetSnapshotRpc = Rpc.make(PROVIDER_ACCOUNTS_WS_METHODS.getSnapshot, {
+  payload: Schema.Struct({}),
+  success: ProviderAccountsSnapshot,
+  error: WsRpcError,
+});
+
+export const WsProviderAccountsBeginConnectRpc = Rpc.make(
+  PROVIDER_ACCOUNTS_WS_METHODS.beginConnect,
+  {
+    payload: ProviderAccountsBeginConnectInput,
+    success: ProviderAccountsBeginConnectResult,
+    error: WsRpcError,
+  },
+);
+
+export const WsProviderAccountsGetConnectStatusRpc = Rpc.make(
+  PROVIDER_ACCOUNTS_WS_METHODS.getConnectStatus,
+  {
+    payload: ProviderAccountsOperationInput,
+    success: ProviderAccountsConnectStatus,
+    error: WsRpcError,
+  },
+);
+
+export const WsProviderAccountsCancelConnectRpc = Rpc.make(
+  PROVIDER_ACCOUNTS_WS_METHODS.cancelConnect,
+  {
+    payload: ProviderAccountsOperationInput,
+    success: Schema.Void,
+    error: WsRpcError,
+  },
+);
+
+export const WsProviderAccountsSetActiveRpc = Rpc.make(PROVIDER_ACCOUNTS_WS_METHODS.setActive, {
+  payload: ProviderAccountsSetActiveInput,
+  success: Schema.Void,
+  error: WsRpcError,
+});
+
+export const WsProviderAccountsDisconnectBindingRpc = Rpc.make(
+  PROVIDER_ACCOUNTS_WS_METHODS.disconnectBinding,
+  {
+    payload: ProviderAccountsDisconnectBindingInput,
+    success: Schema.Void,
+    error: WsRpcError,
+  },
+);
+
+export const WsProviderAccountsHideRpc = Rpc.make(PROVIDER_ACCOUNTS_WS_METHODS.hide, {
+  payload: ProviderAccountsHideInput,
+  success: Schema.Void,
+  error: WsRpcError,
+});
+
+export const WsProviderAccountsRebindThreadRpc = Rpc.make(
+  PROVIDER_ACCOUNTS_WS_METHODS.rebindThread,
+  {
+    payload: ProviderAccountsRebindThreadInput,
+    success: Schema.Void,
+    error: WsRpcError,
+  },
+);
+
+export const WsProviderAccountsLaunchRpc = Rpc.make(PROVIDER_ACCOUNTS_WS_METHODS.launch, {
+  payload: ProviderAccountsLaunchInput,
+  success: ProviderAccountsLaunchResult,
+  error: WsRpcError,
+});
+
+export const WsProviderAccountsGetIntegrationStatusRpc = Rpc.make(
+  PROVIDER_ACCOUNTS_WS_METHODS.getIntegrationStatus,
+  {
+    payload: Schema.Struct({}),
+    success: ProviderAccountsIntegrationStatus,
+    error: WsRpcError,
+  },
+);
+
+export const WsProviderAccountsUpdateCliIntegrationRpc = Rpc.make(
+  PROVIDER_ACCOUNTS_WS_METHODS.updateCliIntegration,
+  {
+    payload: ProviderAccountsUpdateCliIntegrationInput,
+    success: ProviderAccountsIntegrationStatus,
+    error: WsRpcError,
+  },
+);
+
+export const WsProviderAccountsGetDoctorReportRpc = Rpc.make(
+  PROVIDER_ACCOUNTS_WS_METHODS.getDoctorReport,
+  {
+    payload: Schema.Struct({}),
+    success: ProviderAccountsDoctorReport,
+    error: WsRpcError,
+  },
+);
+
+export const WsProviderAccountsGetThreadBindingRpc = Rpc.make(
+  PROVIDER_ACCOUNTS_WS_METHODS.getThreadBinding,
+  {
+    payload: ProviderAccountsGetThreadBindingInput,
+    success: ProviderAccountsThreadBinding,
+    error: WsRpcError,
+  },
+);
 
 export const WsAutomationListRpc = Rpc.make(WS_METHODS.automationList, {
   payload: AutomationListInput,
@@ -1876,7 +2024,169 @@ export const WsSubscribeProjectAgentEventsRpc = Rpc.make(WS_METHODS.subscribePro
 
 export const WsBootstrapRpcGroup = RpcGroup.make(WsBootstrapNegotiateRpc);
 
-export const WsFeatureRpcGroup = RpcGroup.make(
+// Keep declaration emission bounded: serialize references, not every expanded RPC schema.
+export type WsFeatureRpc =
+  | typeof WsOrchestrationDispatchCommandRpc
+  | typeof WsOrchestrationSettleTurnDispatchRpc
+  | typeof WsOrchestrationImportThreadRpc
+  | typeof WsListProjectImportsRpc
+  | typeof WsImportProjectRpc
+  | typeof WsLoadProjectImportHistoryRpc
+  | typeof WsOrchestrationRegenerateThreadTitleRpc
+  | typeof WsOrchestrationGetSnapshotRpc
+  | typeof WsOrchestrationGetShellSnapshotRpc
+  | typeof WsOrchestrationGetThreadDetailSnapshotRpc
+  | typeof WsOrchestrationSearchThreadsRpc
+  | typeof WsOrchestrationRepairStateRpc
+  | typeof WsOrchestrationGetTurnDiffRpc
+  | typeof WsOrchestrationGetFullThreadDiffRpc
+  | typeof WsOrchestrationReplayEventsRpc
+  | typeof WsOrchestrationListProviderDeliveryBlockersRpc
+  | typeof WsOrchestrationReconcileProviderDeliveryRpc
+  | typeof WsOrchestrationPrepareQuitResumeRpc
+  | typeof WsOrchestrationSubscribeShellRpc
+  | typeof WsOrchestrationUnsubscribeShellRpc
+  | typeof WsOrchestrationSubscribeThreadRpc
+  | typeof WsOrchestrationUnsubscribeThreadRpc
+  | typeof WsOrchestrationSubscribeDomainEventsRpc
+  | typeof WsProjectsDiscoverScriptsRpc
+  | typeof WsProjectsListDirectoriesRpc
+  | typeof WsProjectsSearchEntriesRpc
+  | typeof WsProjectsSearchLocalEntriesRpc
+  | typeof WsProjectsSearchContentRpc
+  | typeof WsProjectsPrewarmSearchIndexRpc
+  | typeof WsProjectsReadFileRpc
+  | typeof WsProjectsSubscribeFileChangeRpc
+  | typeof WsProjectsResolveWorkspaceFileReferencesRpc
+  | typeof WsProjectsResolveOutOfRootFileReferenceRpc
+  | typeof WsProjectsCreateLocalFilePreviewGrantRpc
+  | typeof WsProjectsWriteFileRpc
+  | typeof WsProjectsRunDevServerRpc
+  | typeof WsProjectsStopDevServerRpc
+  | typeof WsProjectsListDevServersRpc
+  | typeof WsSubscribeProjectDevServerEventsRpc
+  | typeof WsProjectsProvisionFromGitHubRpc
+  | typeof WsStudioListThreadOutputsRpc
+  | typeof WsFilesystemBrowseRpc
+  | typeof WsShellOpenInEditorRpc
+  | typeof WsGitGithubRepositoryRpc
+  | typeof WsGitStatusRpc
+  | typeof WsGitReadWorkingTreeDiffRpc
+  | typeof WsGitBlameLineRpc
+  | typeof WsGitReadFileAtRevRpc
+  | typeof WsGitWorkingTreeDiffStatsRpc
+  | typeof WsGitSummarizeDiffRpc
+  | typeof WsGitPullRpc
+  | typeof WsGitRunStackedActionRpc
+  | typeof WsGitResolvePullRequestRpc
+  | typeof WsGitPullRequestSnapshotRpc
+  | typeof WsGitPreparePullRequestThreadRpc
+  | typeof WsGitHubInboxListRpc
+  | typeof WsGitHubInboxIssueDetailRpc
+  | typeof WsGitHubInboxIssueCommentRpc
+  | typeof WsPullRequestsDetailRpc
+  | typeof WsPullRequestsDiffRpc
+  | typeof WsPullRequestsActionRpc
+  | typeof WsPullRequestsCommentRpc
+  | typeof WsPullRequestsSetPinnedRpc
+  | typeof WsPullRequestsGetAutoFixRpc
+  | typeof WsPullRequestsSetAutoFixRpc
+  | typeof WsGitListBranchesRpc
+  | typeof WsGitListRecentCommitsRpc
+  | typeof WsGitCreateWorktreeRpc
+  | typeof WsGitCreateDetachedWorktreeRpc
+  | typeof WsGitRemoveWorktreeRpc
+  | typeof WsGitCreateBranchRpc
+  | typeof WsGitCheckoutRpc
+  | typeof WsGitStashAndCheckoutRpc
+  | typeof WsGitStashDropRpc
+  | typeof WsGitStashInfoRpc
+  | typeof WsGitRemoveIndexLockRpc
+  | typeof WsGitInitRpc
+  | typeof WsGitStageFilesRpc
+  | typeof WsGitUnstageFilesRpc
+  | typeof WsGitHandoffThreadRpc
+  | typeof WsTerminalOpenRpc
+  | typeof WsTerminalWriteRpc
+  | typeof WsTerminalAckOutputRpc
+  | typeof WsTerminalResizeRpc
+  | typeof WsTerminalClearRpc
+  | typeof WsTerminalRestartRpc
+  | typeof WsTerminalCloseRpc
+  | typeof WsSubscribeTerminalEventsRpc
+  | typeof WsServerGetRuntimeStatusRpc
+  | typeof WsServerGetConfigRpc
+  | typeof WsServerGetEnvironmentRpc
+  | typeof WsServerGetSettingsRpc
+  | typeof WsServerUpdateSettingsRpc
+  | typeof WsServerRefreshProvidersRpc
+  | typeof WsServerUpdateProviderRpc
+  | typeof WsServerListExternalMcpIntegrationsRpc
+  | typeof WsServerCreateExternalMcpIntegrationRpc
+  | typeof WsServerRevokeExternalMcpIntegrationRpc
+  | typeof WsServerRefreshExternalMcpPairingRpc
+  | typeof WsServerListWorktreesRpc
+  | typeof WsServerListLocalServersRpc
+  | typeof WsServerStopLocalServerRpc
+  | typeof WsServerGetProviderUsageSnapshotRpc
+  | typeof WsServerListProviderUsageRpc
+  | typeof WsServerConsumeCodexResetCreditRpc
+  | typeof WsStatsGetProfileStatsRpc
+  | typeof WsStatsGetProfileTokenStatsRpc
+  | typeof WsStatsGetRecapRpc
+  | typeof WsServerGetDiagnosticsRpc
+  | typeof WsServerReadThreadDiagnosticsRpc
+  | typeof WsServerPrewarmVoiceRpc
+  | typeof WsServerTranscribeVoiceRpc
+  | typeof WsServerGenerateThreadRecapRpc
+  | typeof WsServerGenerateAutomationIntentRpc
+  | typeof WsServerUpsertKeybindingRpc
+  | typeof WsServerEditKeybindingsRpc
+  | typeof WsSubscribeServerLifecycleRpc
+  | typeof WsSubscribeServerConfigRpc
+  | typeof WsSubscribeServerProviderStatusesRpc
+  | typeof WsSubscribeServerKeepAwakeRpc
+  | typeof WsSubscribeServerSettingsRpc
+  | typeof WsProviderGetComposerCapabilitiesRpc
+  | typeof WsProviderCompactThreadRpc
+  | typeof WsProviderListCommandsRpc
+  | typeof WsProviderListSkillsRpc
+  | typeof WsProviderListSkillsCatalogRpc
+  | typeof WsProviderListPluginsRpc
+  | typeof WsProviderReadPluginRpc
+  | typeof WsProviderListModelsRpc
+  | typeof WsProviderListAgentsRpc
+  | typeof WsProviderAccountsGetSnapshotRpc
+  | typeof WsProviderAccountsBeginConnectRpc
+  | typeof WsProviderAccountsGetConnectStatusRpc
+  | typeof WsProviderAccountsCancelConnectRpc
+  | typeof WsProviderAccountsSetActiveRpc
+  | typeof WsProviderAccountsDisconnectBindingRpc
+  | typeof WsProviderAccountsHideRpc
+  | typeof WsProviderAccountsRebindThreadRpc
+  | typeof WsProviderAccountsLaunchRpc
+  | typeof WsProviderAccountsGetIntegrationStatusRpc
+  | typeof WsProviderAccountsUpdateCliIntegrationRpc
+  | typeof WsProviderAccountsGetDoctorReportRpc
+  | typeof WsProviderAccountsGetThreadBindingRpc
+  | typeof WsAutomationListRpc
+  | typeof WsAutomationGetMemoryRpc
+  | typeof WsAutomationCreateRpc
+  | typeof WsAutomationUpdateRpc
+  | typeof WsAutomationDeleteRpc
+  | typeof WsAutomationRunNowRpc
+  | typeof WsAutomationCancelRunRpc
+  | typeof WsAutomationMarkRunReadRpc
+  | typeof WsAutomationArchiveRunRpc
+  | typeof WsAutomationResolveProposalRpc
+  | typeof WsSubscribeAutomationEventsRpc
+  | typeof WsTodoListRpc
+  | typeof WsTodoCreateRpc
+  | typeof WsTodoUpdateRpc
+  | typeof WsTodoDeleteRpc
+  | typeof WsSubscribeTodoEventsRpc;
+
+export const WsFeatureRpcGroup: RpcGroup.RpcGroup<WsFeatureRpc> = RpcGroup.make(
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationSettleTurnDispatchRpc,
   WsOrchestrationImportThreadRpc,
@@ -1887,6 +2197,7 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsOrchestrationGetSnapshotRpc,
   WsOrchestrationGetShellSnapshotRpc,
   WsOrchestrationGetThreadDetailSnapshotRpc,
+  WsOrchestrationSearchThreadsRpc,
   WsOrchestrationRepairStateRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
@@ -1964,6 +2275,7 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsTerminalRestartRpc,
   WsTerminalCloseRpc,
   WsSubscribeTerminalEventsRpc,
+  WsServerGetRuntimeStatusRpc,
   WsServerGetConfigRpc,
   WsServerGetEnvironmentRpc,
   WsServerGetSettingsRpc,
@@ -1994,6 +2306,7 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsSubscribeServerLifecycleRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerProviderStatusesRpc,
+  WsSubscribeServerKeepAwakeRpc,
   WsSubscribeServerSettingsRpc,
   WsProviderGetComposerCapabilitiesRpc,
   WsProviderCompactThreadRpc,
@@ -2004,6 +2317,19 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsProviderReadPluginRpc,
   WsProviderListModelsRpc,
   WsProviderListAgentsRpc,
+  WsProviderAccountsGetSnapshotRpc,
+  WsProviderAccountsBeginConnectRpc,
+  WsProviderAccountsGetConnectStatusRpc,
+  WsProviderAccountsCancelConnectRpc,
+  WsProviderAccountsSetActiveRpc,
+  WsProviderAccountsDisconnectBindingRpc,
+  WsProviderAccountsHideRpc,
+  WsProviderAccountsRebindThreadRpc,
+  WsProviderAccountsLaunchRpc,
+  WsProviderAccountsGetIntegrationStatusRpc,
+  WsProviderAccountsUpdateCliIntegrationRpc,
+  WsProviderAccountsGetDoctorReportRpc,
+  WsProviderAccountsGetThreadBindingRpc,
   WsAutomationListRpc,
   WsAutomationGetMemoryRpc,
   WsAutomationCreateRpc,

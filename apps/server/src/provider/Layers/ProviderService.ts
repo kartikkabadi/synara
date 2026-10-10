@@ -1,3 +1,4 @@
+import { accountStartOptions } from "../../providerAccounts/accountStartOptions.ts";
 /**
  * ProviderServiceLive - Cross-provider orchestration layer.
  *
@@ -34,6 +35,9 @@ import {
   ProviderKind,
   TurnId,
   type ProviderInstanceId,
+  SupportedAccountProvider,
+  ProviderAccountsRebindThreadInput,
+  type ProviderAccountLaunchContext,
   type ProviderRuntimeEvent,
   type ProviderSession,
 } from "@synara/contracts";
@@ -130,6 +134,11 @@ const isStaleDevinSessionLoadError = (
   provider === "devin" &&
   error instanceof ProviderAdapterProcessError &&
   error.reason === "resume-state-unavailable";
+import {
+  readAccountBindingFromRuntimePayload,
+  type ThreadAccountBinding,
+} from "../accountBindingPayload.ts";
+import { ProviderAccounts } from "../../providerAccounts/Services/ProviderAccounts.ts";
 
 export interface ProviderServiceLiveOptions {
   readonly canonicalEventLogPath?: string;
@@ -298,6 +307,8 @@ function toRuntimePayloadFromSession(
     readonly providerOptions?: unknown;
     readonly enableComputerControl?: boolean;
     readonly autoApproveSynaraTools?: boolean;
+    /** Extra folders of a multi-folder project, so recovery restarts with the same grant. */
+    readonly additionalDirectories?: ReadonlyArray<string>;
     readonly providerInstanceId?: string;
     readonly lastRuntimeEvent?: string;
     readonly lastRuntimeEventAt?: string;
@@ -309,6 +320,7 @@ function toRuntimePayloadFromSession(
      * thread with a home/credentials override the user already removed.
      */
     readonly launchOptionsAuthoritative?: boolean;
+    readonly accountBinding?: ThreadAccountBinding;
   },
 ): Record<string, unknown> {
   const persistedProviderOptions =
@@ -366,6 +378,11 @@ function toRuntimePayloadFromSession(
     ...(extra?.autoApproveSynaraTools !== undefined
       ? { autoApproveSynaraTools: extra.autoApproveSynaraTools }
       : {}),
+    ...(extra?.additionalDirectories !== undefined
+      ? { additionalDirectories: [...extra.additionalDirectories] }
+      : extra?.launchOptionsAuthoritative
+        ? { additionalDirectories: null }
+        : {}),
     ...(extra?.lastRuntimeEvent !== undefined ? { lastRuntimeEvent: extra.lastRuntimeEvent } : {}),
     ...(extra?.lastRuntimeEventAt !== undefined
       ? { lastRuntimeEventAt: extra.lastRuntimeEventAt }
@@ -373,6 +390,7 @@ function toRuntimePayloadFromSession(
     ...(extra?.lifecycleGeneration !== undefined
       ? { lifecycleGeneration: extra.lifecycleGeneration }
       : {}),
+    ...(extra?.accountBinding !== undefined ? { accountBinding: extra.accountBinding } : {}),
   };
 }
 
@@ -437,6 +455,15 @@ function readPersistedAutoApproveSynaraTools(
   runtimePayload: ProviderRuntimeBinding["runtimePayload"],
 ): boolean {
   return runtimePayloadRecord(runtimePayload).autoApproveSynaraTools === true;
+}
+
+function readPersistedAdditionalDirectories(
+  runtimePayload: ProviderRuntimeBinding["runtimePayload"],
+): ReadonlyArray<string> {
+  const raw = runtimePayloadRecord(runtimePayload).additionalDirectories;
+  return Array.isArray(raw)
+    ? raw.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+    : [];
 }
 
 // Fingerprints the credential inputs that persistence strips (environment,
@@ -966,6 +993,84 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             ),
           )
         : Effect.void;
+    // Optional so embedded/test layers without account management keep native
+    // launch behavior for every provider — but the degradation is explicit:
+    // it is logged once at startup, never silently skipped per launch.
+    const providerAccounts = Option.getOrUndefined(yield* Effect.serviceOption(ProviderAccounts));
+    if (providerAccounts === undefined) {
+      yield* Effect.logWarning(
+        "ProviderService.provider_accounts_unavailable: managed account resolution is disabled; all launches use native provider accounts.",
+      );
+    }
+    const isSupportedAccountProvider = Schema.is(SupportedAccountProvider);
+
+    const resolveAccountForLaunch = (resolveInput: {
+      readonly operation: string;
+      readonly provider: ProviderKind;
+      readonly persistedBinding?: ProviderRuntimeBinding;
+      readonly explicitOrdinal?: number;
+    }): Effect.Effect<
+      {
+        readonly accountBinding?: ThreadAccountBinding;
+        readonly accountLaunch?: ProviderAccountLaunchContext;
+      },
+      ProviderValidationError
+    > =>
+      Effect.gen(function* () {
+        if (!isSupportedAccountProvider(resolveInput.provider)) return {};
+        if (providerAccounts === undefined) {
+          const binding = readAccountBindingFromRuntimePayload(
+            resolveInput.persistedBinding?.runtimePayload,
+          );
+          if ((resolveInput.explicitOrdinal ?? binding?.ordinal ?? 0) > 0) {
+            return yield* toValidationError(
+              resolveInput.operation,
+              "Managed account service is unavailable; refusing to use a native account.",
+            );
+          }
+          return {};
+        }
+        const persisted =
+          resolveInput.persistedBinding?.provider === resolveInput.provider
+            ? resolveInput.persistedBinding
+            : undefined;
+        // Legacy migration: threads with provider history but no persisted
+        // account binding stay on the native account 0.
+        const threadBinding =
+          readAccountBindingFromRuntimePayload(persisted?.runtimePayload) ??
+          (persisted !== undefined ? { ordinal: 0, agentGeneration: 1 } : undefined);
+        const resolved = yield* providerAccounts
+          .resolveLaunch({
+            provider: resolveInput.provider,
+            surface: "agent",
+            ...(resolveInput.explicitOrdinal !== undefined
+              ? { explicitOrdinal: resolveInput.explicitOrdinal }
+              : {}),
+            ...(threadBinding !== undefined ? { threadBinding } : {}),
+          })
+          .pipe(
+            // A selected managed account that is missing, disconnected, or
+            // generation-mismatched fails closed; never fall back silently.
+            Effect.mapError((cause) =>
+              toValidationError(resolveInput.operation, cause.detail, cause),
+            ),
+          );
+        return {
+          accountBinding: { ordinal: resolved.ordinal, agentGeneration: resolved.generation },
+          ...(resolved.ordinal > 0
+            ? {
+                accountLaunch: {
+                  ordinal: resolved.ordinal,
+                  generation: resolved.generation,
+                  environment: resolved.environment,
+                  ...(resolved.profilePath !== undefined
+                    ? { profilePath: resolved.profilePath }
+                    : {}),
+                },
+              }
+            : {}),
+        };
+      });
     const lifecycle = makeProviderLifecycleCoordinator();
     for (const binding of yield* directory.listBindings()) {
       if (binding.lifecycleGeneration !== undefined) {
@@ -1177,6 +1282,10 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       });
 
     const resolveLaunchProviderInstance = (input: {
+      readonly accountSelection?: {
+        readonly persistedBinding?: ProviderRuntimeBinding;
+        readonly explicitOrdinal?: number;
+      };
       readonly operation: string;
       readonly provider?: ProviderSessionStartInput["provider"];
       readonly providerInstanceId?: string | undefined;
@@ -1240,19 +1349,47 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             `Model selection provider '${input.modelSelection.provider}' does not match provider instance '${instance.instanceId}' driver '${instance.driver}'.`,
           );
         }
+        // Explicit provider instances already own their credentials and endpoint.
+        // A driver-wide default must never silently replace that identity.
+        const customInstance = instance.instanceId !== instance.driver;
+        if (customInstance && input.accountSelection) {
+          const bound = readAccountBindingFromRuntimePayload(
+            input.accountSelection.persistedBinding?.runtimePayload,
+          );
+          if ((input.accountSelection.explicitOrdinal ?? bound?.ordinal ?? 0) > 0) {
+            return yield* toValidationError(
+              input.operation,
+              "Numbered managed accounts require the default provider instance; custom provider instances retain their own account settings.",
+            );
+          }
+        }
+        const account = input.accountSelection
+          ? yield* resolveAccountForLaunch({
+              operation: input.operation,
+              provider: instance.driver,
+              ...input.accountSelection,
+              ...(customInstance ? { explicitOrdinal: 0 } : {}),
+            })
+          : {};
+        const mergedOptions =
+          input.providerOptionsPrecedence === "caller"
+            ? mergeProviderStartOptions(
+                providerStartOptionsFromInstance(instance),
+                input.providerOptions,
+              )
+            : mergeProviderStartOptions(
+                input.providerOptions,
+                providerStartOptionsFromInstance(instance),
+              );
         return {
           instance,
           modelSelection: modelSelectionForInstance(input.modelSelection, instance),
-          providerOptions:
-            input.providerOptionsPrecedence === "caller"
-              ? mergeProviderStartOptions(
-                  providerStartOptionsFromInstance(instance),
-                  input.providerOptions,
-                )
-              : mergeProviderStartOptions(
-                  input.providerOptions,
-                  providerStartOptionsFromInstance(instance),
-                ),
+          providerOptions: accountStartOptions(
+            instance.driver,
+            mergedOptions,
+            account.accountLaunch,
+          ),
+          ...account,
         } as const;
       });
 
@@ -1438,11 +1575,13 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         readonly providerOptions?: unknown;
         readonly enableComputerControl?: boolean;
         readonly autoApproveSynaraTools?: boolean;
+        readonly additionalDirectories?: ReadonlyArray<string>;
         readonly providerInstanceId?: string;
         readonly lastRuntimeEvent?: string;
         readonly lastRuntimeEventAt?: string;
         readonly runtimePayload?: Record<string, unknown>;
         readonly launchOptionsAuthoritative?: boolean;
+        readonly accountBinding?: ThreadAccountBinding;
       },
     ) =>
       directory.upsert({
@@ -2173,10 +2312,11 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           );
 
         // Keep the retiring runtime's generation current until all of its
-        // background work has settled and the process is stopped. Otherwise
-        // its terminal task event would be rejected as stale and this drain
+        // background work has settled and authority is renewed or the process
+        // is stopped. Otherwise its terminal task event would be rejected as
+        // stale and this drain
         // could wait forever.
-        yield* lifecycle.runCurrent(threadId, () =>
+        const renewedAdapter = yield* lifecycle.runCurrent(threadId, () =>
           Effect.gen(function* () {
             let binding = yield* getCurrentBinding();
             const requiresCredentialRotation =
@@ -2223,9 +2363,26 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 }),
               );
             }
+            if (
+              adapter.renewAgentGatewayCredential &&
+              (yield* adapter.renewAgentGatewayCredential(threadId))
+            ) {
+              yield* withBindingWriteLock(
+                threadId,
+                directory.upsert({
+                  threadId,
+                  provider: binding.provider,
+                  providerInstanceId: binding.providerInstanceId,
+                  runtimePayload: { [AGENT_GATEWAY_CREDENTIAL_ROTATION_REQUIRED]: false },
+                }),
+              );
+              return adapter;
+            }
             yield* adapter.stopSession(threadId);
           }),
         );
+
+        if (renewedAdapter) return renewedAdapter;
 
         return yield* lifecycle.run(threadId, (lease) =>
           Effect.gen(function* () {
@@ -2245,6 +2402,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             });
             const resolved = yield* resolveLaunchProviderInstance({
               operation: input.operation,
+              accountSelection: { persistedBinding: binding },
               ...providerKindConstraint(binding.provider),
               providerInstanceId: persistedProviderInstanceId,
               ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
@@ -2363,6 +2521,9 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             const persistedAutoApproveSynaraTools = readPersistedAutoApproveSynaraTools(
               binding.runtimePayload,
             );
+            const persistedAdditionalDirectories = readPersistedAdditionalDirectories(
+              binding.runtimePayload,
+            );
             yield* validateAutoRuntimeMode(
               input.operation,
               resolved.instance.driver,
@@ -2371,6 +2532,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             yield* ensureProviderEnabled(resolved.instance.driver, input.operation);
 
             const resumeStartInput = {
+              ...(resolved.accountLaunch ? { accountLaunch: resolved.accountLaunch } : {}),
               threadId,
               provider: resolved.instance.driver,
               providerInstanceId: resolved.instance.instanceId,
@@ -2380,6 +2542,9 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               ...(resolved.providerOptions ? { providerOptions: resolved.providerOptions } : {}),
               ...(persistedComputerControl ? { enableComputerControl: true } : {}),
               ...(persistedAutoApproveSynaraTools ? { autoApproveSynaraTools: true } : {}),
+              ...(persistedAdditionalDirectories.length > 0
+                ? { additionalDirectories: persistedAdditionalDirectories }
+                : {}),
               ...(canReusePersistedResumeCursor ? { resumeCursor: binding.resumeCursor } : {}),
               ...(expectedCodexContinuationGeneration
                 ? { expectedCodexContinuationGeneration }
@@ -2408,6 +2573,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 ...(resolved.providerOptions ? { providerOptions: resolved.providerOptions } : {}),
                 ...(persistedComputerControl ? { enableComputerControl: true } : {}),
                 ...(persistedAutoApproveSynaraTools ? { autoApproveSynaraTools: true } : {}),
+                additionalDirectories: persistedAdditionalDirectories,
                 launchOptionsAuthoritative: true,
               }).pipe(
                 Effect.andThen(
@@ -2824,6 +2990,12 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               : undefined;
             const resolved = yield* resolveLaunchProviderInstance({
               operation: "ProviderService.startSession",
+              accountSelection: {
+                ...(binding ? { persistedBinding: binding } : {}),
+                ...(input.accountOrdinal !== undefined
+                  ? { explicitOrdinal: input.accountOrdinal }
+                  : {}),
+              },
               provider: parsed.provider,
               providerInstanceId: requestedProviderInstanceId,
               ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
@@ -2854,6 +3026,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               const { resolved } = yield* resolveStartInstance(binding);
               const prepared = yield* adapter.prepareSessionReplacement!({
                 ...input,
+                ...(resolved.accountLaunch ? { accountLaunch: resolved.accountLaunch } : {}),
                 providerInstanceId: resolved.instance.instanceId,
                 ...(resolved.providerOptions !== undefined
                   ? { providerOptions: resolved.providerOptions }
@@ -3004,8 +3177,21 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                   provider: resolved.instance.driver,
                   providerInstanceId: resolved.instance.instanceId,
                 });
+                if (resolved.accountBinding) {
+                  yield* withBindingWriteLock(
+                    threadId,
+                    directory.upsert({
+                      threadId,
+                      provider: resolved.instance.driver,
+                      providerInstanceId: resolved.instance.instanceId,
+                      runtimeMode: input.runtimeMode,
+                      runtimePayload: { accountBinding: resolved.accountBinding },
+                    }),
+                  );
+                }
                 const resolvedAdapterStartInput = {
                   ...adapterStartInput,
+                  ...(resolved.accountLaunch ? { accountLaunch: resolved.accountLaunch } : {}),
                   provider: resolved.instance.driver,
                   providerInstanceId: resolved.instance.instanceId,
                   enableComputerControl: effectiveComputerControl,
@@ -3109,10 +3295,12 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                   threadId,
                   upsertSessionBinding(sessionWithInstance, threadId, {
                     modelSelection: resolved.modelSelection,
+                    ...(resolved.accountBinding ? { accountBinding: resolved.accountBinding } : {}),
                     providerOptions: effectiveProviderOptions,
                     providerInstanceId: resolved.instance.instanceId,
                     enableComputerControl: effectiveComputerControl,
                     autoApproveSynaraTools: effectiveAutoApproveSynaraTools,
+                    additionalDirectories: input.additionalDirectories ?? [],
                     lifecycleGeneration: lease.generation,
                     launchOptionsAuthoritative: true,
                     runtimePayload: {
@@ -3171,6 +3359,9 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               const previousAutoApproveSynaraTools = readPersistedAutoApproveSynaraTools(
                 persistedBinding.runtimePayload,
               );
+              const previousAdditionalDirectories = readPersistedAdditionalDirectories(
+                persistedBinding.runtimePayload,
+              );
               // The recycled flag is a (value, generation) pair with the restored
               // lifecycle generation, not the old bool alone: when the failed
               // replacement turn carried an explicit computer-control value, that
@@ -3195,9 +3386,22 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                         if (replacementStarted) {
                           yield* adapter.stopSession(threadId);
                         }
+                        const restoredAccount = yield* resolveAccountForLaunch({
+                          operation: "ProviderService.restoreSession",
+                          provider: previousAdapter.provider,
+                          persistedBinding,
+                        });
+                        const restoredOptions = accountStartOptions(
+                          previousAdapter.provider,
+                          previousProviderOptions,
+                          restoredAccount.accountLaunch,
+                        );
                         const restored = yield* previousAdapter.startSession({
                           threadId,
                           provider: persistedBinding.provider,
+                          ...(restoredAccount.accountLaunch
+                            ? { accountLaunch: restoredAccount.accountLaunch }
+                            : {}),
                           ...(persistedProviderInstanceId
                             ? { providerInstanceId: persistedProviderInstanceId }
                             : {}),
@@ -3207,12 +3411,15 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                           ...(previousModelSelection !== undefined
                             ? { modelSelection: previousModelSelection }
                             : {}),
-                          ...(previousProviderOptions !== undefined
-                            ? { providerOptions: previousProviderOptions }
+                          ...(restoredOptions !== undefined
+                            ? { providerOptions: restoredOptions }
                             : {}),
                           ...(restoredComputerControl ? { enableComputerControl: true } : {}),
                           ...(restoredAutoApproveSynaraTools
                             ? { autoApproveSynaraTools: true }
+                            : {}),
+                          ...(previousAdditionalDirectories.length > 0
+                            ? { additionalDirectories: previousAdditionalDirectories }
                             : {}),
                           ...(persistedBinding.resumeCursor !== undefined
                             ? { resumeCursor: persistedBinding.resumeCursor }
@@ -3235,9 +3442,13 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                           upsertSessionBinding(restoredWithInstance, threadId, {
                             lifecycleGeneration: previousGeneration,
                             modelSelection: previousModelSelection,
-                            providerOptions: previousProviderOptions,
+                            providerOptions: restoredOptions,
+                            ...(restoredAccount.accountBinding
+                              ? { accountBinding: restoredAccount.accountBinding }
+                              : {}),
                             enableComputerControl: restoredComputerControl,
                             autoApproveSynaraTools: restoredAutoApproveSynaraTools,
+                            additionalDirectories: previousAdditionalDirectories,
                             runtimePayload: {
                               providerOptionsCredentialsFingerprint:
                                 previousProviderCredentialsFingerprint ?? null,
@@ -3362,6 +3573,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           sourcePersistedProviderOptions !== undefined;
         const resolvedSource = yield* resolveLaunchProviderInstance({
           operation: "ProviderService.forkThread",
+          accountSelection: { persistedBinding: sourceBinding },
           providerInstanceId: sourceProviderInstanceId,
           ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
           providerOptions:
@@ -3516,6 +3728,9 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               yield* upsertSessionBinding(forkedSessionWithInstance, input.threadId, {
                 lifecycleGeneration: lease.generation,
                 providerInstanceId: resolvedSource.instance.instanceId,
+                ...(resolvedSource.accountBinding
+                  ? { accountBinding: resolvedSource.accountBinding }
+                  : {}),
                 ...(resolvedSource.modelSelection !== undefined
                   ? { modelSelection: resolvedSource.modelSelection }
                   : {}),
@@ -3526,6 +3741,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                 // must land here or resumeSession re-leases without it.
                 ...(input.enableComputerControl ? { enableComputerControl: true } : {}),
                 ...(input.autoApproveSynaraTools ? { autoApproveSynaraTools: true } : {}),
+                additionalDirectories: input.additionalDirectories ?? [],
                 lastRuntimeEvent: "provider.thread.forked",
                 lastRuntimeEventAt: new Date().toISOString(),
                 launchOptionsAuthoritative: true,
@@ -3549,6 +3765,9 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
               yield* upsertSessionBinding(stoppedForkSession, input.threadId, {
                 lifecycleGeneration: lease.generation,
                 providerInstanceId: resolvedSource.instance.instanceId,
+                ...(resolvedSource.accountBinding
+                  ? { accountBinding: resolvedSource.accountBinding }
+                  : {}),
                 ...(resolvedSource.modelSelection !== undefined
                   ? { modelSelection: resolvedSource.modelSelection }
                   : {}),
@@ -4646,6 +4865,89 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         retireRuntimeIdleGeneration(input.threadId);
       });
 
+    const rebindAccount: NonNullable<ProviderServiceShape["rebindAccount"]> = (rawInput) =>
+      Effect.gen(function* () {
+        const operation = "ProviderService.rebindAccount";
+        const input = yield* decodeInputOrValidationError({
+          operation,
+          schema: ProviderAccountsRebindThreadInput,
+          payload: rawInput,
+        });
+        yield* waitForRuntimeIdleStop(input.threadId);
+        clearRuntimeIdleTimer(input.threadId);
+        return yield* lifecycle.run(input.threadId, (lease) =>
+          Effect.gen(function* () {
+            const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
+            const account = readAccountBindingFromRuntimePayload(binding?.runtimePayload);
+            if (
+              !binding ||
+              !account ||
+              !providerAccounts ||
+              input.ordinal === 0 ||
+              binding.provider !== input.provider ||
+              account.ordinal !== input.ordinal ||
+              account.agentGeneration !== input.expectedGeneration ||
+              binding.providerInstanceId !== defaultInstanceIdForDriver(binding.provider)
+            ) {
+              return yield* toValidationError(
+                operation,
+                "The thread account changed. Refresh before renewing it.",
+              );
+            }
+            const payload = runtimePayloadRecord(binding.runtimePayload);
+            const adapter = yield* getAdapterForBinding(binding);
+            const sessions = yield* adapter.listSessions();
+            const session = sessions.find((entry) => entry.threadId === input.threadId);
+            if (
+              payload.activeTurnId != null ||
+              session?.activeTurnId != null ||
+              (liveRuntimeTaskIds.get(input.threadId)?.size ?? 0) > 0
+            ) {
+              return yield* toValidationError(
+                operation,
+                "Stop the active turn and background tasks before renewing this account.",
+              );
+            }
+            const resolved = yield* providerAccounts
+              .resolveLaunch({
+                provider: input.provider,
+                surface: "agent",
+                explicitOrdinal: input.ordinal,
+              })
+              .pipe(Effect.mapError((cause) => toValidationError(operation, cause.detail, cause)));
+            if (resolved.generation !== input.targetGeneration) {
+              return yield* toValidationError(
+                operation,
+                "The account was reconnected again. Refresh before renewing it.",
+              );
+            }
+            // Prove the old runtime is stopped before replacing its durable identity.
+            yield* adapter.stopSession(input.threadId);
+            clearLiveRuntimeTasks(input.threadId);
+            yield* withBindingWriteLock(
+              input.threadId,
+              directory.upsert({
+                ...binding,
+                status: "stopped",
+                lifecycleGeneration: lease.generation,
+                // A renewed login may belong to a different principal. Never carry
+                // the old provider-native conversation into that identity.
+                resumeCursor: null,
+                runtimePayload: {
+                  ...payload,
+                  accountBinding: { ordinal: input.ordinal, agentGeneration: resolved.generation },
+                  activeTurnId: null,
+                  continuationResetRequested: true,
+                  lifecycleGeneration: lease.generation,
+                },
+              }),
+            );
+            lease.commit();
+            retireRuntimeIdleGeneration(input.threadId);
+          }),
+        );
+      });
+
     const listSessions: ProviderServiceShape["listSessions"] = () =>
       Effect.gen(function* () {
         const activeSessions = (yield* Effect.forEach(adapters, (adapter) =>
@@ -4759,6 +5061,48 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
 
     const getCapabilities: ProviderServiceShape["getCapabilities"] = (provider) =>
       registry.getByProvider(provider).pipe(Effect.map((adapter) => adapter.capabilities));
+
+    const launchApp: NonNullable<ProviderServiceShape["launchApp"]> = (input) =>
+      Effect.gen(function* () {
+        const adapter = yield* registry.getByProvider(input.provider);
+        if (!adapter.launchApp) {
+          return yield* toValidationError(
+            "ProviderService.launchApp",
+            `Desktop app launch is unavailable for provider '${input.provider}'.`,
+          );
+        }
+        if (providerAccounts === undefined || !isSupportedAccountProvider(input.provider)) {
+          return yield* adapter.launchApp({ ordinal: input.ordinal ?? 0 });
+        }
+        const resolved = yield* providerAccounts
+          .resolveLaunch({
+            provider: input.provider,
+            surface: "app",
+            ...(input.ordinal !== undefined ? { explicitOrdinal: input.ordinal } : {}),
+          })
+          .pipe(
+            // A selected managed account that is missing or disconnected
+            // fails closed; never fall back to the native app silently.
+            Effect.mapError((cause) =>
+              toValidationError("ProviderService.launchApp", cause.detail, cause),
+            ),
+          );
+        return yield* adapter.launchApp({
+          ordinal: resolved.ordinal,
+          ...(resolved.ordinal > 0
+            ? {
+                accountLaunch: {
+                  ordinal: resolved.ordinal,
+                  generation: resolved.generation,
+                  environment: resolved.environment,
+                  ...(resolved.profilePath !== undefined
+                    ? { profilePath: resolved.profilePath }
+                    : {}),
+                },
+              }
+            : {}),
+        });
+      });
 
     const rollbackConversation: ProviderServiceShape["rollbackConversation"] = (rawInput) =>
       Effect.gen(function* () {
@@ -4984,6 +5328,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       respondToRequest,
       respondToUserInput,
       stopSession,
+      rebindAccount,
       stopRuntimeSession,
       hasLiveRuntimeTasks,
       clearSessionResumeCursor,
@@ -4992,6 +5337,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       getClaudeCacheObservation,
       startClaudeCompaction,
       cancelClaudeCompactionDiscovery,
+      launchApp,
       rollbackConversation,
       compactThread,
       closeRuntimeEvents,

@@ -60,6 +60,10 @@
       "types": "./src/logging.ts",
       "import": "./src/logging.ts"
     },
+    "./KeyedSingleFlightCache": {
+      "types": "./src/KeyedSingleFlightCache.ts",
+      "import": "./src/KeyedSingleFlightCache.ts"
+    },
     "./errorMessages": {
       "types": "./src/errorMessages.ts",
       "import": "./src/errorMessages.ts"
@@ -139,6 +143,10 @@
     "./Net": {
       "types": "./src/Net.ts",
       "import": "./src/Net.ts"
+    },
+    "./KeyedDrainableWorker": {
+      "types": "./src/KeyedDrainableWorker.ts",
+      "import": "./src/KeyedDrainableWorker.ts"
     },
     "./DrainableWorker": {
       "types": "./src/DrainableWorker.ts",
@@ -236,6 +244,10 @@
       "types": "./src/threadWorkspace.ts",
       "import": "./src/threadWorkspace.ts"
     },
+    "./projectFolders": {
+      "types": "./src/projectFolders.ts",
+      "import": "./src/projectFolders.ts"
+    },
     "./threadHierarchy": {
       "types": "./src/threadHierarchy.ts",
       "import": "./src/threadHierarchy.ts"
@@ -331,6 +343,46 @@
     "./cli": {
       "types": "./src/cli.ts",
       "import": "./src/cli.ts"
+    },
+    "./providerAccounts/accountIds": {
+      "types": "./src/providerAccounts/accountIds.ts",
+      "import": "./src/providerAccounts/accountIds.ts"
+    },
+    "./providerAccounts/accountPaths": {
+      "types": "./src/providerAccounts/accountPaths.ts",
+      "import": "./src/providerAccounts/accountPaths.ts"
+    },
+    "./providerAccounts/capabilities": {
+      "types": "./src/providerAccounts/capabilities.ts",
+      "import": "./src/providerAccounts/capabilities.ts"
+    },
+    "./providerAccounts/launcherProtocol": {
+      "types": "./src/providerAccounts/launcherProtocol.ts",
+      "import": "./src/providerAccounts/launcherProtocol.ts"
+    },
+    "./providerAccounts/accountEnvironment": {
+      "types": "./src/providerAccounts/accountEnvironment.ts",
+      "import": "./src/providerAccounts/accountEnvironment.ts"
+    },
+    "./providerAccounts/accountEnvironmentBuilders": {
+      "types": "./src/providerAccounts/accountEnvironmentBuilders.ts",
+      "import": "./src/providerAccounts/accountEnvironmentBuilders.ts"
+    },
+    "./providerAccounts/codexAccountEnvironment": {
+      "types": "./src/providerAccounts/codexAccountEnvironment.ts",
+      "import": "./src/providerAccounts/codexAccountEnvironment.ts"
+    },
+    "./providerAccounts/claudeAccountEnvironment": {
+      "types": "./src/providerAccounts/claudeAccountEnvironment.ts",
+      "import": "./src/providerAccounts/claudeAccountEnvironment.ts"
+    },
+    "./providerAccounts/cursorAccountEnvironment": {
+      "types": "./src/providerAccounts/cursorAccountEnvironment.ts",
+      "import": "./src/providerAccounts/cursorAccountEnvironment.ts"
+    },
+    "./providerAccounts/grokAccountEnvironment": {
+      "types": "./src/providerAccounts/grokAccountEnvironment.ts",
+      "import": "./src/providerAccounts/grokAccountEnvironment.ts"
     },
     "./migrationRecovery": {
       "types": "./src/migrationRecovery.ts",

@@ -326,6 +326,8 @@ import type {
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
   OrchestrationGetThreadDetailSnapshotInput,
+  OrchestrationSearchThreadsInput,
+  OrchestrationSearchThreadsResult,
   OrchestrationGetThreadDetailSnapshotResult,
   OrchestrationImportThreadInput,
   OrchestrationImportThreadResult,
@@ -367,6 +369,24 @@ import type {
   ProviderReadPluginInput,
   ProviderReadPluginResult,
 } from "./providerDiscovery";
+import type {
+  ProviderAccountsBeginConnectInput,
+  ProviderAccountsBeginConnectResult,
+  ProviderAccountsConnectStatus,
+  ProviderAccountsDisconnectBindingInput,
+  ProviderAccountsDoctorReport,
+  ProviderAccountsGetThreadBindingInput,
+  ProviderAccountsHideInput,
+  ProviderAccountsRebindThreadInput,
+  ProviderAccountsIntegrationStatus,
+  ProviderAccountsLaunchInput,
+  ProviderAccountsLaunchResult,
+  ProviderAccountsOperationInput,
+  ProviderAccountsSetActiveInput,
+  ProviderAccountsSnapshot,
+  ProviderAccountsThreadBinding,
+  ProviderAccountsUpdateCliIntegrationInput,
+} from "./providerAccounts";
 import type { ProviderCompactThreadInput } from "./provider";
 import type {
   StatsGetProfileStatsInput,
@@ -907,6 +927,7 @@ export type DesktopDiagnosticBreadcrumb = typeof DesktopDiagnosticBreadcrumb.Typ
 /** Handled failures carry fixed categories, never exception text or operation arguments. */
 export const DesktopDiagnosticIssue = Schema.Struct({
   code: Schema.Literals([
+    "server.event-loop.stall",
     "git.request.failed",
     "git.branch.failed",
     "git.commit.failed",
@@ -1350,12 +1371,38 @@ export interface NativeApi {
     listModels: (input: ProviderListModelsInput) => Promise<ProviderListModelsResult>;
     listAgents: (input: ProviderListAgentsInput) => Promise<ProviderListAgentsResult>;
   };
+  providerAccounts: {
+    getSnapshot: () => Promise<ProviderAccountsSnapshot>;
+    beginConnect: (
+      input: ProviderAccountsBeginConnectInput,
+    ) => Promise<ProviderAccountsBeginConnectResult>;
+    getConnectStatus: (
+      input: ProviderAccountsOperationInput,
+    ) => Promise<ProviderAccountsConnectStatus>;
+    cancelConnect: (input: ProviderAccountsOperationInput) => Promise<void>;
+    setActive: (input: ProviderAccountsSetActiveInput) => Promise<void>;
+    disconnectBinding: (input: ProviderAccountsDisconnectBindingInput) => Promise<void>;
+    hide: (input: ProviderAccountsHideInput) => Promise<void>;
+    rebindThread: (input: ProviderAccountsRebindThreadInput) => Promise<void>;
+    launch: (input: ProviderAccountsLaunchInput) => Promise<ProviderAccountsLaunchResult>;
+    getIntegrationStatus: () => Promise<ProviderAccountsIntegrationStatus>;
+    updateCliIntegration: (
+      input: ProviderAccountsUpdateCliIntegrationInput,
+    ) => Promise<ProviderAccountsIntegrationStatus>;
+    getDoctorReport: () => Promise<ProviderAccountsDoctorReport>;
+    getThreadBinding: (
+      input: ProviderAccountsGetThreadBindingInput,
+    ) => Promise<ProviderAccountsThreadBinding>;
+  };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;
     getShellSnapshot: () => Promise<OrchestrationShellSnapshot>;
     getThreadDetailSnapshot: (
       input: OrchestrationGetThreadDetailSnapshotInput,
     ) => Promise<OrchestrationGetThreadDetailSnapshotResult>;
+    searchThreads: (
+      input: OrchestrationSearchThreadsInput,
+    ) => Promise<OrchestrationSearchThreadsResult>;
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
     importThread: (
       input: OrchestrationImportThreadInput,
