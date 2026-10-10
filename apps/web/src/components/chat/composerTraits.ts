@@ -13,6 +13,7 @@ import {
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
   isClaudeUltrathinkPrompt,
+  reasoningDescriptorId,
   trimOrNull,
 } from "@synara/shared/model";
 
@@ -65,14 +66,22 @@ function asBooleanDescriptor(
 }
 
 function primaryTraitSelectDescriptor(
+  provider: ProviderKind,
   descriptors: ReadonlyArray<ProviderOptionDescriptor>,
 ): Extract<ProviderOptionDescriptor, { type: "select" }> | null {
-  const descriptor = descriptors.find(
-    (candidate): candidate is Extract<ProviderOptionDescriptor, { type: "select" }> =>
-      candidate.type === "select" &&
-      candidate.id !== "contextWindow" &&
-      candidate.id !== "autoCompactWindow",
-  );
+  const descriptor =
+    descriptors.find(
+      (candidate): candidate is Extract<ProviderOptionDescriptor, { type: "select" }> =>
+        candidate.type === "select" && candidate.id === reasoningDescriptorId(provider),
+    ) ??
+    descriptors.find(
+      (candidate): candidate is Extract<ProviderOptionDescriptor, { type: "select" }> =>
+        candidate.type === "select" &&
+        candidate.id !== "contextWindow" &&
+        candidate.id !== "autoCompactWindow" &&
+        candidate.id !== "leadModel" &&
+        candidate.id !== "sidekick",
+    );
   return descriptor && descriptor.options.length > 1 ? descriptor : null;
 }
 
@@ -111,7 +120,30 @@ export function getComposerTraitSelection(
     caps,
     selections: modelOptions as Record<string, unknown> | undefined,
   });
-  const primarySelectDescriptor = primaryTraitSelectDescriptor(descriptors);
+  const primarySelectDescriptor = primaryTraitSelectDescriptor(provider, descriptors);
+  const extraSelects = descriptors
+    .filter(
+      (descriptor): descriptor is Extract<ProviderOptionDescriptor, { type: "select" }> =>
+        descriptor.type === "select" &&
+        descriptor !== primarySelectDescriptor &&
+        descriptor.id !== "contextWindow" &&
+        descriptor.id !== "autoCompactWindow" &&
+        descriptor.options.length > 1,
+    )
+    .map((descriptor) => ({
+      id: descriptor.id,
+      label: descriptor.label,
+      value:
+        (getProviderOptionCurrentValue(descriptor) as string | undefined) ??
+        descriptor.options.find((option) => option.isDefault)?.id ??
+        descriptor.options[0]?.id ??
+        "",
+      options: descriptor.options.map((option) => ({
+        value: option.id,
+        label: option.label,
+        ...(option.isDefault ? { isDefault: true as const } : {}),
+      })),
+    }));
   const contextWindowDescriptor = asSelectDescriptor(
     descriptors.find((descriptor) => descriptor.id === "autoCompactWindow") ??
       descriptors.find((descriptor) => descriptor.id === "contextWindow"),
@@ -167,6 +199,7 @@ export function getComposerTraitSelection(
     caps,
     descriptors,
     primarySelectDescriptor,
+    extraSelects,
     fastModeDescriptor,
     thinkingDescriptor,
     contextWindowDescriptor,
@@ -230,7 +263,12 @@ export function showsComposerFastModeBadge(
 export function hasVisibleComposerTraitControls(
   selection: Pick<
     ReturnType<typeof getComposerTraitSelection>,
-    "caps" | "effortLevels" | "thinkingEnabled" | "contextWindowOptions" | "fastModeDescriptor"
+    | "caps"
+    | "effortLevels"
+    | "thinkingEnabled"
+    | "contextWindowOptions"
+    | "fastModeDescriptor"
+    | "extraSelects"
   >,
   options?: {
     includeFastMode?: boolean;
@@ -242,6 +280,7 @@ export function hasVisibleComposerTraitControls(
     ((options?.includeEffort ?? true) && selection.effortLevels.length > 0) ||
     selection.thinkingEnabled !== null ||
     selection.contextWindowOptions.length > 1 ||
+    selection.extraSelects.length > 0 ||
     ((options?.includeFastMode ?? true) && supportsComposerFastModeControl(selection))
   );
 }
