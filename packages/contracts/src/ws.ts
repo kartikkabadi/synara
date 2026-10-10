@@ -56,6 +56,17 @@ import {
   ProjectAgentResolveWorkerInput,
 } from "./projectAgent";
 import {
+  MindAffirmInput,
+  MindForgetInput,
+  MindHistoryInput,
+  MindListInput,
+  MindProfileGetInput,
+  MindProfileSetInput,
+  MindSearchInput,
+  MindSetPinnedInput,
+  MindUpdateInput,
+} from "./mind";
+import {
   ClientOrchestrationCommand,
   OrchestrationEvent,
   OrchestrationImportThreadInput,
@@ -68,6 +79,7 @@ import {
   ORCHESTRATION_WS_CHANNELS,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetThreadDetailSnapshotInput,
+  OrchestrationSearchThreadsInput,
   OrchestrationGetShellSnapshotInput,
   OrchestrationRepairStateInput,
   ORCHESTRATION_WS_METHODS,
@@ -169,6 +181,7 @@ import {
   ServerReadThreadDiagnosticsInput,
   ServerGenerateAutomationIntentInput,
   ServerGenerateThreadRecapInput,
+  ServerKeepAwakeUpdatedPayload,
   ServerLifecycleStreamEvent,
   ServerProviderUpdateInput,
   ServerUpdateSettingsInput,
@@ -301,6 +314,7 @@ export const WS_METHODS = {
   terminalClose: "terminal.close",
 
   // Server meta
+  serverGetRuntimeStatus: "server.getRuntimeStatus",
   serverGetConfig: "server.getConfig",
   serverGetEnvironment: "server.getEnvironment",
   serverGetSettings: "server.getSettings",
@@ -331,6 +345,7 @@ export const WS_METHODS = {
   subscribeServerLifecycle: "server.subscribeLifecycle",
   subscribeServerConfig: "server.subscribeConfig",
   subscribeServerProviderStatuses: "server.subscribeProviderStatuses",
+  subscribeServerKeepAwake: "server.subscribeKeepAwake",
   subscribeServerSettings: "server.subscribeSettings",
 
   // Streaming subscriptions
@@ -405,6 +420,16 @@ export const WS_METHODS = {
   projectAgentLibraryStatus: "projectAgent.library.status",
   projectAgentResolveWorker: "projectAgent.resolveWorker",
   subscribeProjectAgentEvents: "projectAgent.subscribe",
+  // Mind methods
+  mindList: "mind.list",
+  mindSearch: "mind.search",
+  mindForget: "mind.forget",
+  mindSetPinned: "mind.setPinned",
+  mindAffirm: "mind.affirm",
+  mindUpdate: "mind.update",
+  mindHistory: "mind.history",
+  mindProfileGet: "mind.profileGet",
+  mindProfileSet: "mind.profileSet",
 } as const;
 
 // ── Push Event Channels ──────────────────────────────────────────────
@@ -422,6 +447,7 @@ export const WS_CHANNELS = {
   serverMaintenanceUpdated: "server.maintenanceUpdated",
   serverConfigUpdated: "server.configUpdated",
   serverProviderStatusesUpdated: "server.providerStatusesUpdated",
+  serverKeepAwakeUpdated: "server.keepAwakeUpdated",
   serverSettingsUpdated: "server.settingsUpdated",
 } as const;
 
@@ -458,6 +484,7 @@ const WebSocketRequestBody = Schema.Union([
     ORCHESTRATION_WS_METHODS.getThreadDetailSnapshot,
     OrchestrationGetThreadDetailSnapshotInput,
   ),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.searchThreads, OrchestrationSearchThreadsInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.repairState, OrchestrationRepairStateInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getTurnDiff, OrchestrationGetTurnDiffInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getFullThreadDiff, OrchestrationGetFullThreadDiffInput),
@@ -579,6 +606,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.terminalClose, TerminalCloseInput),
 
   // Server meta
+  tagRequestBody(WS_METHODS.serverGetRuntimeStatus, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverGetConfig, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverGetEnvironment, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverGetSettings, Schema.Struct({})),
@@ -675,6 +703,16 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.projectAgentLibraryStatus, ProjectAgentLibraryStatusInput),
   tagRequestBody(WS_METHODS.projectAgentResolveWorker, ProjectAgentResolveWorkerInput),
   tagRequestBody(WS_METHODS.subscribeProjectAgentEvents, ProjectAgentSubscribeInput),
+  // Mind methods
+  tagRequestBody(WS_METHODS.mindList, MindListInput),
+  tagRequestBody(WS_METHODS.mindSearch, MindSearchInput),
+  tagRequestBody(WS_METHODS.mindForget, MindForgetInput),
+  tagRequestBody(WS_METHODS.mindSetPinned, MindSetPinnedInput),
+  tagRequestBody(WS_METHODS.mindAffirm, MindAffirmInput),
+  tagRequestBody(WS_METHODS.mindUpdate, MindUpdateInput),
+  tagRequestBody(WS_METHODS.mindHistory, MindHistoryInput),
+  tagRequestBody(WS_METHODS.mindProfileGet, MindProfileGetInput),
+  tagRequestBody(WS_METHODS.mindProfileSet, MindProfileSetInput),
 ]);
 
 export const WebSocketRequest = Schema.Struct({
@@ -714,6 +752,7 @@ export interface WsPushPayloadByChannel {
   readonly [WS_CHANNELS.serverMaintenanceUpdated]: ServerLifecycleStreamEvent;
   readonly [WS_CHANNELS.serverConfigUpdated]: typeof ServerConfigUpdatedPayload.Type;
   readonly [WS_CHANNELS.serverProviderStatusesUpdated]: typeof ServerProviderStatusesUpdatedPayload.Type;
+  readonly [WS_CHANNELS.serverKeepAwakeUpdated]: typeof ServerKeepAwakeUpdatedPayload.Type;
   readonly [WS_CHANNELS.serverSettingsUpdated]: typeof ServerSettingsUpdatedPayload.Type;
   readonly [WS_CHANNELS.automationEvent]: typeof AutomationStreamEvent.Type;
   readonly [WS_CHANNELS.todoEvent]: typeof TodoStreamEvent.Type;
@@ -760,6 +799,10 @@ export const WsPushServerProviderStatusesUpdated = makeWsPushSchema(
 export const WsPushServerSettingsUpdated = makeWsPushSchema(
   WS_CHANNELS.serverSettingsUpdated,
   ServerSettingsUpdatedPayload,
+);
+export const WsPushServerKeepAwakeUpdated = makeWsPushSchema(
+  WS_CHANNELS.serverKeepAwakeUpdated,
+  ServerKeepAwakeUpdatedPayload,
 );
 export const WsPushAutomationEvent = makeWsPushSchema(
   WS_CHANNELS.automationEvent,
@@ -810,6 +853,7 @@ export const WsPushChannelSchema = Schema.Literals([
   WS_CHANNELS.serverMaintenanceUpdated,
   WS_CHANNELS.serverConfigUpdated,
   WS_CHANNELS.serverProviderStatusesUpdated,
+  WS_CHANNELS.serverKeepAwakeUpdated,
   WS_CHANNELS.serverSettingsUpdated,
   WS_CHANNELS.automationEvent,
   WS_CHANNELS.todoEvent,
@@ -829,6 +873,7 @@ export const WsPush = Schema.Union([
   WsPushServerMaintenanceUpdated,
   WsPushServerConfigUpdated,
   WsPushServerProviderStatusesUpdated,
+  WsPushServerKeepAwakeUpdated,
   WsPushServerSettingsUpdated,
   WsPushAutomationEvent,
   WsPushTodoEvent,

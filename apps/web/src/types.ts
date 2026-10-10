@@ -176,6 +176,8 @@ export interface Project {
   createdAt?: string | undefined;
   updatedAt?: string | undefined;
   scripts: ProjectScript[];
+  /** Extra source folders of a multi-folder project; `cwd` is the primary one. */
+  additionalFolders?: ReadonlyArray<string>;
 }
 
 export interface Space {
@@ -382,6 +384,7 @@ export interface ComposerThreadMentionSource {
 
 export interface ThreadSession {
   provider: ProviderKind;
+  runtimeMode?: RuntimeMode;
   providerInstanceId?: ProviderInstanceId;
   status: SessionPhase | "error" | "closed";
   activeTurnId?: TurnId | undefined;

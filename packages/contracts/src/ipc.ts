@@ -111,6 +111,23 @@ import type {
   ProjectThreadIndexEntry,
 } from "./projectAgent";
 import type {
+  MindAffirmInput,
+  MindForgetInput,
+  MindHistoryInput,
+  MindHistoryResult,
+  MindListInput,
+  MindListResult,
+  MindMemory,
+  MindProfile,
+  MindProfileGetInput,
+  MindProfileGetResult,
+  MindProfileSetInput,
+  MindSearchInput,
+  MindSearchResult,
+  MindSetPinnedInput,
+  MindUpdateInput,
+} from "./mind";
+import type {
   GitCheckoutInput,
   GitActionProgressEvent,
   GitWorktreeSetupProgressEvent,
@@ -326,6 +343,8 @@ import type {
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
   OrchestrationGetThreadDetailSnapshotInput,
+  OrchestrationSearchThreadsInput,
+  OrchestrationSearchThreadsResult,
   OrchestrationGetThreadDetailSnapshotResult,
   OrchestrationImportThreadInput,
   OrchestrationImportThreadResult,
@@ -907,6 +926,7 @@ export type DesktopDiagnosticBreadcrumb = typeof DesktopDiagnosticBreadcrumb.Typ
 /** Handled failures carry fixed categories, never exception text or operation arguments. */
 export const DesktopDiagnosticIssue = Schema.Struct({
   code: Schema.Literals([
+    "server.event-loop.stall",
     "git.request.failed",
     "git.branch.failed",
     "git.commit.failed",
@@ -1356,6 +1376,9 @@ export interface NativeApi {
     getThreadDetailSnapshot: (
       input: OrchestrationGetThreadDetailSnapshotInput,
     ) => Promise<OrchestrationGetThreadDetailSnapshotResult>;
+    searchThreads: (
+      input: OrchestrationSearchThreadsInput,
+    ) => Promise<OrchestrationSearchThreadsResult>;
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
     importThread: (
       input: OrchestrationImportThreadInput,
@@ -1473,6 +1496,17 @@ export interface NativeApi {
     update: (input: TodoUpdateInput) => Promise<Todo>;
     delete: (input: TodoDeleteInput) => Promise<void>;
     onEvent: (callback: (event: TodoStreamEvent) => void) => () => void;
+  };
+  mind: {
+    list: (input: MindListInput) => Promise<MindListResult>;
+    search: (input: MindSearchInput) => Promise<MindSearchResult>;
+    forget: (input: MindForgetInput) => Promise<void>;
+    setPinned: (input: MindSetPinnedInput) => Promise<MindMemory>;
+    affirm: (input: MindAffirmInput) => Promise<MindMemory>;
+    update: (input: MindUpdateInput) => Promise<MindMemory>;
+    history: (input: MindHistoryInput) => Promise<MindHistoryResult>;
+    profileGet: (input: MindProfileGetInput) => Promise<MindProfileGetResult>;
+    profileSet: (input: MindProfileSetInput) => Promise<MindProfile>;
   };
   browser: BrowserControlMethods & {
     annotations: BrowserAnnotationMethods;

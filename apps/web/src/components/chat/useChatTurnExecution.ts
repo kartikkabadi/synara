@@ -392,7 +392,10 @@ export function useChatTurnExecution({
               associatedWorktreeBranch: nextAssociatedWorktreeBranch,
               associatedWorktreeRef: nextAssociatedWorktreeRef,
               lastKnownPr: activeThread.lastKnownPr ?? null,
-              createdAt: activeThread.createdAt,
+              // The draft timestamp records when the composer opened. The durable
+              // thread is created by this first send, so order it at the message's
+              // send time just like the turn itself.
+              createdAt: messageCreatedAt,
             },
             api,
           );
@@ -533,7 +536,7 @@ export function useChatTurnExecution({
             if (setupTerminal) {
               const setupActivityAbortController = new AbortController();
               const setupActivityWait = waitForSetupScriptTerminalActivity({
-                threadId: threadIdForSend,
+                threadId: setupTerminal.threadId,
                 terminalId: setupTerminal.terminalId,
                 signal: setupActivityAbortController.signal,
               });

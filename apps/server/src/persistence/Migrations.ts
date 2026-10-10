@@ -146,6 +146,13 @@ import Migration0127 from "./Migrations/127_ProjectImportHistory.ts";
 import Migration0128 from "./Migrations/128_HubWork.ts";
 import Migration0129 from "./Migrations/129_ProjectionThreadsSnooze.ts";
 import Migration0130 from "./Migrations/130_PullRequestAutoFix.ts";
+import Migration0131 from "./Migrations/131_ProjectSourceFolders.ts";
+import Migration0132 from "./Migrations/132_ExternalMcpTurnCapacityRecovery.ts";
+import Migration0133 from "./Migrations/133_Mind.ts";
+import Migration0134 from "./Migrations/134_MindRuntimeIntegrity.ts";
+import Migration0135 from "./Migrations/135_MindTextRevisions.ts";
+import Migration0136 from "./Migrations/136_MindProfiles.ts";
+import Migration0137 from "./Migrations/137_MindProjectionDecoupling.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -292,6 +299,13 @@ export const migrationEntries = [
   [128, "HubWork", Migration0128],
   [129, "ProjectionThreadsSnooze", Migration0129],
   [130, "PullRequestAutoFix", Migration0130],
+  [131, "ProjectSourceFolders", Migration0131],
+  [132, "ExternalMcpTurnCapacityRecovery", Migration0132],
+  [133, "Mind", Migration0133],
+  [134, "MindRuntimeIntegrity", Migration0134],
+  [135, "MindTextRevisions", Migration0135],
+  [136, "MindProfiles", Migration0136],
+  [137, "MindProjectionDecoupling", Migration0137],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

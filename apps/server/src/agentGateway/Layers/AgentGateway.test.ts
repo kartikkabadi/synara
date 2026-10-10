@@ -40,6 +40,7 @@ import { AutomationService } from "../../automation/Services/AutomationService.t
 import { ProjectAgentService } from "../../projectAgent/Services/ProjectAgentService.ts";
 import { GitCore } from "../../git/Services/GitCore.ts";
 import { GitManager } from "../../git/Services/GitManager.ts";
+import { MindServiceLive } from "../../mind/Layers/MindService.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
@@ -48,6 +49,7 @@ import {
   ProjectionThreadRepository,
 } from "../../persistence/Services/ProjectionThreads.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
+import { MindRepositoryLive } from "../../persistence/Layers/MindRepository.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { OrchestrationEngineLive } from "../../orchestration/Layers/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "../../orchestration/Layers/ProjectionPipeline.ts";
@@ -388,6 +390,7 @@ function makeHarnessLayer(
     readonly dispatchDelayMs?: number;
     readonly interruptedOperations?: ReadonlyArray<AgentGatewayOperationRecord>;
     readonly providerStatuses?: ReadonlyArray<ServerProviderStatus>;
+    readonly serverSettings?: Parameters<typeof ServerSettingsService.layerTest>[0];
     readonly existingBranches?: ReadonlyArray<string>;
     readonly existingWorktrees?: Readonly<Record<string, string>>;
     readonly verifiedOwnershipTokens?: ReadonlyArray<string>;
@@ -1338,12 +1341,20 @@ function makeHarnessLayer(
     Layer.provide(snapshotLayer),
     Layer.provide(engineLayer),
     Layer.provide(automationLayer),
-    Layer.provide(projectAgentLayer),
+    Layer.provide(
+      Layer.mergeAll(
+        projectAgentLayer,
+        MindServiceLive.pipe(
+          Layer.provideMerge(MindRepositoryLive),
+          Layer.provideMerge(SqlitePersistenceMemory),
+        ),
+      ),
+    ),
     Layer.provide(gitLayer),
     Layer.provide(gitManagerLayer),
     Layer.provide(providerDiscoveryLayer),
     Layer.provide(providerHealthLayer),
-    Layer.provide(ServerSettingsService.layerTest()),
+    Layer.provide(ServerSettingsService.layerTest(options.serverSettings ?? {})),
     Layer.provide(operationLayer),
     Layer.provide(projectionTurnsLayer),
     Layer.provide(diagnosticsLayer),
@@ -2519,6 +2530,53 @@ describe("AgentGateway", () => {
 
       const serialized = JSON.stringify(payload);
       assert.isBelow(serialized.indexOf('"targetConstruction"'), serialized.indexOf('"providers"'));
+    }).pipe(Effect.provide(gatewayLayer));
+  });
+
+  it.effect("advertises configured provider instances in capabilities", () => {
+    const { gatewayLayer, makeHarness } = makeHarnessLayer(baseThreads, [], {
+      serverSettings: {
+        providerInstances: {
+          codex_work: {
+            driver: "codex",
+            displayName: "Work Codex",
+            enabled: true,
+            config: {},
+          },
+        },
+      },
+    });
+    return Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      const response = yield* harness.callTool({
+        token: "token-parent",
+        name: "synara_capabilities",
+        args: {},
+      });
+      const payload = toolResultJson(response.result);
+      const providers = payload.providers as Array<{
+        provider: string;
+        instances?: Array<{
+          instanceId: string;
+          displayName: string;
+          isDefault: boolean;
+          enabled: boolean;
+        }>;
+      }>;
+      assert.deepEqual(providers.find((provider) => provider.provider === "codex")?.instances, [
+        {
+          instanceId: "codex",
+          displayName: "Codex",
+          isDefault: true,
+          enabled: true,
+        },
+        {
+          instanceId: "codex_work",
+          displayName: "Work Codex",
+          isDefault: false,
+          enabled: true,
+        },
+      ]);
     }).pipe(Effect.provide(gatewayLayer));
   });
 

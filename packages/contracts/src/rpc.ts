@@ -304,6 +304,7 @@ import {
 } from "./project";
 import {
   ServerConfig,
+  ServerRuntimeStatus,
   ServerConfigStreamEvent,
   ServerDiagnosticsResult,
   ServerReadThreadDiagnosticsInput,
@@ -321,6 +322,7 @@ import {
   ServerListProviderUsageResult,
   ServerLifecycleStreamEvent,
   ServerGetSettingsResult,
+  ServerKeepAwakeUpdatedPayload,
   ServerListLocalServersResult,
   ServerListWorktreesResult,
   ServerProviderUpdateError,
@@ -359,6 +361,23 @@ import {
   StatsGetRecapInput,
   StatsGetRecapResult,
 } from "./stats";
+import {
+  MindAffirmInput,
+  MindForgetInput,
+  MindHistoryInput,
+  MindHistoryResult,
+  MindListInput,
+  MindListResult,
+  MindMemory,
+  MindProfile,
+  MindProfileGetInput,
+  MindProfileGetResult,
+  MindProfileSetInput,
+  MindSearchInput,
+  MindSearchResult,
+  MindSetPinnedInput,
+  MindUpdateInput,
+} from "./mind";
 import { WS_METHODS } from "./ws";
 import {
   WS_BOOTSTRAP_METHOD,
@@ -366,6 +385,9 @@ import {
   WsBootstrapNegotiateResult,
   WsCompatibilityError,
 } from "./wsCompatibility";
+
+/** Retry only the affected orchestration subscription from its last applied cursor. */
+export const ORCHESTRATION_STREAM_OVERFLOW_CODE = "ORCHESTRATION_STREAM_OVERFLOW";
 
 export class WsRpcError extends Schema.TaggedErrorClass<WsRpcError>()("WsRpcError", {
   message: Schema.String,
@@ -479,6 +501,12 @@ export const WsOrchestrationGetThreadDetailSnapshotRpc = Rpc.make(
     error: WsRpcError,
   },
 );
+
+export const WsOrchestrationSearchThreadsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.searchThreads, {
+  payload: OrchestrationRpcSchemas.searchThreads.input,
+  success: OrchestrationRpcSchemas.searchThreads.output,
+  error: WsRpcError,
+});
 
 export const WsOrchestrationReplayEventsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.replayEvents, {
   payload: OrchestrationRpcSchemas.replayEvents.input,
@@ -1307,6 +1335,12 @@ export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTermina
   stream: true,
 });
 
+export const WsServerGetRuntimeStatusRpc = Rpc.make(WS_METHODS.serverGetRuntimeStatus, {
+  payload: Schema.Struct({}),
+  success: ServerRuntimeStatus,
+  error: WsRpcError,
+});
+
 export const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
   payload: Schema.Struct({}),
   success: ServerConfig,
@@ -1521,6 +1555,13 @@ export const WsSubscribeServerSettingsRpc = Rpc.make(WS_METHODS.subscribeServerS
   stream: true,
 });
 
+export const WsSubscribeServerKeepAwakeRpc = Rpc.make(WS_METHODS.subscribeServerKeepAwake, {
+  payload: Schema.Struct({}),
+  success: ServerKeepAwakeUpdatedPayload,
+  error: WsRpcError,
+  stream: true,
+});
+
 export const WsProviderGetComposerCapabilitiesRpc = Rpc.make(
   WS_METHODS.providerGetComposerCapabilities,
   {
@@ -1665,6 +1706,24 @@ export const WsTodoUpdateRpc = Rpc.make(WS_METHODS.todoUpdate, {
 
 export const WsTodoDeleteRpc = Rpc.make(WS_METHODS.todoDelete, {
   payload: TodoDeleteInput,
+  success: Schema.Void,
+  error: WsRpcError,
+});
+
+export const WsMindListRpc = Rpc.make(WS_METHODS.mindList, {
+  payload: MindListInput,
+  success: MindListResult,
+  error: WsRpcError,
+});
+
+export const WsMindSearchRpc = Rpc.make(WS_METHODS.mindSearch, {
+  payload: MindSearchInput,
+  success: MindSearchResult,
+  error: WsRpcError,
+});
+
+export const WsMindForgetRpc = Rpc.make(WS_METHODS.mindForget, {
+  payload: MindForgetInput,
   success: Schema.Void,
   error: WsRpcError,
 });
@@ -1874,6 +1933,42 @@ export const WsSubscribeProjectAgentEventsRpc = Rpc.make(WS_METHODS.subscribePro
   stream: true,
 });
 
+export const WsMindSetPinnedRpc = Rpc.make(WS_METHODS.mindSetPinned, {
+  payload: MindSetPinnedInput,
+  success: MindMemory,
+  error: WsRpcError,
+});
+
+export const WsMindAffirmRpc = Rpc.make(WS_METHODS.mindAffirm, {
+  payload: MindAffirmInput,
+  success: MindMemory,
+  error: WsRpcError,
+});
+
+export const WsMindUpdateRpc = Rpc.make(WS_METHODS.mindUpdate, {
+  payload: MindUpdateInput,
+  success: MindMemory,
+  error: WsRpcError,
+});
+
+export const WsMindHistoryRpc = Rpc.make(WS_METHODS.mindHistory, {
+  payload: MindHistoryInput,
+  success: MindHistoryResult,
+  error: WsRpcError,
+});
+
+export const WsMindProfileGetRpc = Rpc.make(WS_METHODS.mindProfileGet, {
+  payload: MindProfileGetInput,
+  success: MindProfileGetResult,
+  error: WsRpcError,
+});
+
+export const WsMindProfileSetRpc = Rpc.make(WS_METHODS.mindProfileSet, {
+  payload: MindProfileSetInput,
+  success: MindProfile,
+  error: WsRpcError,
+});
+
 export const WsBootstrapRpcGroup = RpcGroup.make(WsBootstrapNegotiateRpc);
 
 export const WsFeatureRpcGroup = RpcGroup.make(
@@ -1887,6 +1982,7 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsOrchestrationGetSnapshotRpc,
   WsOrchestrationGetShellSnapshotRpc,
   WsOrchestrationGetThreadDetailSnapshotRpc,
+  WsOrchestrationSearchThreadsRpc,
   WsOrchestrationRepairStateRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
@@ -1964,6 +2060,7 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsTerminalRestartRpc,
   WsTerminalCloseRpc,
   WsSubscribeTerminalEventsRpc,
+  WsServerGetRuntimeStatusRpc,
   WsServerGetConfigRpc,
   WsServerGetEnvironmentRpc,
   WsServerGetSettingsRpc,
@@ -1994,6 +2091,7 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsSubscribeServerLifecycleRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerProviderStatusesRpc,
+  WsSubscribeServerKeepAwakeRpc,
   WsSubscribeServerSettingsRpc,
   WsProviderGetComposerCapabilitiesRpc,
   WsProviderCompactThreadRpc,
@@ -2015,6 +2113,15 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsAutomationArchiveRunRpc,
   WsAutomationResolveProposalRpc,
   WsSubscribeAutomationEventsRpc,
+  WsMindListRpc,
+  WsMindSearchRpc,
+  WsMindForgetRpc,
+  WsMindSetPinnedRpc,
+  WsMindAffirmRpc,
+  WsMindUpdateRpc,
+  WsMindHistoryRpc,
+  WsMindProfileGetRpc,
+  WsMindProfileSetRpc,
   WsTodoListRpc,
   WsTodoCreateRpc,
   WsTodoUpdateRpc,

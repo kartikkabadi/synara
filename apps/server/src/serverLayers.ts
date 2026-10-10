@@ -17,7 +17,7 @@ import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQu
 import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor";
-import { StudioOutputReactorLive } from "./orchestration/Layers/StudioOutputReactor";
+import { HubOutputReactorLive } from "./orchestration/Layers/HubOutputReactor";
 import { ThreadGitMetadataReactorLive } from "./orchestration/Layers/ThreadGitMetadataReactor";
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor";
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion";
@@ -33,6 +33,7 @@ import { DeviceServiceLive } from "./device/Layers/DeviceService";
 import type { DeviceService } from "./device/Services/DeviceService";
 import { ComputerServiceLive } from "./computer/Layers/ComputerService";
 import { KeybindingsLive } from "./keybindings";
+import { MindServiceLive } from "./mind/Layers/MindService";
 import { GitCoreLive } from "./git/Layers/GitCore";
 import { GitLayerLive, TextGenerationLayerLive } from "./git/runtimeLayer";
 import { TerminalLayerLive } from "./terminal/runtimeLayer";
@@ -44,9 +45,12 @@ import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore";
 import { SessionCredentialServiceLive } from "./auth/Layers/SessionCredentialService";
 import { ProfileStatsQueryLive } from "./profileStats";
 import { RecapStatsQueryLive } from "./recapStats";
+import { ThreadSearchQueryLive } from "./threadSearch";
 import { ProfileStatsArchiveLive } from "./profileStatsArchive";
+import { ServerEventLoopMonitorLive } from "./eventLoopMonitor";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents";
 import { ServerRuntimeStartupLive } from "./serverRuntimeStartup";
+import { KeepAwakeLive } from "./keepAwake";
 import { ServerSettingsLive } from "./serverSettings";
 import { WorkspaceLayerLive } from "./workspace/runtimeLayer";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver";
@@ -60,6 +64,7 @@ import { TodoServiceLive } from "./todo/Layers/TodoService";
 import { ProjectAgentRepositoryLive } from "./persistence/Layers/ProjectAgentRepository";
 import { ProjectAgentReactorLive } from "./projectAgent/Layers/ProjectAgentReactor";
 import { ProjectAgentServiceLive } from "./projectAgent/Layers/ProjectAgentService";
+import { MindRepositoryLive } from "./persistence/Layers/MindRepository";
 import { ProjectPullRequestPinsLive } from "./persistence/Layers/ProjectPullRequestPins";
 import { ProjectionTurnRepositoryLive } from "./persistence/Layers/ProjectionTurns";
 import { OrchestrationEventDeliveryRepositoryLive } from "./persistence/Layers/OrchestrationEventDeliveries";
@@ -118,9 +123,7 @@ export function makeServerRuntimeServicesLayer(
     Layer.provideMerge(runtimeServicesLayer),
     Layer.provideMerge(ComputerServiceLive),
   );
-  const studioOutputReactorLayer = StudioOutputReactorLive.pipe(
-    Layer.provideMerge(runtimeServicesLayer),
-  );
+  const hubOutputReactorLayer = HubOutputReactorLive.pipe(Layer.provideMerge(runtimeServicesLayer));
   const threadGitMetadataReactorLayer = ThreadGitMetadataReactorLive.pipe(
     Layer.provideMerge(runtimeServicesLayer),
     Layer.provideMerge(GitLayerLive),
@@ -147,7 +150,7 @@ export function makeServerRuntimeServicesLayer(
     Layer.provideMerge(runtimeServicesLayer),
     Layer.provideMerge(providerHealthLayer),
     Layer.provideMerge(OrchestrationEventDeliveryRepositoryLive),
-    Layer.provideMerge(studioOutputReactorLayer),
+    Layer.provideMerge(hubOutputReactorLayer),
     Layer.provideMerge(GitCoreLive),
     Layer.provideMerge(TextGenerationLayerLive),
     Layer.provideMerge(serverSettingsLayer),
@@ -174,7 +177,7 @@ export function makeServerRuntimeServicesLayer(
     Layer.provideMerge(runtimeIngestionLayer),
     Layer.provideMerge(providerCommandReactorLayer),
     Layer.provideMerge(checkpointReactorLayer),
-    Layer.provideMerge(studioOutputReactorLayer),
+    Layer.provideMerge(hubOutputReactorLayer),
     Layer.provideMerge(threadGitMetadataReactorLayer),
     Layer.provideMerge(sidechatExpiryReactorLayer),
   );
@@ -211,6 +214,8 @@ export function makeServerRuntimeServicesLayer(
     serverAuthLayer,
   );
   const todoServiceLayer = TodoServiceLive.pipe(Layer.provideMerge(TodoRepositoryLive));
+  // Mind domain service over its repository; the SQL client is provided upstream.
+  const mindServiceLayer = MindServiceLive.pipe(Layer.provideMerge(MindRepositoryLive));
   const automationSchedulerLayer = AutomationSchedulerLive.pipe(
     Layer.provideMerge(automationServiceLayer),
     Layer.provideMerge(AutomationRepositoryLive),
@@ -249,7 +254,8 @@ export function makeServerRuntimeServicesLayer(
     Layer.provideMerge(ManagedAttachmentRepositoryLive),
     Layer.provideMerge(agentGatewayCredentialsLayer),
     Layer.provideMerge(automationServiceLayer),
-    Layer.provideMerge(projectAgentServiceLayer),
+    // Share both project coordination and project memory with the gateway.
+    Layer.provideMerge(Layer.mergeAll(projectAgentServiceLayer, mindServiceLayer)),
     Layer.provideMerge(runtimeServicesLayer),
     Layer.provideMerge(GitLayerLive),
     Layer.provideMerge(ProjectionTurnRepositoryLive),
@@ -281,6 +287,10 @@ export function makeServerRuntimeServicesLayer(
     Layer.provideMerge(GitLayerLive),
     Layer.provideMerge(runtimeServicesLayer),
   );
+  const keepAwakeLayer = KeepAwakeLive.pipe(
+    Layer.provideMerge(runtimeServicesLayer),
+    Layer.provideMerge(ServerSettingsLive),
+  );
 
   return Layer.mergeAll(
     agentGatewayCredentialsLayer,
@@ -293,6 +303,7 @@ export function makeServerRuntimeServicesLayer(
     ProjectAgentRepositoryLive,
     projectAgentServiceLayer,
     projectAgentReactorLayer,
+    mindServiceLayer,
     managedAttachmentCleanupLayer,
     AutomationRepositoryLive,
     AgentGatewayOperationRepositoryLive,
@@ -316,11 +327,14 @@ export function makeServerRuntimeServicesLayer(
     TextGenerationLayerLive,
     TerminalLayerLive,
     KeybindingsLive,
+    keepAwakeLayer,
     ServerEnvironmentLive,
     ProfileStatsQueryLive,
     RecapStatsQueryLive,
+    ThreadSearchQueryLive,
     authServicesLayer,
     ServerLifecycleEventsLive,
+    ServerEventLoopMonitorLive,
     ServerRuntimeStartupLive,
     WorkspaceLayerLive,
     ProjectFaviconResolverLive,
