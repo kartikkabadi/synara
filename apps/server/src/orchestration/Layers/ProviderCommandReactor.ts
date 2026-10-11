@@ -3013,15 +3013,9 @@ const make = Effect.gen(function* () {
       .filter((block) => block.trim().length > 0)
       .join("\n\n");
     const settings = yield* serverSettings.getSettings;
-    const globalInstructions = settings.globalInstructionsEnabled
-      ? yield* loadGlobalInstructions().pipe(Effect.provideService(ServerConfig, serverConfig))
-      : null;
-    const globalInstructionsPrompt =
-      globalInstructions === null ? null : formatGlobalInstructionsPrompt(globalInstructions);
     const debugPromptOverheadChars = debugModePromptOverheadChars(input.interactionMode);
     const goalPromptOverheadChars = providerGoalPromptOverheadChars(activeThreadGoal(thread));
-    const providerPromptOverheadChars =
-      debugPromptOverheadChars + goalPromptOverheadChars + (globalInstructionsPrompt?.length ?? 0);
+    let providerPromptOverheadChars = debugPromptOverheadChars + goalPromptOverheadChars;
     const computerInvocation =
       input.dispatchOrigin === undefined || input.dispatchOrigin === "user"
         ? parseComputerInvocation(input.messageText)
@@ -3048,7 +3042,7 @@ const make = Effect.gen(function* () {
       contextBlocks: threadMentionProjection.contextBlocks,
     });
     let mentionContextSuffix = threadMentionContextSuffix(threadMentionProjection.contextBlocks);
-    const providerMentions = threadMentionProjection.providerMentions;
+    let providerMentions = threadMentionProjection.providerMentions;
     // Subagent threads have no provider session of their own: their messages
     // steer the running child task through the parent session (mirrors the
     // interrupt seam), never the session-bootstrap path below. Parent metadata
@@ -3199,6 +3193,36 @@ const make = Effect.gen(function* () {
       }),
       input.claudeCompactionCancellation,
     );
+    const globalInstructions =
+      settings.globalInstructionsEnabled &&
+      (activeSessionBeforeEnsure === undefined || nativeSessionRestarted)
+        ? yield* loadGlobalInstructions().pipe(
+            Effect.provideService(ServerConfig, serverConfig),
+            Effect.catch(() =>
+              Effect.logWarning(
+                "Global instructions could not be loaded; continuing without optional guidance",
+                {
+                  threadId: input.threadId,
+                },
+              ).pipe(Effect.as(null)),
+            ),
+          )
+        : null;
+    const globalInstructionsPrompt =
+      globalInstructions === null ? null : formatGlobalInstructionsPrompt(globalInstructions);
+    if (globalInstructionsPrompt !== null) {
+      providerPromptOverheadChars += globalInstructionsPrompt.length;
+      const boundedMentions = yield* resolveThreadMentionPromptProjection({
+        mentions: input.mentions,
+        snapshotQuery: projectionSnapshotQuery,
+        maxTotalContextChars: availableThreadMentionContextChars(
+          promptWithProjectContext,
+          providerPromptOverheadChars,
+        ),
+      });
+      mentionContextSuffix = threadMentionContextSuffix(boundedMentions.contextBlocks);
+      providerMentions = boundedMentions.providerMentions;
+    }
     // The session returned by ensureSessionForThread is authoritative. A
     // stopped projected session can still name the old provider after a model
     // switch until the projection catches up with the newly started session.

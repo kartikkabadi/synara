@@ -17,7 +17,15 @@ interface CachedInstructions {
 const cache = new Map<string, CachedInstructions>();
 
 export function normalizeGlobalInstructions(text: string): string {
-  return text.trim().slice(0, GLOBAL_INSTRUCTIONS_MAX_CHARS);
+  const trimmed = text.trim();
+  const end = GLOBAL_INSTRUCTIONS_MAX_CHARS;
+  const splitsPair =
+    trimmed.length > end &&
+    trimmed.charCodeAt(end - 1) >= 0xd800 &&
+    trimmed.charCodeAt(end - 1) <= 0xdbff &&
+    trimmed.charCodeAt(end) >= 0xdc00 &&
+    trimmed.charCodeAt(end) <= 0xdfff;
+  return trimmed.slice(0, splitsPair ? end - 1 : end);
 }
 
 export function formatGlobalInstructionsPrompt(text: string): string {

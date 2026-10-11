@@ -73,6 +73,28 @@ it("shows read errors without writing or enabling the feature", async () => {
   await expect
     .element(screen.getByText("Owner authorization is required.", { exact: true }))
     .toBeVisible();
+  await expect.element(screen.getByRole("textbox")).toBeDisabled();
+  await expect.element(screen.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  expect(api.updateGlobalInstructions).not.toHaveBeenCalled();
+  api.getGlobalInstructions.mockResolvedValue({ contents: "Previously unseen guidance" });
+  await screen.getByRole("button", { name: "Retry loading" }).click();
+  await expect.element(screen.getByRole("textbox")).toHaveValue("Previously unseen guidance");
+  await expect.element(screen.getByRole("textbox")).toBeEnabled();
+  expect(api.updateGlobalInstructions).not.toHaveBeenCalled();
+  await screen.unmount();
+  client.clear();
+});
+
+it("refreshes external guidance after a reconnect without discarding an unsaved draft", async () => {
+  const { screen, client } = await openEditor();
+  await expect.element(screen.getByRole("textbox")).toHaveValue("Original guidance");
+  api.getGlobalInstructions.mockResolvedValue({ contents: "Externally replaced guidance" });
+  await client.refetchQueries();
+  await expect.element(screen.getByRole("textbox")).toHaveValue("Externally replaced guidance");
+  await screen.getByRole("textbox").fill("My pending draft");
+  api.getGlobalInstructions.mockResolvedValue({ contents: "Later external version" });
+  await client.refetchQueries();
+  await expect.element(screen.getByRole("textbox")).toHaveValue("My pending draft");
   expect(api.updateGlobalInstructions).not.toHaveBeenCalled();
   await screen.unmount();
   client.clear();

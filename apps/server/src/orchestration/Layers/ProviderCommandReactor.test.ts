@@ -1208,6 +1208,46 @@ describe("ProviderCommandReactor", () => {
     expect((await harness.completionState())[0]?.context_consumed).toBe(1);
   });
 
+  it.each(["guidance", "oversized", "directory"] as const)(
+    "handles optional global instructions from a %s file without failing dispatch",
+    async (kind) => {
+      const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "synara-reactor-guidance-"));
+      const file = path.join(baseDir, "SYNARA.md");
+      if (kind === "directory") fs.mkdirSync(file);
+      else
+        fs.writeFileSync(
+          file,
+          kind === "oversized" ? "x".repeat(65 * 1024) : "GLOBAL-GUIDANCE-MARKER",
+        );
+      const harness = await createHarness({
+        baseDir,
+        serverSettings: { globalInstructionsEnabled: true },
+      });
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          commandId: CommandId.makeUnsafe(`global-guidance-${kind}`),
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          message: {
+            messageId: MessageId.makeUnsafe(`global-guidance-${kind}`),
+            role: "user",
+            text: "Continue my work",
+            attachments: [],
+          },
+          createdAt: new Date().toISOString(),
+        }),
+      );
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      await harness.drain();
+      const prompt = harness.sendTurn.mock.calls[0]?.[0].input;
+      expect(prompt).toContain("Continue my work");
+      if (kind === "guidance") expect(prompt).toContain("GLOBAL-GUIDANCE-MARKER");
+      else expect(prompt).not.toContain("<synara_global_instructions>");
+    },
+  );
+
   it("prefixes the provider input with the project context packet", async () => {
     const harness = await createHarness({
       formatContextPacket: "Project context packet MARKER-PACKET-42",

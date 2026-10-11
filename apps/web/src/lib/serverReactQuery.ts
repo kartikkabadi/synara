@@ -95,7 +95,9 @@ export function serverGlobalInstructionsQueryOptions() {
       const api = ensureNativeApi();
       return api.server.getGlobalInstructions();
     },
-    staleTime: Infinity,
+    staleTime: 0,
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: true,
   });
 }
 

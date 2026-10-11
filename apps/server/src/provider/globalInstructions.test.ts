@@ -23,6 +23,18 @@ describe("global instructions", () => {
     );
   });
 
+  it("preserves complete emoji when truncating at the guidance limit", async () => {
+    const text = `${"x".repeat(GLOBAL_INSTRUCTIONS_MAX_CHARS - 1)}😀trailing`;
+    expect(normalizeGlobalInstructions(text)).toBe("x".repeat(GLOBAL_INSTRUCTIONS_MAX_CHARS - 1));
+    const home = await dataHome();
+    const saved = await runInHome(saveGlobalInstructions(text), home);
+    expect(saved.contents).not.toContain("\ufffd");
+    expect(await readFile(join(home, "SYNARA.md"), "utf8")).toBe(saved.contents);
+    expect(
+      normalizeGlobalInstructions(`${"x".repeat(GLOBAL_INSTRUCTIONS_MAX_CHARS - 2)}😀`),
+    ).toHaveLength(GLOBAL_INSTRUCTIONS_MAX_CHARS);
+  });
+
   it("trims whitespace and caps the file before prompt composition", () => {
     const normalized = normalizeGlobalInstructions(`  ${"x".repeat(10_000)}  `);
     expect(normalized).toHaveLength(GLOBAL_INSTRUCTIONS_MAX_CHARS);

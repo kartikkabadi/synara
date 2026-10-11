@@ -16,7 +16,7 @@ export function GlobalInstructionsEditor() {
       return api.server.updateGlobalInstructions({ contents });
     },
     onSuccess: (result) => {
-      setGlobalInstructionsDraft(result.contents);
+      setGlobalInstructionsDraft(undefined);
       queryClient.setQueryData(serverQueryKeys.globalInstructions(), result);
     },
   });
@@ -26,6 +26,7 @@ export function GlobalInstructionsEditor() {
   const globalInstructionsError = globalInstructionsQuery.error ?? globalInstructionsMutation.error;
   const globalInstructionsLoading =
     globalInstructionsQuery.isPending && globalInstructionsDraft === undefined;
+  const globalInstructionsUnavailable = !globalInstructionsQuery.isSuccess;
   const globalInstructionsSaving = globalInstructionsMutation.isPending;
   return (
     <SettingsRow
@@ -46,6 +47,7 @@ export function GlobalInstructionsEditor() {
         <Button
           variant="outline"
           disabled={
+            globalInstructionsUnavailable ||
             globalInstructionsLoading ||
             globalInstructionsSaving ||
             globalInstructions === savedGlobalInstructions
@@ -57,10 +59,21 @@ export function GlobalInstructionsEditor() {
       }
     >
       <div className="mt-3 space-y-2">
+        {globalInstructionsQuery.isError ? (
+          <Button
+            variant="outline"
+            disabled={globalInstructionsQuery.isFetching}
+            onClick={() => void globalInstructionsQuery.refetch()}
+          >
+            Retry loading
+          </Button>
+        ) : null}
         <Textarea
           value={globalInstructions}
           maxLength={6_000}
-          disabled={globalInstructionsLoading || globalInstructionsSaving}
+          disabled={
+            globalInstructionsUnavailable || globalInstructionsLoading || globalInstructionsSaving
+          }
           onChange={(event) => setGlobalInstructionsDraft(event.target.value)}
           aria-label="Global SYNARA.md instructions content"
           placeholder="Add durable guidance for new or restarted agent sessions…"
