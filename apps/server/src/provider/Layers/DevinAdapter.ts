@@ -1800,7 +1800,9 @@ export function makeDevinAdapter(
     ) =>
       Effect.gen(function* () {
         if (input.lifecycle === "item.started" || ctx.compactionItemId === undefined) {
-          ctx.compactionItemId = RuntimeItemId.makeUnsafe(`devin-compaction:${crypto.randomUUID()}`);
+          ctx.compactionItemId = RuntimeItemId.makeUnsafe(
+            `devin-compaction:${crypto.randomUUID()}`,
+          );
         }
         yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
           type: input.lifecycle,

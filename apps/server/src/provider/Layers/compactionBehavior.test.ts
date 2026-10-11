@@ -206,7 +206,9 @@ adapterCapabilitiesLayer("provider compaction capability flags", (it) => {
   it.effect("projects codex thread/compacting into a context_compaction progress item", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents.pipe(Stream.filter((event) => event.type === "item.started"))).pipe(Effect.forkChild);
+      const firstEventFiber = yield* Stream.runHead(
+        adapter.streamEvents.pipe(Stream.filter((event) => event.type === "item.started")),
+      ).pipe(Effect.forkChild);
 
       codexLifecycleManager.emit("event", {
         id: EventId.makeUnsafe("evt-compaction-behavior-compacting"),
@@ -232,7 +234,9 @@ adapterCapabilitiesLayer("provider compaction capability flags", (it) => {
   it.effect("projects codex thread/compacted into a compacted thread state change", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents.pipe(Stream.filter((event) => event.type === "thread.state.changed"))).pipe(Effect.forkChild);
+      const firstEventFiber = yield* Stream.runHead(
+        adapter.streamEvents.pipe(Stream.filter((event) => event.type === "thread.state.changed")),
+      ).pipe(Effect.forkChild);
 
       codexLifecycleManager.emit("event", {
         id: EventId.makeUnsafe("evt-compaction-behavior-compacted"),

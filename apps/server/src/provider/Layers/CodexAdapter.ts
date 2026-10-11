@@ -2122,16 +2122,27 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
       PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
     );
     const shouldSurfaceUnmappedEvent = makeUnmappedProviderEventGate();
-    const compactionPasses = new Map<ThreadId, {
-      originKey: object | undefined;
-      itemId: RuntimeItemId;
-      completed: boolean;
-    }>();
-    const normalizeCompactionItems = (events: ReadonlyArray<ProviderRuntimeEvent>, originKey: object | undefined): ReadonlyArray<ProviderRuntimeEvent> => {
+    const compactionPasses = new Map<
+      ThreadId,
+      {
+        originKey: object | undefined;
+        itemId: RuntimeItemId;
+        completed: boolean;
+      }
+    >();
+    const normalizeCompactionItems = (
+      events: ReadonlyArray<ProviderRuntimeEvent>,
+      originKey: object | undefined,
+    ): ReadonlyArray<ProviderRuntimeEvent> => {
       const normalized: ProviderRuntimeEvent[] = [];
       for (const event of events) {
         if (event.type === "session.exited") compactionPasses.delete(event.threadId);
-        if ((event.type !== "item.started" && event.type !== "item.updated" && event.type !== "item.completed") || event.payload.itemType !== "context_compaction") {
+        if (
+          (event.type !== "item.started" &&
+            event.type !== "item.updated" &&
+            event.type !== "item.completed") ||
+          event.payload.itemType !== "context_compaction"
+        ) {
           normalized.push(event);
           continue;
         }
@@ -2139,9 +2150,21 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
         if (pass?.originKey !== originKey) pass = undefined;
         if (event.type === "item.completed" && pass?.completed) continue;
         if (!pass || (pass.completed && event.type === "item.started")) {
-          pass = { originKey, itemId: event.itemId ?? RuntimeItemId.makeUnsafe(`codex-compaction:${crypto.randomUUID()}`), completed: false };
+          pass = {
+            originKey,
+            itemId:
+              event.itemId ?? RuntimeItemId.makeUnsafe(`codex-compaction:${crypto.randomUUID()}`),
+            completed: false,
+          };
           compactionPasses.set(event.threadId, pass);
-          if (event.type === "item.completed") normalized.push({ ...event, type: "item.started", eventId: EventId.makeUnsafe(`${event.eventId}:started`), itemId: pass.itemId, payload: { itemType: "context_compaction", status: "inProgress" } });
+          if (event.type === "item.completed")
+            normalized.push({
+              ...event,
+              type: "item.started",
+              eventId: EventId.makeUnsafe(`${event.eventId}:started`),
+              itemId: pass.itemId,
+              payload: { itemType: "context_compaction", status: "inProgress" },
+            });
         }
         normalized.push({ ...event, itemId: pass.itemId });
         if (event.type === "item.completed") pass.completed = true;
@@ -2765,7 +2788,10 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
                   }),
                 ),
               );
-              const runtimeEvents = normalizeCompactionItems(item.runtimeEvents, item.validationKey);
+              const runtimeEvents = normalizeCompactionItems(
+                item.runtimeEvents,
+                item.validationKey,
+              );
               if (runtimeEvents.length === 0) {
                 yield* Effect.logDebug("ignoring unhandled Codex provider event", {
                   method: item.nativeEvent.method,

@@ -55,11 +55,23 @@ export function deriveThreadCompactionRuntimeStatus(input: {
   const { capabilities, lastCompaction, settings, controlState } = input;
   const automaticMode = capabilities?.automatic.mode ?? "unknown";
   const manualSupported = capabilities !== null && capabilities.manual.mode !== "unsupported";
-  const providerAutoEnabled = input.providerAutoEnabled ??
-    (automaticMode === "native" ? capabilities?.automatic.enabledByDefault ?? null : automaticMode === "none" ? false : null);
+  const providerAutoEnabled =
+    input.providerAutoEnabled ??
+    (automaticMode === "native"
+      ? (capabilities?.automatic.enabledByDefault ?? null)
+      : automaticMode === "none"
+        ? false
+        : null);
   const synaraManaged =
-    (automaticMode !== "native" || providerAutoEnabled === false) && manualSupported && settings?.autoEnabled === true;
-  const owner = automaticMode === "native" && providerAutoEnabled !== false ? "provider" : synaraManaged ? "synara" : "none";
+    (automaticMode !== "native" || providerAutoEnabled === false) &&
+    manualSupported &&
+    settings?.autoEnabled === true;
+  const owner =
+    automaticMode === "native" && providerAutoEnabled !== false
+      ? "provider"
+      : synaraManaged
+        ? "synara"
+        : "none";
   return {
     owner,
     providerAutoEnabled,
