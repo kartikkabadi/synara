@@ -80,3 +80,55 @@ it("does not claim the slot or acknowledge Beta welcome on Stable", async () => 
     await screen.unmount();
   }
 });
+
+it("opens Stable for the existing import flow without acknowledging or removing Beta", async () => {
+  const leave = vi.fn(async () => ({ ok: true }));
+  window.desktopBridge = {
+    beta: { getState: async () => state, leave },
+  } as unknown as DesktopBridge;
+  const screen = await render(<BetaWelcomeDialog />);
+  try {
+    await page.getByRole("button", { name: "Open Synara to import" }).click();
+    expect(leave).toHaveBeenCalledWith({ moveToTrash: false });
+    expect(localStorage.getItem(storageKey)).toBeNull();
+    expect(useOnboardingDialogStore.getState().betaWelcomePending).toBe(true);
+  } finally {
+    await screen.unmount();
+  }
+});
+
+it("keeps the welcome available when opening Stable fails", async () => {
+  window.desktopBridge = {
+    beta: {
+      getState: async () => state,
+      leave: async () => ({ ok: false, message: "Synara could not start." }),
+    },
+  } as unknown as DesktopBridge;
+  const screen = await render(<BetaWelcomeDialog />);
+  try {
+    await page.getByRole("button", { name: "Open Synara to import" }).click();
+    await expect.element(page.getByRole("alert")).toHaveTextContent("Synara could not start.");
+    await expect.element(page.getByRole("button", { name: "Open Synara to import" })).toBeEnabled();
+    expect(localStorage.getItem(storageKey)).toBeNull();
+  } finally {
+    await screen.unmount();
+  }
+});
+
+it.each([
+  { ...state, stableInstalled: false },
+  { ...state, lastImportAt: "2026-10-10T12:00:00.000Z" },
+])("does not offer another import when it is unavailable or already complete", async (nextState) => {
+  window.desktopBridge = {
+    beta: { getState: async () => nextState },
+  } as unknown as DesktopBridge;
+  const screen = await render(<BetaWelcomeDialog />);
+  try {
+    await expect.element(page.getByRole("dialog")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "Open Synara to import" }))
+      .not.toBeInTheDocument();
+  } finally {
+    await screen.unmount();
+  }
+});

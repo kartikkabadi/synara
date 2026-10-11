@@ -239,6 +239,15 @@ directories — a leaked lock directory would make beta refuse to start while th
 stable process is alive. Nothing is ever written into the stable home: the
 marker and the result both live in the beta home.
 
+### Import discovery on first launch
+
+When Beta starts without imported data and Stable is installed, its welcome sheet
+has **Open Synara to import**. It opens Stable and closes Beta without removing
+the Beta app. In Stable, choose **Settings → General → Synara Beta → Copy my data and
+open**. The existing confirmation explains that this replaces Beta data. The
+welcome stays pending so the next Beta launch shows the import result. This
+entry point uses the same Stable-authorized import flow described above.
+
 ## Leaving beta
 
 Beta shows **Switch back to Synara** under **Settings → General**. It opens

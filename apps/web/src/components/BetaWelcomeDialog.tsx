@@ -9,7 +9,7 @@
 // desktop builds (the bridge reports the baked flavor, not an env guess).
 
 import { Schema } from "effect";
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { isElectron } from "../env";
 import { useAppSettings } from "../appSettings";
@@ -18,6 +18,7 @@ import { useOnboardingDialogStore } from "../onboarding/onboardingDialogStore";
 import { CentralIcon } from "../lib/central-icons";
 import { cn } from "../lib/utils";
 import { AnnouncementSheet } from "./AnnouncementSheet";
+import { Button } from "./ui/button";
 
 const BETA_WELCOME_STORAGE_KEY = "synara:beta-welcome:v1";
 
@@ -46,6 +47,10 @@ export function BetaWelcomeDialog() {
   const [open, setOpen] = useState(false);
   const [imported, setImported] = useState<boolean | null>(null);
   const [importFailed, setImportFailed] = useState(false);
+  const [stableInstalled, setStableInstalled] = useState(false);
+  const [openingStable, setOpeningStable] = useState(false);
+  const [handoffError, setHandoffError] = useState<string | null>(null);
+  const handoffInFlight = useRef(false);
   const { updateSettingsAndWait } = useAppSettings();
   const setBetaWelcomePending = useOnboardingDialogStore((store) => store.setBetaWelcomePending);
   // updateSettingsAndWait is a new function every render; keeping it out of the
@@ -69,6 +74,7 @@ export function BetaWelcomeDialog() {
         if (state.supported && state.flavor === "beta") {
           const didImport = state.lastImportAt !== null;
           setImported(didImport);
+          setStableInstalled(state.stableInstalled);
           setImportFailed(state.lastImportError !== null);
           if (didImport) {
             // Imported installs are already set up; the normal tour never runs.
@@ -91,7 +97,28 @@ export function BetaWelcomeDialog() {
     };
   }, [storage.acknowledged, setBetaWelcomePending]);
 
+  const openStableForImport = async () => {
+    const bridge = window.desktopBridge?.beta;
+    if (!bridge || handoffInFlight.current) return;
+    handoffInFlight.current = true;
+    setOpeningStable(true);
+    setHandoffError(null);
+    try {
+      const result = await bridge.leave({ moveToTrash: false });
+      if (!result.ok) {
+        setHandoffError(result.message ?? "Could not open Synara. Try again.");
+      }
+      // Keep the welcome unacknowledged so the next Beta launch reports the import result.
+    } catch (error) {
+      setHandoffError(error instanceof Error ? error.message : "Could not open Synara. Try again.");
+    } finally {
+      handoffInFlight.current = false;
+      setOpeningStable(false);
+    }
+  };
+
   const acknowledge = () => {
+    if (handoffInFlight.current) return;
     setOpen(false);
     setStorage({ acknowledged: true });
     setBetaWelcomePending(false);
@@ -142,6 +169,27 @@ export function BetaWelcomeDialog() {
               </li>
             ))}
           </ul>
+          {imported === false && stableInstalled ? (
+            <div className="space-y-2 text-ui">
+              <p className="m-0 text-muted-foreground">
+                Bring your chats and settings from Synara. Open Synara, then go to Settings →
+                General → Synara Beta and choose Copy my data and open. You will confirm before
+                replacing any Beta data. Synara Beta will close so the copy can run safely.
+              </p>
+              <Button
+                variant="outline"
+                disabled={openingStable}
+                onClick={() => void openStableForImport()}
+              >
+                {openingStable ? "Opening Synara…" : "Open Synara to import"}
+              </Button>
+              {handoffError ? (
+                <p role="alert" className="m-0 text-ui text-destructive">
+                  {handoffError}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           {status ? (
             <p
               className={cn(
