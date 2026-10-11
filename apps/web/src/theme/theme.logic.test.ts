@@ -552,16 +552,43 @@ describe("local visual packs", () => {
         "dark",
         { sidebarOnly: false, opacity: 64, blur: 15 },
       );
+      initial.chromeThemes = {
+        dark: { ...initial.chromeThemes.dark, opaqueWindows: true },
+        light: { ...initial.chromeThemes.light, opaqueWindows: false },
+      };
       const selected = applyThemeVisualPreset(initial, id);
       const saved = parseStoredThemeState(JSON.stringify(selected));
       expect(saved.mode).toBe(initial.mode);
       expect(saved.systemUiFont).toBe(false);
       expect(saved.translucency).toEqual(initial.translucency);
+      expect(saved.chromeThemes.dark.opaqueWindows).toBe(true);
+      expect(saved.chromeThemes.light.opaqueWindows).toBe(false);
       for (const variant of ["dark", "light"] as const) {
         expect(resolveThemeWallpaper(saved.chromeThemes[variant], variant).id).toBe(id);
         const css = buildThemeCssVariables(resolveThemePack(saved, variant), variant);
         expect(css.variables["--app-wallpaper-image"]).toBe(`url("/theme-wallpapers/${id}.webp")`);
       }
+    },
+  );
+
+  it.each(["dark", "light"] as const)(
+    "keeps None wallpaper invisible on macOS glass (%s)",
+    (variant) => {
+      const state = {
+        ...DEFAULT_THEME_STATE,
+        chromeThemes: {
+          ...DEFAULT_THEME_STATE.chromeThemes,
+          [variant]: { ...DEFAULT_THEME_STATE.chromeThemes[variant], opaqueWindows: false },
+        },
+      };
+      const css = buildThemeCssVariables(resolveThemePack(state, variant), variant, {
+        electron: true,
+        isMac: true,
+      });
+      expect(css.variables["--app-wallpaper-image"]).toBe("none");
+      expect(css.variables["--app-wallpaper-opacity"]).toBe("0");
+      expect(css.variables["--app-wallpaper-dim"]).toBe("0");
+      expect(css.variables["--app-wallpaper-blur"]).toBe("0px");
     },
   );
 

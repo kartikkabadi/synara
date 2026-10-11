@@ -760,8 +760,8 @@ export function applyThemeVisualPreset(state: ThemeState, presetId: string): The
   return {
     ...state,
     chromeThemes: {
-      dark: preset.dark.theme,
-      light: preset.light.theme,
+      dark: { ...preset.dark.theme, opaqueWindows: state.chromeThemes.dark.opaqueWindows },
+      light: { ...preset.light.theme, opaqueWindows: state.chromeThemes.light.opaqueWindows },
     },
     codeThemeIds: {
       dark: preset.dark.codeThemeId,
@@ -1077,12 +1077,12 @@ export function buildThemeCssVariables(
       : material === "translucent"
         ? `${Math.min(100, Math.round(translucentOpacity * RAIL_SHELL_OPACITY_RATIO_BY_VARIANT[variant]))}%`
         : "100%",
-    "--app-wallpaper-blur": `${wallpaper.blur}px`,
-    "--app-wallpaper-dim": String(wallpaper.dim),
+    "--app-wallpaper-blur": `${wallpaperEnabled ? wallpaper.blur : 0}px`,
+    "--app-wallpaper-dim": String(wallpaperEnabled ? wallpaper.dim : 0),
     "--app-wallpaper-image": wallpaperEnabled
       ? `url("/theme-wallpapers/${wallpaper.id}.webp")`
       : "none",
-    "--app-wallpaper-opacity": String(wallpaper.opacity),
+    "--app-wallpaper-opacity": String(wallpaperEnabled ? wallpaper.opacity : 0),
     "--app-composer-focus-border": composerFocusBorder,
     // Raised-chrome fill over the body's coat when the whole window is glass. Empty elsewhere,
     // which leaves each surface's own fill in charge (see `.app-glass-raised` in index.css).

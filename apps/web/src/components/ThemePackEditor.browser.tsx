@@ -133,7 +133,15 @@ it.each(["Parthenon", "Attic valley"])(
   "applies %s to both modes and preserves window controls",
   async (label) => {
     await page.viewport(1120, 1000);
-    const stored = { ...DEFAULT_THEME_STATE, mode: "light", systemUiFont: false };
+    const stored = {
+      ...DEFAULT_THEME_STATE,
+      mode: "light",
+      systemUiFont: false,
+      chromeThemes: {
+        dark: { ...DEFAULT_THEME_STATE.chromeThemes.dark, opaqueWindows: true },
+        light: { ...DEFAULT_THEME_STATE.chromeThemes.light, opaqueWindows: true },
+      },
+    };
     localStorage.setItem("synara:theme", JSON.stringify(stored));
     await render(
       <>
@@ -155,17 +163,25 @@ it.each(["Parthenon", "Attic valley"])(
     expect(saved.chromeThemes.light.wallpaper?.id).toBe(id);
     expect(saved.chromeThemes.dark.wallpaper?.id).toBe(id);
     expect(saved.translucency).toEqual(stored.translucency);
+    expect(saved.chromeThemes.dark.opaqueWindows).toBe(true);
+    expect(saved.chromeThemes.light.opaqueWindows).toBe(true);
     expect(saved.systemUiFont).toBe(false);
     expect(root.style.getPropertyValue("--theme-font-ui-family")).toContain(
       "system-ui, sans-serif",
     );
     await expect.element(page.getByRole("radio", { name: "Solid", exact: true })).toBeVisible();
     await expect
+      .element(page.getByRole("radio", { name: "Solid", exact: true }))
+      .toHaveAttribute("aria-checked", "true");
+    await expect
       .element(page.getByRole("slider", { name: "Light theme wallpaper opacity" }))
       .toBeVisible();
     await page.getByRole("combobox", { name: "Light theme wallpaper", exact: true }).click();
     await page.getByRole("option", { name: "None", exact: true }).click();
     await expect.poll(() => root.style.getPropertyValue("--app-wallpaper-image")).toBe("none");
+    expect(root.style.getPropertyValue("--app-wallpaper-opacity")).toBe("0");
+    expect(root.style.getPropertyValue("--app-wallpaper-dim")).toBe("0");
+    expect(root.style.getPropertyValue("--app-wallpaper-blur")).toBe("0px");
     expect(
       parseStoredThemeState(localStorage.getItem("synara:theme")).chromeThemes.dark.wallpaper?.id,
     ).toBe(id);
