@@ -39,7 +39,13 @@ export const loadGlobalInstructions = Effect.fn("loadGlobalInstructions")(functi
   return yield* Effect.tryPromise({
     try: async () => {
       let handle: fs.FileHandle;
+      let expectedIdentity: { dev: number; ino: number };
       try {
+        const file = await fs.lstat(filePath);
+        if (!file.isFile() || file.size > MAX_FILE_BYTES) {
+          throw new Error("Global instructions must be a regular file of at most 64 KiB.");
+        }
+        expectedIdentity = { dev: file.dev, ino: file.ino };
         handle = await fs.open(
           filePath,
           constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0),
@@ -55,6 +61,10 @@ export const loadGlobalInstructions = Effect.fn("loadGlobalInstructions")(functi
           cache.delete(filePath);
           throw new Error("Global instructions must be a regular file of at most 64 KiB.");
         }
+        if (stat.dev !== expectedIdentity.dev || stat.ino !== expectedIdentity.ino) {
+          cache.delete(filePath);
+          throw new Error("Global instructions changed while opening; try again.");
+        }
         const identity = JSON.stringify([
           stat.dev,
           stat.ino,
@@ -65,7 +75,12 @@ export const loadGlobalInstructions = Effect.fn("loadGlobalInstructions")(functi
         const cached = cache.get(filePath);
         if (cached?.identity === identity) return cached.text || null;
         const bytes = Buffer.alloc(MAX_FILE_BYTES + 1);
-        const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
+        let bytesRead = 0;
+        while (bytesRead < bytes.length) {
+          const next = await handle.read(bytes, bytesRead, bytes.length - bytesRead, bytesRead);
+          if (next.bytesRead === 0) break;
+          bytesRead += next.bytesRead;
+        }
         if (bytesRead > MAX_FILE_BYTES) {
           cache.delete(filePath);
           throw new Error("Global instructions exceed the 64 KiB file limit.");

@@ -3014,7 +3014,7 @@ const make = Effect.gen(function* () {
       .join("\n\n");
     const settings = yield* serverSettings.getSettings;
     const globalInstructions = settings.globalInstructionsEnabled
-      ? yield* loadGlobalInstructions()
+      ? yield* loadGlobalInstructions().pipe(Effect.provideService(ServerConfig, serverConfig))
       : null;
     const globalInstructionsPrompt =
       globalInstructions === null ? null : formatGlobalInstructionsPrompt(globalInstructions);
