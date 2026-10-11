@@ -90,6 +90,8 @@ it("opens Stable for the existing import flow without acknowledging or removing 
   try {
     await page.getByRole("button", { name: "Open Synara to import" }).click();
     expect(leave).toHaveBeenCalledWith({ moveToTrash: false });
+    await expect.element(page.getByRole("button", { name: "Opening Synara…" })).toBeDisabled();
+    await page.getByRole("button", { name: "Get started" }).click();
     expect(localStorage.getItem(storageKey)).toBeNull();
     expect(useOnboardingDialogStore.getState().betaWelcomePending).toBe(true);
   } finally {
@@ -118,17 +120,20 @@ it("keeps the welcome available when opening Stable fails", async () => {
 it.each([
   { ...state, stableInstalled: false },
   { ...state, lastImportAt: "2026-10-10T12:00:00.000Z" },
-])("does not offer another import when it is unavailable or already complete", async (nextState) => {
-  window.desktopBridge = {
-    beta: { getState: async () => nextState },
-  } as unknown as DesktopBridge;
-  const screen = await render(<BetaWelcomeDialog />);
-  try {
-    await expect.element(page.getByRole("dialog")).toBeVisible();
-    await expect
-      .element(page.getByRole("button", { name: "Open Synara to import" }))
-      .not.toBeInTheDocument();
-  } finally {
-    await screen.unmount();
-  }
-});
+])(
+  "does not offer another import when it is unavailable or already complete",
+  async (nextState) => {
+    window.desktopBridge = {
+      beta: { getState: async () => nextState },
+    } as unknown as DesktopBridge;
+    const screen = await render(<BetaWelcomeDialog />);
+    try {
+      await expect.element(page.getByRole("dialog")).toBeVisible();
+      await expect
+        .element(page.getByRole("button", { name: "Open Synara to import" }))
+        .not.toBeInTheDocument();
+    } finally {
+      await screen.unmount();
+    }
+  },
+);

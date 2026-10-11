@@ -105,16 +105,14 @@ export function BetaWelcomeDialog() {
     setHandoffError(null);
     try {
       const result = await bridge.leave({ moveToTrash: false });
-      if (!result.ok) {
-        setHandoffError(result.message ?? "Could not open Synara. Try again.");
-      }
-      // Keep the welcome unacknowledged so the next Beta launch reports the import result.
+      // Keep the welcome pending until the desktop finishes quitting, then show the import result.
+      if (result.ok) return;
+      setHandoffError(result.message ?? "Could not open Synara. Try again.");
     } catch (error) {
       setHandoffError(error instanceof Error ? error.message : "Could not open Synara. Try again.");
-    } finally {
-      handoffInFlight.current = false;
-      setOpeningStable(false);
     }
+    handoffInFlight.current = false;
+    setOpeningStable(false);
   };
 
   const acknowledge = () => {
