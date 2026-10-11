@@ -2,6 +2,7 @@ import { Effect, Exit, Layer, ManagedRuntime, Scope } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
+import { CompactionReactor } from "../Services/CompactionReactor.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { SidechatExpiryReactor } from "../Services/SidechatExpiryReactor.ts";
@@ -79,6 +80,20 @@ describe("OrchestrationReactor", () => {
           }),
         ),
         Layer.provideMerge(
+          Layer.succeed(CompactionReactor, {
+            start: Effect.acquireRelease(
+              Effect.sync(() => {
+                started.push("compaction-reactor");
+              }),
+              () => Effect.sync(() => stopped.push("compaction-reactor")),
+            ),
+            drain: Effect.void,
+            request: () => Effect.die(new Error("unused")),
+            getControlState: () => Effect.succeed({ status: "idle" as const }),
+            setThreadSettings: () => Effect.void,
+          }),
+        ),
+        Layer.provideMerge(
           Layer.succeed(HubOutputReactor, {
             captureBaselineBeforeTurn: () => Effect.succeed({ status: "not-applicable" as const }),
             cancelPendingTurnBaseline: () => Effect.void,
@@ -113,6 +128,7 @@ describe("OrchestrationReactor", () => {
     expect(started).toEqual([
       "studio-output-reactor",
       "checkpoint-reactor",
+      "compaction-reactor",
       "thread-git-metadata-reactor",
       "provider-runtime-ingestion",
       "sidechat-expiry-reactor",
@@ -125,6 +141,7 @@ describe("OrchestrationReactor", () => {
       "provider-command-reactor",
       "sidechat-expiry-reactor",
       "provider-runtime-ingestion",
+      "compaction-reactor",
       "thread-git-metadata-reactor",
       "checkpoint-reactor",
       "studio-output-reactor",

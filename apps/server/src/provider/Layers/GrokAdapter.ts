@@ -1,3 +1,4 @@
+import { supportsThreadCompactionFromCompaction } from "@synara/shared/providerCompaction";
 import { snapshotProviderTurns } from "../snapshotProviderTurns.ts";
 /**
  * GrokAdapterLive - Grok Build CLI (`grok agent ... stdio`) via ACP.
@@ -8,6 +9,8 @@ import {
   ApprovalRequestId,
   type GrokModelOptions,
   EventId,
+  type CompactionTrigger,
+  type ProviderCompactionCapabilities,
   type ProviderComposerCapabilities,
   type ProviderApprovalDecision,
   type ProviderInteractionMode,
@@ -393,6 +396,13 @@ interface GrokSessionContext {
   // cancelled turn is never prompted.
   pendingTurnInterrupted: boolean;
   compactingThread: boolean;
+  // True while a Grok-initiated (between-turn) auto-compaction has an open
+  // item lifecycle; gates the single item.started per pass.
+  autoCompactionItemStarted: boolean;
+  compactionItemId?: RuntimeItemId | undefined;
+  // Correlates the in-flight manual compaction's synthetic context_compaction
+  // items with the originating ProviderCompactionRequest.
+  compactionRequestId: string | undefined;
   // Failed compaction tool-call detail recorded while compactingThread is set;
   // runGrokCompaction reads it so a failed compaction whose /compact prompt
   // still resolves successfully is not persisted as compacted (mirrors how
@@ -407,7 +417,40 @@ interface GrokSessionContext {
   // ordering then guarantees it cannot cancel the new turn.
   compactionCancelFiber: Fiber.Fiber<void> | undefined;
   latestSessionCostUsd: number | undefined;
+  // Native auto-compaction threshold advertised by ACP initialize, if any.
+  nativeCompactionTriggerPercent: number | undefined;
   stopped: boolean;
+}
+
+// Grok Build advertises its native auto-compaction trigger in the ACP
+// initialize `_meta` extensibility blob as
+// `intra_compaction.trigger_threshold_percent`.
+export function readGrokIntraCompactionTriggerPercent(
+  initializeResult: unknown,
+): number | undefined {
+  if (!isRecord(initializeResult)) {
+    return undefined;
+  }
+  const metaSources = [
+    initializeResult._meta,
+    isRecord(initializeResult.agentCapabilities)
+      ? initializeResult.agentCapabilities._meta
+      : undefined,
+  ];
+  for (const meta of metaSources) {
+    if (!isRecord(meta)) {
+      continue;
+    }
+    const intraCompaction = meta.intra_compaction;
+    if (!isRecord(intraCompaction)) {
+      continue;
+    }
+    const percent = intraCompaction.trigger_threshold_percent;
+    if (typeof percent === "number" && Number.isFinite(percent) && percent > 0 && percent <= 100) {
+      return percent;
+    }
+  }
+  return undefined;
 }
 
 export function isGrokContextCompactionToolCall(toolCall: AcpToolCallState): boolean {
@@ -924,23 +967,29 @@ export function makeGrokAdapter(
     const emitGrokContextCompactionRuntimeEvent = (
       ctx: GrokSessionContext,
       input: {
-        readonly lifecycle: "item.updated" | "item.completed";
+        readonly lifecycle: "item.started" | "item.updated" | "item.completed";
         readonly status: "inProgress" | "completed" | "failed";
         readonly title: string;
         readonly detail?: string;
       },
     ) =>
       Effect.gen(function* () {
+        if (input.lifecycle === "item.started" || ctx.compactionItemId === undefined) {
+          ctx.compactionItemId = RuntimeItemId.makeUnsafe(`grok-compaction:${crypto.randomUUID()}`);
+        }
         yield* offerSessionRuntimeEvent(ctx, {
           type: input.lifecycle,
           ...(yield* makeEventStamp()),
           provider: PROVIDER,
           threadId: ctx.threadId,
-          itemId: RuntimeItemId.makeUnsafe(`grok-compaction:${ctx.threadId}`),
+          itemId: ctx.compactionItemId,
           payload: {
             itemType: "context_compaction",
             status: input.status,
             title: input.title,
+            ...(ctx.compactionRequestId !== undefined
+              ? { requestId: ctx.compactionRequestId }
+              : {}),
             ...(input.detail ? { detail: input.detail } : {}),
           },
         });
@@ -1120,6 +1169,9 @@ export function makeGrokAdapter(
             runtimeMode: input.runtimeMode,
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientInfo: { name: "Synara", version: "0.0.0" },
+            // Grok natively auto-compacts, so its usage snapshots may claim it.
+            // ACP `used`/`size` is a provider-side estimate, not exact model tokens.
+            usageContextConfidence: "medium",
             // Grok registers client hooks from session setup metadata, not
             // initialize.clientCapabilities. Re-send this on load/resume so a
             // reconnected session keeps the Plan-mode write gate.
@@ -1391,10 +1443,13 @@ export function makeGrokAdapter(
             turnStarting: false,
             pendingTurnInterrupted: false,
             compactingThread: false,
+            autoCompactionItemStarted: false,
+            compactionRequestId: undefined,
             compactionFailedToolDetail: undefined,
             compactionQuietUntil: undefined,
             compactionCancelFiber: undefined,
             latestSessionCostUsd: undefined,
+            nativeCompactionTriggerPercent: undefined,
             stopped: false,
           };
 
@@ -1514,6 +1569,20 @@ export function makeGrokAdapter(
                             ? "failed"
                             : "completed"
                           : "inProgress";
+                        // Grok-initiated auto-compaction opens its own item
+                        // lifecycle (manual /compact opens it in
+                        // runGrokCompaction).
+                        if (!ctx.compactingThread && !ctx.autoCompactionItemStarted) {
+                          ctx.autoCompactionItemStarted = true;
+                          yield* emitGrokContextCompactionRuntimeEvent(ctx, {
+                            lifecycle: "item.started",
+                            status: "inProgress",
+                            title: "Compacting context",
+                          });
+                        }
+                        if (emitTerminal) {
+                          ctx.autoCompactionItemStarted = false;
+                        }
                         yield* emitGrokContextCompactionRuntimeEvent(ctx, {
                           lifecycle: emitTerminal ? "item.completed" : "item.updated",
                           status,
@@ -1601,8 +1670,12 @@ export function makeGrokAdapter(
                     return;
                   case "UsageUpdated":
                     {
-                      const activeTurnId = yield* activeTurnIdForGrokRuntimeEvent(ctx, event._tag);
-                      if (activeTurnId === undefined) {
+                      // Usage still refreshes without an active turn: a manual
+                      // /compact and between-turn auto-compaction both report
+                      // the post-compaction snapshot outside a turn. Resume
+                      // replay stays suppressed like every other event.
+                      if (ctx.resumeReplayReady !== undefined) {
+                        yield* noteSuppressedGrokRuntimeEvent(ctx, event._tag, "resume-replay");
                         return;
                       }
                       yield* logNative(ctx.threadId, "session/update", event.rawPayload);
@@ -1613,7 +1686,7 @@ export function makeGrokAdapter(
                           stamp: yield* makeEventStamp(),
                           provider: PROVIDER,
                           threadId: ctx.threadId,
-                          turnId: activeTurnId,
+                          turnId: ctx.activeTurnId,
                           usage: event.usage,
                           rawPayload: event.rawPayload,
                         }),
@@ -1682,6 +1755,9 @@ export function makeGrokAdapter(
             yield* Deferred.succeed(sessionConfigReady, undefined);
             ctx.sessionConfigReady = undefined;
 
+            ctx.nativeCompactionTriggerPercent = readGrokIntraCompactionTriggerPercent(
+              started.initializeResult,
+            );
             yield* offerSessionRuntimeEvent(ctx, {
               type: "session.started",
               ...(yield* makeEventStamp()),
@@ -2237,6 +2313,25 @@ export function makeGrokAdapter(
         return ctx !== undefined && !ctx.stopped;
       });
 
+    // Manual compaction runs through the ACP `/compact` slash command (with the
+    // `x.ai/compact_conversation` extension) and accepts optional instructions.
+    const grokCompaction: ProviderCompactionCapabilities = {
+      manual: {
+        mode: "same-session",
+        mechanism: "control-command",
+        supportsInstructions: true,
+      },
+      automatic: {
+        mode: "native",
+        statusVisibility: "partial",
+        triggerVisibility: "derived",
+      },
+      telemetry: {
+        lifecycle: "native",
+        contextUsage: "provider-estimated",
+      },
+    };
+
     const getComposerCapabilities: NonNullable<GrokAdapterShape["getComposerCapabilities"]> = () =>
       Effect.succeed({
         provider: PROVIDER,
@@ -2246,12 +2341,25 @@ export function makeGrokAdapter(
         supportsPluginMentions: false,
         supportsPluginDiscovery: false,
         supportsRuntimeModelList: true,
-        supportsThreadCompaction: true,
+        compaction: grokCompaction,
+        supportsThreadCompaction: supportsThreadCompactionFromCompaction(grokCompaction),
         supportsThreadImport: false,
       } satisfies ProviderComposerCapabilities);
 
-    const compactThread: NonNullable<GrokAdapterShape["compactThread"]> = (threadId) =>
+    const getNativeCompactionTrigger: NonNullable<
+      GrokAdapterShape["getNativeCompactionTrigger"]
+    > = (threadId) =>
       Effect.gen(function* () {
+        const ctx = yield* requireSession(threadId);
+        const percent = ctx.nativeCompactionTriggerPercent;
+        return percent !== undefined
+          ? ({ kind: "percent", percent } satisfies CompactionTrigger)
+          : undefined;
+      });
+
+    const compactThread: NonNullable<GrokAdapterShape["compactThread"]> = (input) =>
+      Effect.gen(function* () {
+        const threadId = input.threadId;
         // Startup registers the session before its configuration settles, so
         // compaction must wait before taking the thread lock.
         const preLockCtx = yield* requireSession(threadId);
@@ -2263,7 +2371,8 @@ export function makeGrokAdapter(
         // take the same lock, and a hung compaction must never block
         // stopSessionInternal from cancelling or killing the child.
         const ctx = yield* withThreadLock(threadId, claimGrokCompactionSlot(threadId, preLockCtx));
-        return yield* runGrokCompaction(ctx).pipe(
+        ctx.compactionRequestId = input.requestId;
+        return yield* runGrokCompaction(ctx, input.instructions).pipe(
           // compactingThread stays set until this clears it: sendTurn only
           // rejects while the flag is true, so clearing before the
           // completion/thread-state events publish would let a new turn start
@@ -2271,6 +2380,7 @@ export function makeGrokAdapter(
           Effect.ensuring(
             Effect.sync(() => {
               ctx.compactingThread = false;
+              ctx.compactionRequestId = undefined;
             }),
           ),
         );
@@ -2314,18 +2424,23 @@ export function makeGrokAdapter(
         return ctx;
       });
 
-    const runGrokCompaction = (ctx: GrokSessionContext) =>
+    const runGrokCompaction = (ctx: GrokSessionContext, instructions?: string) =>
       Effect.gen(function* () {
         // A previous timed-out /compact may still be cancelling; same ordering
         // requirement as new turns.
         yield* waitForAbandonedGrokCompaction(ctx);
+        yield* emitGrokContextCompactionRuntimeEvent(ctx, {
+          lifecycle: "item.started",
+          status: "inProgress",
+          title: "Compacting context",
+        });
         yield* emitGrokContextCompactionRuntimeEvent(ctx, {
           lifecycle: "item.updated",
           status: "inProgress",
           title: "Compacting context",
         });
 
-        const compactResult = yield* runGrokAcpCompactionCommand(ctx.acp).pipe(
+        const compactResult = yield* runGrokAcpCompactionCommand(ctx.acp, instructions).pipe(
           Effect.mapError((error) =>
             mapAcpToAdapterError(PROVIDER, ctx.threadId, "session/prompt", error),
           ),
@@ -2440,9 +2555,14 @@ export function makeGrokAdapter(
           );
         }
 
-        // Success: thread.state.changed is the single terminal signal —
-        // ingestion projects it into the "Context compacted manually" row, so
-        // emitting an item.completed row here too would duplicate it.
+        // Success: the item.completed row is the single transcript row for the
+        // pass; thread.state.changed stays bookkeeping-only (resume cursor,
+        // idle stop) and no longer projects an activity.
+        yield* emitGrokContextCompactionRuntimeEvent(ctx, {
+          lifecycle: "item.completed",
+          status: "completed",
+          title: "Context compacted",
+        });
         yield* offerSessionRuntimeEvent(ctx, {
           type: "thread.state.changed",
           ...(yield* makeEventStamp()),
@@ -2453,6 +2573,7 @@ export function makeGrokAdapter(
             detail: { reason: "provider.compactThread" },
           },
         });
+        return { kind: "same-session" } as const;
       });
 
     const listModels: NonNullable<GrokAdapterShape["listModels"]> = (input) => {
@@ -2696,6 +2817,7 @@ export function makeGrokAdapter(
       listSessions,
       getComposerCapabilities,
       compactThread,
+      getNativeCompactionTrigger,
       listModels,
       hasSession,
       stopAll,

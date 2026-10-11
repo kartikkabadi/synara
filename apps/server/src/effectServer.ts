@@ -34,6 +34,7 @@ import {
   OrchestrationReactor,
   type OrchestrationReactorShape,
 } from "./orchestration/Services/OrchestrationReactor";
+import { startRemoteAgentStatusReactor } from "./orchestration/Layers/RemoteAgentStatusReactor";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 import { ProjectionPendingInteractionRepository } from "./persistence/Services/ProjectionPendingInteractions";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor";
@@ -269,6 +270,7 @@ export const createEffectServer = Effect.fn(function* (
       Effect.provide(ProjectionPendingInteractionRepositoryLive),
     ),
     reactors: [
+      { start: () => startRemoteAgentStatusReactor(orchestrationEngine) },
       automationScheduler,
       automationRunReactor,
       threadDeletionReactor,

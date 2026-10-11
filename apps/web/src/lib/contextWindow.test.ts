@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { EventId, type OrchestrationThreadActivity, TurnId } from "@synara/contracts";
 
 import {
+  deriveContextCompactionMeterCopy,
+  deriveContextCompactionStatusLine,
+  deriveLatestCompactionRuntimeStatus,
+  formatCompactionTriggerLabel,
   deriveContextWindowSelectionStatus,
   deriveComposerContextWindowLabel,
   deriveAppliedContextWindowSelection,
@@ -84,12 +88,20 @@ describe("contextWindow", () => {
 
   it("withholds old Claude processed totals while preserving context and other providers", () => {
     for (const provider of ["claudeAgent", "codex"]) {
-      const payload = { provider, usedTokens: 100, totalProcessedTokens: 400 };
+      const payload = {
+        provider,
+        usedTokens: 100,
+        totalProcessedTokens: 400,
+        cumulative: { totalProcessedTokens: 400 },
+      };
       const legacy = deriveLatestContextWindowState([
         makeActivity("legacy", "context-window.updated", payload),
       ]).snapshot;
       expect(legacy?.usedTokens).toBe(100);
       expect(legacy?.totalProcessedTokens).toBe(provider === "claudeAgent" ? null : 400);
+      expect(legacy?.cumulative).toEqual(
+        provider === "claudeAgent" ? null : { totalProcessedTokens: 400 },
+      );
       const corrected = deriveLatestContextWindowState([
         makeActivity("corrected", "context-window.updated", {
           ...payload,
@@ -299,6 +311,269 @@ describe("contextWindow", () => {
       activeLabel: "200k",
       selectedLabel: "1M",
       pendingSelectedLabel: "1M",
+    });
+  });
+
+  describe("deriveContextCompactionMeterCopy", () => {
+    const baseCompaction = {
+      manual: {
+        mode: "unsupported",
+        mechanism: "unsupported",
+        supportsInstructions: false,
+      },
+      automatic: {
+        mode: "unknown",
+        statusVisibility: "none",
+        triggerVisibility: "opaque",
+      },
+      telemetry: {
+        lifecycle: "none",
+        contextUsage: "none",
+      },
+    } as const;
+
+    it("claims provider-managed auto compaction from the descriptor, not the snapshot", () => {
+      expect(
+        deriveContextCompactionMeterCopy({
+          compaction: {
+            ...baseCompaction,
+            automatic: { mode: "native", statusVisibility: "none", triggerVisibility: "opaque" },
+          },
+        }),
+      ).toBe("provider-auto");
+    });
+
+    it("reports compaction as unavailable when neither manual nor automatic exists", () => {
+      expect(
+        deriveContextCompactionMeterCopy({
+          compaction: baseCompaction,
+        }),
+      ).toBe("unavailable");
+    });
+
+    it("stays silent when manual compaction exists without observable native auto", () => {
+      expect(
+        deriveContextCompactionMeterCopy({
+          compaction: {
+            ...baseCompaction,
+            manual: {
+              mode: "same-session",
+              mechanism: "control-command",
+              supportsInstructions: true,
+            },
+            automatic: { mode: "none", statusVisibility: "none", triggerVisibility: "opaque" },
+          },
+        }),
+      ).toBeNull();
+    });
+
+    it("ignores the legacy snapshot boolean when no descriptor is available", () => {
+      expect(deriveContextCompactionMeterCopy({ compaction: null })).toBeNull();
+      const legacySnapshot = deriveLatestContextWindowState([
+        makeActivity("activity-1", "context-window.updated", {
+          usedTokens: 14_000,
+          maxTokens: 258_000,
+          compactsAutomatically: true,
+        }),
+      ]).snapshot;
+      expect(legacySnapshot?.compactsAutomatically).toBe(true);
+      expect(deriveContextCompactionMeterCopy({ compaction: null })).toBeNull();
+    });
+  });
+
+  describe("compaction runtime status", () => {
+    const providerAutoStatus = {
+      owner: "provider",
+      providerAutoEnabled: true,
+      manualAvailability: { available: true },
+      trigger: { kind: "percent", percent: 85 },
+    } as const;
+
+    it("derives the latest runtime status from the activity log", () => {
+      const status = deriveLatestCompactionRuntimeStatus([
+        makeActivity("activity-1", "thread.compaction-runtime-status.updated", {
+          owner: "none",
+          providerAutoEnabled: false,
+          manualAvailability: { available: false, reason: "Unsupported" },
+        }),
+        makeActivity("activity-2", "tool.started", {}),
+        makeActivity("activity-3", "thread.compaction-runtime-status.updated", {
+          ...providerAutoStatus,
+        }),
+      ]);
+      expect(status).toMatchObject({
+        owner: "provider",
+        trigger: { kind: "percent", percent: 85 },
+      });
+    });
+
+    it("keeps persisted settings in the runtime projection", () => {
+      const settings = {
+        autoEnabled: true,
+        trigger: { kind: "percent", percent: 72 },
+        cooldownSeconds: 120,
+      };
+      const status = deriveLatestCompactionRuntimeStatus([
+        makeActivity("status", "thread.compaction-runtime-status.updated", {
+          ...providerAutoStatus,
+          settings,
+        }),
+      ]);
+      expect(status?.settings).toEqual(settings);
+    });
+
+    it("ignores malformed runtime status payloads", () => {
+      expect(
+        deriveLatestCompactionRuntimeStatus([
+          makeActivity("activity-1", "thread.compaction-runtime-status.updated", {
+            owner: "someone",
+          }),
+        ]),
+      ).toBeNull();
+    });
+
+    it("formats each trigger kind", () => {
+      expect(formatCompactionTriggerLabel({ kind: "percent", percent: 85 })).toBe(
+        "Auto-compacts at 85%",
+      );
+      expect(
+        formatCompactionTriggerLabel({ kind: "remaining-tokens", reserveTokens: 16_384 }),
+      ).toBe("Keeps 16k tokens free");
+      expect(
+        formatCompactionTriggerLabel({ kind: "absolute-used-tokens", usedTokens: 200_000 }),
+      ).toBe("Auto-compacts at 200k tokens");
+      expect(formatCompactionTriggerLabel({ kind: "opaque" })).toBeNull();
+      expect(formatCompactionTriggerLabel(null)).toBeNull();
+    });
+
+    it("prefers the runtime status trigger and owner over capabilities", () => {
+      expect(
+        deriveContextCompactionStatusLine({
+          compaction: null,
+          runtimeStatus: providerAutoStatus,
+        }),
+      ).toEqual({ kind: "provider-auto", triggerLabel: "Auto-compacts at 85%" });
+    });
+
+    it("reports manual-only and unavailable from the runtime status", () => {
+      expect(
+        deriveContextCompactionStatusLine({
+          compaction: null,
+          runtimeStatus: {
+            owner: "none",
+            providerAutoEnabled: false,
+            manualAvailability: { available: true },
+          },
+        }),
+      ).toEqual({ kind: "manual" });
+      expect(
+        deriveContextCompactionStatusLine({
+          compaction: null,
+          runtimeStatus: {
+            owner: "none",
+            providerAutoEnabled: false,
+            manualAvailability: { available: false },
+          },
+        }),
+      ).toEqual({ kind: "unavailable" });
+    });
+
+    it("falls back to capability-derived copy without a runtime status", () => {
+      const manualOnlyCompaction = {
+        manual: {
+          mode: "same-session",
+          mechanism: "control-command",
+          supportsInstructions: true,
+        },
+        automatic: { mode: "none", statusVisibility: "none", triggerVisibility: "opaque" },
+        telemetry: { lifecycle: "none", contextUsage: "none" },
+      } as const;
+      expect(deriveContextCompactionStatusLine({ compaction: manualOnlyCompaction })).toEqual({
+        kind: "manual",
+      });
+      expect(deriveContextCompactionStatusLine({ compaction: null })).toBeNull();
+    });
+  });
+
+  describe("nested V2 usage semantics", () => {
+    it("prefers the nested context claim over flat fields", () => {
+      const snapshot = deriveLatestContextWindowState([
+        makeActivity("activity-1", "context-window.updated", {
+          usedTokens: 500_000,
+          maxTokens: 1_000_000,
+          context: {
+            usedTokens: 90_000,
+            maxTokens: 200_000,
+            usedPercent: 45,
+            measurement: "provider-reported",
+            confidence: "exact",
+          },
+        }),
+      ]).snapshot;
+
+      expect(snapshot?.usedTokens).toBe(90_000);
+      expect(snapshot?.maxTokens).toBe(200_000);
+      expect(snapshot?.usedPercentage).toBe(45);
+      expect(deriveContextWindowMeterDisplay(snapshot!)).toMatchObject({
+        hasReliableTokenRatio: true,
+        compactLabel: "45%",
+      });
+    });
+
+    it("marks low-confidence context claims as unreliable", () => {
+      const snapshot = deriveLatestContextWindowState([
+        makeActivity("activity-1", "context-window.updated", {
+          usedTokens: 90_000,
+          maxTokens: 200_000,
+          context: {
+            usedTokens: 90_000,
+            maxTokens: 200_000,
+            usedPercent: 45,
+            measurement: "synara-estimated",
+            confidence: "low",
+          },
+        }),
+      ]).snapshot;
+
+      expect(deriveContextWindowMeterDisplay(snapshot!)).toMatchObject({
+        hasReliableTokenRatio: false,
+        compactLabel: "90k",
+      });
+    });
+
+    it("only reads total processed tokens from the cumulative claim when present", () => {
+      const snapshot = deriveLatestContextWindowState([
+        makeActivity("activity-1", "context-window.updated", {
+          usedTokens: 90_000,
+          maxTokens: 200_000,
+          totalProcessedTokens: 900_000,
+          context: {
+            usedTokens: 90_000,
+            maxTokens: 200_000,
+            measurement: "provider-reported",
+            confidence: "exact",
+          },
+          cumulative: { totalProcessedTokens: 750_000 },
+        }),
+      ]).snapshot;
+
+      expect(snapshot?.totalProcessedTokens).toBe(750_000);
+      expect(snapshot?.usedTokens).toBe(90_000);
+    });
+
+    it("keeps legacy flat payloads working without nested claims", () => {
+      const snapshot = deriveLatestContextWindowState([
+        makeActivity("activity-1", "context-window.updated", {
+          usedTokens: 14_000,
+          maxTokens: 258_000,
+          totalProcessedTokens: 748_126,
+        }),
+      ]).snapshot;
+
+      expect(snapshot?.usedTokens).toBe(14_000);
+      expect(snapshot?.maxTokens).toBe(258_000);
+      expect(snapshot?.totalProcessedTokens).toBe(748_126);
+      expect(snapshot?.context).toBeNull();
     });
   });
 });

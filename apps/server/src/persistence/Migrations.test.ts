@@ -11,6 +11,8 @@ import ProjectPullRequestPinsMigration from "./Migrations/069_ProjectPullRequest
 import PullRequestAutoFixMigration from "./Migrations/130_PullRequestAutoFix.ts";
 import ForkSourceMessageMigration from "./Migrations/134_ProjectionThreadsForkSourceMessage.ts";
 import WorkspaceInitializationMigration from "./Migrations/133_ProjectionTurnsWorkspaceInitialization.ts";
+import ThreadCompactionOperationsMigration from "./Migrations/136_ThreadCompactionOperations.ts";
+import ThreadExecutionProfileMigration from "./Migrations/137_ThreadExecutionProfile.ts";
 import SpacesMigration from "./Migrations/079_Spaces.ts";
 
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
@@ -121,6 +123,66 @@ layer("reconcileMigrationLineage", (it) => {
         yield* sql`UPDATE projection_threads SET fork_source_message_id = 'chosen-message' WHERE thread_id = 'legacy-fork'`;
         yield* ForkSourceMessageMigration;
         assert.deepStrictEqual(yield* read(), [{ title: "Keep this", cutoff: "chosen-message" }]);
+      }),
+  );
+
+  it.effect(
+    "adds compaction tables after the released lineage and preserves rows when replayed",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* runMigrations({ toMigrationInclusive: 134 });
+        yield* sql`INSERT INTO projection_threads (thread_id, project_id, title, created_at, updated_at)
+        VALUES ('legacy-compaction', 'project', 'Keep this', '2026-10-11T00:00:00.000Z', '2026-10-11T00:00:00.000Z')`;
+        yield* runMigrations();
+        yield* sql`INSERT INTO thread_compaction_settings (thread_id, settings_json)
+        VALUES ('legacy-compaction', '{"autoEnabled":false}')`;
+        yield* sql`INSERT INTO thread_compaction_operations
+        (thread_id, request_id, status, owner, trigger, updated_at)
+        VALUES ('legacy-compaction', 'preserved-request', 'uncertain', 'synara', 'manual', '2026-10-11T00:00:00.000Z')`;
+        yield* ThreadCompactionOperationsMigration;
+        assert.deepStrictEqual(
+          yield* sql`SELECT title FROM projection_threads WHERE thread_id = 'legacy-compaction'`,
+          [{ title: "Keep this" }],
+        );
+        assert.deepStrictEqual(
+          yield* sql`SELECT settings_json FROM thread_compaction_settings WHERE thread_id = 'legacy-compaction'`,
+          [{ settings_json: '{"autoEnabled":false}' }],
+        );
+        assert.deepStrictEqual(
+          yield* sql`SELECT status FROM thread_compaction_operations WHERE request_id = 'preserved-request'`,
+          [{ status: "uncertain" }],
+        );
+      }),
+  );
+
+  it.effect(
+    "preserves legacy sessions and bound execution profiles when the additive migration replays",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* runMigrations({ toMigrationInclusive: 134 });
+        const columns = yield* sql<{ name: string }>`PRAGMA table_info(projection_thread_sessions)`;
+        assert.notInclude(
+          columns.map((column) => column.name),
+          "execution_profile_json",
+        );
+        yield* sql`INSERT INTO projection_thread_sessions
+        (thread_id, provider_name, status, updated_at)
+        VALUES ('legacy-remote-session', 'codex', 'ready', '2026-10-11T00:00:00.000Z')`;
+        yield* runMigrations();
+        const read = () => sql<{ provider: string; profile: string | null }>`
+        SELECT provider_name AS provider, execution_profile_json AS profile
+        FROM projection_thread_sessions WHERE thread_id = 'legacy-remote-session'`;
+        assert.deepStrictEqual(yield* read(), [{ provider: "codex", profile: null }]);
+        const profile = JSON.stringify({
+          environmentId: "remote-owner",
+          remoteWorkspaceRoot: "/work",
+        });
+        yield* sql`UPDATE projection_thread_sessions SET execution_profile_json = ${profile}
+        WHERE thread_id = 'legacy-remote-session'`;
+        yield* ThreadExecutionProfileMigration;
+        assert.deepStrictEqual(yield* read(), [{ provider: "codex", profile }]);
       }),
   );
 
@@ -681,7 +743,10 @@ managedAttachmentsLegacyLayer("managed attachment migration after private migrat
         [132, "ExternalMcpTurnCapacityRecovery"],
         [133, "ProjectionTurnsWorkspaceInitialization"],
         [134, "ProjectionThreadsForkSourceMessage"],
-        [135, "ProjectionThreadsRevertSaga"],
+        [135, "OrchestrationMessageIdentity"],
+        [136, "ThreadCompactionOperations"],
+        [137, "ThreadExecutionProfile"],
+        [138, "ProjectionThreadsRevertSaga"],
       ]);
 
       const tracker = yield* trackerRows(sql);
@@ -768,7 +833,10 @@ managedAttachmentsLegacyLayer("managed attachment migration after private migrat
           { migration_id: 132, name: "ExternalMcpTurnCapacityRecovery" },
           { migration_id: 133, name: "ProjectionTurnsWorkspaceInitialization" },
           { migration_id: 134, name: "ProjectionThreadsForkSourceMessage" },
-          { migration_id: 135, name: "ProjectionThreadsRevertSaga" },
+          { migration_id: 135, name: "OrchestrationMessageIdentity" },
+          { migration_id: 136, name: "ThreadCompactionOperations" },
+          { migration_id: 137, name: "ThreadExecutionProfile" },
+          { migration_id: 138, name: "ProjectionThreadsRevertSaga" },
         ],
       );
       const groupConfigColumns = yield* sql<{ readonly name: string }>`
@@ -935,7 +1003,10 @@ agentGatewayRetentionLegacyLayer(
           [132, "ExternalMcpTurnCapacityRecovery"],
           [133, "ProjectionTurnsWorkspaceInitialization"],
           [134, "ProjectionThreadsForkSourceMessage"],
-          [135, "ProjectionThreadsRevertSaga"],
+          [135, "OrchestrationMessageIdentity"],
+          [136, "ThreadCompactionOperations"],
+          [137, "ThreadExecutionProfile"],
+          [138, "ProjectionThreadsRevertSaga"],
         ]);
 
         const columns = yield* sql<{ readonly name: string }>`
@@ -1065,7 +1136,10 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
         [132, "ExternalMcpTurnCapacityRecovery"],
         [133, "ProjectionTurnsWorkspaceInitialization"],
         [134, "ProjectionThreadsForkSourceMessage"],
-        [135, "ProjectionThreadsRevertSaga"],
+        [135, "OrchestrationMessageIdentity"],
+        [136, "ThreadCompactionOperations"],
+        [137, "ThreadExecutionProfile"],
+        [138, "ProjectionThreadsRevertSaga"],
       ]);
 
       const tracker = yield* trackerRows(sql);
@@ -1136,7 +1210,10 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [132, "ExternalMcpTurnCapacityRecovery"],
           [133, "ProjectionTurnsWorkspaceInitialization"],
           [134, "ProjectionThreadsForkSourceMessage"],
-          [135, "ProjectionThreadsRevertSaga"],
+          [135, "OrchestrationMessageIdentity"],
+          [136, "ThreadCompactionOperations"],
+          [137, "ThreadExecutionProfile"],
+          [138, "ProjectionThreadsRevertSaga"],
         ],
       );
 
@@ -1261,7 +1338,10 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
         [132, "ExternalMcpTurnCapacityRecovery"],
         [133, "ProjectionTurnsWorkspaceInitialization"],
         [134, "ProjectionThreadsForkSourceMessage"],
-        [135, "ProjectionThreadsRevertSaga"],
+        [135, "OrchestrationMessageIdentity"],
+        [136, "ThreadCompactionOperations"],
+        [137, "ThreadExecutionProfile"],
+        [138, "ProjectionThreadsRevertSaga"],
       ]);
 
       const tracker = yield* trackerRows(sql);
@@ -1328,7 +1408,10 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [132, "ExternalMcpTurnCapacityRecovery"],
           [133, "ProjectionTurnsWorkspaceInitialization"],
           [134, "ProjectionThreadsForkSourceMessage"],
-          [135, "ProjectionThreadsRevertSaga"],
+          [135, "OrchestrationMessageIdentity"],
+          [136, "ThreadCompactionOperations"],
+          [137, "ThreadExecutionProfile"],
+          [138, "ProjectionThreadsRevertSaga"],
         ],
       );
       const preservedSpaces = yield* sql<{ readonly spaceId: string }>`

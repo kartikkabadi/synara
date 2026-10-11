@@ -70,6 +70,7 @@ import {
 } from "../components/settings/KeyboardShortcutsSettingsPanel";
 import { ProfileSettingsPanel } from "../components/settings/ProfileSettingsPanel";
 import { ProviderUsageSettingsPanel } from "../components/settings/ProviderUsageSettingsPanel";
+import { EnvironmentsSettingsPanel } from "../components/settings/EnvironmentsSettingsPanel";
 import { ExternalMcpSettingsPanel } from "../components/settings/ExternalMcpSettingsPanel";
 import {
   SettingResetButton,
@@ -1769,6 +1770,7 @@ function SettingsRouteView() {
                   updateSettings={updateSettings}
                 />
                 <WorktreesSettingsPanel active={activeSection === "worktrees"} />
+                <EnvironmentsSettingsPanel active={activeSection === "environments"} />
                 <ArchivedSettingsPanel active={activeSection === "archived"} />
                 <ModelsSettingsPanel
                   active={activeSection === "models"}

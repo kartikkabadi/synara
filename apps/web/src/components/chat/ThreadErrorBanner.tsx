@@ -17,11 +17,16 @@ import { DisclosureChevron } from "../ui/DisclosureChevron";
 import { IconButton } from "../ui/icon-button";
 import { CircleAlertIcon, XIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
+import { presentThreadError } from "./threadErrorPresentation";
+import { useRateLimitSecondsLeft, type RateLimitStatus } from "./RateLimitBanner";
 
 type ThreadErrorBannerProps = {
   error: string | null;
   title?: string;
   onContinue?: () => void;
+  /** Only supplied for an owned, unacknowledged composer snapshot. */
+  onRetry?: () => void;
+  rateLimitStatus?: RateLimitStatus | null;
   onChangeModel?: () => void;
   recoveryDisabled?: boolean;
   onDismiss?: () => void;
@@ -41,6 +46,8 @@ function ThreadErrorBannerContent({
   error,
   title,
   onContinue,
+  onRetry,
+  rateLimitStatus,
   onChangeModel,
   recoveryDisabled,
   onDismiss,
@@ -52,6 +59,11 @@ function ThreadErrorBannerContent({
   const [clamped, setClamped] = useState(false);
   const textRef = useRef<HTMLParagraphElement>(null);
   const detailsId = useId();
+  const presentation = presentThreadError(error);
+  const secondsLeft = useRateLimitSecondsLeft(rateLimitStatus?.resetsAt);
+  const retryBlocked =
+    presentation.kind === "rate-limit" && rateLimitStatus?.status === "rejected" && secondsLeft > 0;
+  const displayTitle = title ?? (presentation.kind === "generic" ? null : presentation.title);
   // Offer "Show details" only when the collapsed text actually hides something.
   useLayoutEffect(() => {
     const node = textRef.current;
@@ -64,10 +76,13 @@ function ThreadErrorBannerContent({
   }, [error, expanded]);
   const canUnblock = onUnblock !== undefined && isProviderDeliveryBlockDetail(error);
   return (
-    <Alert variant="error" className={cn("w-full max-w-[36rem] shadow-sm", className)}>
+    <Alert variant={presentation.tone} className={cn("w-full max-w-[36rem] shadow-sm", className)}>
       <CircleAlertIcon />
-      {title ? <AlertTitle>{title}</AlertTitle> : null}
+      {displayTitle ? <AlertTitle>{displayTitle}</AlertTitle> : null}
       <AlertDescription className="min-w-0">
+        {presentation.detail && presentation.kind !== "delivery-block" ? (
+          <p>{presentation.detail}</p>
+        ) : null}
         <p
           ref={textRef}
           id={detailsId}
@@ -93,6 +108,18 @@ function ThreadErrorBannerContent({
             </Button>
           ) : null}
           <CopyTextButton text={error} label="error" />
+          {onRetry && !isProviderDeliveryBlockDetail(error) ? (
+            <Button
+              size="xs"
+              variant="destructive-outline"
+              disabled={recoveryDisabled || retryBlocked}
+              onClick={onRetry}
+            >
+              {retryBlocked
+                ? `Retry in ${secondsLeft < 60 ? `${secondsLeft}s` : `${Math.ceil(secondsLeft / 60)}m`}`
+                : "Try again"}
+            </Button>
+          ) : null}
           {onContinue ? (
             <Button
               size="xs"

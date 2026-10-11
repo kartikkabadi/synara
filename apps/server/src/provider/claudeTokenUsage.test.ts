@@ -48,6 +48,15 @@ describe("Claude token arithmetic", () => {
         inputTokens: 23_863,
         outputTokens: 679,
         maxTokens: 200_000,
+        cumulative: {
+          inputTokens: 23_863,
+          outputTokens: 679,
+          totalProcessedTokens: 24_542,
+        },
+        lastTurn: {
+          inputTokens: 23_863,
+          outputTokens: 679,
+        },
       },
     },
     {
@@ -59,6 +68,8 @@ describe("Claude token arithmetic", () => {
         lastUsedTokens: 200_000,
         totalProcessedTokens: 535_000,
         maxTokens: 200_000,
+        cumulative: { totalProcessedTokens: 535_000 },
+        lastTurn: {},
       },
     },
     {
@@ -69,6 +80,8 @@ describe("Claude token arithmetic", () => {
         usedTokens: 535_000,
         lastUsedTokens: 535_000,
         maxTokens: 1_000_000,
+        cumulative: { totalProcessedTokens: 535_000 },
+        lastTurn: {},
       },
     },
   ])("$name", ({ usage, contextWindow, expected }) => {
@@ -96,7 +109,40 @@ describe("Claude token arithmetic", () => {
       lastUsedTokens: 190_000,
       totalProcessedTokens: 535_000,
       maxTokens: 200_000,
+      cumulative: { totalProcessedTokens: 535_000 },
     });
+  });
+
+  it("carries the live context claim through merges and re-clamps it to the budget", () => {
+    const merged = mergeClaudeTokenUsageSnapshot(
+      {
+        usedTokens: 190_000,
+        lastUsedTokens: 190_000,
+        maxTokens: 1_000_000,
+        context: {
+          usedTokens: 190_000,
+          maxTokens: 1_000_000,
+          usedPercent: 19,
+          measurement: "provider-reported",
+          confidence: "exact",
+        },
+      },
+      {
+        usedTokens: 200_000,
+        totalProcessedTokens: 535_000,
+        cumulative: { totalProcessedTokens: 535_000 },
+      },
+      100_000,
+    );
+
+    expect(merged.context).toEqual({
+      usedTokens: 100_000,
+      maxTokens: 100_000,
+      usedPercent: 100,
+      measurement: "provider-reported",
+      confidence: "exact",
+    });
+    expect(merged.cumulative?.totalProcessedTokens).toBe(535_000);
   });
 
   it("normalizes the SDK live context response and prefers its auto-compact threshold", () => {
@@ -134,6 +180,19 @@ describe("Claude token arithmetic", () => {
       outputTokens: 2_000,
       lastOutputTokens: 2_000,
       compactsAutomatically: true,
+      context: {
+        usedTokens: 200_000,
+        maxTokens: 200_000,
+        usedPercent: 100,
+        measurement: "provider-reported",
+        confidence: "exact",
+      },
+      cumulative: { totalProcessedTokens: 535_000 },
+      lastTurn: {
+        inputTokens: 120_000,
+        cachedInputTokens: 105_000,
+        outputTokens: 2_000,
+      },
     });
   });
 });

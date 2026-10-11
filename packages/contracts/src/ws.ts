@@ -173,7 +173,10 @@ import {
   ServerKeepAwakeUpdatedPayload,
   ServerLifecycleStreamEvent,
   ServerProviderUpdateInput,
+  ServerCheckEnvironmentInput,
+  ServerRemoveEnvironmentInput,
   ServerUpdateSettingsInput,
+  ServerUpsertEnvironmentInput,
   ServerConsumeCodexResetCreditInput,
   ServerGetProviderUsageSnapshotInput,
   ServerListProviderUsageInput,
@@ -203,7 +206,7 @@ import {
   ProviderListSkillsInput,
   ProviderSkillsCatalogInput,
 } from "./providerDiscovery";
-import { ProviderCompactThreadInput } from "./provider";
+import { ProviderCompactionRequest, ProviderSetCompactionSettingsInput } from "./providerRuntime";
 import {
   PullRequestActionInput,
   PullRequestCommentInput,
@@ -311,6 +314,10 @@ export const WS_METHODS = {
   serverGetRuntimeStatus: "server.getRuntimeStatus",
   serverGetConfig: "server.getConfig",
   serverGetEnvironment: "server.getEnvironment",
+  serverListEnvironments: "server.listEnvironments",
+  serverUpsertEnvironment: "server.upsertEnvironment",
+  serverRemoveEnvironment: "server.removeEnvironment",
+  serverCheckEnvironment: "server.checkEnvironment",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
   serverRefreshProviders: "server.refreshProviders",
@@ -352,6 +359,7 @@ export const WS_METHODS = {
   // Provider discovery
   providerGetComposerCapabilities: "provider.getComposerCapabilities",
   providerCompactThread: "provider.compactThread",
+  providerSetCompactionSettings: "provider.setCompactionSettings",
   providerListCommands: "provider.listCommands",
   providerListSkills: "provider.listSkills",
   providerListSkillsCatalog: "provider.listSkillsCatalog",
@@ -596,6 +604,10 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(WS_METHODS.serverGetRuntimeStatus, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverGetConfig, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverGetEnvironment, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.serverListEnvironments, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.serverUpsertEnvironment, ServerUpsertEnvironmentInput),
+  tagRequestBody(WS_METHODS.serverRemoveEnvironment, ServerRemoveEnvironmentInput),
+  tagRequestBody(WS_METHODS.serverCheckEnvironment, ServerCheckEnvironmentInput),
   tagRequestBody(WS_METHODS.serverGetSettings, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverUpdateSettings, ServerUpdateSettingsInput),
   tagRequestBody(WS_METHODS.serverRefreshProviders, Schema.Struct({})),
@@ -630,7 +642,8 @@ const WebSocketRequestBody = Schema.Union([
 
   // Provider discovery
   tagRequestBody(WS_METHODS.providerGetComposerCapabilities, ProviderGetComposerCapabilitiesInput),
-  tagRequestBody(WS_METHODS.providerCompactThread, ProviderCompactThreadInput),
+  tagRequestBody(WS_METHODS.providerCompactThread, ProviderCompactionRequest),
+  tagRequestBody(WS_METHODS.providerSetCompactionSettings, ProviderSetCompactionSettingsInput),
   tagRequestBody(WS_METHODS.providerListCommands, ProviderListCommandsInput),
   tagRequestBody(WS_METHODS.providerListSkills, ProviderListSkillsInput),
   tagRequestBody(WS_METHODS.providerListSkillsCatalog, ProviderSkillsCatalogInput),

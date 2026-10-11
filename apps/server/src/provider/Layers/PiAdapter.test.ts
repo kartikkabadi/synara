@@ -24,14 +24,85 @@ import {
   buildPiAgentGatewayCustomTools,
   piInstalledGatewayToolNames,
   makePiBashProcessSupervisor,
+  makePiCompactionRuntimeEvents,
   makePiExtensionModeCoordinator,
   makePiRuntimeEventBase,
   makePiStoragePaths,
   makePiUserInputOptions,
+  normalizePiTokenUsage,
+  PLAIN_PI_EXTENSION_THEME,
   toPiProviderModelDescriptor,
   resolvePiStartInstanceId,
   resolvePiExtensionMode,
 } from "./PiAdapter";
+
+function makePiSessionStats(input: {
+  readonly tokens: {
+    readonly input: number;
+    readonly output: number;
+    readonly cacheRead: number;
+    readonly cacheWrite: number;
+    readonly total: number;
+  };
+  readonly contextUsage?: {
+    readonly tokens: number | null;
+    readonly contextWindow: number;
+    readonly percent: number | null;
+  };
+}): Parameters<typeof normalizePiTokenUsage>[0] {
+  return {
+    sessionFile: undefined,
+    sessionId: "pi-session-1",
+    userMessages: 1,
+    assistantMessages: 1,
+    toolCalls: 0,
+    toolResults: 0,
+    totalMessages: 2,
+    tokens: input.tokens,
+    cost: 0,
+    ...(input.contextUsage ? { contextUsage: input.contextUsage } : {}),
+  };
+}
+
+describe("normalizePiTokenUsage", () => {
+  it("maps SDK contextTokens/contextWindow to an exact provider-reported context claim", () => {
+    const usage = normalizePiTokenUsage(
+      makePiSessionStats({
+        tokens: { input: 700_000, output: 48_126, cacheRead: 0, cacheWrite: 0, total: 748_126 },
+        contextUsage: { tokens: 31_251, contextWindow: 200_000, percent: 15.6255 },
+      }),
+    );
+
+    expect(usage?.usedTokens).toBe(31_251);
+    expect(usage?.maxTokens).toBe(200_000);
+    expect(usage?.totalProcessedTokens).toBe(748_126);
+    expect(usage?.context).toEqual({
+      usedTokens: 31_251,
+      maxTokens: 200_000,
+      usedPercent: 15.6255,
+      measurement: "provider-reported",
+      confidence: "exact",
+    });
+    expect(usage?.cumulative).toEqual({
+      inputTokens: 700_000,
+      cachedInputTokens: 0,
+      outputTokens: 48_126,
+      totalProcessedTokens: 748_126,
+    });
+  });
+
+  it("downgrades to a low-confidence Synara estimate without SDK context usage", () => {
+    const usage = normalizePiTokenUsage(
+      makePiSessionStats({
+        tokens: { input: 100, output: 50, cacheRead: 10, cacheWrite: 0, total: 160 },
+      }),
+      200_000,
+    );
+
+    expect(usage?.context?.measurement).toBe("synara-estimated");
+    expect(usage?.context?.confidence).toBe("low");
+  });
+});
 
 describe("makePiStoragePaths", () => {
   it("resolves modelSelection-only account identity before Pi storage setup", () => {
@@ -1149,6 +1220,72 @@ describe("applyPiRuntimeApiKeysFromEnvironment", () => {
     expect(runtimeKeys.get("opencode")).toBe("opencode-key");
     expect(runtimeKeys.get("opencode-go")).toBe("opencode-key");
     expect(process.env.OPENAI_API_KEY).toBe(previousOpenAiKey);
+  });
+});
+
+describe("Pi compaction runtime events", () => {
+  const makeBase = () =>
+    makePiRuntimeEventBase({
+      session: { threadId: "thread-pi" as never },
+      activeTurnId: undefined,
+    });
+
+  it("opens the compaction item lifecycle on compaction_start", () => {
+    const events = makePiCompactionRuntimeEvents({
+      makeBase,
+      itemId: "pi-pass-1" as never,
+      event: { type: "compaction_start" } as never,
+    });
+
+    expect(events.map((event) => event.type)).toEqual(["item.started", "item.updated"]);
+    expect(events[0]?.itemId).toBe(events[1]?.itemId);
+    for (const event of events) {
+      expect(event.payload).toMatchObject({
+        itemType: "context_compaction",
+        status: "inProgress",
+      });
+    }
+  });
+
+  it("refreshes usage before completing the pass on compaction_end", () => {
+    const usage = normalizePiTokenUsage(
+      makePiSessionStats({
+        tokens: { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, total: 150 },
+        contextUsage: { tokens: 120, contextWindow: 200_000, percent: 0.06 },
+      }),
+    );
+    expect(usage).toBeDefined();
+
+    const events = makePiCompactionRuntimeEvents({
+      makeBase,
+      itemId: "pi-pass-1" as never,
+      event: { type: "compaction_end", aborted: false } as never,
+      refreshedUsage: usage,
+    });
+
+    expect(events.map((event) => event.type)).toEqual([
+      "thread.token-usage.updated",
+      "item.completed",
+    ]);
+    expect(events[0]?.payload).toMatchObject({ usage: { usedTokens: 120 } });
+    expect(events[1]?.payload).toMatchObject({
+      itemType: "context_compaction",
+      status: "completed",
+    });
+  });
+
+  it("marks the pass failed when compaction_end reports aborted", () => {
+    const events = makePiCompactionRuntimeEvents({
+      makeBase,
+      itemId: "pi-pass-1" as never,
+      event: { type: "compaction_end", aborted: true } as never,
+    });
+
+    expect(events.map((event) => event.type)).toEqual(["item.completed"]);
+    expect(events[0]?.payload).toMatchObject({
+      itemType: "context_compaction",
+      status: "failed",
+    });
   });
 });
 

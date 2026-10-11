@@ -9,6 +9,14 @@ import {
   ProviderCredentialsLive,
 } from "../providerCredentials";
 import { ServerSettingsService } from "../serverSettings";
+import { EnvironmentProbeLive } from "../environment/Layers/EnvironmentProbe";
+import { LocalProcessSpawnerLive } from "../environment/Layers/LocalProcessSpawner";
+import { RemoteEnvironmentRegistryLive } from "../environment/Layers/RemoteEnvironmentRegistry";
+import { RemoteEnvironmentResolverLive } from "../environment/Layers/RemoteEnvironmentResolver";
+import { ServerEnvironmentLive } from "../environment/Layers/ServerEnvironment";
+import { RemoteAgentInstallerLive } from "../environment/Layers/RemoteAgentInstaller";
+import { RemoteAgentProviderLive } from "../environment/Layers/RemoteAgentProvider";
+import { SshProcessProviderLive } from "../environment/Layers/SshProcessProvider";
 import { makeClaudeAdapterLive } from "./Layers/ClaudeAdapter";
 import { makeCodexAdapterLive } from "./Layers/CodexAdapter";
 import { makeCursorAdapterLive } from "./Layers/CursorAdapter";
@@ -56,9 +64,25 @@ export function makeServerProviderLayer(
     // the same MCP catalog/dispatcher through its native custom-tool API.
     const agentGatewayCredentialsLayer =
       options.agentGatewayCredentialsLayer ?? AgentGatewayCredentialsWithSecretsLive;
+    // Remote execution seam: the Codex manager picks these up from its
+    // ServiceMap so sessions carrying an executionProfile can spawn over ssh.
+    const remoteResolverLayer = RemoteEnvironmentResolverLive.pipe(
+      Layer.provide(RemoteEnvironmentRegistryLive.pipe(Layer.provide(ServerEnvironmentLive))),
+    );
+    const executionEnvironmentLayer = Layer.mergeAll(
+      LocalProcessSpawnerLive,
+      SshProcessProviderLive,
+      RemoteAgentProviderLive.pipe(Layer.provide(RemoteAgentInstallerLive)),
+      remoteResolverLayer,
+      EnvironmentProbeLive.pipe(
+        Layer.provide(remoteResolverLayer),
+        Layer.provide(SshProcessProviderLive),
+        Layer.provide(RemoteEnvironmentRegistryLive.pipe(Layer.provide(ServerEnvironmentLive))),
+      ),
+    );
     const codexAdapterLayer = makeCodexAdapterLive(
       nativeEventLogger ? { nativeEventLogger } : undefined,
-    ).pipe(Layer.provide(agentGatewayCredentialsLayer));
+    ).pipe(Layer.provide(agentGatewayCredentialsLayer), Layer.provide(executionEnvironmentLayer));
     const claudeAdapterLayer = makeClaudeAdapterLive(
       nativeEventLogger ? { nativeEventLogger } : undefined,
     ).pipe(Layer.provide(agentGatewayCredentialsLayer));

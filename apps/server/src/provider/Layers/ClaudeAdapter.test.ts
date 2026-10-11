@@ -2962,6 +2962,70 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("brackets compact_boundary with compaction item lifecycle and compacted state", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil(
+          (event) => event.type === "thread.state.changed" && event.payload.state === "compacted",
+        ),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "hello",
+        attachments: [],
+      });
+
+      harness.query.emit({
+        type: "system",
+        subtype: "compact_boundary",
+        session_id: "sdk-session-compact",
+        uuid: "system-compact-1",
+        compact_metadata: {
+          trigger: "auto",
+          pre_tokens: 167_000,
+        },
+      } as unknown as SDKMessage);
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+
+      const started = runtimeEvents.find(
+        (event) => event.type === "item.started" && event.payload.itemType === "context_compaction",
+      );
+      assert.equal(started?.type, "item.started");
+
+      const completed = runtimeEvents.find(
+        (event) =>
+          event.type === "item.completed" && event.payload.itemType === "context_compaction",
+      );
+      assert.equal(completed?.type, "item.completed");
+      if (completed?.type === "item.completed") {
+        assert.equal(completed.payload.status, "completed");
+        assert.equal(completed.itemId, started?.itemId);
+      }
+
+      const stateChanged = runtimeEvents.at(-1);
+      assert.equal(stateChanged?.type, "thread.state.changed");
+      if (stateChanged?.type === "thread.state.changed") {
+        assert.equal(stateChanged.payload.state, "compacted");
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("routes subagent-tagged messages to a child provider thread", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
@@ -7317,6 +7381,8 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
             maxTokens: 1_000_000,
             toolUses: 2,
             durationMs: 654,
+            cumulative: { totalProcessedTokens: 321 },
+            lastTurn: { durationMs: 654, toolUses: 2 },
           },
         });
       }
@@ -7396,6 +7462,12 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
             outputTokens: 679,
             maxTokens: 1_000_000,
             totalProcessedTokens: 24542,
+            cumulative: {
+              inputTokens: 23863,
+              outputTokens: 679,
+              totalProcessedTokens: 24542,
+            },
+            lastTurn: { inputTokens: 23863, outputTokens: 679 },
           },
         });
       }
@@ -7461,6 +7533,8 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
             lastUsedTokens: 200000,
             totalProcessedTokens: 535000,
             maxTokens: 200000,
+            cumulative: { totalProcessedTokens: 535000 },
+            lastTurn: {},
           },
         });
       }
@@ -7543,6 +7617,8 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
               lastUsedTokens: 190000,
               totalProcessedTokens: 535000,
               maxTokens: 200000,
+              cumulative: { totalProcessedTokens: 535000 },
+              lastTurn: {},
             },
           });
         }
@@ -7552,6 +7628,166 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
       );
     },
   );
+
+  it.effect("does not let stale result metadata shrink a known Claude model capacity", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 9).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "hello",
+        attachments: [],
+      });
+
+      harness.query.emit({
+        type: "system",
+        subtype: "task_progress",
+        task_id: "task-usage-window-shrinks",
+        description: "Thinking through the patch",
+        usage: {
+          total_tokens: 190000,
+        },
+        session_id: "sdk-session-task-usage-window-shrinks",
+        uuid: "task-usage-window-shrinks",
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        duration_ms: 1234,
+        duration_api_ms: 1200,
+        num_turns: 1,
+        result: "done",
+        stop_reason: "end_turn",
+        session_id: "sdk-session-result-usage-window-shrinks",
+        usage: {
+          total_tokens: 535000,
+        },
+        modelUsage: {
+          "claude-opus-4-6": {
+            contextWindow: 128000,
+            maxOutputTokens: 64000,
+          },
+        },
+      } as unknown as SDKMessage);
+      harness.query.finish();
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const usageEvents = runtimeEvents.filter(
+        (event) => event.type === "thread.token-usage.updated",
+      );
+      const finalUsageEvent = usageEvents.at(-1);
+      assert.equal(finalUsageEvent?.type, "thread.token-usage.updated");
+      if (finalUsageEvent?.type === "thread.token-usage.updated") {
+        assert.deepEqual(finalUsageEvent.payload, {
+          usage: {
+            usedTokens: 190000,
+            lastUsedTokens: 190000,
+            totalProcessedTokens: 535000,
+            maxTokens: 200000,
+            cumulative: { totalProcessedTokens: 535000 },
+            lastTurn: {},
+          },
+        });
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("ignores malformed Claude model usage context windows", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.take(adapter.streamEvents, 9).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "hello",
+        attachments: [],
+      });
+
+      harness.query.emit({
+        type: "system",
+        subtype: "task_progress",
+        task_id: "task-usage-model-usage-invalid",
+        description: "Thinking through the patch",
+        usage: {
+          total_tokens: 190000,
+        },
+        session_id: "sdk-session-task-usage-model-usage-invalid",
+        uuid: "task-usage-model-usage-invalid",
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        duration_ms: 1234,
+        duration_api_ms: 1200,
+        num_turns: 1,
+        result: "done",
+        stop_reason: "end_turn",
+        session_id: "sdk-session-result-model-usage-invalid",
+        usage: {
+          total_tokens: 535000,
+        },
+        modelUsage: {
+          "claude-opus-4-6": {
+            contextWindow: Number.NaN,
+            maxOutputTokens: 64000,
+          },
+        },
+      } as unknown as SDKMessage);
+      harness.query.finish();
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const usageEvents = runtimeEvents.filter(
+        (event) => event.type === "thread.token-usage.updated",
+      );
+      const finalUsageEvent = usageEvents.at(-1);
+      assert.equal(finalUsageEvent?.type, "thread.token-usage.updated");
+      if (finalUsageEvent?.type === "thread.token-usage.updated") {
+        assert.deepEqual(finalUsageEvent.payload, {
+          usage: {
+            usedTokens: 190000,
+            lastUsedTokens: 190000,
+            maxTokens: 200_000,
+            totalProcessedTokens: 535000,
+            cumulative: { totalProcessedTokens: 535000 },
+            lastTurn: {},
+          },
+        });
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
 
   it.effect(
     "emits completion only after turn result when assistant frames arrive before deltas",
@@ -10893,6 +11129,93 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
             usedTokens: 23_000,
             lastUsedTokens: 23_000,
             maxTokens: 1_000_000,
+            cumulative: { totalProcessedTokens: 23_000 },
+            lastTurn: {},
+          },
+        });
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("preserves the 1m auto-compact budget when final model usage reports 200k", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* Stream.filter(
+        adapter.streamEvents,
+        (event) => event.type === "thread.token-usage.updated",
+      ).pipe(Stream.take(2), Stream.runCollect, Effect.forkChild);
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "hello",
+        modelSelection: {
+          provider: "claudeAgent",
+          model: "claude-opus-4-6",
+          options: {
+            autoCompactWindow: "1m",
+          },
+        },
+        attachments: [],
+      });
+
+      harness.query.emit({
+        type: "system",
+        subtype: "task_progress",
+        task_id: "task-usage-1m-final",
+        description: "Thinking through the larger context",
+        usage: {
+          total_tokens: 23_000,
+        },
+        session_id: "sdk-session-task-usage-1m-final",
+        uuid: "task-usage-progress-1m-final",
+      } as unknown as SDKMessage);
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        duration_ms: 1234,
+        duration_api_ms: 1200,
+        num_turns: 1,
+        result: "done",
+        stop_reason: "end_turn",
+        session_id: "sdk-session-result-usage-1m-final",
+        usage: {
+          total_tokens: 23_000,
+        },
+        modelUsage: {
+          "claude-opus-4-6": {
+            contextWindow: 200000,
+            maxOutputTokens: 64000,
+          },
+        },
+      } as unknown as SDKMessage);
+      harness.query.finish();
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const usageEvents = runtimeEvents.filter(
+        (event) => event.type === "thread.token-usage.updated",
+      );
+      const finalUsageEvent = usageEvents.at(-1);
+      assert.equal(finalUsageEvent?.type, "thread.token-usage.updated");
+      if (finalUsageEvent?.type === "thread.token-usage.updated") {
+        assert.deepEqual(finalUsageEvent.payload, {
+          usage: {
+            usedTokens: 23_000,
+            lastUsedTokens: 23_000,
+            maxTokens: 1_000_000,
+            cumulative: { totalProcessedTokens: 23_000 },
+            lastTurn: {},
           },
         });
       }

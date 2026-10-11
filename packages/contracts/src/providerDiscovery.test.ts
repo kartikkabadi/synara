@@ -1,7 +1,54 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { ProviderListModelsResult } from "./providerDiscovery";
+import {
+  ProviderCompactionCapabilities,
+  ProviderComposerCapabilities,
+  ProviderListModelsResult,
+} from "./providerDiscovery";
+
+const decodeProviderListModelsResult = Schema.decodeUnknownSync(ProviderListModelsResult);
+const decodeProviderComposerCapabilities = Schema.decodeUnknownSync(ProviderComposerCapabilities);
+
+const codexCompaction: ProviderCompactionCapabilities = {
+  manual: {
+    mode: "same-session",
+    mechanism: "native-rpc",
+    supportsInstructions: false,
+  },
+  automatic: {
+    mode: "native",
+    enabledByDefault: true,
+    statusVisibility: "exact",
+    triggerVisibility: "exact",
+  },
+  telemetry: {
+    lifecycle: "native",
+    contextUsage: "exact",
+  },
+};
+
+describe("ProviderComposerCapabilities", () => {
+  it("decodes the structured compaction descriptor", () => {
+    const capabilities = decodeProviderComposerCapabilities({
+      provider: "codex",
+      supportsSkillMentions: true,
+      supportsSkillDiscovery: true,
+      supportsNativeSlashCommandDiscovery: false,
+      supportsPluginMentions: true,
+      supportsPluginDiscovery: true,
+      supportsRuntimeModelList: true,
+      compaction: codexCompaction,
+      supportsThreadCompaction: true,
+      supportsThreadImport: true,
+    });
+
+    expect(capabilities.compaction?.manual.mode).toBe("same-session");
+    expect(capabilities.compaction?.automatic.mode).toBe("native");
+    expect(capabilities.compaction?.telemetry.contextUsage).toBe("exact");
+    expect(capabilities.supportsThreadCompaction).toBe(true);
+  });
+});
 
 const decodeModels = Schema.decodeUnknownSync(ProviderListModelsResult);
 

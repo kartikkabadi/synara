@@ -16,6 +16,7 @@ import { AutomationServiceLive } from "./automation/Layers/AutomationService";
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery";
 import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
+import { CompactionReactorLive } from "./orchestration/compaction/CompactionReactor";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor";
 import { HubOutputReactorLive } from "./orchestration/Layers/HubOutputReactor";
 import { ThreadGitMetadataReactorLive } from "./orchestration/Layers/ThreadGitMetadataReactor";
@@ -58,6 +59,10 @@ import { ExternalMcpRepositoryLive } from "./externalMcp/Layers/ExternalMcpRepos
 import { ExternalMcpServiceLive } from "./externalMcp/Layers/ExternalMcpService";
 import { ExternalMcpGatewayLive } from "./externalMcp/Layers/ExternalMcpGateway";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment";
+import { RemoteEnvironmentRegistryLive } from "./environment/Layers/RemoteEnvironmentRegistry";
+import { EnvironmentProbeLive } from "./environment/Layers/EnvironmentProbe";
+import { RemoteEnvironmentResolverLive } from "./environment/Layers/RemoteEnvironmentResolver";
+import { SshProcessProviderLive } from "./environment/Layers/SshProcessProvider";
 import { AutomationRepositoryLive } from "./persistence/Layers/AutomationRepository";
 import { ControlPlaneKernelLive } from "./persistence/Layers/ControlPlaneKernel";
 import { TodoRepositoryLive } from "./persistence/Layers/TodoRepository";
@@ -166,6 +171,9 @@ export function makeServerRuntimeServicesLayer(
     Layer.provideMerge(runtimeServicesLayer),
     Layer.provideMerge(revertSagaWorkerLayer),
   );
+  const compactionReactorLayer = CompactionReactorLive.pipe(
+    Layer.provideMerge(runtimeServicesLayer),
+  );
   const sidechatExpiryReactorLayer = SidechatExpiryReactorLive.pipe(
     Layer.provideMerge(runtimeServicesLayer),
   );
@@ -179,6 +187,7 @@ export function makeServerRuntimeServicesLayer(
     Layer.provideMerge(runtimeIngestionLayer),
     Layer.provideMerge(providerCommandReactorLayer),
     Layer.provideMerge(checkpointReactorLayer),
+    Layer.provideMerge(compactionReactorLayer),
     Layer.provideMerge(hubOutputReactorLayer),
     Layer.provideMerge(threadGitMetadataReactorLayer),
     Layer.provideMerge(sidechatExpiryReactorLayer),
@@ -272,6 +281,14 @@ export function makeServerRuntimeServicesLayer(
     Layer.provideMerge(DeviceServiceLive),
     Layer.provideMerge(ComputerServiceLive),
   );
+  const remoteEnvironmentRegistryLayer = RemoteEnvironmentRegistryLive.pipe(
+    Layer.provide(ServerEnvironmentLive),
+  );
+  const environmentProbeLayer = EnvironmentProbeLive.pipe(
+    Layer.provide(RemoteEnvironmentResolverLive),
+    Layer.provide(SshProcessProviderLive),
+    Layer.provide(remoteEnvironmentRegistryLayer),
+  );
   // The inbox owns the repository inventory, GitHub read queue, and snapshots; the pull request
   // service shares them so detail reads and mutations stay consistent with the list.
   const githubInboxServiceLayer = GitHubInboxServiceLive.pipe(
@@ -330,6 +347,8 @@ export function makeServerRuntimeServicesLayer(
     KeybindingsLive,
     keepAwakeLayer,
     ServerEnvironmentLive,
+    remoteEnvironmentRegistryLayer,
+    environmentProbeLayer,
     ProfileStatsQueryLive,
     RecapStatsQueryLive,
     ThreadSearchQueryLive,

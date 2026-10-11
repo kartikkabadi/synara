@@ -10,6 +10,7 @@ import {
 } from "./baseSchemas";
 import {
   ChatAttachment,
+  ExecutionProfile,
   ModelSelection,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
@@ -35,6 +36,7 @@ const ProviderSessionStatus = Schema.Literals([
 ]);
 
 export const ProviderSession = Schema.Struct({
+  executionProfile: Schema.optional(ExecutionProfile),
   provider: ProviderDriverKind,
   providerInstanceId: Schema.optional(ProviderInstanceId),
   status: ProviderSessionStatus,
@@ -67,6 +69,7 @@ export const ProviderSessionStartInput = Schema.Struct({
   approvalPolicy: Schema.optional(ProviderApprovalPolicy),
   sandboxMode: Schema.optional(ProviderSandboxMode),
   providerOptions: Schema.optional(ProviderStartOptions),
+  executionProfile: Schema.optional(ExecutionProfile),
   /** Explicit per-thread provisioning for the Linux computer MCP tools. */
   enableComputerControl: Schema.optional(Schema.Boolean),
   /**
@@ -191,11 +194,6 @@ export const ProviderStopSessionInput = Schema.Struct({
   threadId: ThreadId,
 });
 export type ProviderStopSessionInput = typeof ProviderStopSessionInput.Type;
-
-export const ProviderCompactThreadInput = Schema.Struct({
-  threadId: ThreadId,
-});
-export type ProviderCompactThreadInput = typeof ProviderCompactThreadInput.Type;
 
 export const ProviderRespondToRequestInput = Schema.Struct({
   threadId: ThreadId,

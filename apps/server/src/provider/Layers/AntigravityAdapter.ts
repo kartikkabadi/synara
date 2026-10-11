@@ -1,3 +1,4 @@
+import { supportsThreadCompactionFromCompaction } from "@synara/shared/providerCompaction";
 import { providerProcessPriorityEnabled } from "../../providerProcessPriority";
 import crypto from "node:crypto";
 import type { ChildProcess } from "node:child_process";
@@ -8,6 +9,7 @@ import path from "node:path";
 import {
   type AntigravityModelOptions,
   EventId,
+  type ProviderCompactionCapabilities,
   type ProviderComposerCapabilities,
   type ProviderListModelsResult,
   type ProviderRuntimeEvent,
@@ -79,6 +81,26 @@ import { teardownChildProcessTree } from "../supervisedProcessTeardown.ts";
 import { capHistoryBytes } from "../../terminal/terminalHistory.ts";
 
 const PROVIDER = "antigravity" as const;
+
+// One-shot print-mode CLI (`agy --print`): no long-lived session, so no
+// compaction primitive exists to invoke. Synthetic Synara-side compaction is
+// design-gated — see docs/antigravity-compaction-design.md.
+export const antigravityCompaction: ProviderCompactionCapabilities = {
+  manual: {
+    mode: "unsupported",
+    mechanism: "unsupported",
+    supportsInstructions: false,
+  },
+  automatic: {
+    mode: "unknown",
+    statusVisibility: "none",
+    triggerVisibility: "opaque",
+  },
+  telemetry: {
+    lifecycle: "none",
+    contextUsage: "none",
+  },
+};
 const DEFAULT_MODEL = "Gemini 3.5 Flash";
 const PRINT_TIMEOUT = "30m";
 const POLL_INTERVAL_MS = 75;
@@ -3033,7 +3055,8 @@ const makeAntigravityAdapter = (dependencies: AntigravityAdapterDependencies = {
           supportsPluginMentions: false,
           supportsPluginDiscovery: false,
           supportsRuntimeModelList: true,
-          supportsThreadCompaction: false,
+          compaction: antigravityCompaction,
+          supportsThreadCompaction: supportsThreadCompactionFromCompaction(antigravityCompaction),
           supportsThreadImport: false,
         } satisfies ProviderComposerCapabilities),
       get streamEvents() {

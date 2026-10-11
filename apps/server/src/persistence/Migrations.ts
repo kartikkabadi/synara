@@ -122,8 +122,8 @@ import AsyncUserInputMigration from "./Migrations/105_AsyncUserInput.ts";
 import ClaudeTokenAccountingMigration from "./Migrations/103_ClaudeTokenAccounting.ts";
 import Migration0104 from "./Migrations/104_ProjectionThreadsClaudeCacheReview.ts";
 import ProjectImportOriginsMigration from "./Migrations/106_ProjectImportOrigins.ts";
-import Migration0108 from "./Migrations/108_GatewayCompletions.ts";
 import Migration0107 from "./Migrations/107_ProjectionThreadsHumanMessage.ts";
+import Migration0108 from "./Migrations/108_GatewayCompletions.ts";
 import Migration0109 from "./Migrations/109_ProjectAgent.ts";
 import Migration0110 from "./Migrations/110_Groups.ts";
 import Migration0111 from "./Migrations/111_GroupLibraryHosting.ts";
@@ -150,7 +150,10 @@ import Migration0131 from "./Migrations/131_ProjectSourceFolders.ts";
 import Migration0132 from "./Migrations/132_ExternalMcpTurnCapacityRecovery.ts";
 import Migration0133 from "./Migrations/133_ProjectionTurnsWorkspaceInitialization.ts";
 import Migration0134 from "./Migrations/134_ProjectionThreadsForkSourceMessage.ts";
-import Migration0135 from "./Migrations/135_ProjectionThreadsRevertSaga.ts";
+import Migration0135 from "./Migrations/135_OrchestrationMessageIdentity.ts";
+import Migration0136 from "./Migrations/136_ThreadCompactionOperations.ts";
+import Migration0137 from "./Migrations/137_ThreadExecutionProfile.ts";
+import Migration0138 from "./Migrations/138_ProjectionThreadsRevertSaga.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -301,7 +304,10 @@ export const migrationEntries = [
   [132, "ExternalMcpTurnCapacityRecovery", Migration0132],
   [133, "ProjectionTurnsWorkspaceInitialization", Migration0133],
   [134, "ProjectionThreadsForkSourceMessage", Migration0134],
-  [135, "ProjectionThreadsRevertSaga", Migration0135],
+  [135, "OrchestrationMessageIdentity", Migration0135],
+  [136, "ThreadCompactionOperations", Migration0136],
+  [137, "ThreadExecutionProfile", Migration0137],
+  [138, "ProjectionThreadsRevertSaga", Migration0138],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

@@ -41,6 +41,7 @@ import { createThreadFindHighlightStore, type ThreadFindHighlightStore } from ".
 import { AgentActivityDetailView } from "./AgentActivityDetailView";
 import type { AgentActivityDetail } from "./agentActivity.logic";
 import { ThreadErrorBanner } from "./ThreadErrorBanner";
+import type { RateLimitStatus } from "./RateLimitBanner";
 import { SubagentRunningChip } from "./SubagentRunningChip";
 import { SubagentThreadIntro } from "./SubagentThreadIntro";
 import {
@@ -146,6 +147,9 @@ interface ChatTranscriptPaneProps {
   conversationOnly?: boolean;
   /** Stored thread-level error, rendered in flow above the transcript. */
   threadError?: string | null;
+  rateLimitStatus?: RateLimitStatus | null;
+  onRetryThreadError?: () => void;
+  retryThreadErrorDisabled?: boolean;
   recoverableTurnId?: ComponentProps<typeof MessagesTimeline>["recoverableTurnId"];
   turnRecoveryDisabled?: boolean;
   onContinueFailedTurn?: ComponentProps<typeof MessagesTimeline>["onContinueFailedTurn"];
@@ -246,6 +250,9 @@ export function ChatTranscriptPane({
   turnTimingByTurnId,
   conversationOnly,
   threadError,
+  rateLimitStatus,
+  onRetryThreadError,
+  retryThreadErrorDisabled,
   recoverableTurnId,
   turnRecoveryDisabled,
   onContinueFailedTurn,
@@ -404,12 +411,17 @@ export function ChatTranscriptPane({
           a floating overlay, so it can never cover message content. */}
       {!agentActivityDetail &&
       threadError &&
-      !visibleTimelineEntries.some(
-        (entry) => entry.kind === "work" && entry.entry.turnFailure?.cause === threadError,
-      ) ? (
+      (onRetryThreadError ||
+        !visibleTimelineEntries.some(
+          (entry) => entry.kind === "work" && entry.entry.turnFailure?.cause === threadError,
+        )) ? (
         <div className="flex shrink-0 justify-center px-3 pt-2">
           <ThreadErrorBanner
+            key={activeThreadId}
             error={threadError}
+            rateLimitStatus={rateLimitStatus ?? null}
+            recoveryDisabled={retryThreadErrorDisabled === true}
+            {...(onRetryThreadError ? { onRetry: onRetryThreadError } : {})}
             unblocking={unblockingThread === true}
             {...(onDismissThreadError ? { onDismiss: onDismissThreadError } : {})}
             {...(onUnblockThread ? { onUnblock: onUnblockThread } : {})}

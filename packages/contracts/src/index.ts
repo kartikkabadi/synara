@@ -39,6 +39,7 @@ export * from "./orchestration";
 export * from "./asyncUserInput";
 export * from "./editor";
 export * from "./environment";
+export * from "./remoteAgent";
 export * from "./project";
 export * from "./projectAgent";
 export * from "./hubWork";

@@ -174,6 +174,7 @@ import { makeImportThreadHandler } from "./orchestration/importThreadRoute";
 import { makeProjectImportHandlers } from "./orchestration/projectImportRoute";
 import { makeProjectImportRepository } from "./persistence/projectImportRepository";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
+import { CompactionReactor } from "./orchestration/Services/CompactionReactor";
 import { ProviderCommandReactor } from "./orchestration/Services/ProviderCommandReactor";
 import { SidechatExpiryReactor } from "./orchestration/Services/SidechatExpiryReactor";
 import { ProjectionStateIncompleteError } from "./persistence/Errors";
@@ -192,6 +193,8 @@ import { RecapStatsQuery } from "./recapStats";
 import { ThreadSearchQuery } from "./threadSearch";
 import { redactSensitiveProcessArgs } from "./processArgumentRedaction";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment";
+import { RemoteEnvironmentRegistry } from "./environment/Services/RemoteEnvironmentRegistry";
+import { EnvironmentProbe } from "./environment/Services/EnvironmentProbe";
 import { ExternalMcpService } from "./externalMcp/Services/ExternalMcpService";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
@@ -531,6 +534,7 @@ const makeWsRpcHandlersLayer = () =>
       const keybindings = yield* Keybindings;
       const open = yield* Open;
       const orchestrationEngine = yield* OrchestrationEngineService;
+      const compactionReactor = yield* CompactionReactor;
       const providerCommandReactor = yield* ProviderCommandReactor;
       const sidechatExpiryReactor = yield* SidechatExpiryReactor;
       const path = yield* Path.Path;
@@ -548,6 +552,8 @@ const makeWsRpcHandlersLayer = () =>
       const lifecycleEvents = yield* ServerLifecycleEvents;
       const runtimeStartup = yield* ServerRuntimeStartup;
       const serverEnvironment = yield* ServerEnvironment;
+      const remoteEnvironmentRegistry = yield* RemoteEnvironmentRegistry;
+      const environmentProbe = yield* EnvironmentProbe;
       const serverSettings = yield* ServerSettingsService;
       const keepAwake = yield* KeepAwakeService;
       const terminalManager = yield* TerminalManager;
@@ -2281,6 +2287,37 @@ const makeWsRpcHandlersLayer = () =>
           rpcEffect(loadServerConfig, "Failed to load server config"),
         [WS_METHODS.serverGetEnvironment]: () =>
           rpcEffect(serverEnvironment.getDescriptor, "Failed to load server environment"),
+        [WS_METHODS.serverListEnvironments]: () =>
+          rpcEffect(
+            requireWsOwnerSession.pipe(
+              Effect.andThen(remoteEnvironmentRegistry.list()),
+              Effect.map((environments) => ({ environments })),
+            ),
+            "Failed to list environments",
+          ),
+        [WS_METHODS.serverUpsertEnvironment]: (input) =>
+          rpcEffect(
+            requireWsOwnerSession.pipe(
+              Effect.andThen(remoteEnvironmentRegistry.upsert(input.descriptor)),
+            ),
+            "Failed to upsert environment",
+          ),
+        [WS_METHODS.serverRemoveEnvironment]: (input) =>
+          rpcEffect(
+            requireWsOwnerSession.pipe(
+              Effect.andThen(remoteEnvironmentRegistry.remove(input.environmentId)),
+              Effect.map((removed) => ({ removed })),
+            ),
+            "Failed to remove environment",
+          ),
+        [WS_METHODS.serverCheckEnvironment]: (input) =>
+          rpcEffect(
+            requireWsOwnerSession.pipe(
+              Effect.andThen(environmentProbe.check(input.executionProfile)),
+              Effect.map((connection) => ({ connection })),
+            ),
+            "Failed to check environment",
+          ),
         [WS_METHODS.serverGetSettings]: () =>
           rpcEffect(serverSettings.getSettingsView, "Failed to load server settings"),
         [WS_METHODS.serverUpdateSettings]: (input) =>
@@ -2663,7 +2700,12 @@ const makeWsRpcHandlersLayer = () =>
             "Failed to get composer capabilities",
           ),
         [WS_METHODS.providerCompactThread]: (input) =>
-          rpcEffect(providerService.compactThread(input), "Failed to compact thread"),
+          rpcEffect(compactionReactor.request(input), "Failed to compact thread"),
+        [WS_METHODS.providerSetCompactionSettings]: (input) =>
+          rpcEffect(
+            compactionReactor.setThreadSettings(input),
+            "Failed to update compaction settings",
+          ),
         [WS_METHODS.providerListCommands]: (input) =>
           rpcEffect(providerDiscoveryService.listCommands(input), "Failed to list commands"),
         [WS_METHODS.providerListSkills]: (input) =>

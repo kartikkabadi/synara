@@ -902,6 +902,8 @@ function writeThreadState(state: AppState, nextThread: Thread, previousThread?: 
 }
 
 function removeThreadState(state: AppState, threadId: ThreadId): AppState {
+  const { [threadId]: _removedRemoteStatus, ...remoteAgentStatusByThreadId } =
+    state.remoteAgentStatusByThreadId ?? {};
   const { [threadId]: _removedShell, ...threadShellById } =
     state.threadShellById ?? EMPTY_THREAD_SHELL_BY_ID;
   const { [threadId]: _removedSession, ...threadSessionById } =
@@ -939,6 +941,7 @@ function removeThreadState(state: AppState, threadId: ThreadId): AppState {
     {
       ...state,
       threadIds: nextThreadIds,
+      remoteAgentStatusByThreadId,
       threadShellById,
       threadSessionById,
       threadTurnStateById,

@@ -1,3 +1,4 @@
+import { supportsThreadCompactionFromCompaction } from "@synara/shared/providerCompaction";
 import { spawnSync, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import fsSync from "node:fs";
@@ -21,6 +22,7 @@ import {
 } from "../../agentGateway/Services/AgentGatewayCredentials";
 import { AntigravityAdapter } from "../Services/AntigravityAdapter";
 import {
+  antigravityCompaction,
   antigravityPromptCommandLineIssue,
   type AntigravityAdapterDependencies,
   buildAntigravityCaptureCommand,
@@ -4177,5 +4179,18 @@ describe("Antigravity background task helpers (#752)", () => {
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("Antigravity compaction capabilities", () => {
+  // Placeholder guard: `agy` (verified locally) is a one-shot print-mode CLI
+  // with no long-lived session, so compaction must stay unsupported until the
+  // synthetic-compaction design in docs/antigravity-compaction-design.md is
+  // approved and implemented.
+  it("asserts compaction is unsupported until the synthetic design is approved", () => {
+    expect(antigravityCompaction.manual.mode).toBe("unsupported");
+    expect(antigravityCompaction.manual.mechanism).toBe("unsupported");
+    expect(antigravityCompaction.manual.supportsInstructions).toBe(false);
+    expect(supportsThreadCompactionFromCompaction(antigravityCompaction)).toBe(false);
   });
 });

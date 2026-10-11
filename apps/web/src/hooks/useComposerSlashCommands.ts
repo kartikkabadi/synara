@@ -83,6 +83,8 @@ export function useComposerSlashCommands(input: {
   isLocalDraftThread: boolean;
   supportsFastSlashCommand: boolean;
   canOfferCompactCommand: boolean;
+  compactionSupportsInstructions?: boolean | undefined;
+  compactDisabledReason?: string | null | undefined;
   canExecuteSideCommand: boolean;
   sidechatTargetProviders: ReadonlyArray<ProviderKind>;
   canOfferExportCommand: boolean;
@@ -136,6 +138,8 @@ export function useComposerSlashCommands(input: {
     isLocalDraftThread,
     supportsFastSlashCommand,
     canOfferCompactCommand,
+    compactionSupportsInstructions,
+    compactDisabledReason,
     canExecuteSideCommand,
     sidechatTargetProviders,
     canOfferExportCommand,
@@ -171,49 +175,79 @@ export function useComposerSlashCommands(input: {
     providerNativeCommandNames,
   });
 
-  const compactProviderThread = useCallback(async (): Promise<boolean> => {
-    const api = readNativeApi();
-    if (
-      !api ||
-      !canOfferCompactCommand ||
-      !isServerThread ||
-      !activeThread?.session ||
-      activeThread.session.status === "closed"
-    ) {
-      toastManager.add({
-        type: "warning",
-        title: "Compact is unavailable",
-        description: "Open an active supported server thread before compacting context.",
-      });
-      return false;
-    }
-
-    try {
-      void api.provider
-        .compactThread({
-          threadId: activeThread.id,
-        })
-        .catch((error) => {
-          toastManager.add({
-            type: "error",
-            title: "Could not compact thread",
-            description:
-              error instanceof Error
-                ? error.message
-                : "An error occurred while compacting context.",
-          });
+  const compactionInFlightRef = useRef(new Set<ThreadId>());
+  const [compactingThreadIds, setCompactingThreadIds] = useState<ReadonlySet<ThreadId>>(
+    () => new Set(),
+  );
+  const compactProviderThread = useCallback(
+    async (instructions?: string): Promise<boolean> => {
+      const api = readNativeApi();
+      if (
+        !api ||
+        selectedProvider === "claudeAgent" ||
+        !canOfferCompactCommand ||
+        compactDisabledReason != null ||
+        !isServerThread ||
+        !activeThread?.session ||
+        activeThread.session.status === "closed"
+      ) {
+        toastManager.add({
+          type: "warning",
+          title: "Compact is unavailable",
+          description:
+            compactDisabledReason ??
+            "Open an active supported server thread before compacting context.",
         });
-      return true;
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Could not compact thread",
-        description:
-          error instanceof Error ? error.message : "An error occurred while compacting context.",
-      });
-      return false;
-    }
-  }, [activeThread, canOfferCompactCommand, isServerThread]);
+        return false;
+      }
+
+      const compactionThreadId = activeThread.id;
+      if (compactionInFlightRef.current.has(compactionThreadId)) return false;
+      const trimmedInstructions = instructions?.trim();
+      if (trimmedInstructions && compactionSupportsInstructions === false) {
+        toastManager.add({
+          type: "warning",
+          title: "Compaction instructions unsupported",
+          description: "This provider does not accept custom compaction instructions.",
+        });
+        return false;
+      }
+
+      const compactionInput = {
+        requestId: crypto.randomUUID(),
+        threadId: activeThread.id,
+        trigger: "manual" as const,
+        ...(trimmedInstructions ? { instructions: trimmedInstructions } : {}),
+      };
+      compactionInFlightRef.current.add(compactionThreadId);
+      setCompactingThreadIds((current) => new Set([...current, compactionThreadId]));
+      try {
+        await api.provider.compactThread(compactionInput);
+        return true;
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Could not compact thread",
+          description:
+            error instanceof Error ? error.message : "An error occurred while compacting context.",
+        });
+        return false;
+      } finally {
+        compactionInFlightRef.current.delete(compactionThreadId);
+        setCompactingThreadIds(
+          (current) => new Set([...current].filter((id) => id !== compactionThreadId)),
+        );
+      }
+    },
+    [
+      activeThread,
+      canOfferCompactCommand,
+      compactionSupportsInstructions,
+      compactDisabledReason,
+      isServerThread,
+      selectedProvider,
+    ],
+  );
 
   const setFastModeFromSlashCommand = useCallback(
     (enabled: boolean) => {
@@ -898,7 +932,7 @@ export function useComposerSlashCommands(input: {
       }
       if (slashInvocation.command === "compact") {
         editorActions.clearComposerSlashDraft();
-        await compactProviderThread();
+        await compactProviderThread(slashInvocation.args);
         return true;
       }
       if (
@@ -1311,6 +1345,8 @@ export function useComposerSlashCommands(input: {
   );
 
   return {
+    compactProviderThread,
+    isCompactingProviderThread: compactingThreadIds.has(threadId),
     handleForkFromMessage,
     handleForkTargetSelection,
     handleReviewTargetSelection,

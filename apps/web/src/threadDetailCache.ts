@@ -60,6 +60,9 @@ export function snapshotAppliedThreadDetail(
           })),
         session: thread.session
           ? {
+              ...(thread.session.executionProfile
+                ? { executionProfile: thread.session.executionProfile }
+                : {}),
               threadId: id,
               status: thread.session.orchestrationStatus,
               providerName: thread.session.provider,

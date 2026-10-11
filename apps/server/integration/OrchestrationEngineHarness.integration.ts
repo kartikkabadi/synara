@@ -67,6 +67,7 @@ import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from "../src/orchestration/Services/OrchestrationEngine.ts";
+import { CompactionReactor } from "../src/orchestration/Services/CompactionReactor.ts";
 import { OrchestrationReactor } from "../src/orchestration/Services/OrchestrationReactor.ts";
 import { ProjectionSnapshotQuery } from "../src/orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ThreadGitMetadataReactor } from "../src/orchestration/Services/ThreadGitMetadataReactor.ts";
@@ -362,6 +363,13 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(RevertSagaWorkerLive.pipe(Layer.provide(ControlPlaneKernelLive))),
     );
+    const compactionReactorLayer = Layer.succeed(CompactionReactor, {
+      start: Effect.void,
+      drain: Effect.void,
+      request: () => Effect.die(new Error("CompactionReactor is unused in this harness")),
+      setThreadSettings: () => Effect.void,
+      getControlState: () => Effect.succeed({ status: "idle" as const }),
+    });
     const sidechatExpiryReactorLayer = SidechatExpiryReactorLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),
     );
@@ -373,6 +381,7 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(runtimeIngestionLayer),
       Layer.provideMerge(providerCommandReactorLayer),
       Layer.provideMerge(checkpointReactorLayer),
+      Layer.provideMerge(compactionReactorLayer),
       Layer.provideMerge(hubOutputReactorLayer),
       Layer.provideMerge(threadGitMetadataReactorLayer),
       Layer.provideMerge(sidechatExpiryReactorLayer),

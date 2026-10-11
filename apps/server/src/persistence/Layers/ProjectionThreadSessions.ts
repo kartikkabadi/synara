@@ -1,6 +1,7 @@
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Schema } from "effect";
+import { ExecutionProfile } from "@synara/contracts";
 
 import { toPersistenceSqlError } from "../Errors.ts";
 
@@ -31,6 +32,7 @@ const makeProjectionThreadSessionRepository = Effect.gen(function* () {
           provider_name,
           provider_instance_id,
           runtime_mode,
+          execution_profile_json,
           active_turn_id,
           last_error,
           last_activity_at,
@@ -43,6 +45,7 @@ const makeProjectionThreadSessionRepository = Effect.gen(function* () {
           ${row.providerName},
           ${row.providerInstanceId},
           ${row.runtimeMode},
+          ${row.executionProfile ? JSON.stringify(row.executionProfile) : null},
           ${row.activeTurnId},
           ${row.lastError},
           ${row.lastActivityAt},
@@ -55,6 +58,7 @@ const makeProjectionThreadSessionRepository = Effect.gen(function* () {
           provider_name = excluded.provider_name,
           provider_instance_id = excluded.provider_instance_id,
           runtime_mode = excluded.runtime_mode,
+          execution_profile_json = COALESCE(excluded.execution_profile_json, projection_thread_sessions.execution_profile_json),
           active_turn_id = excluded.active_turn_id,
           last_error = excluded.last_error,
           last_activity_at = MAX(
@@ -71,7 +75,10 @@ const makeProjectionThreadSessionRepository = Effect.gen(function* () {
 
   const getProjectionThreadSessionRow = SqlSchema.findOneOption({
     Request: GetProjectionThreadSessionInput,
-    Result: ProjectionThreadSession,
+    Result: ProjectionThreadSession.mapFields((fields) => ({
+      ...fields,
+      executionProfile: Schema.NullOr(Schema.fromJsonString(ExecutionProfile)),
+    })),
     execute: ({ threadId }) =>
       sql`
         SELECT
@@ -80,6 +87,7 @@ const makeProjectionThreadSessionRepository = Effect.gen(function* () {
           provider_name AS "providerName",
           provider_instance_id AS "providerInstanceId",
           runtime_mode AS "runtimeMode",
+          execution_profile_json AS "executionProfile",
           active_turn_id AS "activeTurnId",
           last_error AS "lastError",
           last_activity_at AS "lastActivityAt",

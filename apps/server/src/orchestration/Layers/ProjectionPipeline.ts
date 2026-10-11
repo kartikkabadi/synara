@@ -1414,6 +1414,7 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             providerName: event.payload.session.providerName,
             providerInstanceId: event.payload.session.providerInstanceId ?? null,
             runtimeMode: event.payload.session.runtimeMode,
+            executionProfile: event.payload.session.executionProfile ?? null,
             activeTurnId: event.payload.session.activeTurnId,
             lastError: event.payload.session.lastError,
             lastActivityAt: event.payload.session.lastActivityAt ?? null,

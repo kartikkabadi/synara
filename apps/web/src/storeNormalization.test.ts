@@ -2,7 +2,13 @@
 // Purpose: pins the incremental activity accumulator to the `normalizeActivities` fold it
 // replaces, and locks the legacy session provider-name → ProviderKind mapping.
 
-import { EventId, MessageId, TurnId, type PendingClaudeCacheReview } from "@synara/contracts";
+import {
+  EnvironmentId,
+  EventId,
+  MessageId,
+  TurnId,
+  type PendingClaudeCacheReview,
+} from "@synara/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ProviderKind } from "@synara/contracts";
@@ -659,5 +665,39 @@ describe("session approval mode", () => {
     const updated = normalizeThreadSession({ ...session, runtimeMode: "full-access" }, normalized);
     expect(updated?.runtimeMode).toBe("full-access");
     expect(updated).not.toBe(normalized);
+  });
+});
+
+describe("remote session execution profile", () => {
+  it("retains the profile through hydration and notices profile changes", () => {
+    const thread = makeReadModelThread();
+    const executionProfile = {
+      environmentId: EnvironmentId.makeUnsafe("remote-box"),
+      providerKind: "codex" as const,
+      remoteWorkspaceRoot: "/srv/project",
+    };
+    const session = {
+      threadId: thread.id,
+      providerName: "codex" as const,
+      status: "ready" as const,
+      runtimeMode: "full-access" as const,
+      activeTurnId: null,
+      lastError: null,
+      updatedAt: thread.updatedAt,
+      executionProfile,
+    };
+    const remote = normalizeThreadSession(session, null);
+    expect(remote?.executionProfile).toEqual(executionProfile);
+    expect(
+      normalizeThreadSession({ ...session, executionProfile: { ...executionProfile } }, remote),
+    ).toBe(remote);
+    const changed = normalizeThreadSession(
+      { ...session, executionProfile: { ...executionProfile, remoteWorkspaceRoot: "/srv/other" } },
+      remote,
+    );
+    expect(changed).not.toBe(remote);
+    expect(changed?.executionProfile?.remoteWorkspaceRoot).toBe("/srv/other");
+    const { executionProfile: _profile, ...localSession } = session;
+    expect(normalizeThreadSession(localSession, remote)?.executionProfile).toBeUndefined();
   });
 });

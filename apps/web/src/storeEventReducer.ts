@@ -1895,6 +1895,32 @@ function applyOrchestrationEvent(
         },
       );
 
+    case "thread.remote-agent-connection-status-changed": {
+      if (state.deletedThreadIdsById?.[event.payload.threadId] !== undefined) return state;
+      const previous = state.remoteAgentStatusByThreadId?.[event.payload.threadId];
+      if (
+        previous !== undefined &&
+        previous.status === event.payload.status &&
+        previous.retryCount === event.payload.retryCount &&
+        previous.lastSeq === event.payload.lastSeq &&
+        previous.message === event.payload.message
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        remoteAgentStatusByThreadId: {
+          ...state.remoteAgentStatusByThreadId,
+          [event.payload.threadId]: {
+            status: event.payload.status,
+            retryCount: event.payload.retryCount,
+            lastSeq: event.payload.lastSeq,
+            ...(event.payload.message !== undefined ? { message: event.payload.message } : {}),
+          },
+        },
+      };
+    }
+
     default:
       return state;
   }

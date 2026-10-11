@@ -74,6 +74,17 @@
         "wrangler": "^4.122.0",
       },
     },
+    "apps/remote-agent": {
+      "name": "@synara/remote-agent",
+      "devDependencies": {
+        "@synara/contracts": "workspace:*",
+        "@synara/shared": "workspace:*",
+        "@types/node": "catalog:",
+        "effect": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "apps/server": {
       "name": "@synara/cli",
       "version": "1.0.2-beta.1",
@@ -1304,6 +1315,8 @@
     "@synara/desktop": ["@synara/desktop@workspace:apps/desktop"],
 
     "@synara/marketing": ["@synara/marketing@workspace:apps/marketing"],
+
+    "@synara/remote-agent": ["@synara/remote-agent@workspace:apps/remote-agent"],
 
     "@synara/scripts": ["@synara/scripts@workspace:scripts"],
 

@@ -21,6 +21,7 @@ import {
   type CheckpointRef,
   CommandId,
   EventId,
+  type ExecutionProfile,
   type ModelSelection,
   MessageId,
   type OrchestrationEvent,
@@ -2063,6 +2064,7 @@ const make = Effect.gen(function* () {
       readonly providerOptions?: ProviderStartOptions;
       readonly enableComputerControl?: boolean;
       readonly runtimeMode?: RuntimeMode;
+      readonly executionProfile?: ExecutionProfile;
       readonly registerPriorTranscriptBootstrapOnFreshStart?: boolean;
     },
   ) {
@@ -2222,11 +2224,20 @@ const make = Effect.gen(function* () {
         ? providerStartOptionsFromInstance(desiredProviderInstance)
         : undefined,
     );
-    const effectiveCwd = yield* resolveProjectedThreadWorkspaceCwd(thread);
+    const executionProfile = options?.executionProfile ?? thread.session?.executionProfile;
+    const effectiveCwd =
+      executionProfile?.remoteWorkspaceRoot ?? (yield* resolveProjectedThreadWorkspaceCwd(thread));
     const workspaceState = resolveThreadWorkspaceState({
       envMode: thread.envMode,
       worktreePath: thread.worktreePath,
     });
+    if (executionProfile && (workspaceState !== "local" || preferredProvider !== "codex")) {
+      return yield* new ProviderAdapterValidationError({
+        provider: preferredProvider,
+        operation: "thread.turn.start",
+        issue: "Remote threads require Codex and cannot use a local worktree.",
+      });
+    }
     if (workspaceState === "worktree-pending") {
       return yield* new ProviderAdapterValidationError({
         provider: preferredProvider,
@@ -2249,6 +2260,13 @@ const make = Effect.gen(function* () {
         ),
       );
     const additionalDirectories = Option.getOrUndefined(workspaceProject)?.additionalFolders ?? [];
+    if (executionProfile && additionalDirectories.length > 0) {
+      return yield* new ProviderAdapterValidationError({
+        provider: preferredProvider,
+        operation: "thread.turn.start",
+        issue: "Remote threads cannot grant local project folders.",
+      });
+    }
     if (additionalDirectories.length > 0) {
       const folderIssue = projectFoldersSessionIssue({
         provider: preferredProvider,
@@ -2295,6 +2313,9 @@ const make = Effect.gen(function* () {
         : {}),
       ...(autoApproveSynaraTools ? { autoApproveSynaraTools: true } : {}),
       runtimeMode: desiredRuntimeMode,
+      ...((options?.executionProfile ?? thread.session?.executionProfile) !== undefined
+        ? { executionProfile: options?.executionProfile ?? thread.session?.executionProfile }
+        : {}),
     };
     const autoApproveSynaraToolsChanged = autoApproveSynaraTools !== previousAutoApproveSynaraTools;
 
@@ -2335,6 +2356,7 @@ const make = Effect.gen(function* () {
                 ? "stopped"
                 : session.status,
           providerName: session.provider,
+          ...(session.executionProfile ? { executionProfile: session.executionProfile } : {}),
           providerInstanceId: session.providerInstanceId ?? desiredProviderInstanceId,
           runtimeMode: desiredRuntimeMode,
           // Provider turn ids are not orchestration turn ids.
@@ -2977,6 +2999,7 @@ const make = Effect.gen(function* () {
     readonly runtimeMode?: RuntimeMode;
     readonly interactionMode?: ProviderInteractionMode;
     readonly dispatchMode?: "queue" | "steer";
+    readonly executionProfile?: ExecutionProfile;
     readonly turnKind?: "user" | "goal-continuation";
     readonly createdAt: string;
     readonly cacheReviewSource?: Extract<
@@ -2988,6 +3011,22 @@ const make = Effect.gen(function* () {
     readonly claudeCompactionUsesPersistedProfile?: boolean;
   }) {
     const thread = yield* resolveThread(input.threadId);
+    const dispatchProfile = input.executionProfile ?? thread?.session?.executionProfile;
+    if (
+      dispatchProfile &&
+      (input.attachments?.length ||
+        input.skills?.length ||
+        input.mentions?.length ||
+        input.enableComputerControl ||
+        parseComputerInvocation(input.messageText))
+    ) {
+      return yield* new ProviderAdapterValidationError({
+        provider: "codex",
+        operation: "thread.turn.start",
+        issue: "Remote turns cannot use local attachments, skills, mentions or computer control.",
+      });
+    }
+
     if (!thread) {
       return;
     }
@@ -3182,6 +3221,9 @@ const make = Effect.gen(function* () {
         ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
         ...(input.dispatchMode === "steer" ? {} : { enableComputerControl }),
         ...(input.runtimeMode !== undefined ? { runtimeMode: input.runtimeMode } : {}),
+        ...(input.executionProfile !== undefined
+          ? { executionProfile: input.executionProfile }
+          : {}),
         ...(registerPriorTranscriptBootstrapOnFreshStart
           ? { registerPriorTranscriptBootstrapOnFreshStart: true }
           : {}),
@@ -3889,6 +3931,9 @@ const make = Effect.gen(function* () {
         ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
         enableComputerControl,
         ...(input.runtimeMode !== undefined ? { runtimeMode: input.runtimeMode } : {}),
+        ...(input.executionProfile !== undefined
+          ? { executionProfile: input.executionProfile }
+          : {}),
       });
       const replayWithTranscriptBootstrap = (
         cause: ProviderServiceError,
@@ -4722,6 +4767,9 @@ const make = Effect.gen(function* () {
           : {}),
         interactionMode: event.payload.interactionMode,
         dispatchMode: immediateDispatchMode,
+        ...(event.payload.executionProfile !== undefined
+          ? { executionProfile: event.payload.executionProfile }
+          : {}),
         createdAt: event.payload.createdAt,
       }).pipe(
         Effect.catchCause((cause) =>
@@ -5452,6 +5500,9 @@ const make = Effect.gen(function* () {
             : {}),
           runtimeMode: nextQueuedTurn.runtimeMode,
           interactionMode: nextQueuedTurn.interactionMode,
+          ...(nextQueuedTurn.executionProfile !== undefined
+            ? { executionProfile: nextQueuedTurn.executionProfile }
+            : {}),
           ...(nextQueuedTurn.sourceProposedPlan !== undefined
             ? { sourceProposedPlan: nextQueuedTurn.sourceProposedPlan }
             : {}),
@@ -6449,7 +6500,7 @@ const make = Effect.gen(function* () {
       });
     }
     yield* executeEditReplayWorkspaceRestore(workspaceRestorePlan);
-    yield* orchestrationEngine.dispatch({
+    const rollback = yield* orchestrationEngine.dispatch({
       type: "thread.conversation.rollback.complete",
       commandId: serverCommandId("message-edit-rollback-complete"),
       threadId: payload.threadId,
@@ -6473,31 +6524,41 @@ const make = Effect.gen(function* () {
     }
 
     editResendTurnStartKeys.add(editResendTurnStartKey(payload.threadId, payload.messageId));
-    yield* orchestrationEngine.dispatch({
-      type: "thread.turn.start",
-      commandId: serverCommandId("message-edit-resend-turn-start"),
-      threadId: payload.threadId,
-      message: {
-        messageId: payload.messageId,
-        role: "user",
-        text: payload.text,
-        attachments: originalMessage.attachments ?? [],
-        ...(originalMessage.skills !== undefined ? { skills: originalMessage.skills } : {}),
-        ...(originalMessage.mentions !== undefined ? { mentions: originalMessage.mentions } : {}),
-      },
-      ...(payload.modelSelection !== undefined ? { modelSelection: payload.modelSelection } : {}),
-      ...(payload.providerOptions !== undefined
-        ? { providerOptions: payload.providerOptions }
-        : {}),
-      ...computerActivationMetadata(payload),
-      ...(payload.assistantDeliveryMode !== undefined
-        ? { assistantDeliveryMode: payload.assistantDeliveryMode }
-        : {}),
-      dispatchMode: "queue",
-      runtimeMode: payload.runtimeMode,
-      interactionMode: payload.interactionMode,
-      createdAt: payload.createdAt,
-    });
+    yield* orchestrationEngine
+      .dispatch({
+        type: "thread.turn.start",
+        commandId: serverCommandId("message-edit-resend-turn-start"),
+        editResendFromRollbackSequence: rollback.sequence,
+        threadId: payload.threadId,
+        message: {
+          messageId: payload.messageId,
+          role: "user",
+          text: payload.text,
+          attachments: originalMessage.attachments ?? [],
+          ...(originalMessage.skills !== undefined ? { skills: originalMessage.skills } : {}),
+          ...(originalMessage.mentions !== undefined ? { mentions: originalMessage.mentions } : {}),
+        },
+        ...(payload.modelSelection !== undefined ? { modelSelection: payload.modelSelection } : {}),
+        ...(payload.providerOptions !== undefined
+          ? { providerOptions: payload.providerOptions }
+          : {}),
+        ...computerActivationMetadata(payload),
+        ...(payload.assistantDeliveryMode !== undefined
+          ? { assistantDeliveryMode: payload.assistantDeliveryMode }
+          : {}),
+        dispatchMode: "queue",
+        runtimeMode: payload.runtimeMode,
+        interactionMode: payload.interactionMode,
+        createdAt: payload.createdAt,
+      })
+      .pipe(
+        Effect.catchTag("OrchestrationCommandInvariantError", (error) => {
+          editResendTurnStartKeys.delete(
+            editResendTurnStartKey(payload.threadId, payload.messageId),
+          );
+          return Effect.fail(error);
+        }),
+      );
   });
 
   const stopActiveProviderRuntimeForEdit = Effect.fnUntraced(function* (input: {

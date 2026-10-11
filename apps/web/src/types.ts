@@ -4,6 +4,7 @@
 
 import type {
   ModelSelection,
+  ExecutionProfile,
   MessageDispatchOrigin,
   OrchestrationMessageSource,
   OrchestrationPendingInteraction,
@@ -390,6 +391,7 @@ export interface ComposerThreadMentionSource {
 }
 
 export interface ThreadSession {
+  executionProfile?: ExecutionProfile;
   provider: ProviderKind;
   runtimeMode?: RuntimeMode;
   providerInstanceId?: ProviderInstanceId;

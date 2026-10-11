@@ -12,7 +12,8 @@
 import {
   defaultInstanceIdForDriver,
   EventId,
-  ProviderCompactThreadInput,
+  ExecutionProfile,
+  ProviderCompactionRequest,
   ProviderForkThreadInput,
   ModelSelection,
   RuntimeMode,
@@ -33,6 +34,7 @@ import {
   ProviderStartOptions,
   ProviderKind,
   TurnId,
+  type ProviderCompactionResult,
   type ProviderInstanceId,
   type ProviderRuntimeEvent,
   type ProviderSession,
@@ -72,6 +74,7 @@ import {
   ProviderAdapterProcessError,
   ProviderUnsupportedError,
   ProviderValidationError,
+  ProviderCompactionPersistenceError,
 } from "../Errors.ts";
 import type {
   ProviderAdapterShape,
@@ -337,6 +340,7 @@ function toRuntimePayloadFromSession(
         )
       : undefined;
   return {
+    ...(session.executionProfile ? { executionProfile: session.executionProfile } : {}),
     cwd: session.cwd ?? null,
     model: session.model ?? null,
     providerInstanceId: session.providerInstanceId ?? extra?.providerInstanceId ?? session.provider,
@@ -2317,6 +2321,12 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         return yield* lifecycle.run(threadId, (lease) =>
           Effect.gen(function* () {
             const binding = yield* getCurrentBinding();
+            if (runtimePayloadRecord(binding.runtimePayload).executionProfile != null) {
+              return yield* toValidationError(
+                input.operation,
+                "Remote native session recovery requires a verified remote continuation source. This thread will not run locally.",
+              );
+            }
             const hasPersistedResumeCursor = hasResumeCursor(binding.resumeCursor);
             const persistedCwd = readPersistedCwd(binding.runtimePayload);
             const persistedModelSelection = readPersistedModelSelection(binding.runtimePayload);
@@ -2890,10 +2900,60 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             `Unknown provider '${resolvedProvider}'.`,
           );
         }
+        const existingBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+        const persistedProfileValue = runtimePayloadRecord(
+          existingBinding?.runtimePayload,
+        ).executionProfile;
+        const persistedExecutionProfile =
+          persistedProfileValue == null
+            ? undefined
+            : yield* decodeInputOrValidationError({
+                operation: "ProviderService.startSession",
+                schema: ExecutionProfile,
+                payload: persistedProfileValue,
+              });
+        if (
+          persistedExecutionProfile &&
+          parsed.executionProfile &&
+          !isDeepStrictEqual(persistedExecutionProfile, parsed.executionProfile)
+        ) {
+          return yield* toValidationError(
+            "ProviderService.startSession",
+            "A bound thread cannot change its execution environment. Start a new thread.",
+          );
+        }
+        const executionProfile = persistedExecutionProfile ?? parsed.executionProfile;
+        if (
+          executionProfile &&
+          (resolvedProvider !== "codex" || executionProfile.providerKind !== "codex")
+        ) {
+          return yield* toValidationError(
+            "ProviderService.startSession",
+            "Remote execution currently supports Codex only.",
+          );
+        }
+        if (executionProfile && existingBinding && !persistedExecutionProfile) {
+          return yield* toValidationError(
+            "ProviderService.startSession",
+            "A local thread cannot move to a remote environment. Start a new thread.",
+          );
+        }
+        if (
+          executionProfile &&
+          (parsed.resumeCursor !== undefined || hasResumeCursor(existingBinding?.resumeCursor))
+        ) {
+          return yield* toValidationError(
+            "ProviderService.startSession",
+            "Remote native session recovery requires a verified remote continuation source. Start a new remote thread; this thread will not run locally.",
+          );
+        }
         const input = {
           ...parsed,
           threadId,
           provider: resolvedProvider,
+          ...(executionProfile
+            ? { executionProfile, cwd: executionProfile.remoteWorkspaceRoot }
+            : {}),
         };
         // Reject disabled providers before waiting on lifecycle work, then
         // check again immediately before spawning in case settings changed.
@@ -4937,46 +4997,187 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         );
       });
 
+    const bindingLifecycleGeneration = (
+      binding: ProviderRuntimeBinding | undefined,
+    ): string | undefined => {
+      if (binding?.lifecycleGeneration !== undefined) {
+        return binding.lifecycleGeneration;
+      }
+      const payloadGeneration = runtimePayloadRecord(binding?.runtimePayload).lifecycleGeneration;
+      return typeof payloadGeneration === "string" ? payloadGeneration : undefined;
+    };
+
+    const bindingIdentityFields = (binding: ProviderRuntimeBinding) => ({
+      threadId: binding.threadId,
+      provider: binding.provider,
+      providerInstanceId: binding.providerInstanceId,
+      ...(binding.adapterKey !== undefined ? { adapterKey: binding.adapterKey } : {}),
+      ...(binding.runtimeMode !== undefined ? { runtimeMode: binding.runtimeMode } : {}),
+    });
+
+    const compactionRuntimePayload = (
+      binding: ProviderRuntimeBinding,
+      extra?: Record<string, unknown>,
+    ): Record<string, unknown> => ({
+      ...runtimePayloadRecord(binding.runtimePayload),
+      activeTurnId: null,
+      lastRuntimeEvent: "provider.compactThread",
+      lastRuntimeEventAt: new Date().toISOString(),
+      ...extra,
+    });
+
+    const applyCompactionResult = <TError>(
+      threadId: ThreadId,
+      result: ProviderCompactionResult,
+      adapter: ProviderAdapterShape<TError>,
+      expectedBinding: ProviderRuntimeBinding | undefined,
+    ) =>
+      withBindingWriteLock(
+        threadId,
+        Effect.gen(function* () {
+          const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+          if (
+            !binding ||
+            !expectedBinding ||
+            binding.provider !== expectedBinding.provider ||
+            binding.providerInstanceId !== expectedBinding.providerInstanceId ||
+            bindingLifecycleGeneration(binding) !== bindingLifecycleGeneration(expectedBinding)
+          ) {
+            return yield* new ProviderCompactionPersistenceError({
+              operation: "ProviderService.compactThread",
+              detail:
+                "The provider session changed during compaction; its outcome could not be applied.",
+              outcomeKnown: false,
+            });
+          }
+          const sameSession = result.kind === "same-session";
+          const generation = sameSession
+            ? (binding.lifecycleGeneration ?? lifecycle.currentGeneration(threadId) ?? randomUUID())
+            : randomUUID();
+          // Commit the continuation before retiring the process. Cleanup failures
+          // propagate so callers cannot report an unproven rollover as complete.
+          yield* directory.upsert({
+            ...bindingIdentityFields(binding),
+            status: binding.status ?? "running",
+            lifecycleGeneration: generation,
+            resumeCursor: result.resumeCursor ?? binding.resumeCursor,
+            runtimePayload: compactionRuntimePayload(binding, {
+              lifecycleGeneration: generation,
+              ...(result.kind === "session-rollover" && result.providerThreadId !== undefined
+                ? { providerThreadId: result.providerThreadId }
+                : {}),
+            }),
+          });
+          lifecycle.adoptCurrent(threadId, generation);
+          if (sameSession) return;
+          if (yield* adapter.hasSession(threadId)) yield* adapter.stopSession(threadId);
+          clearLiveRuntimeTasks(threadId);
+          yield* directory.upsert({
+            ...bindingIdentityFields(binding),
+            status: "stopped",
+            lifecycleGeneration: generation,
+            resumeCursor: result.resumeCursor ?? binding.resumeCursor,
+            runtimePayload: compactionRuntimePayload(binding, {
+              lifecycleGeneration: generation,
+              ...(result.kind === "session-rollover" && result.providerThreadId !== undefined
+                ? { providerThreadId: result.providerThreadId }
+                : {}),
+            }),
+          });
+        }),
+      );
+
+    const getNativeCompactionTrigger: NonNullable<
+      ProviderServiceShape["getNativeCompactionTrigger"]
+    > = (threadId) =>
+      Effect.gen(function* () {
+        const routed = yield* resolveRoutableSession({
+          threadId,
+          operation: "ProviderService.getNativeCompactionTrigger",
+          allowRecovery: false,
+        });
+        return routed.adapter.getNativeCompactionTrigger
+          ? yield* routed.adapter.getNativeCompactionTrigger(threadId)
+          : undefined;
+      });
+
     const compactThread: ProviderServiceShape["compactThread"] = (rawInput) =>
       Effect.gen(function* () {
         const input = yield* decodeInputOrValidationError({
           operation: "ProviderService.compactThread",
-          schema: ProviderCompactThreadInput,
+          schema: ProviderCompactionRequest,
           payload: rawInput,
         });
-        yield* runIdleSensitiveProviderWork(
+        return yield* runIdleSensitiveProviderWork(
           input.threadId,
           Effect.gen(function* () {
-            const routed = yield* resolveRoutableSession({
+            yield* resolveRoutableSession({
               threadId: input.threadId,
               operation: "ProviderService.compactThread",
               allowRecovery: true,
             });
-            if (!routed.adapter.compactThread) {
-              return yield* toValidationError(
-                "ProviderService.compactThread",
-                `Context compaction is unavailable for provider '${routed.adapter.provider}'.`,
-              );
-            }
-            yield* routed.adapter.compactThread(input.threadId);
-            const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId));
-            if (binding) {
-              yield* directory.upsert({
-                threadId: input.threadId,
-                provider: binding.provider,
-                providerInstanceId: binding.providerInstanceId,
-                ...(binding.adapterKey !== undefined ? { adapterKey: binding.adapterKey } : {}),
-                ...(binding.runtimeMode !== undefined ? { runtimeMode: binding.runtimeMode } : {}),
-                status: "stopped",
-                resumeCursor: binding.resumeCursor,
-                runtimePayload: {
-                  ...runtimePayloadRecord(binding.runtimePayload),
-                  activeTurnId: null,
-                  lastRuntimeEvent: "provider.compactThread",
-                  lastRuntimeEventAt: new Date().toISOString(),
-                },
-              });
-            }
+            return yield* lifecycle.runCurrent(input.threadId, () =>
+              Effect.gen(function* () {
+                const routed = yield* resolveRoutableSession({
+                  threadId: input.threadId,
+                  operation: "ProviderService.compactThread",
+                  allowRecovery: false,
+                });
+                if (!routed.adapter.compactThread) {
+                  return yield* toValidationError(
+                    "ProviderService.compactThread",
+                    `Context compaction is unavailable for provider '${routed.adapter.provider}'.`,
+                  );
+                }
+                if (input.instructions !== undefined) {
+                  const capabilities = routed.adapter.getComposerCapabilities
+                    ? yield* routed.adapter.getComposerCapabilities()
+                    : undefined;
+                  if (capabilities?.compaction?.manual.supportsInstructions !== true) {
+                    return yield* toValidationError(
+                      "ProviderService.compactThread",
+                      `Provider '${routed.adapter.provider}' does not support compaction instructions.`,
+                    );
+                  }
+                }
+                const preBinding = Option.getOrUndefined(
+                  yield* directory.getBinding(input.threadId),
+                );
+                if (
+                  input.expectedLifecycleGeneration !== undefined &&
+                  bindingLifecycleGeneration(preBinding) !== input.expectedLifecycleGeneration
+                ) {
+                  return yield* toValidationError(
+                    "ProviderService.compactThread",
+                    "Compaction request is stale; the provider session has changed.",
+                  );
+                }
+                const liveSession = (yield* routed.adapter.listSessions()).find(
+                  (session) => session.threadId === input.threadId,
+                );
+                if (
+                  runtimeActiveTurnId(preBinding?.runtimePayload) !== undefined ||
+                  liveSession?.activeTurnId !== undefined
+                ) {
+                  return yield* toValidationError(
+                    "ProviderService.compactThread",
+                    "Cannot compact the thread while a turn is active.",
+                  );
+                }
+                const startedAtMs = Date.now();
+                const result = yield* routed.adapter.compactThread(input);
+                const durationMs = Date.now() - startedAtMs;
+                yield* applyCompactionResult(input.threadId, result, routed.adapter, preBinding);
+                yield* analytics.record("provider.thread.compacted", {
+                  provider: routed.adapter.provider,
+                  resultKind: result.kind,
+                  owner: "provider",
+                  trigger: input.trigger,
+                  durationMs,
+                });
+                return result;
+              }),
+            );
           }),
           { scheduleIdleStopOnSuccess: true },
         );
@@ -5131,6 +5332,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       cancelClaudeCompactionDiscovery,
       rollbackConversation,
       compactThread,
+      getNativeCompactionTrigger,
       closeRuntimeEvents,
       getRuntimeEventPumpHealth: () => Effect.sync(runtimeEventPumpHealth.snapshot),
       // Each access creates a fresh PubSub subscription so that multiple

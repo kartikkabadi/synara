@@ -1,5 +1,12 @@
-import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@synara/contracts";
-import { Effect, FileSystem, Layer, Path, Random } from "effect";
+import {
+  EnvironmentId,
+  ExecutionEnvironmentCapabilities,
+  ExecutionEnvironmentConnection,
+  type ExecutionEnvironmentDescriptor,
+  ExecutionEnvironmentRuntime,
+  ProviderKind,
+} from "@synara/contracts";
+import { Effect, FileSystem, Layer, Path, Random, Schema } from "effect";
 
 import packageJson from "../../../package.json" with { type: "json" };
 import { ServerConfig } from "../../config";
@@ -66,7 +73,7 @@ export const makeServerEnvironment = Effect.fn(function* () {
   });
 
   const environmentId = EnvironmentId.makeUnsafe(environmentIdRaw);
-  const descriptor: ExecutionEnvironmentDescriptor = {
+  const baseDescriptor: Omit<ExecutionEnvironmentDescriptor, "connection"> = {
     environmentId,
     label: resolveServerEnvironmentLabel({ cwdBaseName: path.basename(serverConfig.cwd) }),
     platform: {
@@ -74,13 +81,34 @@ export const makeServerEnvironment = Effect.fn(function* () {
       arch: platformArch(),
     },
     serverVersion: packageJson.version,
-    capabilities: {
+    capabilities: Schema.decodeUnknownSync(ExecutionEnvironmentCapabilities)({
       repositoryIdentity: true,
-    },
+      providerKinds: ProviderKind.literals,
+      shell: true,
+      checkpoint: true,
+      devServerForwarding: true,
+      reconnect: "none",
+      browser: false,
+      computerUse: false,
+      sync: false,
+    }),
+    runtime: Schema.decodeUnknownSync(ExecutionEnvironmentRuntime)({
+      runtimeType: "local",
+      serverVersion: packageJson.version,
+      supervisor: "none",
+    }),
   };
 
+  const makeDescriptor = (): ExecutionEnvironmentDescriptor => ({
+    ...baseDescriptor,
+    connection: Schema.decodeUnknownSync(ExecutionEnvironmentConnection)({
+      connectionStatus: "connected",
+      lastSeenAt: new Date().toISOString(),
+    }),
+  });
+
   return {
-    getDescriptor: Effect.succeed(descriptor),
+    getDescriptor: Effect.sync(makeDescriptor),
   } satisfies ServerEnvironmentShape;
 });
 

@@ -477,6 +477,7 @@ interface DevinSessionContext extends SynaraHarnessPolicyDeliveryState {
   // before dispatching so a cancelled turn is never prompted.
   pendingTurnInterrupted: boolean;
   compactingThread: boolean;
+  compactionItemId?: RuntimeItemId | undefined;
   // Failed compaction tool-call detail recorded while compactingThread is set;
   // runDevinCompaction reads it so a failed compaction tool call is not
   // persisted as a completed one.
@@ -1791,19 +1792,24 @@ export function makeDevinAdapter(
     const emitDevinContextCompactionRuntimeEvent = (
       ctx: DevinSessionContext,
       input: {
-        readonly lifecycle: "item.updated" | "item.completed";
+        readonly lifecycle: "item.started" | "item.updated" | "item.completed";
         readonly status: "inProgress" | "completed" | "failed";
         readonly title: string;
         readonly detail?: string;
       },
     ) =>
       Effect.gen(function* () {
+        if (input.lifecycle === "item.started" || ctx.compactionItemId === undefined) {
+          ctx.compactionItemId = RuntimeItemId.makeUnsafe(
+            `devin-compaction:${crypto.randomUUID()}`,
+          );
+        }
         yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
           type: input.lifecycle,
           ...(yield* makeEventStamp()),
           provider: PROVIDER,
           threadId: ctx.threadId,
-          itemId: RuntimeItemId.makeUnsafe(`devin-compaction:${ctx.threadId}`),
+          itemId: ctx.compactionItemId,
           payload: {
             itemType: "context_compaction",
             status: input.status,
@@ -3430,6 +3436,15 @@ export function makeDevinAdapter(
         supportsPluginMentions: false,
         supportsPluginDiscovery: false,
         supportsRuntimeModelList: true,
+        compaction: {
+          manual: {
+            mode: "same-session",
+            mechanism: "control-command",
+            supportsInstructions: false,
+          },
+          automatic: { mode: "unknown", statusVisibility: "partial", triggerVisibility: "opaque" },
+          telemetry: { lifecycle: "native", contextUsage: "provider-estimated" },
+        },
         supportsThreadCompaction: true,
         supportsThreadImport: false,
       } satisfies ProviderComposerCapabilities);
@@ -3543,8 +3558,16 @@ export function makeDevinAdapter(
       );
     };
 
-    const compactThread: NonNullable<DevinAdapterShape["compactThread"]> = (threadId) =>
+    const compactThread: NonNullable<DevinAdapterShape["compactThread"]> = (input) =>
       Effect.gen(function* () {
+        const threadId = input.threadId;
+        if (input.instructions !== undefined) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "compactThread",
+            issue: "Devin context compaction does not support custom instructions.",
+          });
+        }
         // Wait for a settling resume replay before taking the thread lock:
         // stopSession/startSession need that lock, and stopping the session is
         // what resolves the deferred early, so awaiting under the lock would
@@ -3562,6 +3585,7 @@ export function makeDevinAdapter(
         // stopSessionInternal from cancelling or killing the child.
         const ctx = yield* withThreadLock(threadId, claimDevinCompactionSlot(threadId, preLockCtx));
         return yield* runDevinCompaction(ctx).pipe(
+          Effect.as({ kind: "same-session" } as const),
           // compactingThread stays set until this clears it: sendTurn only
           // rejects while the flag is true, so clearing before the
           // completion/thread-state events publish would let a new turn start
@@ -3646,7 +3670,7 @@ export function makeDevinAdapter(
         // same ordering requirement as new turns.
         yield* waitForAbandonedDevinCompaction(ctx);
         yield* emitDevinContextCompactionRuntimeEvent(ctx, {
-          lifecycle: "item.updated",
+          lifecycle: "item.started",
           status: "inProgress",
           title: "Compacting context",
         });
@@ -3711,9 +3735,11 @@ export function makeDevinAdapter(
           return yield* failDevinCompaction(ctx, "Context compaction failed", failedToolDetail);
         }
 
-        // Success: thread.state.changed is the single terminal signal —
-        // ingestion projects it into the "Context compacted manually" row, so
-        // emitting an item.completed row here too would duplicate it.
+        yield* emitDevinContextCompactionRuntimeEvent(ctx, {
+          lifecycle: "item.completed",
+          status: "completed",
+          title: "Context compacted",
+        });
         yield* offerRuntimeEvent(ctx.lifecycleGeneration, {
           type: "thread.state.changed",
           ...(yield* makeEventStamp()),

@@ -721,6 +721,10 @@ export function createWsNativeApi(): NativeApi {
     server: {
       getConfig: () => transport.request(WS_METHODS.serverGetConfig),
       getEnvironment: () => transport.request(WS_METHODS.serverGetEnvironment),
+      listEnvironments: () => transport.request(WS_METHODS.serverListEnvironments),
+      upsertEnvironment: (input) => transport.request(WS_METHODS.serverUpsertEnvironment, input),
+      removeEnvironment: (input) => transport.request(WS_METHODS.serverRemoveEnvironment, input),
+      checkEnvironment: (input) => transport.request(WS_METHODS.serverCheckEnvironment, input),
       getSettings: () => transport.request(WS_METHODS.serverGetSettings),
       updateSettings: (input) => transport.request(WS_METHODS.serverUpdateSettings, input),
       getAuthSession: () => requestAuthJson<AuthSessionState>("/api/auth/session"),
@@ -835,6 +839,8 @@ export function createWsNativeApi(): NativeApi {
       // to the 10-minute turn-idle ceiling), so the server owns this bound.
       compactThread: (input) =>
         transport.request(WS_METHODS.providerCompactThread, input, { timeoutMs: null }),
+      setCompactionSettings: (input) =>
+        transport.request(WS_METHODS.providerSetCompactionSettings, input),
       listCommands: (input) => transport.request(WS_METHODS.providerListCommands, input),
       listSkills: (input) => transport.request(WS_METHODS.providerListSkills, input),
       listSkillsCatalog: (input) => transport.request(WS_METHODS.providerListSkillsCatalog, input),

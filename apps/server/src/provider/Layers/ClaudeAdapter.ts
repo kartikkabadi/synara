@@ -1,3 +1,4 @@
+import { supportsThreadCompactionFromCompaction } from "@synara/shared/providerCompaction";
 import { providerProcessPriorityEnabled } from "../../providerProcessPriority";
 import { claudeTurnResultUsage, type ClaudeResultUsageBaseline } from "../claudeResultUsage.ts";
 import { restoreClaudeImportedCopyDates } from "../claudeImportedCopyDates.ts";
@@ -57,6 +58,8 @@ import {
   ThreadId,
   TurnId,
   type UserInputQuestion,
+  type CompactionTrigger,
+  type ProviderCompactionCapabilities,
   type ProviderComposerCapabilities,
   type ProviderListCommandsInput,
   type ProviderArtifactsState,
@@ -475,6 +478,7 @@ interface ClaudeSessionContext {
   hasObservedCacheRequest?: boolean;
   tokenUsageState: ClaudeTokenUsageState;
   compactionMessageId: string | undefined;
+  compactionRuntimeItemId?: RuntimeItemId | undefined;
   // Assistant snapshots report one API call at a time. Keep their processed-token
   // accounting separately from the current context size so compaction can clear
   // the meter without resetting the cumulative processed estimate.
@@ -2955,17 +2959,21 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       Effect.gen(function* () {
         if (!turnState || turnState.compactionInProgress) return;
         turnState.compactionInProgress = true;
+        context.compactionRuntimeItemId = asRuntimeItemId(
+          `claude-compaction-${crypto.randomUUID()}`,
+        );
         const stamp = yield* makeEventStamp();
         yield* offerRuntimeEvent(context, {
-          type: "item.updated",
+          type: "item.started",
           eventId: stamp.eventId,
           provider: PROVIDER,
           createdAt: stamp.createdAt,
           threadId: context.session.threadId,
           turnId: asCanonicalTurnId(turnState.turnId),
-          itemId: asRuntimeItemId(`claude-compaction-${turnState.turnId}`),
+          itemId: context.compactionRuntimeItemId,
           payload: {
             itemType: "context_compaction",
+            compactionTrigger: turnState.explicitCompaction ? "manual" : "provider-auto",
             status: "inProgress",
             title: "Compacting context",
           },
@@ -2986,7 +2994,9 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           createdAt: stamp.createdAt,
           threadId: context.session.threadId,
           turnId: asCanonicalTurnId(turnState.turnId),
-          itemId: asRuntimeItemId(`claude-compaction-${turnState.turnId}`),
+          itemId:
+            context.compactionRuntimeItemId ??
+            asRuntimeItemId(`claude-compaction-${turnState.turnId}`),
           payload: {
             itemType: "context_compaction",
             status: "failed",
@@ -2994,6 +3004,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           },
           providerRefs: nativeProviderRefs(context),
         });
+        context.compactionRuntimeItemId = undefined;
       });
 
     const cancelReservedCompaction = (
@@ -5519,7 +5530,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               },
             });
             return;
-          case "compact_boundary":
+          case "compact_boundary": {
             if (context.turnState?.explicitCompaction?.nativeSessionId === message.session_id) {
               context.turnState.explicitCompaction.boundaryObserved = true;
             }
@@ -5528,8 +5539,42 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             context.lastKnownTokenUsage = undefined;
             context.tokenUsageState = "skip-compaction-call";
             yield* updateResumeCursor(context);
+            const compactionItemId =
+              context.compactionRuntimeItemId ??
+              asRuntimeItemId(`claude-compaction-${stamp.eventId}`);
+            if (context.compactionRuntimeItemId === undefined) {
+              yield* offerRuntimeEvent(context, {
+                ...base,
+                itemId: compactionItemId,
+                type: "item.started",
+                payload: {
+                  itemType: "context_compaction",
+                  compactionTrigger: context.turnState?.explicitCompaction
+                    ? "manual"
+                    : "provider-auto",
+                  status: "inProgress",
+                  title: "Compacting context",
+                },
+              });
+            }
+            context.compactionRuntimeItemId = undefined;
+            const completedStamp = yield* makeEventStamp();
             yield* offerRuntimeEvent(context, {
               ...base,
+              eventId: completedStamp.eventId,
+              itemId: compactionItemId,
+              type: "item.completed",
+              payload: {
+                itemType: "context_compaction",
+                status: "completed",
+                title: "Context compaction",
+                data: message,
+              },
+            });
+            const stateStamp = yield* makeEventStamp();
+            yield* offerRuntimeEvent(context, {
+              ...base,
+              eventId: stateStamp.eventId,
               type: "thread.state.changed",
               payload: {
                 state: "compacted",
@@ -5537,6 +5582,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               },
             });
             return;
+          }
           case "hook_started":
             yield* offerRuntimeEvent(context, {
               ...base,
@@ -8697,6 +8743,25 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       ).pipe(Effect.ignore, Effect.andThen(Queue.shutdown(runtimeEventQueue))),
     );
 
+    // Manual Claude compaction uses the dedicated turn-owned native command path.
+    // The generic idle maintenance API cannot report that asynchronous turn as completed.
+    const compaction: ProviderCompactionCapabilities = {
+      manual: {
+        mode: "unsupported",
+        mechanism: "unsupported",
+        supportsInstructions: false,
+      },
+      automatic: {
+        mode: "native",
+        enabledByDefault: true,
+        statusVisibility: "partial",
+        triggerVisibility: "derived",
+      },
+      telemetry: {
+        lifecycle: "native",
+        contextUsage: "exact",
+      },
+    };
     const composerCapabilities: ProviderComposerCapabilities = {
       provider: PROVIDER,
       supportsSkillMentions: false,
@@ -8705,9 +8770,24 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       supportsPluginMentions: false,
       supportsPluginDiscovery: false,
       supportsRuntimeModelList: true,
-      supportsThreadCompaction: false,
+      compaction,
+      supportsThreadCompaction: supportsThreadCompactionFromCompaction(compaction),
       supportsThreadImport: true,
     };
+
+    // Claude auto-compacts when context usage reaches the effective budget
+    // derived from the selected `autoCompactWindow` (or SDK-reported
+    // threshold), so the trigger is an absolute used-token threshold.
+    const getNativeCompactionTrigger: NonNullable<
+      ClaudeAdapterShape["getNativeCompactionTrigger"]
+    > = (threadId) =>
+      Effect.gen(function* () {
+        const context = yield* requireSession(threadId);
+        const budget = claudeEffectiveContextBudget(context);
+        return budget !== undefined
+          ? ({ kind: "absolute-used-tokens", usedTokens: budget } satisfies CompactionTrigger)
+          : undefined;
+      });
 
     const getComposerCapabilities: NonNullable<
       ClaudeAdapterShape["getComposerCapabilities"]
@@ -8818,6 +8898,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       hasSession,
       stopAll,
       getComposerCapabilities,
+      getNativeCompactionTrigger,
       listCommands,
       listSkills,
       listModels,

@@ -1,3 +1,4 @@
+import { supportsThreadCompactionFromCompaction } from "@synara/shared/providerCompaction";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -13,6 +14,7 @@ import {
   EventId,
   type ProviderInteractionMode,
   type ProviderKind,
+  type ProviderCompactionCapabilities,
   type ProviderComposerCapabilities,
   type ProviderListCommandsResult,
   type ProviderRuntimeEvent,
@@ -249,6 +251,13 @@ interface OpenCodeSessionContext extends OpenCodeMessageState<Part> {
   readonly modelContextLimitBySlug: Map<string, number>;
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
   lastEmittedTokenUsageKey: string | undefined;
+  // True while a compaction pass has an open context_compaction item
+  // lifecycle; gates the single item.started per pass.
+  compactionItemOpen: boolean;
+  compactionItemId?: RuntimeItemId | undefined;
+  // auto/overflow flags from the latest compaction part, reported on the
+  // pass's item.completed data.
+  compactionPassFlags: { readonly auto?: boolean; readonly overflow?: boolean } | undefined;
   latestTurnCostUsd: number | undefined;
   activeTurnId: TurnId | undefined;
   activeTurnEventSerial: number;
@@ -1285,6 +1294,31 @@ export function normalizeOpenCodeTokenUsage(
     lastCachedInputTokens: cachedInputTokens,
     lastOutputTokens: outputTokens,
     lastReasoningOutputTokens: reasoningOutputTokens,
+    // The SDK only reports cumulative processed tokens; there is no reliable
+    // per-request context count, so the context claim is a low-confidence
+    // Synara estimate derived from that cumulative value.
+    context: {
+      usedTokens,
+      ...(normalizedMaxTokens !== undefined ? { maxTokens: normalizedMaxTokens } : {}),
+      ...(normalizedMaxTokens !== undefined
+        ? { usedPercent: Math.min(100, (usedTokens / normalizedMaxTokens) * 100) }
+        : {}),
+      measurement: "synara-estimated",
+      confidence: "low",
+    },
+    cumulative: {
+      inputTokens,
+      cachedInputTokens,
+      outputTokens,
+      reasoningOutputTokens,
+      totalProcessedTokens,
+    },
+    lastTurn: {
+      inputTokens,
+      cachedInputTokens,
+      outputTokens,
+      reasoningOutputTokens,
+    },
   };
 }
 
@@ -1529,6 +1563,28 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           readonly data?: unknown;
         },
       ) {
+        if (!context.compactionItemOpen) {
+          context.compactionItemOpen = true;
+          context.compactionItemId = RuntimeItemId.makeUnsafe(
+            `opencode-compaction:${crypto.randomUUID()}`,
+          );
+          context.lastKnownTokenUsage = undefined;
+          yield* emit(context, {
+            ...buildEventBase({
+              threadId: context.session.threadId,
+              turnId: input.turnId,
+              raw: input.raw,
+            }),
+            type: "item.started",
+            itemId: context.compactionItemId,
+            payload: {
+              itemType: "context_compaction",
+              status: "inProgress",
+              detail: input.detail ?? "Compacting context",
+              ...(input.data !== undefined ? { data: input.data } : {}),
+            },
+          });
+        }
         yield* emit(context, {
           ...buildEventBase({
             threadId: context.session.threadId,
@@ -1536,6 +1592,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
             raw: input.raw,
           }),
           type: "item.updated",
+          itemId: context.compactionItemId,
           payload: {
             itemType: "context_compaction",
             status: "inProgress",
@@ -1559,6 +1616,31 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           },
           { clearLastError: true },
         );
+        const passFlags = context.compactionPassFlags;
+        context.compactionItemOpen = false;
+        context.compactionPassFlags = undefined;
+        yield* emit(context, {
+          ...buildEventBase({
+            threadId: context.session.threadId,
+            turnId: input.turnId,
+            raw: input.raw,
+          }),
+          type: "item.completed",
+          itemId: context.compactionItemId,
+          payload: {
+            itemType: "context_compaction",
+            status: "completed",
+            title: "Context compacted",
+            data: {
+              ...(passFlags?.auto !== undefined
+                ? { auto: passFlags.auto, trigger: passFlags.auto ? "provider-auto" : "manual" }
+                : {}),
+              ...(passFlags?.overflow
+                ? { overflow: passFlags.overflow, reason: "provider context overflow" }
+                : {}),
+            },
+          },
+        });
         yield* emit(context, {
           ...buildEventBase({
             threadId: context.session.threadId,
@@ -2680,6 +2762,10 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
             }
 
             if (part.type === "compaction") {
+              context.compactionPassFlags = {
+                ...(part.auto !== undefined ? { auto: part.auto } : {}),
+                ...(part.overflow !== undefined ? { overflow: part.overflow } : {}),
+              };
               yield* emitContextCompactionProgress(context, {
                 turnId,
                 raw: event,
@@ -4062,6 +4148,8 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                   backgroundTaskIdBySessionId: new Map(),
                   modelContextLimitBySlug: started.modelContextLimitBySlug,
                   lastKnownTokenUsage: undefined,
+                  compactionItemOpen: false,
+                  compactionPassFlags: undefined,
                   lastEmittedTokenUsageKey: undefined,
                   latestTurnCostUsd: undefined,
                   activeTurnId: undefined,
@@ -4675,9 +4763,16 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         },
       );
 
-      const compactThread: NonNullable<OpenCodeAdapterShape["compactThread"]> = (threadId) =>
+      const compactThread: NonNullable<OpenCodeAdapterShape["compactThread"]> = (input) =>
         Effect.gen(function* () {
-          const context = ensureAdapterSessionContext(threadId);
+          if (input.instructions !== undefined) {
+            return yield* new ProviderAdapterValidationError({
+              provider,
+              operation: "compactThread",
+              issue: `${adapterConfig.displayName} context compaction does not support custom instructions.`,
+            });
+          }
+          const context = ensureAdapterSessionContext(input.threadId);
           if (isOpenCodeV2Client(context.client)) context.allowNativeContinuation = true;
           const parsedModel = parseOpenCodeModelSlug(context.session.model);
           if (!parsedModel) {
@@ -4695,6 +4790,7 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
               modelID: parsedModel.modelID,
             }),
           ).pipe(Effect.mapError(toAdapterRequestError));
+          return { kind: "same-session" } as const;
         });
 
       const forkThread: NonNullable<OpenCodeAdapterShape["forkThread"]> = (input) =>
@@ -5100,6 +5196,29 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
         );
       };
 
+      // OpenCode compacts manually via the
+      // `session.summarize` SDK call and compact natively with
+      // `part.type === "compaction"` / `session.compacted` events; the current
+      // usage normalizer reports cumulative processed tokens, not exact
+      // occupancy, so context usage is provider-estimated.
+      const compaction: ProviderCompactionCapabilities = {
+        manual: {
+          mode: "same-session",
+          mechanism: "native-sdk",
+          supportsInstructions: false,
+        },
+        automatic: {
+          mode: "native",
+          enabledByDefault: true,
+          statusVisibility: "exact",
+          triggerVisibility: "opaque",
+        },
+        telemetry: {
+          lifecycle: "native",
+          contextUsage: "provider-estimated",
+        },
+      };
+
       const getComposerCapabilities: NonNullable<
         OpenCodeAdapterShape["getComposerCapabilities"]
       > = () =>
@@ -5111,7 +5230,8 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           supportsPluginMentions: false,
           supportsPluginDiscovery: false,
           supportsRuntimeModelList: true,
-          supportsThreadCompaction: true,
+          compaction,
+          supportsThreadCompaction: supportsThreadCompactionFromCompaction(compaction),
           supportsThreadImport: true,
         } satisfies ProviderComposerCapabilities);
 

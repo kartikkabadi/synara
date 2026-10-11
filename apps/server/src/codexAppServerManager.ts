@@ -1,3 +1,5 @@
+import { sshProcessEnv } from "./environment/sshProcessEnv";
+import { supportsThreadCompactionFromCompaction } from "@synara/shared/providerCompaction";
 import { providerProcessPriorityEnabled } from "./providerProcessPriority";
 import type { ChildProcess, ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -7,6 +9,7 @@ import {
   ApprovalRequestId,
   BROWSER_TOOL_NAMES,
   EventId,
+  type ProviderCompactionCapabilities,
   type ProviderStartOptions,
   type ProviderComposerCapabilities,
   ProviderItemId,
@@ -30,6 +33,7 @@ import {
   type ProviderSession,
   type ProviderSessionStartInput,
   type ProviderTurnStartResult,
+  type ExecutionProfile,
   RuntimeMode,
   ProviderInteractionMode,
   type ServerVoiceTranscriptionInput,
@@ -48,8 +52,9 @@ import {
   type JsonRpcPendingRequest,
 } from "@synara/shared/jsonrpc-stdio";
 import { decodeSubagentReceiverThreadIds } from "@synara/shared/subagents";
+import { makeLocalProcessSpawner } from "./environment/Layers/LocalProcessSpawner";
 import { spawnProcess } from "@synara/shared/processRuntime";
-import { Effect, Semaphore, ServiceMap } from "effect";
+import { Effect, Option, Semaphore, ServiceMap } from "effect";
 
 import {
   CODEX_CLI_UNPARSEABLE_VERSION_MESSAGE,
@@ -100,7 +105,24 @@ import {
   teardownChildProcessTree,
   teardownProviderProcessTree,
 } from "./provider/supervisedProcessTeardown.ts";
+import {
+  ProviderProcessSpawner,
+  type ProviderProcessSpawnerShape,
+} from "./environment/Services/ProviderProcessSpawner.ts";
+import {
+  RemoteEnvironmentResolver,
+  type RemoteEnvironmentResolverShape,
+} from "./environment/Services/RemoteEnvironmentResolver.ts";
+import {
+  SshProcessProvider,
+  type SshProcessProviderShape,
+} from "./environment/Services/SshProcessProvider.ts";
+import {
+  RemoteAgentProvider,
+  type RemoteAgentProviderShape,
+} from "./environment/Services/RemoteAgentProvider.ts";
 import { ensureIsolatedScratchWorkspace, resolveScratchWorkspaceCwd } from "./scratchWorkspaces.ts";
+import { EnvironmentProbe } from "./environment/Services/EnvironmentProbe";
 import { createLogger } from "./logger";
 import { transcribeVoiceWithChatGptSession } from "./voiceTranscription.ts";
 import {
@@ -382,6 +404,7 @@ export interface CodexAppServerStartSessionInput {
   readonly expectedCodexContinuationGeneration?: string;
   readonly forkSourceResumeCursor?: unknown;
   readonly providerOptions?: ProviderSessionStartInput["providerOptions"];
+  readonly executionProfile?: ExecutionProfile;
   readonly additionalDirectories?: ProviderSessionStartInput["additionalDirectories"];
   /**
    * Session-start facts the gateway lease derives its capabilities from.
@@ -1255,6 +1278,15 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   private readonly spawnAppServer: typeof spawnCodexAppServer;
   private readonly teardownProcessTree: typeof teardownProviderProcessTree;
   private readonly taskCompleteFallbackGraceMs: number;
+  private readonly processSpawner: ProviderProcessSpawnerShape | undefined;
+  private readonly remoteEnvironmentResolver: RemoteEnvironmentResolverShape | undefined;
+  private readonly sshProcessProvider: SshProcessProviderShape | undefined;
+  private readonly remoteAgentProvider: RemoteAgentProviderShape | undefined;
+  private readonly remoteProcessStops = new WeakMap<
+    ChildProcessWithoutNullStreams,
+    () => Promise<void>
+  >();
+  private readonly environmentProbe: EnvironmentProbe["Service"] | undefined;
   private readonly discoverySessionIdleMs: number;
   private readonly authRevalidationTimeoutMs: number;
   // Native filesystem promises cannot be cancelled. Keep their permits until
@@ -1286,11 +1318,105 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     this.spawnAppServer = options?.spawnAppServer ?? spawnCodexAppServer;
     this.teardownProcessTree = options?.teardownProcessTree ?? teardownProviderProcessTree;
     this.taskCompleteFallbackGraceMs = Math.max(0, options?.taskCompleteFallbackGraceMs ?? 750);
+    this.processSpawner = options?.spawnAppServer
+      ? undefined
+      : services
+        ? Option.getOrElse(
+            ServiceMap.getOption(services, ProviderProcessSpawner),
+            makeLocalProcessSpawner,
+          )
+        : makeLocalProcessSpawner();
+    this.remoteEnvironmentResolver = services
+      ? Option.getOrUndefined(ServiceMap.getOption(services, RemoteEnvironmentResolver))
+      : undefined;
+    this.sshProcessProvider = services
+      ? Option.getOrUndefined(ServiceMap.getOption(services, SshProcessProvider))
+      : undefined;
+    this.environmentProbe = services
+      ? Option.getOrUndefined(ServiceMap.getOption(services, EnvironmentProbe))
+      : undefined;
+    this.remoteAgentProvider = services
+      ? Option.getOrUndefined(ServiceMap.getOption(services, RemoteAgentProvider))
+      : undefined;
     this.discoverySessionIdleMs = Math.max(
       0,
       options?.discoverySessionIdleMs ?? CODEX_DISCOVERY_SESSION_IDLE_MS,
     );
     this.authRevalidationTimeoutMs = Math.max(1, options?.authRevalidationTimeoutMs ?? 5_000);
+  }
+
+  private async spawnCodexAppServer(input: {
+    readonly lowerPriority: boolean;
+    readonly binaryPath: string;
+    readonly cwd: string;
+    readonly env: NodeJS.ProcessEnv;
+    readonly remote?: {
+      readonly executionProfile: ExecutionProfile;
+      readonly sessionStartInput: ProviderSessionStartInput;
+    };
+  }): Promise<ChildProcessWithoutNullStreams> {
+    if (input.remote !== undefined) {
+      const resolver = this.remoteEnvironmentResolver;
+      if (resolver === undefined) {
+        throw new Error(
+          "An executionProfile was provided but no RemoteEnvironmentResolver service is available",
+        );
+      }
+      const plan = await Effect.runPromise(
+        resolver.resolve(input.remote.executionProfile, input.remote.sessionStartInput),
+      );
+      if (plan.kind === "ssh") {
+        const sshProvider = this.sshProcessProvider;
+        if (sshProvider === undefined) {
+          throw new Error(
+            "An ssh spawn plan was resolved but no SshProcessProvider service is available",
+          );
+        }
+        const spawned = await Effect.runPromise(
+          sshProvider.spawnSsh(plan, { cwd: input.cwd, env: sshProcessEnv(input.env) }),
+        );
+        this.remoteProcessStops.set(spawned.child, async () => {
+          spawned.kill("SIGTERM");
+          throw new Error(
+            "SSH channel closed; remote process-tree termination is unverified. Use the persistent remote agent for confirmed cancellation.",
+          );
+        });
+        return spawned.child;
+      }
+      if (plan.kind === "remote-agent") {
+        const agentProvider = this.remoteAgentProvider;
+        if (agentProvider === undefined) {
+          throw new Error(
+            "A remote-agent spawn plan was resolved but no RemoteAgentProvider service is available",
+          );
+        }
+        const spawned = await Effect.runPromise(
+          agentProvider.spawnRemoteAgent(plan, { cwd: input.cwd, env: sshProcessEnv(input.env) }),
+        );
+        this.remoteProcessStops.set(spawned.child, spawned.stop);
+        return spawned.child;
+      }
+      throw new Error(
+        "A remote execution profile resolved to a local runtime; refusing local fallback.",
+      );
+    }
+    if (!this.processSpawner) return this.spawnAppServer(input);
+    const sourceHomePath = input.env.CODEX_SQLITE_HOME?.trim();
+    if (!sourceHomePath) {
+      throw new Error("Codex app-server requires a verified shared continuation home.");
+    }
+    return Effect.runPromise(
+      this.processSpawner.spawn(
+        input.binaryPath,
+        [...buildCodexAppServerArgs(sourceHomePath), "--config", "thread_unload_delay_secs=0"],
+        {
+          cwd: input.cwd,
+          env: input.env,
+          lowerPriority: input.lowerPriority,
+          requireExecutable: true,
+        },
+      ),
+    );
   }
 
   // Only the endpoint lives in shared config. Credentials travel over the owned
@@ -1363,12 +1489,27 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       }
       previousSessionStopped = true;
 
-      const resolvedCwd = resolveScratchWorkspaceCwd(threadId, input.cwd);
+      const remoteProfile = input.executionProfile;
+      if (
+        remoteProfile &&
+        (remoteProfile.providerKind !== "codex" ||
+          input.additionalDirectories?.length ||
+          input.agentGatewayCapabilityInput.enableComputerControl ||
+          input.forkSourceResumeCursor !== undefined ||
+          input.resumeCursor !== undefined)
+      ) {
+        throw new Error(
+          "Remote Codex cannot use local folder grants, computer control, or local native continuation state.",
+        );
+      }
+      const resolvedCwd =
+        remoteProfile?.remoteWorkspaceRoot ?? resolveScratchWorkspaceCwd(threadId, input.cwd);
 
       const session: ProviderSession = {
         provider: "codex",
         ...(input.providerInstanceId ? { providerInstanceId: input.providerInstanceId } : {}),
         status: "connecting",
+        ...(remoteProfile ? { executionProfile: remoteProfile } : {}),
         runtimeMode: input.runtimeMode,
         model: normalizeCodexModelSlug(input.model),
         cwd: resolvedCwd,
@@ -1396,40 +1537,66 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       const codexShadowHomePath = codexOptions.shadowHomePath;
       const codexAccountId = codexOptions.accountId;
       const codexEnvironment = codexOptions.environment;
-      await this.assertSupportedCodexCliVersion({
-        binaryPath: codexBinaryPath,
-        cwd: resolvedCwd,
-        ...(minimumVersion
-          ? {
-              minimumVersion,
-              minimumVersionRequirement:
-                threadOpenMethodForVersion === "thread/start"
-                  ? "Auto mode"
-                  : "Codex thread resume and fork",
-            }
-          : {}),
-        ...(codexHomePath ? { homePath: codexHomePath } : {}),
-        ...(codexShadowHomePath ? { shadowHomePath: codexShadowHomePath } : {}),
-        ...(codexAccountId ? { accountId: codexAccountId } : {}),
-        ...(codexEnvironment ? { environment: codexEnvironment } : {}),
-        ...(input.expectedCodexContinuationGeneration
-          ? { expectedSharedContinuationGeneration: input.expectedCodexContinuationGeneration }
-          : {}),
-      });
-      gatewaySessionLease = this.agentGatewayMcp?.acquireSessionLease(
-        threadId,
-        input.agentGatewayCapabilityInput,
-      );
-      const processLaunch = await this.buildSessionProcessEnv(
-        normalizedCodexOptions,
-        input.expectedCodexContinuationGeneration,
-      );
+      if (remoteProfile) {
+        if (input.providerInstanceId && input.providerInstanceId !== "codex") {
+          throw new Error(
+            "Remote Codex uses credentials on the remote host; local account profiles cannot be forwarded.",
+          );
+        }
+        if (!this.environmentProbe) throw new Error("Remote environment probing is unavailable.");
+        const connection = await this.runPromise(
+          this.environmentProbe.check(remoteProfile, { minimumVersion }),
+        );
+        if (connection.connectionStatus !== "connected") {
+          throw new Error(
+            connection.healthCheckResult?.message ?? "Remote environment check failed.",
+          );
+        }
+      } else {
+        await this.assertSupportedCodexCliVersion({
+          binaryPath: codexBinaryPath,
+          cwd: resolvedCwd,
+          ...(minimumVersion
+            ? {
+                minimumVersion,
+                minimumVersionRequirement:
+                  threadOpenMethodForVersion === "thread/start"
+                    ? "Auto mode"
+                    : "Codex thread resume and fork",
+              }
+            : {}),
+          ...(codexHomePath ? { homePath: codexHomePath } : {}),
+          ...(codexShadowHomePath ? { shadowHomePath: codexShadowHomePath } : {}),
+          ...(codexAccountId ? { accountId: codexAccountId } : {}),
+          ...(codexEnvironment ? { environment: codexEnvironment } : {}),
+          ...(input.expectedCodexContinuationGeneration
+            ? { expectedSharedContinuationGeneration: input.expectedCodexContinuationGeneration }
+            : {}),
+        });
+      }
+      gatewaySessionLease = remoteProfile
+        ? undefined
+        : this.agentGatewayMcp?.acquireSessionLease(threadId, input.agentGatewayCapabilityInput);
+      const processLaunch = remoteProfile
+        ? { env: process.env, authTracking: undefined, authFingerprint: undefined }
+        : await this.buildSessionProcessEnv(
+            normalizedCodexOptions,
+            input.expectedCodexContinuationGeneration,
+          );
       const launchAuthFingerprint = processLaunch.authFingerprint;
-      const child = this.spawnAppServer({
+      const child = await this.spawnCodexAppServer({
         lowerPriority: (await this.runPromise(providerProcessPriorityEnabled)) as boolean,
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
         env: processLaunch.env,
+        ...(remoteProfile
+          ? {
+              remote: {
+                executionProfile: remoteProfile,
+                sessionStartInput: buildRemoteSessionStartInput(input, remoteProfile),
+              },
+            }
+          : {}),
       });
 
       context = {
@@ -1477,7 +1644,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       this.assertContextAuthCurrent(context);
 
       await this.writeMessage(context, { method: "initialized" });
-      await this.registerSynaraSkillsRoot(context);
+      if (!remoteProfile) await this.registerSynaraSkillsRoot(context);
       // Model discovery is lazy and cached by ProviderDiscoveryService. Keeping model/list
       // out of this serial cold-start path avoids an otherwise unused request
       // with its own 20-second deadline.
@@ -2458,7 +2625,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       const launchAuthFingerprint = processLaunch.authFingerprint;
       const lowerPriority = (await this.runPromise(providerProcessPriorityEnabled)) as boolean;
       signal?.throwIfAborted();
-      const child = this.spawnAppServer({
+      const child = await this.spawnCodexAppServer({
         lowerPriority,
         binaryPath: codexBinaryPath,
         cwd: resolvedCwd,
@@ -3012,6 +3179,11 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
 
   private async teardownContextProcess(context: CodexSessionContext): Promise<void> {
     try {
+      const stopRemote = this.remoteProcessStops.get(context.child);
+      if (stopRemote) {
+        await stopRemote();
+        return;
+      }
       const result = await teardownChildProcessTree(context.child, this.teardownProcessTree);
       context.teardownCapturedBeforeExit = result.capturedBeforeRootExit === true;
     } catch (cause) {
@@ -3631,6 +3803,26 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   }
 
   getComposerCapabilities(): ProviderComposerCapabilities {
+    // Manual compaction is the `thread/compact/start` JSON-RPC on the
+    // app-server; automatic compaction is native and surfaced through
+    // `contextCompaction` items and `thread/compacted` notifications.
+    const compaction: ProviderCompactionCapabilities = {
+      manual: {
+        mode: "same-session",
+        mechanism: "native-rpc",
+        supportsInstructions: false,
+      },
+      automatic: {
+        mode: "native",
+        enabledByDefault: true,
+        statusVisibility: "exact",
+        triggerVisibility: "opaque",
+      },
+      telemetry: {
+        lifecycle: "native",
+        contextUsage: "exact",
+      },
+    };
     return {
       provider: "codex",
       supportsSkillMentions: true,
@@ -3639,7 +3831,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       supportsPluginMentions: true,
       supportsPluginDiscovery: true,
       supportsRuntimeModelList: true,
-      supportsThreadCompaction: true,
+      compaction,
+      supportsThreadCompaction: supportsThreadCompactionFromCompaction(compaction),
       supportsThreadImport: true,
     };
   }
@@ -3980,7 +4173,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     if (launchAuthFingerprint !== expectedAuthFingerprint) {
       throw new Error("Codex authentication changed before discovery launch; retry the request.");
     }
-    const child = this.spawnAppServer({
+    const child = await this.spawnCodexAppServer({
       lowerPriority: false,
       binaryPath: codexBinaryPath,
       cwd: normalizedCwd,
@@ -5890,6 +6083,22 @@ function readResumeCursorThreadId(resumeCursor: unknown): string | undefined {
 
 function readResumeThreadId(input: { readonly resumeCursor?: unknown }): string | undefined {
   return readResumeCursorThreadId(input.resumeCursor);
+}
+
+// The resolver only reads the executionProfile today; the session-start input
+// travels alongside it so future spawn plans can honor per-session options.
+function buildRemoteSessionStartInput(
+  input: CodexAppServerStartSessionInput,
+  executionProfile: ExecutionProfile,
+): ProviderSessionStartInput {
+  return {
+    threadId: input.threadId,
+    provider: "codex",
+    runtimeMode: input.runtimeMode,
+    executionProfile,
+    ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
+    ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
+  };
 }
 
 function toTurnId(value: string | undefined): TurnId | undefined {

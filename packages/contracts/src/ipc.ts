@@ -276,6 +276,8 @@ import type {
 import type { ComputerGetAuditHistoryInput, ComputerGetAuditHistoryResult } from "./computerAudit";
 import type { StudioListThreadOutputsInput, StudioListThreadOutputsResult } from "./studio";
 import type {
+  ServerCheckEnvironmentInput,
+  ServerCheckEnvironmentResult,
   ServerConfig,
   ServerDiagnosticsResult,
   ServerReadThreadDiagnosticsInput,
@@ -285,6 +287,10 @@ import type {
   ServerGenerateThreadRecapInput,
   ServerGenerateThreadRecapResult,
   ServerGetEnvironmentResult,
+  ServerListEnvironmentsResult,
+  ServerRemoveEnvironmentInput,
+  ServerRemoveEnvironmentResult,
+  ServerUpsertEnvironmentInput,
   ServerConsumeCodexResetCreditInput,
   ServerConsumeCodexResetCreditResult,
   ServerGetProviderUsageSnapshotInput,
@@ -369,7 +375,11 @@ import type {
   ProviderReadPluginInput,
   ProviderReadPluginResult,
 } from "./providerDiscovery";
-import type { ProviderCompactThreadInput } from "./provider";
+import type {
+  ProviderCompactionRequest,
+  ProviderCompactionResult,
+  ProviderSetCompactionSettingsInput,
+} from "./providerRuntime";
 import type {
   StatsGetProfileStatsInput,
   StatsGetProfileStatsResult,
@@ -1285,6 +1295,12 @@ export interface NativeApi {
   server: {
     getConfig: () => Promise<ServerConfig>;
     getEnvironment: () => Promise<ServerGetEnvironmentResult>;
+    listEnvironments: () => Promise<ServerListEnvironmentsResult>;
+    upsertEnvironment: (input: ServerUpsertEnvironmentInput) => Promise<void>;
+    removeEnvironment: (
+      input: ServerRemoveEnvironmentInput,
+    ) => Promise<ServerRemoveEnvironmentResult>;
+    checkEnvironment: (input: ServerCheckEnvironmentInput) => Promise<ServerCheckEnvironmentResult>;
     getSettings: () => Promise<ServerGetSettingsResult>;
     updateSettings: (input: ServerUpdateSettingsInput) => Promise<ServerUpdateSettingsResult>;
     getAuthSession: () => Promise<AuthSessionState>;
@@ -1361,7 +1377,8 @@ export interface NativeApi {
     getComposerCapabilities: (
       input: ProviderGetComposerCapabilitiesInput,
     ) => Promise<ProviderComposerCapabilities>;
-    compactThread: (input: ProviderCompactThreadInput) => Promise<void>;
+    compactThread: (input: ProviderCompactionRequest) => Promise<ProviderCompactionResult>;
+    setCompactionSettings: (input: ProviderSetCompactionSettingsInput) => Promise<void>;
     listCommands: (input: ProviderListCommandsInput) => Promise<ProviderListCommandsResult>;
     listSkills: (input: ProviderListSkillsInput) => Promise<ProviderListSkillsResult>;
     listSkillsCatalog: (input: ProviderSkillsCatalogInput) => Promise<ProviderSkillsCatalogResult>;

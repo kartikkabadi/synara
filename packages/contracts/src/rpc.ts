@@ -259,7 +259,11 @@ import {
   OrchestrationShellStreamItem,
   OrchestrationThreadStreamItem,
 } from "./orchestration";
-import { ProviderCompactThreadInput } from "./provider";
+import {
+  ProviderCompactionRequest,
+  ProviderCompactionResult,
+  ProviderSetCompactionSettingsInput,
+} from "./providerRuntime";
 import {
   ProviderGetComposerCapabilitiesInput,
   ProviderComposerCapabilities,
@@ -321,7 +325,13 @@ import {
   ServerGenerateAutomationIntentResult,
   ServerGenerateThreadRecapInput,
   ServerGenerateThreadRecapResult,
+  ServerCheckEnvironmentInput,
+  ServerCheckEnvironmentResult,
   ServerGetEnvironmentResult,
+  ServerListEnvironmentsResult,
+  ServerRemoveEnvironmentInput,
+  ServerRemoveEnvironmentResult,
+  ServerUpsertEnvironmentInput,
   ServerConsumeCodexResetCreditInput,
   ServerConsumeCodexResetCreditResult,
   ServerGetProviderUsageSnapshotInput,
@@ -1344,6 +1354,30 @@ export const WsServerGetEnvironmentRpc = Rpc.make(WS_METHODS.serverGetEnvironmen
   error: WsRpcError,
 });
 
+export const WsServerListEnvironmentsRpc = Rpc.make(WS_METHODS.serverListEnvironments, {
+  payload: Schema.Struct({}),
+  success: ServerListEnvironmentsResult,
+  error: WsRpcError,
+});
+
+export const WsServerUpsertEnvironmentRpc = Rpc.make(WS_METHODS.serverUpsertEnvironment, {
+  payload: ServerUpsertEnvironmentInput,
+  success: Schema.Void,
+  error: WsRpcError,
+});
+
+export const WsServerRemoveEnvironmentRpc = Rpc.make(WS_METHODS.serverRemoveEnvironment, {
+  payload: ServerRemoveEnvironmentInput,
+  success: ServerRemoveEnvironmentResult,
+  error: WsRpcError,
+});
+
+export const WsServerCheckEnvironmentRpc = Rpc.make(WS_METHODS.serverCheckEnvironment, {
+  payload: ServerCheckEnvironmentInput,
+  success: ServerCheckEnvironmentResult,
+  error: WsRpcError,
+});
+
 export const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
   payload: Schema.Struct({}),
   success: ServerGetSettingsResult,
@@ -1563,10 +1597,19 @@ export const WsProviderGetComposerCapabilitiesRpc = Rpc.make(
 );
 
 export const WsProviderCompactThreadRpc = Rpc.make(WS_METHODS.providerCompactThread, {
-  payload: ProviderCompactThreadInput,
-  success: Schema.Void,
+  payload: ProviderCompactionRequest,
+  success: ProviderCompactionResult,
   error: WsRpcError,
 });
+
+export const WsProviderSetCompactionSettingsRpc = Rpc.make(
+  WS_METHODS.providerSetCompactionSettings,
+  {
+    payload: ProviderSetCompactionSettingsInput,
+    success: Schema.Void,
+    error: WsRpcError,
+  },
+);
 
 export const WsProviderListCommandsRpc = Rpc.make(WS_METHODS.providerListCommands, {
   payload: ProviderListCommandsInput,
@@ -2024,6 +2067,10 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsServerGetRuntimeStatusRpc,
   WsServerGetConfigRpc,
   WsServerGetEnvironmentRpc,
+  WsServerListEnvironmentsRpc,
+  WsServerUpsertEnvironmentRpc,
+  WsServerRemoveEnvironmentRpc,
+  WsServerCheckEnvironmentRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
   WsServerRefreshProvidersRpc,
@@ -2059,6 +2106,7 @@ export const WsFeatureRpcGroup = RpcGroup.make(
   WsSubscribeServerSettingsRpc,
   WsProviderGetComposerCapabilitiesRpc,
   WsProviderCompactThreadRpc,
+  WsProviderSetCompactionSettingsRpc,
   WsProviderListCommandsRpc,
   WsProviderListSkillsRpc,
   WsProviderListSkillsCatalogRpc,

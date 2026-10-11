@@ -1,4 +1,4 @@
-import { OrchestrationProposedPlanId, ProjectId, ThreadId } from "@synara/contracts";
+import { MessageId, OrchestrationProposedPlanId, ProjectId, ThreadId } from "@synara/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { partializeComposerDraftStoreState, useComposerDraftStore } from "./composerDraftStore";
 import {
@@ -24,6 +24,28 @@ import {
 } from "./lib/terminalContext";
 
 describe("composerDraftStore persisted-state hydration", () => {
+  it("keeps the original acknowledgement guard and frozen text of a queued retry", () => {
+    resetComposerDraftStore();
+    const threadId = ThreadId.makeUnsafe("retry-roundtrip");
+    const retry = makeQueuedChatTurn("retry");
+    if (retry.kind !== "chat") throw new Error("Expected a chat fixture");
+    retry.retryMessageId = MessageId.makeUnsafe("failed-message");
+    retry.retryMessageText = "Exact original context\nSecond line";
+    retry.retryAssistantDeliveryMode = "buffered";
+    useComposerDraftStore.getState().enqueueQueuedTurn(threadId, retry);
+    const persisted = normalizeCurrentPersistedComposerDraftStoreState(
+      JSON.parse(
+        JSON.stringify(partializeComposerDraftStoreState(useComposerDraftStore.getState())),
+      ),
+    );
+    const hydrated = toHydratedThreadDraft(threadId, persisted.draftsByThreadId[threadId]!);
+    expect(hydrated.queuedTurns[0]).toMatchObject({
+      retryMessageId: retry.retryMessageId,
+      retryMessageText: retry.retryMessageText,
+      retryAssistantDeliveryMode: "buffered",
+    });
+  });
+
   it("keeps the queue stop and resume markers only while the queue has entries", () => {
     resetComposerDraftStore();
     const threadId = ThreadId.makeUnsafe("thread-queue-resume");

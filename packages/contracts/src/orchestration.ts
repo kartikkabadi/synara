@@ -26,9 +26,11 @@ import { AsyncUserInput, AsyncUserInputQuestions, AsyncUserInputResponse } from 
 import { ProjectKind } from "./project";
 import { ClaudeCacheObservation } from "./claudeCache";
 import {
+  AbsolutePosixPath,
   ApprovalRequestId,
   CheckpointRef,
   CommandId,
+  EnvironmentId,
   EventId,
   IsoDateTime,
   MessageId,
@@ -87,6 +89,19 @@ export const ProviderKind = Schema.Literals([
   "omp",
 ]);
 export type ProviderKind = typeof ProviderKind.Type;
+
+// Per-thread execution profile: binds a thread to an execution environment,
+// a provider, and the workspace scope it runs against. Environment descriptors
+// describe hosts; the profile scopes a single thread's run on one of them.
+export const ExecutionProfile = Schema.Struct({
+  environmentId: EnvironmentId,
+  providerKind: ProviderKind,
+  remoteWorkspaceRoot: AbsolutePosixPath,
+  repositoryRevision: Schema.optional(TrimmedNonEmptyString),
+  bootstrapImage: Schema.optional(TrimmedNonEmptyString),
+  adapterProtocolVersion: Schema.optional(TrimmedNonEmptyString),
+});
+export type ExecutionProfile = typeof ExecutionProfile.Type;
 
 /**
  * Providers that no longer exist as `ProviderKind` members but may survive in
@@ -846,6 +861,7 @@ export const OrchestrationSessionStatus = Schema.Literals([
 export type OrchestrationSessionStatus = typeof OrchestrationSessionStatus.Type;
 
 export const OrchestrationSession = Schema.Struct({
+  executionProfile: Schema.optional(ExecutionProfile),
   threadId: ThreadId,
   status: OrchestrationSessionStatus,
   providerName: Schema.NullOr(TrimmedNonEmptyString),
@@ -1700,7 +1716,13 @@ export const ThreadTurnStartCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
   ),
+  // Present only when the thread's first turn targets a remote execution
+  // environment; absent means local execution.
+  executionProfile: Schema.optional(ExecutionProfile),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  // Server-only: the edit reactor may reuse a message identity once after its
+  // exact rollback completion. The client schema deliberately omits this field.
+  editResendFromRollbackSequence: Schema.optional(NonNegativeInt),
   // Server-only (quit resume): accept the turn only while the thread is not archived,
   // has nothing in flight, and no turn finished on its own since the record was
   // taken (the recorded turn itself, or any later one). Clients cannot set it:
@@ -1740,6 +1762,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   ),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  executionProfile: Schema.optional(ExecutionProfile),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
 });
@@ -1823,6 +1846,7 @@ const ThreadDispatchQueuedTurnCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
   ),
+  executionProfile: Schema.optional(ExecutionProfile),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
 });
@@ -2106,6 +2130,38 @@ const ThreadConversationRollbackCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+export const RemoteAgentConnectionStatus = Schema.Literals([
+  "connecting",
+  "connected",
+  "reconnecting",
+  "degraded",
+  "disconnected",
+]);
+export type RemoteAgentConnectionStatus = typeof RemoteAgentConnectionStatus.Type;
+
+export const ThreadRemoteAgentConnectionStatusChangedPayload = Schema.Struct({
+  threadId: ThreadId,
+  environmentId: EnvironmentId,
+  status: RemoteAgentConnectionStatus,
+  retryCount: NonNegativeInt,
+  lastSeq: NonNegativeInt,
+  message: Schema.optional(TrimmedNonEmptyString),
+});
+export type ThreadRemoteAgentConnectionStatusChangedPayload =
+  typeof ThreadRemoteAgentConnectionStatusChangedPayload.Type;
+
+const ThreadRemoteAgentConnectionStatusSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.remote-agent.connection-status.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  environmentId: EnvironmentId,
+  status: RemoteAgentConnectionStatus,
+  retryCount: NonNegativeInt,
+  lastSeq: NonNegativeInt,
+  message: Schema.optional(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
 const ThreadSidechatActivityRecordCommand = Schema.Struct({
   type: Schema.Literal("thread.sidechat.activity.record"),
   commandId: CommandId,
@@ -2140,6 +2196,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadConversationRollbackCommand,
   ThreadConversationRollbackCompleteCommand,
   ThreadDispatchQueuedTurnCommand,
+  ThreadRemoteAgentConnectionStatusSetCommand,
   ThreadSidechatActivityRecordCommand,
   ThreadSidechatExpireCommand,
 ]);
@@ -2195,6 +2252,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.remote-agent-connection-status-changed",
   "thread.sidechat-activity-recorded",
   "thread.sidechat-expired",
 ]);
@@ -2495,6 +2553,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
   ),
+  executionProfile: Schema.optional(ExecutionProfile),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
 });
@@ -2869,6 +2928,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.remote-agent-connection-status-changed"),
+    payload: ThreadRemoteAgentConnectionStatusChangedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

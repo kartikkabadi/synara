@@ -1,3 +1,4 @@
+import { ExecutionProfile } from "@synara/contracts";
 import {
   selectMessageTextChunks,
   selectSegmentEndedAt,
@@ -186,7 +187,10 @@ const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
   }),
 );
 type PendingInteractionRow = typeof OrchestrationPendingInteraction.Type;
-const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession;
+const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession.mapFields((fields) => ({
+  ...fields,
+  executionProfile: Schema.NullOr(Schema.fromJsonString(ExecutionProfile)),
+}));
 const ProjectionCheckpointDbRowSchema = ProjectionCheckpoint.mapFields(
   Struct.assign({
     files: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
@@ -509,6 +513,7 @@ function toProjectedSession(row: ProjectionThreadSessionDbRow): OrchestrationSes
     providerName: row.providerName,
     ...(row.providerInstanceId ? { providerInstanceId: row.providerInstanceId } : {}),
     runtimeMode: row.runtimeMode,
+    ...(row.executionProfile ? { executionProfile: row.executionProfile } : {}),
     activeTurnId: row.activeTurnId,
     lastError: row.lastError,
     lastActivityAt: row.lastActivityAt,
@@ -1537,6 +1542,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           provider_session_id AS "providerSessionId",
           provider_thread_id AS "providerThreadId",
           runtime_mode AS "runtimeMode",
+          execution_profile_json AS "executionProfile",
           active_turn_id AS "activeTurnId",
           last_error AS "lastError",
           last_activity_at AS "lastActivityAt",
@@ -2358,6 +2364,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           provider_session_id AS "providerSessionId",
           provider_thread_id AS "providerThreadId",
           runtime_mode AS "runtimeMode",
+          execution_profile_json AS "executionProfile",
           active_turn_id AS "activeTurnId",
           last_error AS "lastError",
           last_activity_at AS "lastActivityAt",
@@ -2415,6 +2422,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           provider_session_id AS "providerSessionId",
           provider_thread_id AS "providerThreadId",
           runtime_mode AS "runtimeMode",
+          execution_profile_json AS "executionProfile",
           active_turn_id AS "activeTurnId",
           last_error AS "lastError",
           last_activity_at AS "lastActivityAt",

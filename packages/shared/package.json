@@ -443,6 +443,14 @@
     "./keybindingRules": {
       "types": "./src/keybindingRules.ts",
       "import": "./src/keybindingRules.ts"
+    },
+    "./ownedPosixProcessGroup": {
+      "types": "./src/ownedPosixProcessGroup.ts",
+      "import": "./src/ownedPosixProcessGroup.ts"
+    },
+    "./providerCompaction": {
+      "types": "./src/providerCompaction.ts",
+      "import": "./src/providerCompaction.ts"
     }
   },
   "scripts": {

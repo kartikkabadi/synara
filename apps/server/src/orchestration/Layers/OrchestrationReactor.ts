@@ -5,6 +5,7 @@ import {
   type OrchestrationReactorShape,
 } from "../Services/OrchestrationReactor.ts";
 import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
+import { CompactionReactor } from "../Services/CompactionReactor.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { SidechatExpiryReactor } from "../Services/SidechatExpiryReactor.ts";
@@ -15,6 +16,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const providerRuntimeIngestion = yield* ProviderRuntimeIngestionService;
   const providerCommandReactor = yield* ProviderCommandReactor;
   const checkpointReactor = yield* CheckpointReactor;
+  const compactionReactor = yield* CompactionReactor;
   const hubOutputReactor = yield* HubOutputReactor;
   const threadGitMetadataReactor = yield* ThreadGitMetadataReactor;
   const sidechatExpiryReactor = yield* SidechatExpiryReactor;
@@ -22,6 +24,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const start: OrchestrationReactorShape["start"] = Effect.gen(function* () {
     yield* hubOutputReactor.start;
     yield* checkpointReactor.start;
+    yield* compactionReactor.start;
     yield* threadGitMetadataReactor.start;
     yield* providerRuntimeIngestion.start;
     yield* sidechatExpiryReactor.start;

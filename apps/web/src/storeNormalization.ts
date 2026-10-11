@@ -118,6 +118,7 @@ export function threadSessionsEqual(
   if (left === right) return true;
   if (left == null || right == null) return false;
   return (
+    deepEqualJson(left.executionProfile, right.executionProfile) &&
     left.provider === right.provider &&
     left.status === right.status &&
     left.orchestrationStatus === right.orchestrationStatus &&
@@ -1705,6 +1706,7 @@ export function normalizeThreadSession(
       ? incoming.lastError
       : undefined;
   const nextSession = {
+    ...(incoming.executionProfile ? { executionProfile: incoming.executionProfile } : {}),
     provider: toLegacyProvider(incoming.providerName),
     ...(incoming.providerInstanceId !== undefined
       ? { providerInstanceId: incoming.providerInstanceId }
@@ -1719,6 +1721,7 @@ export function normalizeThreadSession(
   } satisfies NonNullable<Thread["session"]>;
   if (
     previous &&
+    deepEqualJson(previous.executionProfile, nextSession.executionProfile) &&
     previous.provider === nextSession.provider &&
     previous.providerInstanceId === nextSession.providerInstanceId &&
     previous.status === nextSession.status &&

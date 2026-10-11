@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type {
   OrchestrationCommand,
   OrchestrationEvent,
@@ -1984,6 +1985,30 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Proposed plan '${sourceProposedPlan?.planId}' belongs to thread '${sourceThread.id}' in a different project.`,
         });
       }
+      const boundExecutionProfile = targetThread.session?.executionProfile;
+      if (
+        command.executionProfile &&
+        targetThread.session &&
+        !isDeepStrictEqual(command.executionProfile, boundExecutionProfile)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A bound thread cannot change its execution environment. Start a new thread.",
+        });
+      }
+      if (
+        (command.executionProfile ?? boundExecutionProfile) &&
+        (command.message.attachments.length ||
+          command.message.skills?.length ||
+          command.message.mentions?.length ||
+          command.enableComputerControl)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Remote turns cannot use local attachments, skills, mentions or computer control.",
+        });
+      }
       const activeProvider =
         targetThread.session?.providerName ?? targetThread.modelSelection.provider;
       const isThreadRunning =
@@ -2064,6 +2089,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         dispatchOrigin: command.dispatchOrigin ?? "user",
         runtimeMode,
         interactionMode,
+        ...(command.executionProfile !== undefined
+          ? { executionProfile: command.executionProfile }
+          : {}),
         ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
         createdAt: command.createdAt,
       } as const;
@@ -2309,6 +2337,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           dispatchOrigin: command.dispatchOrigin ?? "user",
           runtimeMode: command.runtimeMode,
           interactionMode: command.interactionMode,
+          ...(command.executionProfile !== undefined
+            ? { executionProfile: command.executionProfile }
+            : {}),
           ...(command.sourceProposedPlan !== undefined
             ? { sourceProposedPlan: command.sourceProposedPlan }
             : {}),
@@ -2745,6 +2776,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      if (
+        thread.session?.executionProfile &&
+        command.session.executionProfile &&
+        !isDeepStrictEqual(thread.session.executionProfile, command.session.executionProfile)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A bound thread cannot change its execution environment. Start a new thread.",
+        });
+      }
       const sessionChanged =
         (command.expectedSessionStatus !== undefined &&
           thread.session?.status !== command.expectedSessionStatus) ||
@@ -2767,7 +2808,41 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "thread.session-set",
         payload: {
           threadId: command.threadId,
-          session: command.session,
+          session: {
+            ...command.session,
+            ...((command.session.executionProfile ?? thread.session?.executionProfile)
+              ? {
+                  executionProfile:
+                    command.session.executionProfile ?? thread.session?.executionProfile,
+                }
+              : {}),
+          },
+        },
+      };
+    }
+
+    case "thread.remote-agent.connection-status.set": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+          metadata: {},
+        }),
+        type: "thread.remote-agent-connection-status-changed",
+        payload: {
+          threadId: command.threadId,
+          environmentId: command.environmentId,
+          status: command.status,
+          retryCount: command.retryCount,
+          lastSeq: command.lastSeq,
+          ...(command.message !== undefined ? { message: command.message } : {}),
         },
       };
     }

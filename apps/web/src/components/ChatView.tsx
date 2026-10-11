@@ -24,6 +24,7 @@ import {
   type RuntimeMode,
   type ServerProviderStatus,
   type ThreadGoalAchievement,
+  type ThreadCompactionSettings,
   type TurnId,
 } from "@synara/contracts";
 import { resolveLatestTailUserMessageEditTarget } from "@synara/shared/conversationEdit";
@@ -81,6 +82,7 @@ import { getLocalFolderBrowseRootPath } from "~/lib/localFolderMentions";
 import { findProviderStatus, resolveVoiceTranscriptionTarget } from "~/lib/providerAvailability";
 import { resolveProviderInstanceLabel } from "~/lib/providerInstancePresentation";
 import { holdQueuedComposerTurnsForStop } from "~/lib/queuedComposerDrain";
+import { clearFailedComposerRetry } from "~/lib/failedComposerRetry";
 import { resolveAuxiliaryTextGenerationSelection } from "~/lib/textGenerationCapabilities";
 import { cn, isMacNavigatorPlatform, newCommandId, newThreadId, randomUUID } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
@@ -164,6 +166,7 @@ import {
   deriveObservedClaudeContextBudget,
   deriveAppliedContextWindowSelection,
   deriveCumulativeCostUsd,
+  deriveLatestCompactionRuntimeStatus,
   deriveLatestContextWindowState,
 } from "../lib/contextWindow";
 import { reconcileDeletedThreadFromClient } from "../lib/deletedThreadClientReconciliation";
@@ -258,6 +261,7 @@ import {
   derivePromptHistoryFromMessages,
   hasFileUndoSettled,
   resolveActiveThreadTitle,
+  threadHasProviderLockingActivity,
   type TurnDispatchSettings,
   resolveActiveTurnLiveDiffState,
   resolveCommittedProviderModel,
@@ -291,6 +295,9 @@ import { ThreadWorktreeHandoffDialog } from "./ThreadWorktreeHandoffDialog";
 
 import { ChatComposerFooter } from "./chat/ChatComposerFooter";
 import { ChatHeader } from "./chat/ChatHeader";
+import { ComposerExecutionEnvironmentPicker } from "./chat/ComposerExecutionEnvironmentPicker";
+import { useThreadExecutionEnvironmentStore } from "../threadExecutionEnvironmentStore";
+import { serverEnvironmentsQueryOptions } from "../lib/serverReactQuery";
 import { OpenThreadTabStrip } from "./chat/OpenThreadTabStrip";
 import { ChatSurfaceHeader } from "./chat/ChatSurfaceHeader";
 import { useAsyncUserInputResponse } from "./chat/useAsyncUserInputResponse";
@@ -1058,6 +1065,24 @@ export default function ChatView({
   const resolvedDiffOpen = panelState ? panelState.panel === "diff" : diffOpen;
   const onRespondToAsyncUserInput = useAsyncUserInputResponse(threadId);
   const activeThreadId = activeThread?.id ?? null;
+  const activeThreadEnvironmentSelection = useThreadExecutionEnvironmentStore((state) =>
+    activeThreadId ? (state.selectionByThreadId[activeThreadId] ?? null) : null,
+  );
+  const activeThreadRemoteAgentStatus = useStore((state) =>
+    activeThreadId ? (state.remoteAgentStatusByThreadId?.[activeThreadId] ?? null) : null,
+  );
+  const activeExecutionProfile = activeThread?.session?.executionProfile;
+  const executionEnvironmentsQuery = useQuery({
+    ...serverEnvironmentsQueryOptions(),
+    enabled: activeExecutionProfile !== undefined,
+  });
+  const activeExecutionEnvironmentLabel = activeThread?.session
+    ? activeExecutionProfile
+      ? (executionEnvironmentsQuery.data?.environments.find(
+          (environment) => environment.environmentId === activeExecutionProfile.environmentId,
+        )?.label ?? activeExecutionProfile.environmentId)
+      : null
+    : (activeThreadEnvironmentSelection?.environmentLabel ?? null);
   const activeLatestTurn = activeThread?.latestTurn ?? null;
   // Read once here so memo bodies depend on the turn id instead of the turn object: a
   // `foo?.bar` read inside a memo makes React Compiler infer `foo` as the dependency, which
@@ -1080,6 +1105,27 @@ export default function ChatView({
     () => deriveCumulativeCostUsd(threadActivities),
     [threadActivities],
   );
+  const activeCompactionRuntimeStatus = useMemo(
+    () => deriveLatestCompactionRuntimeStatus(threadActivities),
+    [threadActivities],
+  );
+  const updateActiveThreadCompactionSettings = useCallback(
+    (settings: ThreadCompactionSettings) => {
+      const api = readNativeApi();
+      if (!api || activeThreadId === null) return;
+      void api.provider
+        .setCompactionSettings({ threadId: activeThreadId, settings })
+        .catch((error) => {
+          toastManager.add({
+            type: "error",
+            title: "Could not update compaction settings",
+            description: error instanceof Error ? error.message : "Please try again.",
+          });
+        });
+    },
+    [activeThreadId],
+  );
+
   const activeRateLimitStatus = useMemo(
     () => deriveLatestRateLimitStatus(threadActivities),
     [threadActivities],
@@ -1429,7 +1475,6 @@ export default function ChatView({
     activeThread && coordinatorThreadIds.has(activeThread.id),
   );
   const {
-    hasThreadStarted,
     lockedProvider,
     boundProvider,
     boundProviderInstanceId,
@@ -2323,6 +2368,7 @@ export default function ChatView({
     supportsTextNativeReviewCommand,
     isComposerMenuLoading,
     canCompactThread,
+    compactionCapabilities,
     isNativeCommandDiscoveryPending,
   } = useComposerDiscovery({
     threadId,
@@ -2876,6 +2922,8 @@ export default function ChatView({
   const setThreadError = useCallback(
     (targetThreadId: ThreadId | null, error: string | null) => {
       if (!targetThreadId) return;
+      // Invalidate even an equal-string rewrite: recovery belongs to one failed send.
+      clearFailedComposerRetry(targetThreadId);
       if (getThreadFromState(useStore.getState(), targetThreadId)) {
         setStoreThreadError(targetThreadId, error);
         return;
@@ -4505,7 +4553,7 @@ export default function ChatView({
     },
   );
 
-  const { onSend: submitComposerTurn } = useChatTurnSubmission({
+  const { onSend: submitComposerTurn, onRetryFailedSend } = useChatTurnSubmission({
     threadId,
     hasLiveTurn,
     canSendWithProviderHandoff,
@@ -4932,6 +4980,23 @@ export default function ChatView({
         )
       ) : null}
       {composerModelAndTraitsControls}
+      {activeThreadId !== null ? (
+        <ComposerExecutionEnvironmentPicker
+          threadId={activeThreadId}
+          providerKind={selectedProvider}
+          locked={
+            Boolean(activeThread && threadHasProviderLockingActivity(activeThread)) ||
+            isSendBusy ||
+            isConnecting
+          }
+          hasSession={activeThread?.session != null}
+          {...(activeThread?.session?.executionProfile
+            ? { executionProfile: activeThread.session.executionProfile }
+            : {})}
+          compact={isComposerFooterCompact}
+          hideLabel={!composerFooterControlsPlan.showModelLabel}
+        />
+      ) : null}
     </>
   );
   const toggleFastMode = useCallback(() => {
@@ -5034,7 +5099,26 @@ export default function ChatView({
     ],
   );
 
+  const genericCompactDisabledReason = isThreadDetailAwaitingVerification(threadId)
+    ? "Reconnect before compacting."
+    : isWorking || isConnecting || (activeBackgroundTasks?.activeCount ?? 0) > 0
+      ? "Wait for the current work to finish before compacting."
+      : activePendingApproval || pendingUserInputs.length > 0
+        ? "Resolve the pending request before compacting."
+        : activeThread?.session?.status === "closed" || !activeThread?.session
+          ? "Open an active session before compacting."
+          : activeThread.session.provider !== selectedProvider
+            ? "Send a turn with the selected provider before compacting."
+            : activeCompactionRuntimeStatus?.phase?.status === "pending" ||
+                activeCompactionRuntimeStatus?.phase?.status === "running"
+              ? "Compaction is already running."
+              : activeCompactionRuntimeStatus?.manualAvailability.available === false
+                ? (activeCompactionRuntimeStatus.manualAvailability.reason ??
+                  "Compaction is unavailable.")
+                : null;
   const {
+    compactProviderThread,
+    isCompactingProviderThread,
     handleForkFromMessage,
     handleForkTargetSelection,
     handleReviewTargetSelection,
@@ -5056,6 +5140,8 @@ export default function ChatView({
       isServerThread &&
       activeThread?.session !== null &&
       activeThread?.session?.status !== "closed",
+    compactionSupportsInstructions: compactionCapabilities?.manual.supportsInstructions,
+    compactDisabledReason: genericCompactDisabledReason,
     canExecuteSideCommand,
     sidechatTargetProviders: sidechatTargetProviders,
     canOfferExportCommand,
@@ -6425,7 +6511,27 @@ export default function ChatView({
                     runtimeUsageContextWindow &&
                     composerFooterControlsPlan.showContextMeter ? (
                       <ContextWindowMeter
+                        key={threadId}
                         usage={runtimeUsageContextWindow}
+                        compaction={compactionCapabilities}
+                        compactionRuntimeStatus={activeCompactionRuntimeStatus}
+                        compactDisabledReason={
+                          isCompactingProviderThread
+                            ? "Compaction is already running."
+                            : genericCompactDisabledReason
+                        }
+                        onCompactNow={
+                          selectedProvider !== "claudeAgent" && canCompactThread && isServerThread
+                            ? () => {
+                                void compactProviderThread();
+                              }
+                            : undefined
+                        }
+                        onUpdateCompactionSettings={
+                          selectedProvider !== "claudeAgent" && isServerThread
+                            ? updateActiveThreadCompactionSettings
+                            : undefined
+                        }
                         showClaudeCache={activeThread?.session?.provider === "claudeAgent"}
                         onOpenChange={setIsContextWindowMeterOpen}
                         {...(selectedProvider === "claudeAgent" &&
@@ -6550,6 +6656,8 @@ export default function ChatView({
       >
         <ChatHeader
           activeThreadId={activeThread.id}
+          executionEnvironmentLabel={activeExecutionEnvironmentLabel}
+          remoteAgentConnectionStatus={activeThreadRemoteAgentStatus?.status ?? null}
           activeThreadTitle={activeThreadDisplayTitle}
           activeThreadEntryPoint={terminalState.entryPoint}
           activeProvider={activeThread.session?.provider ?? activeThread.modelSelection.provider}
@@ -6848,6 +6956,14 @@ export default function ChatView({
                     conversationOnly={isCoordinatorConversation}
                     hubWorkItemsByMessageId={hubWorkItemsByMessageId}
                     threadError={activeThread?.error ?? null}
+                    rateLimitStatus={activeRateLimitStatus}
+                    {...(onRetryFailedSend ? { onRetryThreadError: onRetryFailedSend } : {})}
+                    retryThreadErrorDisabled={
+                      isSendBusy ||
+                      isConnecting ||
+                      pendingApprovals.length > 0 ||
+                      pendingUserInputs.length > 0
+                    }
                     recoverableTurnId={
                       activeLatestTurnState === "error" ? activeLatestTurnId : null
                     }

@@ -9,6 +9,7 @@ import {
   type ProjectScript,
   PROVIDER_DISPLAY_NAMES,
   type ProviderKind,
+  type RemoteAgentConnectionStatus,
   type ResolvedKeybindingsConfig,
   type ThreadId,
 } from "@synara/contracts";
@@ -39,6 +40,7 @@ import {
   SurfaceTabChip,
   SurfaceTabStrip,
 } from "./chatHeaderControls";
+import { Badge } from "../ui/badge";
 import { DiffStat } from "../ui/diff-stat";
 import { IconButton } from "../ui/icon-button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuSeparator, MenuTrigger } from "../ui/menu";
@@ -76,6 +78,58 @@ import type { ThreadHandoffTarget } from "~/lib/threadHandoff";
  * for any layout that narrows the chat column (split chat, right dock, small window).
  */
 const HEADER_COMPACT_BREAKPOINT = 700;
+
+function environmentBadgeLabel(
+  label: string | null,
+  status: RemoteAgentConnectionStatus | null,
+): string {
+  const name = label ?? "Local";
+  switch (status) {
+    case "reconnecting":
+      return `${name} — reconnecting…`;
+    case "degraded":
+      return `${name} — degraded`;
+    case "disconnected":
+      return `${name} — disconnected`;
+    default:
+      return name;
+  }
+}
+
+function environmentBadgeTitle(
+  label: string | null,
+  status: RemoteAgentConnectionStatus | null,
+): string {
+  if (label === null) {
+    return "Runs on this machine";
+  }
+  const base = `Runs on remote environment "${label}"`;
+  switch (status) {
+    case "reconnecting":
+      return `${base} — reconnecting to the remote agent`;
+    case "degraded":
+      return `${base} — connection degraded, retrying`;
+    case "disconnected":
+      return `${base} — remote agent disconnected`;
+    default:
+      return base;
+  }
+}
+
+function remoteAgentConnectionStatusClassName(
+  status: RemoteAgentConnectionStatus | null,
+): string | undefined {
+  switch (status) {
+    case "reconnecting":
+      return "text-amber-600 dark:text-amber-400";
+    case "degraded":
+      return "text-amber-600 dark:text-amber-400";
+    case "disconnected":
+      return "text-destructive";
+    default:
+      return undefined;
+  }
+}
 
 interface ChatHeaderProps {
   activeThreadId: ThreadId;
@@ -122,6 +176,8 @@ interface ChatHeaderProps {
   onToggleRightDock?: () => void;
   surfaceMode?: "single" | "split";
   isSidechat?: boolean;
+  executionEnvironmentLabel?: string | null;
+  remoteAgentConnectionStatus?: RemoteAgentConnectionStatus | null;
   // When provided, the header collapses the
   // Open-in-editor + git-actions + diff-toggle cluster into one Environment button that
   // drives the Environment panel; otherwise the legacy cluster is rendered.
@@ -447,6 +503,8 @@ export function ChatHeader({
   onToggleRightDock,
   surfaceMode: surfaceModeProp,
   isSidechat: isSidechatProp,
+  executionEnvironmentLabel,
+  remoteAgentConnectionStatus,
   environment: environmentProp,
   projectPanel = null,
   libraryPanel = null,
@@ -715,6 +773,28 @@ export function ChatHeader({
             </div>
           </div>
         )}
+        {!minimalChrome && executionEnvironmentLabel !== undefined ? (
+          <Badge
+            variant="outline"
+            className="hidden !h-6 max-w-40 shrink-0 items-center rounded-md px-1.5 text-ui-xs sm:inline-flex"
+            title={environmentBadgeTitle(
+              executionEnvironmentLabel,
+              remoteAgentConnectionStatus ?? null,
+            )}
+          >
+            <span
+              className={cn(
+                "truncate",
+                remoteAgentConnectionStatusClassName(remoteAgentConnectionStatus ?? null),
+              )}
+            >
+              {environmentBadgeLabel(
+                executionEnvironmentLabel,
+                remoteAgentConnectionStatus ?? null,
+              )}
+            </span>
+          </Badge>
+        ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-2 [-webkit-app-region:no-drag]">
         {!minimalChrome && !hideHandoffControls && !environment ? (

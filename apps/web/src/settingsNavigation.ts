@@ -15,6 +15,7 @@ export const SETTINGS_SECTION_IDS = [
   "computer",
   "shortcuts",
   "worktrees",
+  "environments",
   "archived",
   "models",
   "providers",
@@ -179,6 +180,14 @@ export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
     description: "Review and clean up isolated workspaces created by Synara.",
     icon: "branch-simple",
     eyebrow: "Workspace management",
+  },
+  {
+    id: "environments",
+    group: "coding",
+    label: "Environments",
+    description: "Manage remote execution environments and pre-flight their connections.",
+    icon: "server-1",
+    eyebrow: "Remote execution",
   },
   {
     id: "advanced",
