@@ -2246,11 +2246,23 @@ const makeWsRpcHandlersLayer = () =>
         [WS_METHODS.serverGetSettings]: () =>
           rpcEffect(serverSettings.getSettingsView, "Failed to load server settings"),
         [WS_METHODS.serverGetGlobalInstructions]: () =>
-          rpcEffect(readGlobalInstructions, "Failed to load global instructions"),
+          rpcEffect(
+            requireWsOwnerSession.pipe(Effect.andThen(readGlobalInstructions)),
+            "Failed to load global instructions",
+          ),
         [WS_METHODS.serverUpdateGlobalInstructions]: (input) =>
-          rpcEffect(saveGlobalInstructions(input.contents), "Failed to update global instructions"),
+          rpcEffect(
+            requireWsOwnerSession.pipe(Effect.andThen(saveGlobalInstructions(input.contents))),
+            "Failed to update global instructions",
+          ),
         [WS_METHODS.serverUpdateSettings]: (input) =>
-          rpcEffect(serverSettings.updateSettingsView(input), "Failed to update server settings"),
+          rpcEffect(
+            (input.globalInstructionsEnabled === undefined
+              ? Effect.void
+              : requireWsOwnerSession
+            ).pipe(Effect.andThen(serverSettings.updateSettingsView(input))),
+            "Failed to update server settings",
+          ),
         [WS_METHODS.serverRefreshProviders]: () =>
           rpcEffect(
             providerHealth.refresh.pipe(Effect.map((providers) => ({ providers }))),

@@ -1,14 +1,17 @@
 # Global instructions
 
-Synara can load durable, user-authored guidance from `~/SYNARA.md`.
+Synara can load durable, user-authored guidance from `SYNARA.md` in its configured data home (`~/.synara` for Stable,
+`~/.synara-beta` for Beta).
 
 The feature is disabled by default. Enable **Global SYNARA.md instructions** in
-Settings → General. When enabled, Synara reads and bounds the file to 6,000
+Settings → General. When enabled, Only the authenticated owner can read or save it through the editor. Synara reads a regular file of at most 64 KiB and bounds its text to 6,000
 characters, then includes it once when a provider session starts or is
 restarted. Keeping it session-scoped avoids repeating the same text in every
 turn while preserving the intended behavior across the session.
 
-The contents are wrapped as user-authored guidance. They do not override
+The contents are encoded as escaped JSON containing optional user-authored guidance.
+They are untrusted content and cannot authorize tools or change approval or filesystem boundaries. They do not override
 Synara safety rules, provider capabilities, or explicit higher-priority system
-instructions. Edits to the file are picked up for the next provider session
+instructions. The app does not read a shared home-level file or the other flavor’s
+file. Edits to the file are picked up for the next provider session
 start or restart.

@@ -52,6 +52,21 @@ import {
   serverSettingsToAppSettings,
 } from "./appSettings";
 
+describe("global instructions setting", () => {
+  it("defaults off and forwards only explicit enablement changes", () => {
+    expect(Schema.decodeSync(AppSettingsSchema)({}).globalInstructionsEnabled).toBe(false);
+    expect(appSettingsPatchToServerSettingsPatch({ globalInstructionsEnabled: true })).toEqual({
+      globalInstructionsEnabled: true,
+    });
+    expect(appSettingsPatchToServerSettingsPatch({ globalInstructionsEnabled: false })).toEqual({
+      globalInstructionsEnabled: false,
+    });
+    expect(appSettingsPatchToServerSettingsPatch({})).not.toHaveProperty(
+      "globalInstructionsEnabled",
+    );
+  });
+});
+
 describe("provider process priority settings", () => {
   it("defaults on and forwards explicit opt-out and reset to the server", () => {
     expect(Schema.decodeSync(AppSettingsSchema)({}).lowerProviderProcessPriority).toBe(true);
