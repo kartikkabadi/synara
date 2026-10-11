@@ -1,8 +1,8 @@
 {
-  "codeHead": "75d0e8901f1ae329ce5fbcc6d20a7953e4db60de",
+  "codeHead": "0b06fd898258f10fcabebfce397d7e4cb3e8f3ea",
   "fixture": "apps/web/src/components/ThemePackEditor.browser.tsx",
-  "fixtureSha256": "e833b7784e99c521d721b5fff1eb18cbc72803247f98aa907035e19391ce6945",
-  "scope": "Actual Chromium appearance controls with disposable browser localStorage and opaque desktop projection; no native macOS vibrancy or full Settings page.",
+  "fixtureSha256": "a071d3e76c00ed9d4d94d2bffbca7e1fdb5332d9a2ce36d8786df95b8b73770d",
+  "scope": "Actual Chromium appearance controls with disposable browser localStorage and Solid windows preserved; no native macOS vibrancy or full Settings page.",
   "viewport": {
     "width": 1120,
     "height": 1200
@@ -13,8 +13,15 @@
     "attic-valley.png": "Attic valley applied with available system-font fallback"
   },
   "imageSha256": {
-    "before.png": "cd7b41cbe86e19bc9ad3ee21970a544256f150e397994827585e2c300e63ce9b",
-    "parthenon.png": "d6749b09444b69e43db61be98b00bd3803b2c60970dc61722d0c3a7c9a703256",
-    "attic-valley.png": "9ca2b7ec091ef8c9a475c45a6c55d4ce116513fe4f551933b113d24c77232289"
+    "before.png": "e582d0d6f4f7e85d811e8776fadfebca7b90a30f03c6d69b3ef3f14efca065f1",
+    "parthenon.png": "68e41116ba09c23f7687285da2c277fdf975491f08acd732d48d9005ff99b532",
+    "attic-valley.png": "300098635ad46917025c143598dd875070b5de4ef8733142049a586ea414ba07"
+  },
+  "procedure": {
+    "path": "assets/pr-screenshots/theme-packs-178/capture.config.mts",
+    "sha256": "7d13c54d498ecffafe4c5abea7914fbc5008835c077fbf2b88b448114f1a4a63",
+    "workingDirectory": "apps/web",
+    "command": "bun run vitest run --config ../../assets/pr-screenshots/theme-packs-178/capture.config.mts src/components/ThemePackEditor.browser.tsx",
+    "viewportOverride": "Capture overlay changes the ordinary 1120x1000 fixture to 1120x1200, verifies its transformation anchors, and waits for fonts and animations."
   }
 }
