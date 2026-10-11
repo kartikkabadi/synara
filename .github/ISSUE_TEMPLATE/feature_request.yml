@@ -9,6 +9,7 @@ body:
     attributes:
       value: |
         Use this form for new capabilities or meaningful improvements to existing behavior.
+        Do not post credentials, cookies, private source code, or unredacted transcripts.
         This repo is still early. Small, concrete requests that clearly explain the problem and scope are much easier to evaluate.
 
   - type: checkboxes

@@ -3,6 +3,10 @@
 The full product documentation lives at [trysynara.com/docs](https://www.trysynara.com/docs). This
 folder keeps a small set of focused guides that stay in sync with the repository:
 
+- [Project vision](../VISION.md) — current product principles and maintained references.
+- [Design](../DESIGN.md) — runtime ownership, provider boundaries, and verification.
+- [Contributing](../CONTRIBUTING.md) — how to propose and submit focused changes.
+
 - [Quickstart](./quickstart.md) — from installation to your first reviewed change in about five minutes.
 - [Core concepts](./core-concepts.md) — projects, tasks, environments, provider sessions, and Git ownership.
 - [Hubs](./hubs.md) — a coordinator that runs parallel threads with shared instructions, memory, and a Library.

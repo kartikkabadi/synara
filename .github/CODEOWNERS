@@ -1,0 +1,9 @@
+# Review routing for kartikkabadi/synara, whose owner has write access.
+# This requests review; permissions and branch protection enforce actual access.
+# It does not assign maintainer authority in upstream or another fork.
+* @kartikkabadi
+/SECURITY.md @kartikkabadi
+/.github/ @kartikkabadi
+/scripts/ @kartikkabadi
+/apps/server/src/provider/ @kartikkabadi
+/apps/server/src/persistence/ @kartikkabadi

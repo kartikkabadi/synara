@@ -1,0 +1,167 @@
+[
+  {
+    "name": "kind:bug",
+    "color": "0969da",
+    "description": "Something is broken or behaves incorrectly."
+  },
+  {
+    "name": "kind:feature",
+    "color": "0969da",
+    "description": "New capability or user-facing addition."
+  },
+  {
+    "name": "kind:polish",
+    "color": "0969da",
+    "description": "Improves existing behavior: UX, performance, or reliability."
+  },
+  {
+    "name": "kind:docs",
+    "color": "0969da",
+    "description": "Documentation only."
+  },
+  {
+    "name": "kind:chore",
+    "color": "0969da",
+    "description": "Build, CI, dependencies, refactors, and tooling."
+  },
+  {
+    "name": "kind:question",
+    "color": "0969da",
+    "description": "Question or support request."
+  },
+  {
+    "name": "area:chat",
+    "color": "8250df",
+    "description": "Composer, transcript, threads, and messages."
+  },
+  {
+    "name": "area:providers",
+    "color": "8250df",
+    "description": "Provider adapters, models, auth, and sessions."
+  },
+  {
+    "name": "area:git",
+    "color": "8250df",
+    "description": "Git, worktrees, diffs, and pull requests."
+  },
+  {
+    "name": "area:terminal",
+    "color": "8250df",
+    "description": "Integrated terminal and command execution."
+  },
+  {
+    "name": "area:browser",
+    "color": "8250df",
+    "description": "Embedded browser and browser tools."
+  },
+  {
+    "name": "area:computer-use",
+    "color": "8250df",
+    "description": "Computer use and device control."
+  },
+  {
+    "name": "area:voice",
+    "color": "8250df",
+    "description": "Voice input and realtime voice."
+  },
+  {
+    "name": "area:settings",
+    "color": "8250df",
+    "description": "Settings, preferences, and keybindings."
+  },
+  {
+    "name": "area:app-shell",
+    "color": "8250df",
+    "description": "Desktop app, windows, install, updates, and layout."
+  },
+  {
+    "name": "area:remote",
+    "color": "8250df",
+    "description": "Remote access, cloud, and mobile companion."
+  },
+  {
+    "name": "provider:codex",
+    "color": "bf8700",
+    "description": "Specific to the Codex provider."
+  },
+  {
+    "name": "provider:claude",
+    "color": "bf8700",
+    "description": "Specific to the Claude provider."
+  },
+  {
+    "name": "provider:opencode",
+    "color": "bf8700",
+    "description": "Specific to the OpenCode provider."
+  },
+  {
+    "name": "provider:pi",
+    "color": "bf8700",
+    "description": "Specific to the Pi provider."
+  },
+  {
+    "name": "provider:cursor",
+    "color": "bf8700",
+    "description": "Specific to the Cursor provider."
+  },
+  {
+    "name": "provider:gemini",
+    "color": "bf8700",
+    "description": "Specific to the Gemini provider."
+  },
+  {
+    "name": "provider:antigravity",
+    "color": "bf8700",
+    "description": "Specific to the Antigravity provider."
+  },
+  {
+    "name": "provider:omp",
+    "color": "bf8700",
+    "description": "Specific to the Oh My Pi provider."
+  },
+  {
+    "name": "os:macos",
+    "color": "6e7781",
+    "description": "Only affects macOS."
+  },
+  {
+    "name": "os:windows",
+    "color": "6e7781",
+    "description": "Only affects Windows."
+  },
+  {
+    "name": "os:linux",
+    "color": "6e7781",
+    "description": "Only affects Linux."
+  },
+  {
+    "name": "status:triage",
+    "color": "fbca04",
+    "description": "Waiting for first triage."
+  },
+  {
+    "name": "status:needs-info",
+    "color": "fbca04",
+    "description": "Waiting on the author for details."
+  },
+  {
+    "name": "status:blocked",
+    "color": "fbca04",
+    "description": "Blocked by another issue, PR, or decision."
+  },
+  {
+    "name": "review:pass",
+    "color": "1a7f37",
+    "description": "Automated review found no blocking problems."
+  },
+  {
+    "name": "review:changes",
+    "color": "cf222e",
+    "description": "Automated review found problems to fix."
+  },
+  {
+    "name": "review:needs-human",
+    "color": "bc4c00",
+    "description": "Automated review needs a maintainer decision."
+  }
+]

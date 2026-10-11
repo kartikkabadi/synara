@@ -161,3 +161,11 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a pull request. For a r
 ## License
 
 Synara is licensed under the [MIT License](./LICENSE).
+
+## Project guidance
+
+- [Contributing](CONTRIBUTING.md): focused changes, prior discussion, review evidence.
+- [Support](SUPPORT.md): questions, bug reports, and useful reproduction details.
+- [Security reporting](SECURITY.md): check the configured private reporting route.
+- [Participation](CODE_OF_CONDUCT.md) and [fork review process](GOVERNANCE.md).
+- [Product references](VISION.md) and [architecture references](DESIGN.md).

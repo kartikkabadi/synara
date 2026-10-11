@@ -10,6 +10,7 @@ body:
       value: |
         Use this form for broken behavior, regressions, crashes, or reliability problems.
         Search existing issues first and keep the report focused on one problem.
+        Do not post credentials, cookies, private source code, or unredacted transcripts.
 
   - type: checkboxes
     id: checks
