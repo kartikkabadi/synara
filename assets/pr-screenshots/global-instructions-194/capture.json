@@ -1,0 +1,16 @@
+{
+  "codeHead": "37249e5dee5ae8102aed297b8186768102a2f34f",
+  "component": "apps/web/src/components/settings/GlobalInstructionsEditor.tsx",
+  "fixture": "apps/web/src/components/settings/GlobalInstructionsEditor.browser.tsx",
+  "description": "Actual Chromium component captures with synthetic read/save API responses: initial guidance and saved guidance. No live provider or whole-app capture.",
+  "images": [
+    {
+      "path": "initial.png",
+      "sha256": "0c3612466bdb0171f4c08ff36f73aed3c10b3527462dfd6d5a96120751c085f0"
+    },
+    {
+      "path": "saved.png",
+      "sha256": "a185644ade83df027599423e614baa5b6c46f58cb6ece05dea0796f545ddb686"
+    }
+  ]
+}
