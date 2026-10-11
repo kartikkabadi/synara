@@ -6,7 +6,9 @@
  * (`recoverTransaction` / `recoverClaim`). This service hides the native
  * `minisqlite-node` napi binding behind an Effect interface so tests can
  * substitute fakes and the `SYNARA_CONTROL_PLANE_KERNEL` flag can swap
- * implementations.
+ * implementations. Rollout is fail-closed: with the flag "shadow" or "on",
+ * a missing or incompatible addon fails startup (layer construction)
+ * instead of silently running with the kernel disabled.
  *
  * @module ControlPlaneKernel
  */
