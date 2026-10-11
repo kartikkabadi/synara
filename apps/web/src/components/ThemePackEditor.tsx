@@ -402,6 +402,7 @@ export function ThemePackEditor({
             <ThemeRow label="Wallpaper opacity">
               <ThemeSlider
                 ariaLabel={`${titleLabel} wallpaper opacity`}
+                suffix="%"
                 max={70}
                 min={0}
                 value={Math.round(wallpaper.opacity * 100)}
@@ -411,6 +412,7 @@ export function ThemePackEditor({
             <ThemeRow label="Wallpaper dim">
               <ThemeSlider
                 ariaLabel={`${titleLabel} wallpaper dim`}
+                suffix="%"
                 max={80}
                 min={0}
                 value={Math.round(wallpaper.dim * 100)}
