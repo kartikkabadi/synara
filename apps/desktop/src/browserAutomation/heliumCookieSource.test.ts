@@ -1,5 +1,5 @@
 import { createCipheriv, createHash, pbkdf2Sync, randomBytes } from "node:crypto";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire, syncBuiltinESMExports } from "node:module";
@@ -494,6 +494,59 @@ describe.skipIf(process.platform !== "darwin")("helium cookie source", () => {
       expect(String(error)).not.toContain("interaction");
     },
   );
+
+  it("refuses oversized source files before requesting key material", async () => {
+    await truncate(
+      join(home, "Library", "Application Support", "net.imput.helium", "Default", "Cookies"),
+      64 * 1024 * 1024 + 1,
+    );
+    const keychainPassword = vi.fn(async () => syntheticKeychainPassword());
+    await expect(
+      heliumSource.readHeliumCookieSnapshot(heliumOptions(), { home, keychainPassword }),
+    ).rejects.toMatchObject({
+      cookieReaderCode: "source_extraction_failed",
+      cookieReaderStage: "acquisition",
+    });
+    expect(keychainPassword).not.toHaveBeenCalled();
+  });
+
+  it("keeps domain-filtered imports from profiles above the transfer cookie count", async () => {
+    const database = new DatabaseSync(
+      join(home, "Library", "Application Support", "net.imput.helium", "Default", "Cookies"),
+    );
+    database.exec(
+      "WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM numbers WHERE n < 10001) INSERT INTO cookies (host_key, name, value, path) SELECT 'unselected.test', 'row-' || n, 'synthetic', '/' FROM numbers",
+    );
+    database.close();
+    const snapshot = await cookieSync.extractCookieSync(
+      heliumOptions({ domains: ["example.test"] }),
+      neverLoadNativeReader(),
+      { home, keychainPassword: async () => syntheticKeychainPassword() },
+    );
+    expect(snapshot.cookies).toHaveLength(2);
+    expect(
+      snapshot.cookies.every((cookie: { domain: string }) => cookie.domain === "example.test"),
+    ).toBe(true);
+  });
+
+  it("refuses oversized row sets without truncating the import", async () => {
+    const database = new DatabaseSync(
+      join(home, "Library", "Application Support", "net.imput.helium", "Default", "Cookies"),
+    );
+    database.exec(
+      "WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM numbers WHERE n < 100001) INSERT INTO cookies (host_key, name, path) SELECT 'example.test', 'row-' || n, '/' FROM numbers",
+    );
+    database.close();
+    await expect(
+      heliumSource.readHeliumCookieSnapshot(heliumOptions(), {
+        home,
+        keychainPassword: async () => syntheticKeychainPassword(),
+      }),
+    ).rejects.toMatchObject({
+      cookieReaderCode: "source_extraction_failed",
+      cookieReaderStage: "query",
+    });
+  });
 
   it.each([false, true])(
     "wipes derived key material after a snapshot (query failure: %s)",

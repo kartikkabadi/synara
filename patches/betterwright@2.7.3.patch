@@ -206,7 +206,7 @@ diff --git a/dist/src/helium-cookie-source.js b/dist/src/helium-cookie-source.js
 new file mode 100644
 --- /dev/null
 +++ b/dist/src/helium-cookie-source.js
-@@ -0,0 +1,341 @@
+@@ -0,0 +1,348 @@
 +// Helium (net.imput.helium) cookie source for hosts whose native reader does
 +// not register the browser yet. Reads the same Chromium cookie database the
 +// native reader would, decrypts v10 rows with the profile's Keychain secret,
@@ -241,6 +241,10 @@ new file mode 100644
 +const CHROMIUM_EPOCH_OFFSET_SECONDS = 11_644_473_600;
 +const CHROMIUM_AES_IV = Buffer.alloc(16, 0x20);
 +const HELIUM_KEYCHAIN_TIMEOUT_MS = 30_000;
++// Acquisition has its own larger ceiling so domain-filtered transfers can
++// select from profiles above the final 10,000-cookie / 6 MiB transfer limit.
++const HELIUM_SOURCE_MAX_ROWS = 100_000;
++const HELIUM_SNAPSHOT_MAX_BYTES = 64 * 1024 * 1024;
 +
 +export async function heliumCookieSourceAvailable(home = homedir()) {
 +    if (process.platform !== "darwin") return null;
@@ -504,7 +508,8 @@ new file mode 100644
 +                if (Number.isInteger(parsed) && parsed >= 0) version = parsed;
 +            }
 +        } catch { /* The meta table is best-effort. */ }
-+        const rows = queryHeliumRows(database, `SELECT ${selection.join(", ")} FROM cookies`);
++        const rows = queryHeliumRows(database, `SELECT ${selection.join(", ")} FROM cookies LIMIT ${HELIUM_SOURCE_MAX_ROWS + 1}`);
++        if (rows.length > HELIUM_SOURCE_MAX_ROWS) throw heliumError("source_extraction_failed", "query");
 +        const detailedCookies = [];
 +        for (const row of rows) {
 +            const detailed = heliumCookieRow(row, key, warnings, version);
@@ -526,9 +531,11 @@ new file mode 100644
 +    if (!available.some((entry) => entry.id === profile)) throw heliumError("no_selected_source", "discovery");
 +    const databasePath = await heliumCookieDatabasePath(join(heliumProfileRoot(home), profile));
 +    if (!databasePath) throw heliumError("no_selected_source", "acquisition");
++    if ((await stat(databasePath)).size > HELIUM_SNAPSHOT_MAX_BYTES) throw heliumError("source_extraction_failed", "acquisition");
 +    const workspace = await mkdtemp(join(tmpdir(), "betterwright-helium-"));
 +    try {
 +        const copyPath = await snapshotHeliumDatabase(databasePath, workspace);
++        if ((await stat(copyPath)).size > HELIUM_SNAPSHOT_MAX_BYTES) throw heliumError("source_extraction_failed", "acquisition");
 +        const keychainPassword = deps.keychainPassword ?? spawnKeychainPassword;
 +        const password = await keychainPassword(Math.min(options.timeoutMs, HELIUM_KEYCHAIN_TIMEOUT_MS));
 +        if (!password) throw heliumError("source_extraction_failed", "decrypt");

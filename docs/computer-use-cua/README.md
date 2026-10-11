@@ -387,7 +387,7 @@ origin, and requires explicit confirmation before a whole-profile import.
 Destination changes or timeout revoke the import transport. Agents cannot
 invoke this human-only path.
 
-Helium discovery and its Chromium cookie reader are macOS-only. The maintained
+Helium discovery and its Chromium cookie reader are macOS-only. Source acquisition refuses databases above 64 MiB or 100,000 rows instead of silently truncating them; the existing domain-filtered transfer still limits selected cookies to 10,000 and 6 MiB. Derived decryption keys are wiped after success or failure. The maintained
 BetterWright 2.7.3 patch snapshots the selected SQLite store consistently, uses
 Helium's Keychain storage key, verifies the v24 host-key digest, and passes the
 result through the existing bounded cookie-sync pipeline. Unsupported formats
