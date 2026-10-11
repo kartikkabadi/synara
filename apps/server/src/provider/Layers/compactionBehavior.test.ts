@@ -1,10 +1,5 @@
-// FILE: compactionBehavior.test.ts
-// Purpose: Characterization tests recording verified per-provider context
-//          compaction behavior (observed from the installed CLIs/SDKs and the
-//          adapters that wrap them) so later compaction work cannot silently
-//          regress against the real provider surfaces.
-// Layer: Provider adapter tests
-// Depends on: adapter live layers, CodexAppServerManager, Grok compaction helpers.
+// Adapter contract regressions using synthetic runtime events. Historical CLI
+// observations motivated these fixtures; this suite does not execute providers.
 
 import assert from "node:assert/strict";
 import type { ProviderEvent, ProviderKind } from "@synara/contracts";
@@ -33,31 +28,8 @@ import { isGrokContextCompactionToolCall, makeGrokAdapterLive } from "./GrokAdap
 import { makeOpenCodeAdapterLive } from "./OpenCodeAdapter.ts";
 import { makePiAdapterLive } from "./PiAdapter.ts";
 
-// Characterization of observed provider compaction behavior. Every entry below
-// records behavior verified against the installed CLI/SDK or its source:
-//
-// - codex (codex 0.144.6, `codex app-server` JSON-RPC): `thread/compact/start`
-//   returns `{}` immediately; the app-server then emits `thread/compacting`
-//   followed by `thread/compacted`. Auto-compaction is provider-managed.
-// - grok (Grok Build 0.2.106, `grok agent stdio` ACP): `initialize` advertises
-//   `availableCommands` including `compact`; the `x.ai/compact_conversation`
-//   ACP extension performs compaction. The adapter drives manual compaction
-//   with a `/compact` prompt and detects between-turn compaction with a title
-//   heuristic. CLI default intra-compaction config is `enabled: false` with
-//   `trigger_threshold_percent: 85`.
-// - opencode (opencode 1.18.4): emits `session.compacted` events and message
-//   parts with `part.type === "compaction"` carrying `data.auto` and
-//   `data.overflow`; manual compaction is `session.summarize`.
-// - pi (Pi SDK): auto-compacts by default when
-//   `contextTokens > contextWindow - reserveTokens` (default reserve 16,384)
-//   and emits `compaction_start` / `compaction_end` events; manual compaction
-//   is `session.compact()`.
-// - droid: the TUI `/compress` is a rollover, and the Factory ACP used by the
-//   adapter exposes no compaction RPC.
-// - antigravity: print-mode one-shot CLI with no session, so no compaction
-//   surface exists.
-// - cursor: `cursor-agent` ACP compaction behavior is unverified; treated as
-//   unsupported until verified.
+// This table records the adapter surfaces under test. It is not live CLI or
+// protocol certification; exact native thresholds come from adapter hooks.
 interface CompactionCharacterization {
   readonly supportsThreadCompaction: boolean;
   readonly manual: {
@@ -182,7 +154,7 @@ const adapterCapabilitiesLayer = it.layer(
 );
 
 adapterCapabilitiesLayer("provider compaction capability flags", (it) => {
-  it.effect("match the verified compaction characterization per provider", () =>
+  it.effect("match the compaction contract per adapter", () =>
     Effect.gen(function* () {
       const adapters = {
         codex: yield* CodexAdapter,
@@ -203,7 +175,7 @@ adapterCapabilitiesLayer("provider compaction capability flags", (it) => {
         assert.equal(
           capabilities.supportsThreadCompaction,
           entry.supportsThreadCompaction,
-          `${provider}: supportsThreadCompaction flag drifted from verified provider behavior`,
+          `${provider}: supportsThreadCompaction flag drifted from its compaction contract`,
         );
       }
     }),
@@ -225,7 +197,7 @@ adapterCapabilitiesLayer("provider compaction capability flags", (it) => {
         assert.equal(
           adapter.compactThread !== undefined,
           entry.manual.mode !== "unsupported",
-          `${provider}: compactThread surface drifted from verified provider behavior`,
+          `${provider}: compactThread surface drifted from its compaction contract`,
         );
       }
     }),
@@ -234,7 +206,7 @@ adapterCapabilitiesLayer("provider compaction capability flags", (it) => {
   it.effect("projects codex thread/compacting into a context_compaction progress item", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents.pipe(Stream.filter((event) => event.type === "item.started"))).pipe(Effect.forkChild);
 
       codexLifecycleManager.emit("event", {
         id: EventId.makeUnsafe("evt-compaction-behavior-compacting"),
@@ -250,8 +222,8 @@ adapterCapabilitiesLayer("provider compaction capability flags", (it) => {
       const firstEvent = yield* Fiber.join(firstEventFiber);
       assert.equal(firstEvent._tag, "Some");
       if (firstEvent._tag !== "Some") return;
-      assert.equal(firstEvent.value.type, "item.updated");
-      if (firstEvent.value.type !== "item.updated") return;
+      assert.equal(firstEvent.value.type, "item.started");
+      if (firstEvent.value.type !== "item.started") return;
       assert.equal(firstEvent.value.payload.itemType, "context_compaction");
       assert.equal(firstEvent.value.payload.status, "inProgress");
     }),
@@ -260,7 +232,7 @@ adapterCapabilitiesLayer("provider compaction capability flags", (it) => {
   it.effect("projects codex thread/compacted into a compacted thread state change", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents.pipe(Stream.filter((event) => event.type === "thread.state.changed"))).pipe(Effect.forkChild);
 
       codexLifecycleManager.emit("event", {
         id: EventId.makeUnsafe("evt-compaction-behavior-compacted"),

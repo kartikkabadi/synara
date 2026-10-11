@@ -5,7 +5,9 @@ import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
 import { CompactionReactor } from "../Services/CompactionReactor.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
-import { StudioOutputReactor } from "../Services/StudioOutputReactor.ts";
+import { SidechatExpiryReactor } from "../Services/SidechatExpiryReactor.ts";
+import { HubOutputReactor } from "../Services/HubOutputReactor.ts";
+import { ThreadGitMetadataReactor } from "../Services/ThreadGitMetadataReactor.ts";
 import { OrchestrationReactor } from "../Services/OrchestrationReactor.ts";
 import { makeOrchestrationReactor } from "./OrchestrationReactor.ts";
 
@@ -26,6 +28,18 @@ describe("OrchestrationReactor", () => {
 
     runtime = ManagedRuntime.make(
       Layer.effect(OrchestrationReactor, makeOrchestrationReactor).pipe(
+        Layer.provideMerge(
+          Layer.succeed(SidechatExpiryReactor, {
+            start: Effect.acquireRelease(
+              Effect.sync(() => {
+                started.push("sidechat-expiry-reactor");
+              }),
+              () => Effect.sync(() => stopped.push("sidechat-expiry-reactor")),
+            ),
+            viewStarted: () => Effect.void,
+            viewEnded: () => Effect.void,
+          }),
+        ),
         Layer.provideMerge(
           Layer.succeed(ProviderRuntimeIngestionService, {
             start: Effect.acquireRelease(
@@ -51,6 +65,7 @@ describe("OrchestrationReactor", () => {
             drain: Effect.void,
             listBlockingDeliveries: () => Effect.succeed([]),
             reconcileDelivery: () => Effect.succeed(null),
+            regenerateThreadTitle: () => Effect.succeed({ status: "no-context", title: null }),
           }),
         ),
         Layer.provideMerge(
@@ -79,14 +94,25 @@ describe("OrchestrationReactor", () => {
           }),
         ),
         Layer.provideMerge(
-          Layer.succeed(StudioOutputReactor, {
-            captureBaselineBeforeTurn: () => Effect.void,
+          Layer.succeed(HubOutputReactor, {
+            captureBaselineBeforeTurn: () => Effect.succeed({ status: "not-applicable" as const }),
             cancelPendingTurnBaseline: () => Effect.void,
             start: Effect.acquireRelease(
               Effect.sync(() => {
                 started.push("studio-output-reactor");
               }),
               () => Effect.sync(() => stopped.push("studio-output-reactor")),
+            ),
+            drain: Effect.void,
+          }),
+        ),
+        Layer.provideMerge(
+          Layer.succeed(ThreadGitMetadataReactor, {
+            start: Effect.acquireRelease(
+              Effect.sync(() => {
+                started.push("thread-git-metadata-reactor");
+              }),
+              () => Effect.sync(() => stopped.push("thread-git-metadata-reactor")),
             ),
             drain: Effect.void,
           }),
@@ -103,7 +129,9 @@ describe("OrchestrationReactor", () => {
       "studio-output-reactor",
       "checkpoint-reactor",
       "compaction-reactor",
+      "thread-git-metadata-reactor",
       "provider-runtime-ingestion",
+      "sidechat-expiry-reactor",
       "provider-command-reactor",
     ]);
     expect(reconciledOpenTurns).toBe(1);
@@ -111,8 +139,10 @@ describe("OrchestrationReactor", () => {
     await Effect.runPromise(Scope.close(scope, Exit.void));
     expect(stopped).toEqual([
       "provider-command-reactor",
+      "sidechat-expiry-reactor",
       "provider-runtime-ingestion",
       "compaction-reactor",
+      "thread-git-metadata-reactor",
       "checkpoint-reactor",
       "studio-output-reactor",
     ]);

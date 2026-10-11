@@ -1,330 +1,105 @@
-// Real-provider compaction e2e suite. One serial describe-block per provider;
-// providers without an API key in the environment are skipped.
+import { randomUUID } from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
+import { ProviderKind, type OrchestrationThread } from "../../../packages/contracts/src/orchestration";
+import type { NativeApi } from "../../../packages/contracts/src/ipc";
+import { parseCases, requiredRunPath } from "../config";
+import { createTestThread } from "../seed-project";
 
-interface ProviderSpec {
-  readonly id: string;
-  readonly label: string;
-  readonly envKeys: readonly string[];
-  // Whether /compact (manual compaction) is offered by this provider.
-  readonly manualCompact: boolean;
-  // Whether the provider supports compaction at all.
-  readonly compactionSupported: boolean;
-  // Preferred model slug fragment (small context window where possible).
-  readonly preferModel?: string;
+const cases = parseCases(process.env.SYNARA_E2E_CASES, ProviderKind.literals);
+const workspaceRoot = requiredRunPath(process.env.SYNARA_E2E_WORKSPACE_ROOT, "SYNARA_E2E_WORKSPACE_ROOT");
+
+async function readThread(page: Page, threadId: string): Promise<OrchestrationThread> {
+  return page.evaluate(async (id) => {
+    const modulePath = "/src/nativeApi.ts";
+    const { ensureNativeApi } = await import(/* @vite-ignore */ modulePath) as { ensureNativeApi: () => NativeApi };
+    const snapshot = await ensureNativeApi().orchestration.getThreadDetailSnapshot({ threadId: id as never });
+    if (!snapshot) throw new Error("Test thread was not found.");
+    return snapshot.thread;
+  }, threadId);
 }
 
-const PROVIDERS: readonly ProviderSpec[] = [
-  {
-    id: "codex",
-    label: "Codex",
-    envKeys: ["OPENAI_API_KEY", "CODEX_API_KEY"],
-    manualCompact: true,
-    compactionSupported: true,
-  },
-  {
-    id: "claudeAgent",
-    label: "Claude",
-    envKeys: ["ANTHROPIC_API_KEY"],
-    manualCompact: false,
-    compactionSupported: true,
-  },
-  {
-    id: "grok",
-    label: "Grok",
-    envKeys: ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY"],
-    manualCompact: true,
-    compactionSupported: true,
-  },
-  {
-    id: "opencode",
-    label: "OpenCode",
-    envKeys: ["OPENCODE_API_KEY", "OPENCODE_GO_API_KEY"],
-    manualCompact: true,
-    compactionSupported: true,
-    preferModel: "deepseek-v4-flash-free",
-  },
-  {
-    id: "kilo",
-    label: "Kilo",
-    envKeys: ["OPENCODE_API_KEY", "OPENCODE_GO_API_KEY"],
-    manualCompact: true,
-    compactionSupported: true,
-  },
-  {
-    id: "pi",
-    label: "Pi",
-    envKeys: ["PI_API_KEY"],
-    manualCompact: true,
-    compactionSupported: true,
-  },
-  {
-    id: "cursor",
-    label: "Cursor",
-    envKeys: ["CURSOR_API_KEY"],
-    manualCompact: false,
-    compactionSupported: false,
-  },
-  {
-    id: "droid",
-    label: "Droid",
-    envKeys: ["FACTORY_API_KEY"],
-    manualCompact: false,
-    compactionSupported: false,
-  },
-  {
-    id: "antigravity",
-    label: "Antigravity",
-    envKeys: ["ANTIGRAVITY_API_KEY"],
-    manualCompact: false,
-    compactionSupported: false,
-  },
-];
-
-const workspaceName = process.env.SYNARA_E2E_WORKSPACE_NAME ?? "";
-
-function requestedProviders(): ReadonlySet<string> | null {
-  const raw = process.env.SYNARA_E2E_PROVIDERS?.trim();
-  if (!raw) return null;
-  return new Set(raw.split(",").map((entry) => entry.trim().toLowerCase()));
-}
-
-function hasKey(spec: ProviderSpec): boolean {
-  return spec.envKeys.some((key) => (process.env[key] ?? "").length > 0);
-}
-
-// A long, cheap-to-generate pasted text used to grow context toward the
-// compaction threshold on inexpensive providers.
-function longContextPrompt(): string {
-  const filler = Array.from(
-    { length: 400 },
-    (_, index) =>
-      `Line ${index}: the quick brown fox jumps over the lazy dog while enumerating context tokens for the compaction threshold test.`,
-  ).join("\n");
-  return `Here is a long document. Reply with only the word "ok".\n\n${filler}`;
-}
-
-async function openWorkspace(page: Page): Promise<void> {
-  await page.goto("/");
-  const projectPicker = page.getByRole("combobox").filter({ hasText: /work in a project/i });
-  await projectPicker.waitFor({ timeout: 30_000 });
-  await projectPicker.click();
-  const folder = page.getByRole("option", { name: workspaceName, exact: true }).first();
-  await folder.waitFor({ timeout: 30_000 });
-  await folder.click();
-}
-
-async function selectProvider(page: Page, spec: ProviderSpec): Promise<void> {
-  await page.keyboard.press("Escape");
-  await page.waitForTimeout(500);
-
-  const modelTrigger = page.locator("[data-testid='provider-model-picker']").first();
-  await modelTrigger.waitFor({ state: "visible", timeout: 15_000 });
-  await modelTrigger.click();
-
-  const modelPickerMenu = page.getByRole("menu").first();
-  await modelPickerMenu.waitFor({ timeout: 15_000 });
-
-  const providerItem = page
-    .locator("[data-slot='menu-sub-trigger']")
-    .filter({ hasText: spec.label });
-  try {
-    await providerItem.first().waitFor({ timeout: 15_000 });
-  } catch {
-    const disabledRow = page
-      .locator("[data-slot='menu-item']")
-      .filter({ hasText: spec.label })
-      .first();
-    if (await disabledRow.isVisible().catch(() => false)) {
-      const rowText = (await disabledRow.textContent()) ?? "";
-      throw new Error(
-        `provider "${spec.label}" is listed but not selectable (row reads "${rowText.trim()}") — likely unavailable on the server`,
-      );
-    }
-    throw new Error(`provider "${spec.label}" not found in the provider picker`);
+function assertHealthy(thread: OrchestrationThread): void {
+  if (thread.session?.lastError || thread.latestTurn?.state === "error" || thread.latestTurn?.state === "interrupted") {
+    throw new Error("The test thread failed or was interrupted; inspect the retained isolated run.");
   }
-  await providerItem.first().click();
-
-  const search = page.getByRole("searchbox", { name: /search models/i });
-  if (spec.preferModel) {
-    const searchReady = await search
-      .waitFor({ timeout: 10_000 })
-      .then(() => true)
-      .catch(() => false);
-    if (searchReady) {
-      await search.fill(spec.preferModel);
-    }
+  if (thread.hasPendingApprovals || thread.hasPendingUserInput || thread.claudeCacheReview) {
+    throw new Error("Provider requires operator input; the harness does not approve tools or bypass cache review.");
   }
-
-  // Long model lists collapse provider groups by default, which hides every
-  // radio item; expand the groups if no item shows up on its own.
-  const modelItems = page.getByRole("menuitemradio");
-  const modelItemsAppeared = await modelItems
-    .first()
-    .waitFor({ timeout: 10_000 })
-    .then(() => true)
-    .catch(() => false);
-  if (!modelItemsAppeared) {
-    const groupTriggers = page
-      .getByRole("menu")
-      .last()
-      .locator("[data-slot='collapsible-trigger']");
-    const triggerCount = await groupTriggers.count();
-    for (let index = 0; index < triggerCount; index += 1) {
-      await groupTriggers.nth(index).click();
-    }
-    await modelItems.first().waitFor({ timeout: 30_000 });
-  }
-  const preferred = spec.preferModel
-    ? page.getByRole("menuitemradio", { name: new RegExp(spec.preferModel, "i") })
-    : modelItems;
-  const target = (await preferred.count()) > 0 ? preferred.first() : modelItems.first();
-  await target.click();
-  await page.keyboard.press("Escape").catch(() => {});
 }
 
 function composer(page: Page) {
-  return page.locator("[contenteditable='true']").first();
+  return page.locator('[data-chat-composer-form="true"] [contenteditable="true"]');
 }
 
-async function sendMessage(page: Page, text: string): Promise<void> {
-  const input = composer(page);
-  await input.click();
-  await input.fill(text).catch(async () => {
-    // contenteditable editors may not support fill(); fall back to insertText
-    // so huge prompts don't take minutes to type.
-    await page.keyboard.insertText(text);
-  });
-  await page.keyboard.press("Enter");
+async function sendAndObserveReply(page: Page, threadId: string): Promise<void> {
+  const before = await readThread(page, threadId);
+  const beforeIds = new Set(before.messages.map((message) => message.id));
+  const marker = `compaction-proof-${randomUUID()}`;
+  await expect(composer(page)).toHaveCount(1);
+  await composer(page).fill(`Reply with exactly ${marker}. Do not use tools.`);
+  await composer(page).press("Enter");
+  let assistantId: string | undefined;
+  await expect.poll(async () => {
+    const thread = await readThread(page, threadId);
+    assertHealthy(thread);
+    const freshUser = thread.messages.find((message) => !beforeIds.has(message.id) && message.role === "user" && message.text.includes(marker));
+    const reply = thread.messages.find((message) => !beforeIds.has(message.id) && message.role === "assistant" && !message.streaming && message.text.includes(marker) && message.turnId === freshUser?.turnId);
+    assistantId = reply?.id;
+    return Boolean(freshUser?.turnId && reply && thread.latestTurn?.turnId === freshUser.turnId && thread.latestTurn.state === "completed" && !thread.session?.activeTurnId);
+  }, { timeout: 180_000, message: "A fresh assistant reply and its completed turn must follow this exact prompt." }).toBe(true);
+  await expect(page.locator(`[data-message-id="${assistantId}"][data-message-role="assistant"]`)).toContainText(marker);
 }
 
-async function openContextMeterPopover(page: Page): Promise<void> {
-  const meter = page.getByRole("button", { name: /^Context window / }).first();
-  await meter.waitFor({ timeout: 60_000 });
+async function openMeter(page: Page): Promise<void> {
+  const meter = page.getByRole("button", { name: /^Context window / });
+  await expect(meter).toHaveCount(1);
   await meter.hover();
+  await expect(page.getByText("Context window", { exact: true })).toBeVisible();
 }
 
-async function waitForAssistantReply(page: Page, timeout = 180_000): Promise<void> {
-  // The composer send affordance re-enables once the turn completes; the
-  // simplest robust signal is the meter updating with non-zero usage.
-  await expect(page.getByRole("button", { name: /^Context window / }).first()).toBeVisible({
-    timeout,
-  });
-}
+for (const spec of cases) {
+  test(`${spec.provider} / ${spec.model}: ${spec.compaction}`, async ({ page }, testInfo) => {
+    await page.goto("/");
+    const threadId = await createTestThread(page, spec, workspaceRoot);
+    await page.goto(`/${threadId}`);
+    await sendAndObserveReply(page, threadId);
+    const before = await readThread(page, threadId);
+    expect(before.modelSelection.provider).toBe(spec.provider);
+    expect(before.modelSelection.model).toBe(spec.model);
+    const beforeActivityIds = new Set(before.activities.map((activity) => activity.id));
+    await openMeter(page);
 
-// The timeline collapses compaction work-log entries into a "Worked for Xs" /
-// "Details" disclosure by default, so the terminal "Context compacted" text may
-// be hidden until that disclosure is expanded.
-function compactionText(page: Page) {
-  return page.getByText(/Context compacted|Context compacted manually/).first();
-}
-
-function workLogTrigger(page: Page) {
-  return page
-    .locator('[data-slot="collapsible-trigger"]')
-    .filter({ hasText: /^Worked for|Details/ })
-    .last();
-}
-
-async function waitForCompactionRow(page: Page, timeout = 180_000): Promise<void> {
-  const text = compactionText(page);
-  const deadline = Date.now() + timeout;
-
-  // The row can appear inside a disclosure that starts collapsed (and can
-  // re-collapse on re-render), so keep expanding the latest one while polling.
-  while (Date.now() < deadline) {
-    if (await text.isVisible().catch(() => false)) return;
-
-    const trigger = workLogTrigger(page);
-    if (await trigger.isVisible().catch(() => false)) {
-      const expanded = await trigger.getAttribute("aria-expanded").catch(() => null);
-      if (expanded !== "true") {
-        await trigger.click().catch(() => {});
-      }
+    if (spec.compaction === "unavailable") {
+      await expect(page.getByText("Compaction unavailable for this provider.", { exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Compact now", exact: true })).toHaveCount(0);
+      await composer(page).fill("/compact");
+      await expect(page.getByRole("option", { name: /compact/i })).toHaveCount(0);
+      await composer(page).fill("");
+      return;
     }
-    await page.waitForTimeout(1_000);
-  }
 
-  throw new Error(
-    `timed out after ${timeout}ms waiting for the "Context compacted" timeline row ` +
-      "(neither the compaction text nor an expandable work-log disclosure revealed it)",
-  );
-}
-
-for (const spec of PROVIDERS) {
-  const requested = requestedProviders();
-  const included =
-    requested === null ||
-    requested.has(spec.id.toLowerCase()) ||
-    requested.has(spec.label.toLowerCase());
-
-  test.describe(`${spec.label} compaction`, () => {
-    test.skip(!included, `provider not in SYNARA_E2E_PROVIDERS`);
-    test.skip(!hasKey(spec), `no API key (${spec.envKeys.join(" or ")})`);
-
-    test(`compaction behavior via web UI`, async ({ page }) => {
-      await openWorkspace(page);
-      await selectProvider(page, spec);
-
-      if (!spec.compactionSupported) {
-        // Providers without compaction: /compact must not be offered and the
-        // meter must say compaction is unavailable.
-        await sendMessage(page, 'Reply with only the word "ok".');
-        await waitForAssistantReply(page);
-
-        await composer(page).click();
-        await page.keyboard.type("/compact");
-        await expect(page.getByRole("option", { name: /compact/i })).toHaveCount(0);
-        await page.keyboard.press("Escape");
-
-        await openContextMeterPopover(page);
-        await expect(page.getByText("Compaction unavailable for this provider.")).toBeVisible();
-        return;
+    // Claude's button uses its native durable /compact turn; other providers use their RPC.
+    const compact = page.getByRole("button", { name: "Compact now", exact: true });
+    await expect(compact).toBeEnabled({ timeout: 30_000 });
+    await compact.click();
+    let completionId: string | undefined;
+    await expect.poll(async () => {
+      const thread = await readThread(page, threadId);
+      assertHealthy(thread);
+      const fresh = thread.activities.filter((activity) => !beforeActivityIds.has(activity.id));
+      if (fresh.some((activity) => activity.kind === "thread.compaction-failed" || activity.kind === "thread.compaction-suspended" || (activity.kind === "context-compaction" && activity.tone === "error"))) {
+        throw new Error("Fresh compaction failure recorded.");
       }
-
-      if (spec.manualCompact) {
-        // Cheap path for expensive providers: seed a tiny turn, then compact
-        // manually from the composer.
-        await sendMessage(page, 'Reply with only the word "ok".');
-        await waitForAssistantReply(page);
-        await sendMessage(page, "/compact");
-      } else {
-        // Claude: no manual compaction. Assert /compact is not offered, then
-        // grow context with a long pasted document toward the native
-        // auto-compaction threshold.
-        await composer(page).click();
-        await page.keyboard.type("/compact");
-        await expect(page.getByRole("option", { name: /compact/i })).toHaveCount(0);
-        await page.keyboard.press("Escape");
-        await composer(page).click();
-        await page.keyboard.press("ControlOrMeta+A");
-        await page.keyboard.press("Backspace");
-        await sendMessage(page, longContextPrompt());
-        await waitForAssistantReply(page);
-      }
-
-      // 1) Meter reflects a compaction state (in-progress, then a terminal
-      //    owner state) and never an error.
-      await openContextMeterPopover(page);
-      const meterState = page
-        .getByText("Auto-compacts when context is nearly full.")
-        .or(page.getByText("Synara will compact automatically."))
-        .or(page.getByText("Compact now"))
-        .or(page.getByText("Compact now with /compact."))
-        .or(page.getByText(/Compacting context/));
-      await expect(meterState.first()).toBeVisible({ timeout: 120_000 });
-      await expect(page.getByText(/Compaction failed/)).toHaveCount(0);
-
-      // 2) Timeline shows the compaction item (manual compaction always emits
-      //    one; auto compaction emits one once the threshold is crossed).
-      if (spec.manualCompact) {
-        await waitForCompactionRow(page);
-      }
-
-      // 3) The thread still works after compaction.
-      await sendMessage(page, 'Say "done".');
-      await waitForAssistantReply(page);
-      await expect(page.getByText(/error/i)).toHaveCount(0);
-    });
+      const completed = fresh.find((activity) => {
+        if (activity.kind === "thread.compaction-completed") return true;
+        const payload = activity.payload as Record<string, unknown> | null;
+        return activity.kind === "context-compaction" && (payload?.state === "compacted" || payload?.status === "completed");
+      });
+      completionId = completed?.id;
+      return Boolean(completed && !thread.session?.activeTurnId && thread.latestTurn?.state !== "running");
+    }, { timeout: 180_000, message: "A fresh durable completed compaction event is required; meter visibility is not proof." }).toBe(true);
+    await testInfo.attach("compaction-evidence", { body: JSON.stringify({ provider: spec.provider, model: spec.model, threadId, completionId }), contentType: "application/json" });
+    await page.keyboard.press("Escape");
+    await sendAndObserveReply(page, threadId);
   });
 }

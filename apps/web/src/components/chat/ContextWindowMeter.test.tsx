@@ -229,6 +229,46 @@ describe("ContextWindowMeterDetails", () => {
     expect(markup).not.toContain("Retry compaction");
   });
 
+  it("keeps the native Claude compact action with cache details", () => {
+    const markup = renderToStaticMarkup(
+      <ContextWindowMeterDetails
+        usage={usage}
+        showClaudeCache
+        compaction={nativeAutoCompaction}
+        compactAction={{
+          disabledReason: "Wait for Claude to finish.",
+          isSubmitting: false,
+          onCompact: async () => true,
+        }}
+      />,
+    );
+    expect(markup).toContain("Wait for Claude to finish.");
+    expect(markup).toContain("Compact now");
+    expect(markup).not.toContain("Compaction unavailable");
+  });
+
+  it("loads the saved cooldown and threshold", () => {
+    const markup = renderToStaticMarkup(
+      <ContextWindowMeterDetails
+        usage={usage}
+        compaction={manualOnlyCompaction}
+        compactionRuntimeStatus={{
+          owner: "synara",
+          providerAutoEnabled: false,
+          manualAvailability: { available: true },
+          settings: {
+            autoEnabled: true,
+            trigger: { kind: "percent", percent: 72 },
+            cooldownSeconds: 120,
+          },
+        }}
+        onUpdateCompactionSettings={() => {}}
+      />,
+    );
+    expect(markup).toContain('value="72"');
+    expect(markup).toContain('value="120"');
+  });
+
   it("renders the settings toggle only for synara-managed candidates", () => {
     const markup = renderToStaticMarkup(
       <ContextWindowMeterDetails

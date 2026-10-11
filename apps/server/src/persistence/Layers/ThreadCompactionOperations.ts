@@ -1,5 +1,9 @@
-import type { ThreadTokenUsageSnapshot } from "@synara/contracts";
-import { Effect, Layer, Option } from "effect";
+import {
+  ProviderCompactionResult,
+  ThreadCompactionSettings,
+  ThreadTokenUsageSnapshot,
+} from "@synara/contracts";
+import { Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { toPersistenceSqlError } from "../Errors.ts";
@@ -12,6 +16,8 @@ import {
 interface ThreadCompactionOperationRow {
   readonly threadId: string;
   readonly requestId: string;
+  readonly requestFingerprint: string | null;
+  readonly resultJson: string | null;
   readonly status: ThreadCompactionOperation["status"];
   readonly owner: ThreadCompactionOperation["owner"];
   readonly trigger: ThreadCompactionOperation["trigger"];
@@ -31,6 +37,8 @@ interface ThreadCompactionOperationRow {
 const columns = (sql: SqlClient.SqlClient) => sql`
   thread_id AS "threadId",
   request_id AS "requestId",
+  request_fingerprint AS "requestFingerprint",
+  result_json AS "resultJson",
   status,
   owner,
   trigger,
@@ -50,7 +58,7 @@ const columns = (sql: SqlClient.SqlClient) => sql`
 function parseUsage(json: string | null): ThreadTokenUsageSnapshot | null {
   if (json === null) return null;
   try {
-    return JSON.parse(json) as ThreadTokenUsageSnapshot;
+    return Schema.decodeUnknownSync(ThreadTokenUsageSnapshot)(JSON.parse(json));
   } catch {
     return null;
   }
@@ -64,6 +72,11 @@ function fromRow(row: ThreadCompactionOperationRow): ThreadCompactionOperation {
   return {
     threadId: row.threadId,
     requestId: row.requestId,
+    requestFingerprint: row.requestFingerprint,
+    result:
+      row.resultJson === null
+        ? null
+        : Schema.decodeUnknownSync(ProviderCompactionResult)(JSON.parse(row.resultJson)),
     status: row.status,
     owner: row.owner,
     trigger: row.trigger,
@@ -87,12 +100,12 @@ const make = Effect.gen(function* () {
   const upsert: ThreadCompactionOperationRepositoryShape["upsert"] = (operation) =>
     sql`
       INSERT INTO thread_compaction_operations (
-        thread_id, request_id, status, owner, trigger, session_effect,
+        thread_id, request_id, request_fingerprint, result_json, status, owner, trigger, session_effect,
         failure_kind, detail, retryable, outcome_known,
         before_usage_json, after_usage_json,
         requested_at, started_at, completed_at, updated_at
       ) VALUES (
-        ${operation.threadId}, ${operation.requestId}, ${operation.status},
+        ${operation.threadId}, ${operation.requestId}, ${operation.requestFingerprint ?? null}, ${operation.result == null ? null : JSON.stringify(operation.result)}, ${operation.status},
         ${operation.owner}, ${operation.trigger}, ${operation.sessionEffect},
         ${operation.failureKind}, ${operation.detail},
         ${operation.retryable === null ? null : operation.retryable ? 1 : 0},
@@ -102,8 +115,9 @@ const make = Effect.gen(function* () {
         ${operation.requestedAt}, ${operation.startedAt}, ${operation.completedAt},
         ${operation.updatedAt}
       )
-      ON CONFLICT (thread_id) DO UPDATE SET
-        request_id = excluded.request_id,
+      ON CONFLICT (request_id) DO UPDATE SET
+        request_fingerprint = COALESCE(excluded.request_fingerprint, thread_compaction_operations.request_fingerprint),
+        result_json = excluded.result_json,
         status = excluded.status,
         owner = excluded.owner,
         trigger = excluded.trigger,
@@ -118,9 +132,25 @@ const make = Effect.gen(function* () {
         started_at = excluded.started_at,
         completed_at = excluded.completed_at,
         updated_at = excluded.updated_at
+      WHERE thread_compaction_operations.thread_id = excluded.thread_id
+      RETURNING request_id
     `.pipe(
-      Effect.asVoid,
+      Effect.flatMap((rows) =>
+        rows.length === 1
+          ? Effect.void
+          : Effect.fail(new Error("Compaction request belongs to a different thread.")),
+      ),
       Effect.mapError(toPersistenceSqlError("ThreadCompactionOperation.upsert")),
+    );
+
+  const getByRequestId: ThreadCompactionOperationRepositoryShape["getByRequestId"] = (requestId) =>
+    sql<ThreadCompactionOperationRow>`
+      SELECT ${columns(sql)} FROM thread_compaction_operations WHERE request_id = ${requestId}
+    `.pipe(
+      Effect.flatMap((rows) =>
+        Effect.try(() => Option.fromNullishOr(rows[0]).pipe(Option.map(fromRow))),
+      ),
+      Effect.mapError(toPersistenceSqlError("ThreadCompactionOperation.getByRequestId")),
     );
 
   const getByThreadId: ThreadCompactionOperationRepositoryShape["getByThreadId"] = (threadId) =>
@@ -128,8 +158,11 @@ const make = Effect.gen(function* () {
       SELECT ${columns(sql)}
       FROM thread_compaction_operations
       WHERE thread_id = ${threadId}
+      ORDER BY updated_at DESC, rowid DESC LIMIT 1
     `.pipe(
-      Effect.map((rows) => Option.fromNullishOr(rows[0]).pipe(Option.map(fromRow))),
+      Effect.flatMap((rows) =>
+        Effect.try(() => Option.fromNullishOr(rows[0]).pipe(Option.map(fromRow))),
+      ),
       Effect.mapError(toPersistenceSqlError("ThreadCompactionOperation.getByThreadId")),
     );
 
@@ -138,9 +171,9 @@ const make = Effect.gen(function* () {
       SELECT ${columns(sql)}
       FROM thread_compaction_operations
       WHERE status IN ('pending', 'running')
-      ORDER BY thread_id ASC
+      ORDER BY updated_at ASC, rowid ASC
     `.pipe(
-      Effect.map((rows) => rows.map(fromRow)),
+      Effect.flatMap((rows) => Effect.try(() => rows.map(fromRow))),
       Effect.mapError(toPersistenceSqlError("ThreadCompactionOperation.listUnsettled")),
     );
 
@@ -149,15 +182,47 @@ const make = Effect.gen(function* () {
       SELECT ${columns(sql)}
       FROM thread_compaction_operations
       WHERE status IN ('completed', 'failed', 'uncertain')
-      ORDER BY thread_id ASC
+      ORDER BY updated_at ASC, rowid ASC
     `.pipe(
-      Effect.map((rows) => rows.map(fromRow)),
+      Effect.flatMap((rows) => Effect.try(() => rows.map(fromRow))),
       Effect.mapError(toPersistenceSqlError("ThreadCompactionOperation.listSettled")),
     );
 
+  const setSettings: ThreadCompactionOperationRepositoryShape["setSettings"] = (
+    threadId,
+    settings,
+  ) =>
+    sql`INSERT INTO thread_compaction_settings (thread_id, settings_json)
+        VALUES (${threadId}, ${JSON.stringify(settings)})
+        ON CONFLICT (thread_id) DO UPDATE SET settings_json = excluded.settings_json`.pipe(
+      Effect.asVoid,
+      Effect.mapError(toPersistenceSqlError("ThreadCompactionOperation.setSettings")),
+    );
+
+  const listSettings: ThreadCompactionOperationRepositoryShape["listSettings"] = () =>
+    sql<{
+      threadId: string;
+      settingsJson: string;
+    }>`SELECT thread_id AS "threadId", settings_json AS "settingsJson" FROM thread_compaction_settings`.pipe(
+      Effect.flatMap((rows) =>
+        Effect.try(() =>
+          rows.map((row) => ({
+            threadId: row.threadId,
+            settings: Schema.decodeUnknownSync(ThreadCompactionSettings)(
+              JSON.parse(row.settingsJson),
+            ),
+          })),
+        ),
+      ),
+      Effect.mapError(toPersistenceSqlError("ThreadCompactionOperation.listSettings")),
+    );
+
   return {
+    setSettings,
+    listSettings,
     upsert,
     getByThreadId,
+    getByRequestId,
     listUnsettled,
     listSettled,
   } satisfies ThreadCompactionOperationRepositoryShape;

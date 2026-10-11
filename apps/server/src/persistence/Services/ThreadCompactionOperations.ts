@@ -2,14 +2,18 @@
  * ThreadCompactionOperationRepository - Repository interface for durable
  * compaction operations.
  *
- * Owns one row per thread describing the latest compaction operation so the
+ * Owns a history row per request so the
  * reactor can reconcile in-flight passes after a restart.
  *
  * @module ThreadCompactionOperationRepository
  */
 import { Option, ServiceMap } from "effect";
 import type { Effect } from "effect";
-import type { ThreadTokenUsageSnapshot } from "@synara/contracts";
+import type {
+  ProviderCompactionResult,
+  ThreadCompactionSettings,
+  ThreadTokenUsageSnapshot,
+} from "@synara/contracts";
 
 import type { PersistenceSqlError } from "../Errors.ts";
 
@@ -23,6 +27,8 @@ export type ThreadCompactionOperationStatus =
 export interface ThreadCompactionOperation {
   readonly threadId: string;
   readonly requestId: string;
+  readonly requestFingerprint?: string | null;
+  readonly result?: ProviderCompactionResult | null;
   readonly status: ThreadCompactionOperationStatus;
   readonly owner: "provider" | "synara";
   readonly trigger: "manual" | "provider-auto" | "synara-auto";
@@ -40,10 +46,23 @@ export interface ThreadCompactionOperation {
 }
 
 export interface ThreadCompactionOperationRepositoryShape {
-  /** Insert or replace the latest compaction operation row for a thread. */
+  readonly setSettings: (
+    threadId: string,
+    settings: ThreadCompactionSettings,
+  ) => Effect.Effect<void, PersistenceSqlError>;
+  readonly listSettings: () => Effect.Effect<
+    ReadonlyArray<{ readonly threadId: string; readonly settings: ThreadCompactionSettings }>,
+    PersistenceSqlError
+  >;
+
+  /** Insert or advance one request without replacing earlier history. */
   readonly upsert: (
     operation: ThreadCompactionOperation,
   ) => Effect.Effect<void, PersistenceSqlError>;
+
+  readonly getByRequestId: (
+    requestId: string,
+  ) => Effect.Effect<Option.Option<ThreadCompactionOperation>, PersistenceSqlError>;
 
   /** Read the latest compaction operation for a thread. */
   readonly getByThreadId: (

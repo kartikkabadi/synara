@@ -17,7 +17,7 @@ import {
   ThreadId,
   type CommandId as CommandIdType,
   type CompactionOperationSummary,
-  type ProviderCompactionCapabilities,
+  type ProviderInstanceId,
   type ProviderCompactionRequest,
   type ProviderCompactionResult,
   type ProviderRuntimeEvent,
@@ -107,7 +107,7 @@ const serverCommandId = (tag: string): CommandIdType =>
 
 interface PendingWaiter {
   readonly request: ProviderCompactionRequest;
-  readonly deferred: Deferred.Deferred<ProviderCompactionResult, ProviderServiceError>;
+  readonly ready: Deferred.Deferred<void, ProviderServiceError>;
 }
 
 interface InFlightEntry {
@@ -128,6 +128,8 @@ function failValidation(issue: string): Effect.Effect<never, ProviderValidationE
 
 function outcomeKnownForError(error: ProviderServiceError): boolean {
   switch (error._tag) {
+    case "ProviderCompactionPersistenceError":
+      return error.outcomeKnown;
     case "ProviderValidationError":
     case "ProviderUnsupportedError":
     case "ProviderSessionNotFoundError":
@@ -150,9 +152,11 @@ const make = Effect.gen(function* () {
   const states = new Map<string, CompactionControlState>();
   const settings = new Map<string, ThreadCompactionSettings>();
   const latestUsage = new Map<string, ThreadTokenUsageSnapshot>();
+  const providerAutoEnabled = new Map<string, boolean>();
   const lastCompactions = new Map<string, CompactionOperationSummary>();
-  const capabilitiesCache = new Map<string, ProviderCompactionCapabilities | null>();
   const pendingWaiters = new Map<string, PendingWaiter>();
+  const admittedThreads = new Set<string>();
+  const nativePasses = new Map<string, { requestId: string; event: ProviderRuntimeEvent }>();
   const lastAutoCompactionAt = new Map<string, number>();
   const autoFailureCounts = new Map<string, number>();
   const autoInFlight = new Set<string>();
@@ -163,44 +167,45 @@ const make = Effect.gen(function* () {
   const getState = (threadId: string): CompactionControlState =>
     states.get(threadId) ?? IDLE_COMPACTION_STATE;
 
-  const lookupProviderName = (threadId: ThreadId) =>
+  const lookupSession = (threadId: ThreadId) =>
     projectionSnapshotQuery.getThreadDetailById(threadId).pipe(
-      Effect.map((threadOption) => {
-        const providerName = Option.getOrUndefined(threadOption)?.session?.providerName ?? null;
-        return providerName !== null && isProviderDiscoveryKind(providerName) ? providerName : null;
-      }),
+      Effect.map((threadOption) => Option.getOrUndefined(threadOption)?.session ?? null),
       Effect.catch(() => Effect.succeed(null)),
     );
 
-  const lookupCapabilities = (provider: (typeof ProviderDiscoveryKind.Type & string) | null) =>
-    Effect.gen(function* () {
-      if (provider === null) {
-        return null;
-      }
-      const cached = capabilitiesCache.get(provider);
-      if (cached !== undefined) {
-        return cached;
-      }
-      const capabilities = yield* providerDiscoveryService
-        .getComposerCapabilities({ provider })
-        .pipe(
-          Effect.map((result) => result.compaction),
-          Effect.catch(() => Effect.succeed(null)),
-        );
-      if (capabilities !== null) {
-        capabilitiesCache.set(provider, capabilities);
-      }
-      return capabilities;
-    });
+  const lookupCapabilities = (
+    session: {
+      readonly providerName: string | null;
+      readonly providerInstanceId?: ProviderInstanceId;
+    } | null,
+  ) => {
+    if (!session || !isProviderDiscoveryKind(session.providerName)) return Effect.succeed(null);
+    return providerDiscoveryService
+      .getComposerCapabilities({
+        provider: session.providerName,
+        ...(session.providerInstanceId !== undefined
+          ? { instanceId: session.providerInstanceId }
+          : {}),
+      })
+      .pipe(
+        Effect.map((result) => result.compaction ?? null),
+        Effect.catch(() => Effect.succeed(null)),
+      );
+  };
 
   const buildRuntimeStatus = (threadId: ThreadId) =>
     Effect.gen(function* () {
-      const provider = yield* lookupProviderName(threadId);
-      const capabilities = yield* lookupCapabilities(provider);
+      const session = yield* lookupSession(threadId);
+      const capabilities = yield* lookupCapabilities(session);
       return deriveThreadCompactionRuntimeStatus({
-        provider,
+        provider: session?.providerName ?? null,
         capabilities,
-        contextWindowMaxTokens: latestUsage.get(threadId)?.maxTokens ?? null,
+        providerAutoEnabled: providerAutoEnabled.get(threadId),
+        nativeTrigger: providerService.getNativeCompactionTrigger
+          ? yield* providerService
+              .getNativeCompactionTrigger(threadId)
+              .pipe(Effect.orElseSucceed(() => undefined))
+          : undefined,
         lastCompaction: lastCompactions.get(threadId),
         settings: settings.get(threadId),
         controlState: getState(threadId),
@@ -235,11 +240,17 @@ const make = Effect.gen(function* () {
     state: CompactionControlState,
     event: CompactionLifecycleInput,
     previous: CompactionControlState,
+    result?: ProviderCompactionResult,
   ) =>
     Effect.gen(function* () {
       const now = new Date().toISOString();
       const base = {
         threadId,
+        requestFingerprint:
+          "requestId" in event.payload
+            ? (inFlight.get(event.payload.requestId)?.fingerprint ?? null)
+            : null,
+        result: result ?? null,
         sessionEffect: null,
         failureKind: null,
         detail: null,
@@ -285,7 +296,10 @@ const make = Effect.gen(function* () {
             requestId: event.payload.requestId,
             status: "completed",
             owner: previous.status === "running" ? previous.owner : "synara",
-            trigger: previous.status === "running" ? previous.trigger : "manual",
+            trigger:
+              previous.status === "running" || previous.status === "pending"
+                ? previous.trigger
+                : "manual",
             sessionEffect: event.payload.sessionEffect,
             beforeUsage: event.payload.beforeUsage ?? null,
             afterUsage: event.payload.afterUsage ?? null,
@@ -299,8 +313,14 @@ const make = Effect.gen(function* () {
             requestId: event.payload.requestId,
             status: event.payload.outcomeKnown ? "failed" : "uncertain",
             owner: previous.status === "running" ? previous.owner : "synara",
-            trigger: previous.status === "running" ? previous.trigger : "manual",
+            trigger:
+              previous.status === "running" || previous.status === "pending"
+                ? previous.trigger
+                : "manual",
             failureKind: event.payload.failureKind,
+            beforeUsage: previous.status === "running" ? (previous.beforeUsage ?? null) : null,
+            startedAt: previous.status === "running" ? previous.startedAt : null,
+            requestedAt: previous.status === "pending" ? previous.requestedAt : null,
             detail: event.payload.detail ?? null,
             retryable: event.payload.retryable,
             outcomeKnown: event.payload.outcomeKnown,
@@ -319,13 +339,15 @@ const make = Effect.gen(function* () {
   const applyEvent = (
     threadId: ThreadId,
     event: CompactionLifecycleInput,
+    result?: ProviderCompactionResult,
   ): Effect.Effect<CompactionControlState, PersistenceSqlError> =>
     Effect.gen(function* () {
       const previous = getState(threadId);
       const next = compactionReducer(previous, event);
+      if (next === previous) return previous;
       // Persist before committing the in-memory transition so a failed
       // durable write leaves the previous control state observable.
-      const row = yield* persistOperation(threadId, next, event, previous);
+      const row = yield* persistOperation(threadId, next, event, previous, result);
       states.set(threadId, next);
       const summary = row === null ? null : compactionSummaryFromOperation(row);
       if (summary !== null) {
@@ -431,26 +453,31 @@ const make = Effect.gen(function* () {
         yield* settle(input.requestId, fingerprint, { _tag: "failure", error: persistError });
         return yield* Effect.fail(persistError);
       }
+      latestUsage.delete(input.threadId);
       const outcome = yield* providerService.compactThread(input).pipe(
         Effect.map((result) => ({ _tag: "ok" as const, result })),
         Effect.catch((error) => Effect.succeed({ _tag: "err" as const, error })),
       );
       if (outcome._tag === "ok") {
         const afterUsage = latestUsage.get(input.threadId);
-        const completePersist = yield* applyEvent(input.threadId, {
-          type: "thread.compaction-completed",
-          payload: {
-            requestId: input.requestId,
-            sessionEffect:
-              outcome.result.kind === "runtime-restart-required"
-                ? "runtime-restart"
-                : outcome.result.kind,
-            ...(beforeUsage !== undefined ? { beforeUsage } : {}),
-            ...(afterUsage !== undefined ? { afterUsage } : {}),
-            durationMs: Math.max(0, Date.now() - startedAtMs),
-            createdAt: new Date().toISOString(),
+        const completePersist = yield* applyEvent(
+          input.threadId,
+          {
+            type: "thread.compaction-completed",
+            payload: {
+              requestId: input.requestId,
+              sessionEffect:
+                outcome.result.kind === "runtime-restart-required"
+                  ? "runtime-restart"
+                  : outcome.result.kind,
+              ...(beforeUsage !== undefined ? { beforeUsage } : {}),
+              ...(afterUsage !== undefined ? { afterUsage } : {}),
+              durationMs: Math.max(0, Date.now() - startedAtMs),
+              createdAt: new Date().toISOString(),
+            },
           },
-        }).pipe(
+          outcome.result,
+        ).pipe(
           Effect.map(() => ({ _tag: "ok" as const })),
           Effect.catch((error) => Effect.succeed({ _tag: "err" as const, error })),
         );
@@ -523,6 +550,12 @@ const make = Effect.gen(function* () {
 
   const validate = (input: ProviderCompactionRequest) =>
     Effect.gen(function* () {
+      if (
+        input.trigger === "synara-auto" &&
+        autoOptionsFromSettings(settings.get(input.threadId)) === null
+      ) {
+        return yield* failValidation("Automatic compaction was disabled before the request began.");
+      }
       const threadOption = yield* projectionSnapshotQuery
         .getThreadDetailById(input.threadId)
         .pipe(Effect.catch(() => Effect.succeed(Option.none())));
@@ -537,9 +570,15 @@ const make = Effect.gen(function* () {
         );
       }
       const capabilities = yield* providerDiscoveryService
-        .getComposerCapabilities({ provider: session.providerName })
+        .getComposerCapabilities({
+          provider: session.providerName,
+          ...(session.providerInstanceId !== undefined
+            ? { instanceId: session.providerInstanceId }
+            : {}),
+        })
         .pipe(Effect.catch(() => Effect.succeed(null)));
-      if (capabilities !== null && capabilities.compaction.manual.mode === "unsupported") {
+      const manualMode = capabilities?.compaction?.manual.mode;
+      if (manualMode !== "same-session" && manualMode !== "session-rollover") {
         return yield* failValidation(
           `Provider '${session.providerName}' does not support manual compaction.`,
         );
@@ -609,62 +648,133 @@ const make = Effect.gen(function* () {
           `A compaction operation is already ${state.status} for thread '${input.threadId}'.`,
         );
       }
-      const session = yield* validate(input);
-      const deferred = yield* Deferred.make<ProviderCompactionResult, ProviderServiceError>();
-      inFlight.set(input.requestId, { fingerprint, deferred });
-      if (session.activeTurnId !== null) {
-        // Defer behind the active turn; the turn-completion runtime event
-        // promotes the pending request. The pending row must be durable
-        // before the request may wait: an in-memory-only pending request
-        // would silently disappear on restart.
-        const pendingPersist = yield* applyEvent(input.threadId, {
-          type: "thread.compaction-requested",
-          payload: {
-            requestId: input.requestId,
-            trigger: input.trigger,
-            ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
-            createdAt: new Date().toISOString(),
-          },
-        }).pipe(
-          Effect.map(() => ({ _tag: "ok" as const })),
-          Effect.catch((error) => Effect.succeed({ _tag: "err" as const, error })),
+      if (admittedThreads.has(input.threadId)) {
+        return yield* failValidation(
+          `A compaction request is already being admitted for thread '${input.threadId}'.`,
         );
-        if (pendingPersist._tag === "err") {
-          const persistError = new ProviderCompactionPersistenceError({
-            operation: "CompactionReactor.request",
-            detail: pendingPersist.error.message,
-            outcomeKnown: true,
-            cause: pendingPersist.error,
-          });
-          yield* applyEventInMemory(input.threadId, {
-            type: "thread.compaction-failed",
+      }
+      const deferred = Deferred.makeUnsafe<ProviderCompactionResult, ProviderServiceError>();
+      admittedThreads.add(input.threadId);
+      inFlight.set(input.requestId, { fingerprint, deferred });
+      return yield* Effect.gen(function* () {
+        const persisted = Option.getOrUndefined(
+          yield* operations.getByRequestId(input.requestId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderCompactionPersistenceError({
+                  operation: "CompactionReactor.request",
+                  detail: cause.message,
+                  outcomeKnown: true,
+                  cause,
+                }),
+            ),
+          ),
+        );
+        if (persisted !== undefined) {
+          if (persisted.requestFingerprint !== fingerprint) {
+            return yield* failValidation(
+              `Request id '${input.requestId}' was already used for a different compaction request.`,
+            );
+          }
+          if (persisted.status === "completed" && persisted.result != null) {
+            yield* settle(input.requestId, fingerprint, {
+              _tag: "success",
+              result: persisted.result,
+            });
+            return persisted.result;
+          }
+          return yield* failValidation(
+            `Request id '${input.requestId}' has a durable ${persisted.status} outcome; use a new request only after reviewing the operation.`,
+          );
+        }
+        const session = yield* validate(input);
+        if (session.activeTurnId != null) {
+          const ready = Deferred.makeUnsafe<void, ProviderServiceError>();
+          pendingWaiters.set(input.threadId, { request: input, ready });
+          // Defer behind the active turn; the turn-completion runtime event
+          // promotes the pending request. The pending row must be durable
+          // before the request may wait: an in-memory-only pending request
+          // would silently disappear on restart.
+          const pendingPersist = yield* applyEvent(input.threadId, {
+            type: "thread.compaction-requested",
             payload: {
               requestId: input.requestId,
-              outcomeKnown: true,
-              retryable: true,
-              failureKind: "persistence-failure",
-              detail: persistError.detail,
+              trigger: input.trigger,
+              ...(input.instructions !== undefined ? { instructions: input.instructions } : {}),
               createdAt: new Date().toISOString(),
             },
-          });
-          yield* settle(input.requestId, fingerprint, { _tag: "failure", error: persistError });
-          return yield* Effect.fail(persistError);
+          }).pipe(
+            Effect.map(() => ({ _tag: "ok" as const })),
+            Effect.catch((error) => Effect.succeed({ _tag: "err" as const, error })),
+          );
+          if (pendingPersist._tag === "err") {
+            const persistError = new ProviderCompactionPersistenceError({
+              operation: "CompactionReactor.request",
+              detail: pendingPersist.error.message,
+              outcomeKnown: true,
+              cause: pendingPersist.error,
+            });
+            yield* applyEventInMemory(input.threadId, {
+              type: "thread.compaction-failed",
+              payload: {
+                requestId: input.requestId,
+                outcomeKnown: true,
+                retryable: true,
+                failureKind: "persistence-failure",
+                detail: persistError.detail,
+                createdAt: new Date().toISOString(),
+              },
+            });
+            yield* settle(input.requestId, fingerprint, { _tag: "failure", error: persistError });
+            return yield* Effect.fail(persistError);
+          }
+          yield* Deferred.await(ready);
+          yield* validate(input);
+          return yield* runOperation(input);
         }
-        pendingWaiters.set(input.threadId, { request: input, deferred });
-        return yield* Deferred.await(deferred);
-      }
-      return yield* runOperation(input);
+        return yield* runOperation(input);
+      }).pipe(
+        Effect.onExit((exit) =>
+          Effect.gen(function* () {
+            admittedThreads.delete(input.threadId);
+            pendingWaiters.delete(input.threadId);
+            const entry = inFlight.get(input.requestId);
+            if (entry === undefined || Exit.isSuccess(exit)) return;
+            const current = getState(input.threadId);
+            if (current.status === "pending" || current.status === "running") {
+              yield* applyEventBestEffort(input.threadId, {
+                type: "thread.compaction-failed",
+                payload: {
+                  requestId: input.requestId,
+                  outcomeKnown: current.status === "pending",
+                  retryable: current.status === "pending",
+                  failureKind: "request-interrupted",
+                  detail: "Compaction request ended before its result was confirmed.",
+                  createdAt: new Date().toISOString(),
+                },
+              });
+            }
+            inFlight.delete(input.requestId);
+            yield* Deferred.failCause(entry.deferred, exit.cause);
+          }),
+        ),
+      );
     });
 
   const suspendAutoCompaction = (threadId: ThreadId, reason: string, detail?: string) =>
-    applyEventBestEffort(threadId, {
-      type: "thread.compaction-suspended",
-      payload: {
-        reason,
-        ...(detail !== undefined ? { detail } : {}),
-        createdAt: new Date().toISOString(),
-      },
-    }).pipe(Effect.asVoid);
+    Effect.gen(function* () {
+      const disabled = { ...settings.get(threadId), autoEnabled: false };
+      yield* operations.setSettings(threadId, disabled).pipe(Effect.orDie);
+      settings.set(threadId, disabled);
+      yield* applyEventBestEffort(threadId, {
+        type: "thread.compaction-suspended",
+        payload: {
+          reason,
+          ...(detail !== undefined ? { detail } : {}),
+          createdAt: new Date().toISOString(),
+        },
+      });
+    });
 
   const runAutoCompaction = (threadId: ThreadId) =>
     Effect.gen(function* () {
@@ -679,6 +789,7 @@ const make = Effect.gen(function* () {
         return;
       }
       const error = outcome.error;
+      if (autoOptionsFromSettings(settings.get(threadId)) === null) return;
       if (
         error._tag === "ProviderValidationError" ||
         error._tag === "ProviderUnsupportedError" ||
@@ -701,15 +812,9 @@ const make = Effect.gen(function* () {
       if (options === null || usage === undefined || autoInFlight.has(threadId)) {
         return;
       }
-      const provider = yield* lookupProviderName(threadId);
-      const capability = yield* lookupCapabilities(provider);
-      if (capability === null) {
-        return;
-      }
-      const threadOption = yield* projectionSnapshotQuery
-        .getThreadDetailById(threadId)
-        .pipe(Effect.catch(() => Effect.succeed(Option.none())));
-      const session = Option.getOrUndefined(threadOption)?.session ?? null;
+      const session = yield* lookupSession(threadId);
+      const capability = yield* lookupCapabilities(session);
+      if (capability === null) return;
       if (session === null) {
         return;
       }
@@ -763,22 +868,31 @@ const make = Effect.gen(function* () {
         return;
       }
       pendingWaiters.delete(threadId);
-      yield* runOperation(waiter.request).pipe(Effect.exit);
+      yield* Deferred.succeed(waiter.ready, undefined);
     });
 
   const handleProviderNativeStarted = (event: ProviderRuntimeEvent, requestId: string) =>
     Effect.gen(function* () {
       const state = getState(event.threadId);
-      if (state.status === "running") {
+      if (
+        state.status === "running" ||
+        state.status === "pending" ||
+        admittedThreads.has(event.threadId)
+      ) {
         return;
       }
+      nativePasses.set(event.threadId, { requestId, event });
       const beforeUsage = latestUsage.get(event.threadId);
+      latestUsage.delete(event.threadId);
       yield* applyEventBestEffort(event.threadId, {
         type: "thread.compaction-started",
         payload: {
           requestId,
           owner: "provider",
-          trigger: "provider-auto",
+          trigger:
+            event.type === "item.started"
+              ? (event.payload.compactionTrigger ?? "provider-auto")
+              : "provider-auto",
           ...(beforeUsage !== undefined ? { beforeUsage } : {}),
           createdAt: event.createdAt,
         },
@@ -788,7 +902,37 @@ const make = Effect.gen(function* () {
   const handleProviderNativeCompleted = (event: ProviderRuntimeEvent) =>
     Effect.gen(function* () {
       const state = getState(event.threadId);
-      if (state.status !== "running" || state.owner !== "provider") {
+      const pass = nativePasses.get(event.threadId);
+      if (
+        state.status !== "running" ||
+        state.owner !== "provider" ||
+        pass === undefined ||
+        pass.requestId !== state.requestId ||
+        pass.event.provider !== event.provider ||
+        pass.event.lifecycleGeneration !== event.lifecycleGeneration ||
+        pass.event.providerInstanceId !== event.providerInstanceId ||
+        (pass.event.itemId !== undefined &&
+          event.itemId !== undefined &&
+          pass.event.itemId !== event.itemId)
+      ) {
+        return;
+      }
+      nativePasses.delete(event.threadId);
+      if (event.type !== "item.completed" || event.payload.status !== "completed") {
+        yield* applyEventBestEffort(event.threadId, {
+          type: "thread.compaction-failed",
+          payload: {
+            requestId: state.requestId,
+            outcomeKnown: true,
+            retryable: true,
+            failureKind: "provider-compaction-failed",
+            detail:
+              event.type === "item.completed"
+                ? (event.payload.detail ?? "Provider compaction failed or was cancelled.")
+                : "Provider compaction was interrupted.",
+            createdAt: event.createdAt,
+          },
+        });
         return;
       }
       const afterUsage = latestUsage.get(event.threadId);
@@ -807,10 +951,29 @@ const make = Effect.gen(function* () {
   const processRuntimeEvent = Effect.fnUntraced(function* (event: ProviderRuntimeEvent) {
     if (event.type === "thread.token-usage.updated") {
       latestUsage.set(event.threadId, event.payload.usage);
+      if (event.payload.usage.compactsAutomatically !== undefined)
+        providerAutoEnabled.set(event.threadId, event.payload.usage.compactsAutomatically);
       yield* maybeAutoCompact(event.threadId);
       return;
     }
-    if (event.type === "turn.completed" || event.type === "turn.aborted") {
+    if (event.type === "session.exited" || event.type === "turn.aborted") {
+      if (event.type === "session.exited") {
+        latestUsage.delete(event.threadId);
+        providerAutoEnabled.delete(event.threadId);
+      }
+      yield* handleProviderNativeCompleted(event);
+      const pending = pendingWaiters.get(event.threadId);
+      if (pending)
+        yield* Deferred.fail(
+          pending.ready,
+          new ProviderValidationError({
+            operation: "CompactionReactor.request",
+            issue: "The provider session or active turn was interrupted before compaction began.",
+          }),
+        );
+      return;
+    }
+    if (event.type === "turn.completed") {
       // Auto decisions deferred behind the turn already sit in pendingWaiters;
       // fresh evaluations wait for the next usage event so a stale pre-turn
       // snapshot cannot re-trigger a compaction that just ran.
@@ -846,20 +1009,34 @@ const make = Effect.gen(function* () {
   // retried automatically; interrupted pending requests never reached the
   // provider and settle as retryable failures.
   const reconcile = Effect.gen(function* () {
+    for (const entry of yield* operations.listSettings())
+      settings.set(entry.threadId, entry.settings);
     // Hydrate lastCompaction from settled durable rows so the first status
     // emission after a restart carries the previous pass.
-    const settled = yield* operations
-      .listSettled()
-      .pipe(Effect.catch(() => Effect.succeed([] as ReadonlyArray<ThreadCompactionOperation>)));
+    const settled = yield* operations.listSettled();
     for (const operation of settled) {
       const summary = compactionSummaryFromOperation(operation);
       if (summary !== null) {
         lastCompactions.set(operation.threadId, summary);
+        states.set(
+          operation.threadId,
+          operation.status === "uncertain"
+            ? {
+                status: "uncertain",
+                requestId: operation.requestId,
+                detail: operation.detail ?? "The previous provider outcome remains unknown.",
+                since: operation.updatedAt,
+              }
+            : IDLE_COMPACTION_STATE,
+        );
+        if (operation.trigger === "synara-auto" && operation.status === "completed") {
+          const completedAt = Date.parse(operation.completedAt ?? operation.updatedAt);
+          if (Number.isFinite(completedAt))
+            lastAutoCompactionAt.set(operation.threadId, completedAt);
+        }
       }
     }
-    const unsettled = yield* operations
-      .listUnsettled()
-      .pipe(Effect.catch(() => Effect.succeed([] as ReadonlyArray<ThreadCompactionOperation>)));
+    const unsettled = yield* operations.listUnsettled();
     for (const operation of unsettled) {
       const threadId = ThreadId.makeUnsafe(operation.threadId);
       states.set(
@@ -908,10 +1085,11 @@ const make = Effect.gen(function* () {
       const scope = yield* Scope.make("sequential");
       autoScope = scope;
       yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
-      yield* reconcile;
+      yield* reconcile.pipe(Effect.orDie);
       yield* Effect.forkScoped(
         Stream.runForEach(providerService.streamEvents, (event) => {
           switch (event.type) {
+            case "session.exited":
             case "thread.token-usage.updated":
             case "turn.completed":
             case "turn.aborted":
@@ -932,8 +1110,29 @@ const make = Effect.gen(function* () {
   const setThreadSettings: CompactionReactorShape["setThreadSettings"] = (
     input: ProviderSetCompactionSettingsInput,
   ) =>
-    Effect.suspend(() => {
+    Effect.gen(function* () {
+      yield* operations.setSettings(input.threadId, input.settings).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderCompactionPersistenceError({
+              operation: "CompactionReactor.setThreadSettings",
+              detail: cause.message,
+              outcomeKnown: true,
+              cause,
+            }),
+        ),
+      );
       settings.set(input.threadId, input.settings);
+      const pending = pendingWaiters.get(input.threadId);
+      if (!input.settings.autoEnabled && pending?.request.trigger === "synara-auto") {
+        yield* Deferred.fail(
+          pending.ready,
+          new ProviderValidationError({
+            operation: "CompactionReactor.request",
+            issue: "Automatic compaction was disabled before the request began.",
+          }),
+        );
+      }
       // Re-applying settings is the manual resume action: it clears an
       // auto-compaction suspension and resets the failure streak.
       autoFailureCounts.delete(input.threadId);
@@ -941,7 +1140,7 @@ const make = Effect.gen(function* () {
       if (state.status === "suspended") {
         states.set(input.threadId, IDLE_COMPACTION_STATE);
       }
-      return publishStatus(input.threadId, getState(input.threadId));
+      yield* publishStatus(input.threadId, getState(input.threadId));
     });
 
   return {

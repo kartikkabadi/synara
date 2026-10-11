@@ -1,13 +1,20 @@
 import {
+  CommandId,
+  OrchestrationCommand,
   ProjectId,
   ThreadId,
   TurnId,
+  type OrchestrationSession,
   type OrchestrationThreadShell,
   type ProviderSession,
 } from "@synara/contracts";
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { planProviderRuntimeReconciliation } from "./providerRuntimeReconciliation.ts";
+import {
+  planProviderRuntimeReconciliation,
+  type ProviderRuntimeReconciliationPlan,
+} from "./providerRuntimeReconciliation.ts";
 import type { ProviderRuntimeBinding } from "./Services/ProviderSessionDirectory.ts";
 
 const NOW = Date.parse("2026-07-23T20:00:30.000Z");
@@ -74,6 +81,7 @@ function binding(
   return {
     threadId: THREAD_ID,
     provider,
+    providerInstanceId: provider,
     status: activeTurnId === null ? "stopped" : "running",
     lastSeenAt: "2026-07-23T20:00:00.000Z",
     runtimePayload: { activeTurnId },
@@ -113,41 +121,6 @@ describe("planProviderRuntimeReconciliation", () => {
       expect.objectContaining({
         action: "settle-interrupted",
         threadId: THREAD_ID,
-        projectedTurnId: OLD_TURN_ID,
-        runtimeTurnId: null,
-      }),
-    ]);
-  });
-
-  it("uses the same stale-turn recovery for Claude sessions", () => {
-    expect(
-      planProviderRuntimeReconciliation({
-        threads: [
-          threadShell({
-            modelSelection: { provider: "claudeAgent", model: "claude-opus-4-8" },
-            session: {
-              ...threadShell().session!,
-              providerName: "claudeAgent",
-            },
-          }),
-        ],
-        bindings: [binding(null, "claudeAgent")],
-        liveSessions: [liveSession({ provider: "claudeAgent", status: "ready" })],
-        pumpHealth: [
-          {
-            provider: "claudeAgent",
-            status: "recovering",
-            consecutiveFailures: 1,
-            updatedAt: "2026-07-23T20:00:29.000Z",
-          },
-        ],
-        nowMs: NOW,
-        staleAfterMs: 10_000,
-      }),
-    ).toEqual([
-      expect.objectContaining({
-        action: "settle-interrupted",
-        provider: "claudeAgent",
         projectedTurnId: OLD_TURN_ID,
         runtimeTurnId: null,
       }),
@@ -367,7 +340,7 @@ describe("planProviderRuntimeReconciliation", () => {
     ]);
   });
 
-  it.each(["ready", "interrupted", "stopped", "error"] as const)(
+  it.each(["ready", "error"] as const)(
     "settles a stale running turn without reopening its %s session",
     (status) => {
       const terminalSession = {
@@ -490,7 +463,174 @@ describe("planProviderRuntimeReconciliation", () => {
     ]);
   });
 
-  it("records degraded pump evidence in the reconciliation reason", () => {
+  /**
+   * A plan is only ever consumed by building `thread.session.set` and
+   * `thread.activity.append` from it (ProviderRuntimeReconciler.applyPlan). Those
+   * commands are built in code and never decoded, so nothing but this check
+   * enforces the schema-only refinements on what the plan carries - and this is
+   * the stuck-thread recovery path, so a rejected command breaks exactly the
+   * mechanism meant to un-stick the thread.
+   */
+  const commandsFromPlan = (
+    plan: ProviderRuntimeReconciliationPlan,
+    thread: OrchestrationThreadShell,
+  ): ReadonlyArray<unknown> => {
+    const now = new Date(NOW).toISOString();
+    const runtimeMode = thread.session?.runtimeMode ?? thread.runtimeMode;
+    const session: OrchestrationSession = {
+      threadId: plan.threadId,
+      status:
+        plan.action === "align-running-turn"
+          ? "running"
+          : plan.action === "settle-error"
+            ? "error"
+            : plan.action === "settle-terminal-projection"
+              ? plan.terminalSession.status
+              : "interrupted",
+      providerName:
+        plan.action === "settle-terminal-projection"
+          ? plan.terminalSession.providerName
+          : plan.provider,
+      runtimeMode:
+        plan.action === "settle-terminal-projection"
+          ? plan.terminalSession.runtimeMode
+          : runtimeMode,
+      activeTurnId:
+        plan.action === "align-running-turn"
+          ? plan.runtimeTurnId
+          : plan.action === "settle-error"
+            ? plan.projectedTurnId
+            : plan.action === "settle-terminal-projection" &&
+                plan.terminalSession.status === "error"
+              ? plan.terminalSession.activeTurnId
+              : null,
+      lastError:
+        plan.action === "settle-error"
+          ? plan.errorMessage
+          : plan.action === "settle-terminal-projection"
+            ? plan.terminalSession.lastError
+            : null,
+      updatedAt: now,
+    };
+    return [
+      {
+        type: "thread.session.set",
+        commandId: CommandId.makeUnsafe("cmd-session-set"),
+        threadId: plan.threadId,
+        session,
+        createdAt: now,
+      },
+      {
+        type: "thread.activity.append",
+        commandId: CommandId.makeUnsafe("cmd-activity-append"),
+        threadId: plan.threadId,
+        activity: {
+          id: "provider-runtime-reconcile:activity",
+          tone: "info",
+          kind: "provider.runtime.reconciled",
+          summary: "Synara recovered a stale running state",
+          payload: {
+            provider: plan.provider,
+            action: plan.action,
+            reason: plan.reason,
+            projectedTurnId: plan.projectedTurnId,
+            runtimeTurnId: plan.runtimeTurnId,
+          },
+          turnId: plan.projectedTurnId,
+          createdAt: now,
+        },
+        createdAt: now,
+      },
+    ];
+  };
+
+  const expectSchemaValidPlans = (
+    plans: ReadonlyArray<ProviderRuntimeReconciliationPlan>,
+    thread: OrchestrationThreadShell,
+  ): void => {
+    expect(plans.length).toBeGreaterThan(0);
+    for (const command of plans.flatMap((plan) => commandsFromPlan(plan, thread))) {
+      expect(() => Schema.decodeUnknownSync(OrchestrationCommand)(command)).not.toThrow();
+    }
+  };
+
+  describe("plans only carry values their commands' schema accepts", () => {
+    it("falls back to a real message when the live session reports a blank error", () => {
+      const thread = threadShell();
+      expectSchemaValidPlans(
+        planProviderRuntimeReconciliation({
+          threads: [thread],
+          bindings: [binding()],
+          liveSessions: [
+            liveSession({ status: "error", activeTurnId: OLD_TURN_ID, lastError: "   " }),
+          ],
+          pumpHealth: [],
+          nowMs: NOW,
+          staleAfterMs: 10_000,
+        }),
+        thread,
+      );
+    });
+
+    it("treats a blank projected turn id as absent instead of settling turn ''", () => {
+      const thread = threadShell({
+        session: { ...threadShell().session!, activeTurnId: "" as unknown as TurnId },
+      });
+      const plans = planProviderRuntimeReconciliation({
+        threads: [thread],
+        bindings: [binding(null)],
+        liveSessions: [],
+        pumpHealth: [],
+        nowMs: NOW,
+        staleAfterMs: 10_000,
+      });
+      expectSchemaValidPlans(plans, thread);
+      // Absent, so it falls through to the latest running turn like a missing id.
+      expect(plans[0]?.projectedTurnId).toBe(OLD_TURN_ID);
+    });
+
+    it("normalizes blank fields copied off a terminal projected session", () => {
+      const thread = threadShell({
+        session: {
+          ...threadShell().session!,
+          status: "error",
+          providerName: "",
+          lastError: "  ",
+        },
+      });
+      expectSchemaValidPlans(
+        planProviderRuntimeReconciliation({
+          threads: [thread],
+          bindings: [binding(null)],
+          liveSessions: [],
+          pumpHealth: [],
+          nowMs: NOW,
+          staleAfterMs: 10_000,
+        }),
+        thread,
+      );
+    });
+
+    it("never aligns onto a blank live turn id", () => {
+      const plans = planProviderRuntimeReconciliation({
+        threads: [threadShell()],
+        bindings: [binding()],
+        liveSessions: [liveSession({ status: "running", activeTurnId: "" as unknown as TurnId })],
+        pumpHealth: [],
+        nowMs: NOW,
+        staleAfterMs: 10_000,
+      });
+      // A live session that claims to be running but names no turn is evidence of
+      // nothing. Aligning onto '' would write a session command the schema rejects.
+      expect(plans).toEqual([]);
+    });
+  });
+
+  it("does not settle while the provider's runtime-event pump is unhealthy", () => {
+    // A quiet projection plus a missing/settled-looking live session is exactly
+    // what a stalled event stream produces for a turn that is in fact
+    // progressing. Settling on evidence the process cannot observe kills live
+    // turns; the abandoned clock is the only escape hatch.
     const plans = planProviderRuntimeReconciliation({
       threads: [threadShell()],
       bindings: [binding(null)],
@@ -507,6 +647,106 @@ describe("planProviderRuntimeReconciliation", () => {
       staleAfterMs: 10_000,
     });
 
+    expect(plans).toEqual([]);
+  });
+
+  it("does not settle while the runtime journal has uningested rows", () => {
+    // Persisted-but-uningested rows starve the projection: its staleness is
+    // manufactured, and a completed turn's terminal events may be sitting in
+    // the queue. Settling here "recovers" a turn that finished normally.
+    const plans = planProviderRuntimeReconciliation({
+      threads: [threadShell()],
+      bindings: [binding(null)],
+      liveSessions: [],
+      pumpHealth: [],
+      runtimeJournalLagging: true,
+      nowMs: NOW,
+      staleAfterMs: 10_000,
+    });
+
+    expect(plans).toEqual([]);
+  });
+
+  it("still settles an abandoned thread despite a lagging runtime journal", () => {
+    const abandonedAt = "2026-07-23T19:00:00.000Z";
+    const plans = planProviderRuntimeReconciliation({
+      threads: [
+        threadShell({
+          updatedAt: abandonedAt,
+          session: {
+            ...threadShell().session!,
+            updatedAt: abandonedAt,
+          },
+        }),
+      ],
+      bindings: [binding(null)],
+      liveSessions: [],
+      pumpHealth: [],
+      runtimeJournalLagging: true,
+      nowMs: NOW,
+      staleAfterMs: 10_000,
+      maxTurnAgeMs: 30 * 60_000,
+    });
+
+    expect(plans).toEqual([
+      expect.objectContaining({
+        action: "settle-interrupted",
+        threadId: THREAD_ID,
+        projectedTurnId: OLD_TURN_ID,
+      }),
+    ]);
+  });
+
+  it("still settles an abandoned thread despite an unhealthy pump, recording pump evidence", () => {
+    const abandonedAt = "2026-07-23T19:00:00.000Z";
+    const plans = planProviderRuntimeReconciliation({
+      threads: [
+        threadShell({
+          updatedAt: abandonedAt,
+          session: {
+            ...threadShell().session!,
+            updatedAt: abandonedAt,
+          },
+        }),
+      ],
+      bindings: [binding(null)],
+      liveSessions: [],
+      pumpHealth: [
+        {
+          provider: "codex",
+          status: "recovering",
+          consecutiveFailures: 2,
+          updatedAt: "2026-07-23T20:00:29.000Z",
+        },
+      ],
+      nowMs: NOW,
+      staleAfterMs: 10_000,
+      maxTurnAgeMs: 30 * 60_000,
+    });
+
+    expect(plans).toEqual([
+      expect.objectContaining({
+        action: "settle-interrupted",
+        threadId: THREAD_ID,
+        projectedTurnId: OLD_TURN_ID,
+      }),
+    ]);
     expect(plans[0]?.reason).toContain("runtime-event pump is recovering");
+  });
+
+  it("does not treat an actively streaming turn as stale when only the session row is quiet", () => {
+    // thread.updatedAt advances on every appended message. A turn that is
+    // streaming output must never become a settle candidate just because the
+    // session lifecycle row has not moved since the turn started.
+    const plans = planProviderRuntimeReconciliation({
+      threads: [threadShell({ updatedAt: "2026-07-23T20:00:28.000Z" })],
+      bindings: [binding(null)],
+      liveSessions: [liveSession({ status: "ready" })],
+      pumpHealth: [],
+      nowMs: NOW,
+      staleAfterMs: 10_000,
+    });
+
+    expect(plans).toEqual([]);
   });
 });

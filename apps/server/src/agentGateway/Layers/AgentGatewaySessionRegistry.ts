@@ -4,10 +4,20 @@ import { Layer } from "effect";
 
 import {
   AgentGatewaySessionRegistry,
+  type AgentGatewayCapability,
   type AgentGatewaySessionIdentity,
-  type AgentGatewayWriteAuthority,
   type AgentGatewaySessionRegistryShape,
+  type AgentGatewayWriteAuthority,
 } from "../Services/AgentGatewaySessionRegistry.ts";
+
+const PROVIDER_SESSION_CAPABILITIES = [
+  "thread:read",
+  "thread:write",
+  "automation:write",
+  "diagnostics:read",
+  "browser:control",
+  "device:control",
+] as const;
 
 export function makeAgentGatewaySessionRegistry(options?: {
   readonly now?: () => number;
@@ -15,11 +25,48 @@ export function makeAgentGatewaySessionRegistry(options?: {
 }): AgentGatewaySessionRegistryShape {
   const now = options?.now ?? Date.now;
   const randomId = options?.randomId ?? randomUUID;
-  const sessions = new Map<string, AgentGatewaySessionIdentity>();
-  const sessionsByKey = new Map<string, AgentGatewaySessionIdentity>();
+  interface RegisteredSession {
+    identity: AgentGatewaySessionIdentity;
+    retiredWriteTurnId: string | undefined;
+  }
+  const sessions = new Map<string, RegisteredSession>();
+  const sessionsByKey = new Map<string, RegisteredSession>();
 
+  const disabledComputerThreads = new Set<string>();
+  const visibleIdentity = (identity: AgentGatewaySessionIdentity): AgentGatewaySessionIdentity =>
+    disabledComputerThreads.has(identity.threadId)
+      ? {
+          ...identity,
+          capabilities: new Set(
+            [...identity.capabilities].filter((capability) => capability !== "computer:control"),
+          ),
+        }
+      : identity;
   return {
-    issue: (threadId, provider) => {
+    setComputerControlEnabled: (threadId, enabled) => {
+      if (enabled) disabledComputerThreads.delete(threadId);
+      else {
+        disabledComputerThreads.add(threadId);
+        for (const row of sessionsByKey.values()) {
+          if (row.identity.threadId !== threadId) continue;
+          row.identity = {
+            ...row.identity,
+            capabilities: new Set(
+              [...row.identity.capabilities].filter(
+                (capability) => capability !== "computer:control",
+              ),
+            ),
+          };
+        }
+      }
+    },
+    computerControlProvisioned: (threadId, provider) => {
+      const candidates = [...sessionsByKey.values()].filter(
+        (row) => row.identity.threadId === threadId && row.identity.provider === provider,
+      );
+      return candidates.at(-1)?.identity.capabilities.has("computer:control") ?? false;
+    },
+    issue: (threadId, provider, issueOptions) => {
       // Every provider runtime owns an independent credential. Replacement
       // runtimes overlap their predecessor during startup, and the outgoing
       // runtime revokes its own token during teardown. Reusing a token here
@@ -32,25 +79,30 @@ export function makeAgentGatewaySessionRegistry(options?: {
         threadId,
         provider,
         issuedAt,
-        capabilities: new Set([
-          "thread:read",
-          "thread:write",
-          "automation:write",
-          "diagnostics:read",
+        capabilities: new Set<AgentGatewayCapability>([
+          ...PROVIDER_SESSION_CAPABILITIES,
+          ...(issueOptions?.additionalCapabilities ?? []).filter(
+            (capability) =>
+              capability !== "computer:control" || !disabledComputerThreads.has(threadId),
+          ),
         ]),
       };
-      sessions.set(token, identity);
-      sessionsByKey.set(sessionKey, identity);
+      const registered: RegisteredSession = {
+        identity,
+        retiredWriteTurnId: undefined,
+      };
+      sessions.set(token, registered);
+      sessionsByKey.set(sessionKey, registered);
       return { token, ...identity };
     },
     verify: (token) => {
-      const identity = sessions.get(token);
-      if (!identity) return null;
-      return identity;
+      const identity = sessions.get(token)?.identity;
+      return identity ? visibleIdentity(identity) : null;
     },
     bindWriteAuthority: (token, turnId) => {
-      const identity = sessions.get(token);
-      if (!identity) return null;
+      const registered = sessions.get(token);
+      if (!registered || registered.retiredWriteTurnId !== undefined) return null;
+      const { identity } = registered;
       return {
         sessionKey: identity.sessionKey,
         threadId: identity.threadId,
@@ -59,18 +111,32 @@ export function makeAgentGatewaySessionRegistry(options?: {
       } satisfies AgentGatewayWriteAuthority;
     },
     verifyWriteAuthority: (authority) => {
-      const identity = sessionsByKey.get(authority.sessionKey);
+      const registered = sessionsByKey.get(authority.sessionKey);
+      const identity = registered?.identity;
       return (
         identity !== undefined &&
+        registered?.retiredWriteTurnId === undefined &&
         identity.threadId === authority.threadId &&
         identity.provider === authority.provider
       );
     },
+    retireWriteAuthority: (token, turnId) => {
+      const registered = sessions.get(token);
+      if (!registered) return false;
+      if (registered.retiredWriteTurnId !== undefined) {
+        return registered.retiredWriteTurnId === turnId;
+      }
+      // Record A even when it never called a gateway tool. This is the
+      // critical case: a detached request from A must not arrive during B and
+      // become the first request to bind this credential.
+      registered.retiredWriteTurnId = turnId;
+      return true;
+    },
     revoke: (token) => {
-      const identity = sessions.get(token);
-      if (!identity) return;
+      const registered = sessions.get(token);
+      if (!registered) return;
       sessions.delete(token);
-      sessionsByKey.delete(identity.sessionKey);
+      sessionsByKey.delete(registered.identity.sessionKey);
     },
   };
 }

@@ -43,7 +43,9 @@ export interface CompactionReactorShape {
    * Update the thread's Synara-managed auto-compaction policy and republish
    * the runtime status so clients see the new owner/trigger immediately.
    */
-  readonly setThreadSettings: (input: ProviderSetCompactionSettingsInput) => Effect.Effect<void>;
+  readonly setThreadSettings: (
+    input: ProviderSetCompactionSettingsInput,
+  ) => Effect.Effect<void, ProviderServiceError>;
 }
 
 export class CompactionReactor extends ServiceMap.Service<

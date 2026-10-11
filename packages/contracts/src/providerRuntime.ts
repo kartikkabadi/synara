@@ -1,4 +1,5 @@
 import { Option, Schema } from "effect";
+import { AsyncUserInputQuestions } from "./asyncUserInput";
 import {
   EventId,
   IsoDateTime,
@@ -12,7 +13,8 @@ import {
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas";
-import { ProviderKind } from "./orchestration";
+import { ClaudeCacheObservation } from "./claudeCache";
+import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance";
 
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const UnknownRecordSchema = Schema.Record(Schema.String, Schema.Unknown);
@@ -28,7 +30,6 @@ const RuntimeEventRawSource = Schema.Literals([
   "antigravity.cli.event",
   "acp.jsonrpc",
   "acp.cursor.extension",
-  "kilo.sdk.event",
   "opencode.sdk.event",
   "pi.sdk.event",
 ]);
@@ -143,9 +144,11 @@ export const CanonicalRequestType = Schema.Literals([
   "command_execution_approval",
   "file_read_approval",
   "file_change_approval",
+  "permissions_approval",
   "apply_patch_approval",
   "exec_command_approval",
   "tool_user_input",
+  "tool_approval",
   "dynamic_tool_call",
   "auth_tokens_refresh",
   "unknown",
@@ -200,8 +203,10 @@ const ProviderRuntimeEventType = Schema.Literals([
   "config.warning",
   "deprecation.notice",
   "files.persisted",
+  "vcs.state.changed",
   "runtime.warning",
   "runtime.error",
+  "event.unmapped",
 ]);
 export type ProviderRuntimeEventType = typeof ProviderRuntimeEventType.Type;
 
@@ -252,12 +257,15 @@ const ModelReroutedType = Schema.Literal("model.rerouted");
 const ConfigWarningType = Schema.Literal("config.warning");
 const DeprecationNoticeType = Schema.Literal("deprecation.notice");
 const FilesPersistedType = Schema.Literal("files.persisted");
+const VcsStateChangedType = Schema.Literal("vcs.state.changed");
 const RuntimeWarningType = Schema.Literal("runtime.warning");
 const RuntimeErrorType = Schema.Literal("runtime.error");
+const EventUnmappedType = Schema.Literal("event.unmapped");
 
 const ProviderRuntimeEventBase = Schema.Struct({
   eventId: EventId,
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
+  providerInstanceId: Schema.optional(ProviderInstanceId),
   threadId: ThreadId,
   createdAt: IsoDateTime,
   turnId: Schema.optional(TurnId),
@@ -346,11 +354,23 @@ export const LastTurnUsageSnapshot = Schema.Struct({
 export type LastTurnUsageSnapshot = typeof LastTurnUsageSnapshot.Type;
 
 export const ThreadTokenUsageSnapshot = Schema.Struct({
+  claudeCache: Schema.optional(ClaudeCacheObservation),
+  // Provider session totals, distinct from the latest request/context snapshot.
+  cumulativeUsage: Schema.optional(
+    Schema.Struct({
+      inputTokens: NonNegativeInt,
+      outputTokens: NonNegativeInt,
+      cachedInputTokens: Schema.optional(NonNegativeInt),
+      cacheCreationInputTokens: Schema.optional(NonNegativeInt),
+    }),
+  ),
   usedTokens: NonNegativeInt,
   usedPercent: Schema.optional(
     Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)).check(Schema.isLessThanOrEqualTo(100)),
   ),
   totalProcessedTokens: Schema.optional(NonNegativeInt),
+  // Claude v1 counts API responses once; unversioned Claude totals are unreliable.
+  tokenAccountingVersion: Schema.optional(Schema.Literal(1)),
   maxTokens: Schema.optional(PositiveInt),
   inputTokens: Schema.optional(NonNegativeInt),
   cachedInputTokens: Schema.optional(NonNegativeInt),
@@ -374,9 +394,12 @@ export type ThreadTokenUsageSnapshot = typeof ThreadTokenUsageSnapshot.Type;
 
 // How a compaction pass is (or would be) triggered for a thread.
 export const CompactionTrigger = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("percent"), percent: Schema.Number }),
-  Schema.Struct({ kind: Schema.Literal("remaining-tokens"), reserveTokens: Schema.Number }),
-  Schema.Struct({ kind: Schema.Literal("absolute-used-tokens"), usedTokens: Schema.Number }),
+  Schema.Struct({
+    kind: Schema.Literal("percent"),
+    percent: Schema.Number.check(Schema.isGreaterThan(0)).check(Schema.isLessThanOrEqualTo(100)),
+  }),
+  Schema.Struct({ kind: Schema.Literal("remaining-tokens"), reserveTokens: NonNegativeInt }),
+  Schema.Struct({ kind: Schema.Literal("absolute-used-tokens"), usedTokens: PositiveInt }),
   Schema.Struct({ kind: Schema.Literal("opaque") }),
 ]);
 export type CompactionTrigger = typeof CompactionTrigger.Type;
@@ -405,6 +428,15 @@ export const ThreadCompactionPhase = Schema.Struct({
 });
 export type ThreadCompactionPhase = typeof ThreadCompactionPhase.Type;
 
+// Per-thread Synara-managed auto-compaction policy: whether Synara should
+// compact on its own, at what trigger, and how long to wait between passes.
+export const ThreadCompactionSettings = Schema.Struct({
+  autoEnabled: Schema.Boolean,
+  trigger: Schema.optional(CompactionTrigger),
+  cooldownSeconds: Schema.optional(NonNegativeInt),
+});
+export type ThreadCompactionSettings = typeof ThreadCompactionSettings.Type;
+
 // Per-thread runtime view of compaction: who owns it, whether manual
 // compaction is currently available, and what the last pass did.
 export const ThreadCompactionRuntimeStatus = Schema.Struct({
@@ -417,6 +449,7 @@ export const ThreadCompactionRuntimeStatus = Schema.Struct({
   trigger: Schema.optional(CompactionTrigger),
   phase: Schema.optional(ThreadCompactionPhase),
   lastCompaction: Schema.optional(CompactionOperationSummary),
+  settings: Schema.optional(ThreadCompactionSettings),
 });
 export type ThreadCompactionRuntimeStatus = typeof ThreadCompactionRuntimeStatus.Type;
 
@@ -526,20 +559,14 @@ export const ThreadCompactionLifecycleEvent = Schema.Union([
 ]);
 export type ThreadCompactionLifecycleEvent = typeof ThreadCompactionLifecycleEvent.Type;
 
-// Per-thread Synara-managed auto-compaction policy: whether Synara should
-// compact on its own, at what trigger, and how long to wait between passes.
-export const ThreadCompactionSettings = Schema.Struct({
-  autoEnabled: Schema.Boolean,
-  trigger: Schema.optional(CompactionTrigger),
-  cooldownSeconds: Schema.optional(NonNegativeInt),
-});
-export type ThreadCompactionSettings = typeof ThreadCompactionSettings.Type;
-
 // Evaluable trigger for Synara-managed auto-compaction. Unlike
 // `CompactionTrigger` there is no `opaque` member: Synara can only act on a
 // threshold it can compute from token usage.
 export const SynaraAutoCompactionTrigger = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("percent"), percent: Schema.Number }),
+  Schema.Struct({
+    kind: Schema.Literal("percent"),
+    percent: Schema.Number.check(Schema.isGreaterThan(0)).check(Schema.isLessThanOrEqualTo(100)),
+  }),
   Schema.Struct({ kind: Schema.Literal("remaining-tokens"), reserveTokens: NonNegativeInt }),
   Schema.Struct({ kind: Schema.Literal("absolute-used-tokens"), usedTokens: NonNegativeInt }),
 ]);
@@ -602,12 +629,18 @@ export type TurnStartedPayload = typeof TurnStartedPayload.Type;
 
 const TurnCompletedPayload = Schema.Struct({
   state: RuntimeTurnState,
+  // Present only for an explicitly requested native compaction operation.
+  contextCompacted: Schema.optional(Schema.Boolean),
   stopReason: Schema.optional(Schema.NullOr(TrimmedNonEmptyStringSchema)),
   usage: Schema.optional(Schema.Unknown),
   modelUsage: Schema.optional(UnknownRecordSchema),
+  tokenAccountingVersion: Schema.optional(Schema.Literal(1)),
+  // Per-turn main-loop usage, including observed usage when no result arrives.
+  mainLoopTokens: Schema.optional(NonNegativeInt),
   totalCostUsd: Schema.optional(Schema.Number),
   cumulativeCostUsd: Schema.optional(Schema.Number),
   errorMessage: Schema.optional(TrimmedNonEmptyStringSchema),
+  errorCode: Schema.optional(TrimmedNonEmptyStringSchema),
 });
 export type TurnCompletedPayload = typeof TurnCompletedPayload.Type;
 
@@ -644,10 +677,17 @@ const TurnDiffUpdatedPayload = Schema.Struct({
 export type TurnDiffUpdatedPayload = typeof TurnDiffUpdatedPayload.Type;
 
 export const ItemLifecyclePayload = Schema.Struct({
+  compactionTrigger: Schema.optional(Schema.Literals(["manual", "provider-auto", "synara-auto"])),
+  asyncQuestions: Schema.optional(AsyncUserInputQuestions),
   itemType: CanonicalItemType,
   status: Schema.optional(RuntimeItemStatus),
   title: Schema.optional(TrimmedNonEmptyStringSchema),
-  detail: Schema.optional(TrimmedNonEmptyStringSchema),
+  // Free-form body (e.g. raw tool output), which legitimately carries leading
+  // and/or trailing whitespace. Keep it unconstrained so item events from
+  // provider adapters (pi, opencode, codex, ...) always pass the durable
+  // journal's encode step; a TrimmedNonEmptyString here rejects ordinary
+  // tool output and forces the event into quarantine.
+  detail: Schema.optional(Schema.String),
   data: Schema.optional(Schema.Unknown),
 });
 export type ItemLifecyclePayload = typeof ItemLifecyclePayload.Type;
@@ -795,6 +835,11 @@ const TaskProgressPayload = Schema.Struct({
   // Live per-agent snapshots for workflow tasks, polled from the run's
   // transcript directory while the workflow is running.
   workflowAgents: Schema.optional(Schema.Array(WorkflowAgentRuntimeSnapshot)),
+  // Set when the task is a provider-native subagent: the spawning tool call id
+  // (the child thread's provider thread id) and the subagent's own title, so
+  // progress is attributed to that subagent instead of the parent's reasoning.
+  toolUseId: Schema.optional(TrimmedNonEmptyStringSchema),
+  subagentTitle: Schema.optional(TrimmedNonEmptyStringSchema),
 });
 export type TaskProgressPayload = typeof TaskProgressPayload.Type;
 
@@ -822,12 +867,20 @@ const TaskCompletedPayload = Schema.Struct({
   usage: Schema.optional(Schema.Unknown),
   workflowTaskId: Schema.optional(RuntimeTaskId),
   workflowAgents: Schema.optional(Schema.Array(WorkflowAgentSnapshot)),
+  // Spawning tool call id when the task is a provider-native subagent.
+  toolUseId: Schema.optional(TrimmedNonEmptyStringSchema),
 });
 export type TaskCompletedPayload = typeof TaskCompletedPayload.Type;
 
-// A queued mid-task user message was injected into a running subagent.
+// A user message was injected into running work without interrupting it.
+// `target` says where it landed, which decides whether the message needs its own
+// transcript marker: a `"subagent"` steer is delivered on the child thread where
+// nothing else shows it, while a `"turn"` steer is already rendered as the sent
+// user message on the thread it steers. Absent means `"subagent"` (the only
+// producer before turn steering existed).
 const TurnSteeredPayload = Schema.Struct({
   message: TrimmedNonEmptyStringSchema,
+  target: Schema.optional(Schema.Literals(["turn", "subagent"])),
 });
 export type TurnSteeredPayload = typeof TurnSteeredPayload.Type;
 
@@ -835,6 +888,8 @@ const HookStartedPayload = Schema.Struct({
   hookId: TrimmedNonEmptyStringSchema,
   hookName: TrimmedNonEmptyStringSchema,
   hookEvent: TrimmedNonEmptyStringSchema,
+  statusMessage: Schema.optional(TrimmedNonEmptyStringSchema),
+  data: Schema.optional(Schema.Unknown),
 });
 export type HookStartedPayload = typeof HookStartedPayload.Type;
 
@@ -848,11 +903,17 @@ export type HookProgressPayload = typeof HookProgressPayload.Type;
 
 const HookCompletedPayload = Schema.Struct({
   hookId: TrimmedNonEmptyStringSchema,
+  hookName: Schema.optional(TrimmedNonEmptyStringSchema),
+  hookEvent: Schema.optional(TrimmedNonEmptyStringSchema),
   outcome: Schema.Literals(["success", "error", "cancelled"]),
+  status: Schema.optional(Schema.Literals(["completed", "failed", "blocked", "stopped"])),
+  statusMessage: Schema.optional(TrimmedNonEmptyStringSchema),
+  durationMs: Schema.optional(NonNegativeInt),
   output: Schema.optional(Schema.String),
   stdout: Schema.optional(Schema.String),
   stderr: Schema.optional(Schema.String),
   exitCode: Schema.optional(Schema.Int),
+  data: Schema.optional(Schema.Unknown),
 });
 export type HookCompletedPayload = typeof HookCompletedPayload.Type;
 
@@ -938,18 +999,35 @@ const FilesPersistedPayload = Schema.Struct({
 });
 export type FilesPersistedPayload = typeof FilesPersistedPayload.Type;
 
+const VcsStateChangedPayload = Schema.Struct({
+  kind: Schema.optional(TrimmedNonEmptyStringSchema),
+  cwd: Schema.optional(TrimmedNonEmptyStringSchema),
+});
+export type VcsStateChangedPayload = typeof VcsStateChangedPayload.Type;
+
 const RuntimeWarningPayload = Schema.Struct({
   message: TrimmedNonEmptyStringSchema,
+  willRetry: Schema.optional(Schema.Boolean),
   detail: Schema.optional(Schema.Unknown),
 });
 export type RuntimeWarningPayload = typeof RuntimeWarningPayload.Type;
 
 const RuntimeErrorPayload = Schema.Struct({
   message: TrimmedNonEmptyStringSchema,
+  errorCode: Schema.optional(TrimmedNonEmptyStringSchema),
   class: Schema.optional(RuntimeErrorClass),
   detail: Schema.optional(Schema.Unknown),
 });
 export type RuntimeErrorPayload = typeof RuntimeErrorPayload.Type;
+
+// Forward-compatible diagnostic for provider events without an explicit mapping.
+// The adapter bounds and redacts `data`; `detail` is a safe readable one-liner.
+const EventUnmappedPayload = Schema.Struct({
+  nativeType: TrimmedNonEmptyStringSchema,
+  detail: Schema.optional(TrimmedNonEmptyStringSchema),
+  data: Schema.optional(Schema.Unknown),
+});
+export type EventUnmappedPayload = typeof EventUnmappedPayload.Type;
 
 const ProviderRuntimeSessionStartedEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
@@ -1297,12 +1375,26 @@ const ProviderRuntimeFilesPersistedEvent = Schema.Struct({
 });
 export type ProviderRuntimeFilesPersistedEvent = typeof ProviderRuntimeFilesPersistedEvent.Type;
 
+const ProviderRuntimeVcsStateChangedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: VcsStateChangedType,
+  payload: VcsStateChangedPayload,
+});
+export type ProviderRuntimeVcsStateChangedEvent = typeof ProviderRuntimeVcsStateChangedEvent.Type;
+
 const ProviderRuntimeWarningEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: RuntimeWarningType,
   payload: RuntimeWarningPayload,
 });
 export type ProviderRuntimeWarningEvent = typeof ProviderRuntimeWarningEvent.Type;
+
+const ProviderRuntimeEventUnmappedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: EventUnmappedType,
+  payload: EventUnmappedPayload,
+});
+export type ProviderRuntimeEventUnmappedEvent = typeof ProviderRuntimeEventUnmappedEvent.Type;
 
 const ProviderRuntimeErrorEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
@@ -1359,8 +1451,10 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeConfigWarningEvent,
   ProviderRuntimeDeprecationNoticeEvent,
   ProviderRuntimeFilesPersistedEvent,
+  ProviderRuntimeVcsStateChangedEvent,
   ProviderRuntimeWarningEvent,
   ProviderRuntimeErrorEvent,
+  ProviderRuntimeEventUnmappedEvent,
 ]);
 export type ProviderRuntimeEventV2 = typeof ProviderRuntimeEventV2.Type;
 

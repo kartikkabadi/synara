@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import {
   ProviderCompactionCapabilities,
   ProviderComposerCapabilities,
-  supportsThreadCompactionFromCompaction,
   ProviderListModelsResult,
 } from "./providerDiscovery";
 
@@ -44,53 +43,39 @@ describe("ProviderComposerCapabilities", () => {
       supportsThreadImport: true,
     });
 
-    expect(capabilities.compaction.manual.mode).toBe("same-session");
-    expect(capabilities.compaction.automatic.mode).toBe("native");
-    expect(capabilities.compaction.telemetry.contextUsage).toBe("exact");
+    expect(capabilities.compaction?.manual.mode).toBe("same-session");
+    expect(capabilities.compaction?.automatic.mode).toBe("native");
+    expect(capabilities.compaction?.telemetry.contextUsage).toBe("exact");
     expect(capabilities.supportsThreadCompaction).toBe(true);
   });
 });
 
-describe("supportsThreadCompactionFromCompaction", () => {
-  it("derives the legacy boolean from the manual compaction mode", () => {
-    expect(supportsThreadCompactionFromCompaction(codexCompaction)).toBe(true);
-    expect(
-      supportsThreadCompactionFromCompaction({
-        ...codexCompaction,
-        manual: { ...codexCompaction.manual, mode: "session-rollover" },
-      }),
-    ).toBe(true);
-    expect(
-      supportsThreadCompactionFromCompaction({
-        ...codexCompaction,
-        manual: {
-          mode: "unsupported",
-          mechanism: "unsupported",
-          supportsInstructions: false,
-        },
-      }),
-    ).toBe(false);
-  });
-});
+const decodeModels = Schema.decodeUnknownSync(ProviderListModelsResult);
 
 describe("ProviderListModelsResult", () => {
-  it("preserves optional runtime model descriptions", () => {
-    const result = decodeProviderListModelsResult({
+  it.each([
+    { roles: [{ name: "smol", model: "upstream/model", thinkingLevel: "high" }] },
+    { roles: [{ name: "", model: null, thinkingLevel: "retired-level" }] },
+    { roles: "invalid legacy roles" },
+    { roles: null },
+  ])("strips legacy roles without discarding model metadata: %j", ({ roles }) => {
+    const catalog = {
       models: [
         {
-          slug: "gpt-5.6-luna",
-          name: "GPT-5.6 Luna",
-          description: "0.4x Factory token rate",
-        },
-        {
-          slug: "custom:GPT-5.6-Luna-0",
-          name: "GPT-5.6 Luna",
+          slug: "upstream/model",
+          name: "Model",
+          upstreamProviderId: "upstream",
+          supportedReasoningEfforts: [{ value: "high", label: "High" }],
         },
       ],
-      source: "droid-acp",
-    });
+      source: "omp-cli",
+      cached: true,
+    };
 
-    expect(result.models[0]?.description).toBe("0.4x Factory token rate");
-    expect(result.models[1]?.description).toBeUndefined();
+    expect(decodeModels({ ...catalog, roles })).toEqual(catalog);
+  });
+
+  it("still rejects an invalid model catalog when legacy roles are present", () => {
+    expect(() => decodeModels({ models: "invalid", roles: [] })).toThrow();
   });
 });

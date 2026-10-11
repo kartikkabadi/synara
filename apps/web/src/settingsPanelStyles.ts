@@ -15,8 +15,9 @@ export const SETTINGS_RADIUS_CLASS_NAME = "rounded-xl";
 export const SETTINGS_INSET_RADIUS_CLASS_NAME = "rounded-lg";
 
 /** The inset radius forced over a component's own default (Select triggers, segmented chips,
- *  inputs, menu options all ship a radius of their own). */
-export const SETTINGS_CONTROL_RADIUS_CLASS_NAME = `!${SETTINGS_INSET_RADIUS_CLASS_NAME}`;
+ *  inputs, menu options all ship a radius of their own). Written as a literal because Tailwind
+ *  scans source text for candidates — a template-built `!${...}` class emits no CSS at all. */
+export const SETTINGS_CONTROL_RADIUS_CLASS_NAME = "rounded-lg!";
 
 /** Same border token as Button `outline` / `chrome-outline` variants. */
 export const SETTINGS_CONTROL_BORDER_CLASS_NAME = "border border-[color:var(--color-border)]";
@@ -45,12 +46,10 @@ export const SETTINGS_CARD_ROW_CLASS_NAME =
   "px-3 py-[var(--app-density-settings-row-padding-y,0.625rem)]";
 
 /** Row title — same UI font/size as the description; weight and color differ. */
-export const SETTINGS_CARD_ROW_TITLE_CLASS_NAME =
-  "text-[length:var(--app-font-size-ui,12px)] font-medium text-foreground";
+export const SETTINGS_CARD_ROW_TITLE_CLASS_NAME = "text-ui font-medium text-foreground";
 
 /** Row description — standard app UI typography. */
-export const SETTINGS_CARD_ROW_DESCRIPTION_CLASS_NAME =
-  "text-[length:var(--app-font-size-ui,12px)] text-muted-foreground";
+export const SETTINGS_CARD_ROW_DESCRIPTION_CLASS_NAME = "text-ui text-muted-foreground";
 
 /** Divider between stacked rows inside one card. */
 export const SETTINGS_CARD_ROW_DIVIDER_CLASS_NAME = "border-t border-[color:var(--color-border)]";

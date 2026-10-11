@@ -9,6 +9,7 @@ import {
   SYNARA_MANAGED_CODEX_CONFIG_END,
 } from "../codexProcessEnv.ts";
 import {
+  buildAntigravityMcpPluginConfig,
   buildAcpSynaraMcpServers,
   buildClaudeMcpServers,
   buildCodexMcpConfigToml,
@@ -29,6 +30,24 @@ const stdioProxy = {
 };
 
 describe("agent gateway MCP injection", () => {
+  it("builds a secret-free Antigravity stdio plugin config", () => {
+    assert.deepEqual(buildAntigravityMcpPluginConfig(stdioProxy), {
+      mcpServers: {
+        synara: {
+          command: stdioProxy.command,
+          args: stdioProxy.args,
+          env: {
+            SYNARA_AGENT_GATEWAY_URL: "$SYNARA_AGENT_GATEWAY_URL",
+            SYNARA_AGENT_GATEWAY_BOOTSTRAP_TOKEN: "$SYNARA_AGENT_GATEWAY_BOOTSTRAP_TOKEN",
+            ELECTRON_RUN_AS_NODE: "1",
+          },
+          disabled: false,
+          disabledTools: [],
+        },
+      },
+    });
+  });
+
   it("builds a codex config block that references the token env var, not the token", () => {
     const block = buildCodexMcpConfigToml(connection.url);
     assert.include(block, "[mcp_servers.synara]");
@@ -258,7 +277,7 @@ describe("agent gateway MCP injection", () => {
     ]);
   });
 
-  it("falls back to the stdio proxy when http is not advertised", () => {
+  it("falls back to a Node-mode stdio proxy when http is not advertised", () => {
     const servers = buildAcpSynaraMcpServers({
       connection,
       initializeResult: {},
@@ -272,6 +291,7 @@ describe("agent gateway MCP injection", () => {
         env: [
           { name: "SYNARA_AGENT_GATEWAY_URL", value: connection.url },
           { name: SYNARA_AGENT_GATEWAY_TOKEN_ENV, value: connection.bearerToken },
+          { name: "ELECTRON_RUN_AS_NODE", value: "1" },
         ],
       },
     ]);

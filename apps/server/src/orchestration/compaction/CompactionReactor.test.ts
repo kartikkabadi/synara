@@ -348,7 +348,9 @@ describe("CompactionReactor", () => {
       trigger: "provider-auto",
     });
 
-    harness.emit(runtimeEvent("item.completed", { itemType: "context_compaction" }));
+    harness.emit(
+      runtimeEvent("item.completed", { itemType: "context_compaction", status: "completed" }),
+    );
     await waitFor(
       () => runtime!.runPromise(reactor.getControlState(THREAD_ID)),
       (state) => state.status === "idle",
@@ -367,6 +369,80 @@ describe("CompactionReactor", () => {
       owner: "provider",
       lastCompaction: { owner: "provider", trigger: "provider-auto", result: "completed" },
     });
+  });
+
+  it("retains prior requests and refuses reuse with a different payload", async () => {
+    const harness = makeHarness();
+    const { reactor, operations } = await startReactor(harness);
+    for (const requestId of ["first", "second"]) {
+      await runtime!.runPromise(
+        reactor.request({ requestId, threadId: THREAD_ID, trigger: "manual" }),
+      );
+    }
+    expect(
+      Option.getOrThrow(await runtime!.runPromise(operations.getByRequestId("first"))),
+    ).toMatchObject({ status: "completed", result: { kind: "same-session" } });
+    expect(await runtime!.runPromise(operations.listSettled())).toHaveLength(2);
+    const replay = await runtime!.runPromise(
+      reactor.request({ requestId: "first", threadId: THREAD_ID, trigger: "manual" }),
+    );
+    expect(replay).toEqual({ kind: "same-session" });
+    const reused = await runtime!.runPromiseExit(
+      reactor.request({
+        requestId: "first",
+        threadId: THREAD_ID,
+        trigger: "manual",
+        instructions: "different",
+      }),
+    );
+    expect(Exit.isFailure(reused)).toBe(true);
+    expect(harness.compactThread).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores a stale native completion and records the matching failure", async () => {
+    const harness = makeHarness();
+    const { reactor, operations } = await startReactor(harness);
+    harness.emit({
+      ...runtimeEvent("item.started", { itemType: "context_compaction", status: "inProgress" }),
+      lifecycleGeneration: "new",
+      itemId: "pass-2",
+    });
+    await waitFor(
+      () => runtime!.runPromise(reactor.getControlState(THREAD_ID)),
+      (state) => state.status === "running",
+    );
+    harness.emit({
+      ...runtimeEvent("item.completed", { itemType: "context_compaction", status: "completed" }),
+      lifecycleGeneration: "old",
+      itemId: "pass-1",
+    });
+    harness.emit({
+      ...runtimeEvent("item.completed", { itemType: "context_compaction", status: "failed" }),
+      lifecycleGeneration: "new",
+      itemId: "pass-2",
+    });
+    await waitFor(
+      () => runtime!.runPromise(reactor.getControlState(THREAD_ID)),
+      (state) => state.status === "idle",
+    );
+    expect(
+      Option.getOrThrow(await runtime!.runPromise(operations.getByThreadId(THREAD_ID))),
+    ).toMatchObject({ status: "failed", failureKind: "provider-compaction-failed" });
+  });
+
+  it("persists the complete policy and projects its custom cooldown", async () => {
+    const harness = makeHarness({ compaction: MANUAL_ONLY_COMPACTION });
+    const { reactor, operations } = await startReactor(harness);
+    const settings = {
+      autoEnabled: true,
+      trigger: { kind: "percent" as const, percent: 72 },
+      cooldownSeconds: 123,
+    };
+    await runtime!.runPromise(reactor.setThreadSettings({ threadId: THREAD_ID, settings }));
+    expect(await runtime!.runPromise(operations.listSettings())).toEqual([
+      { threadId: THREAD_ID, settings },
+    ]);
+    expect(harness.dispatched.at(-1)).toMatchObject({ activity: { payload: { settings } } });
   });
 
   it("rejects a request carrying a stale lifecycle generation", async () => {
@@ -670,6 +746,40 @@ describe("CompactionReactor", () => {
         (state) => state.status === "idle",
       );
       expect(harness.compactThread).toHaveBeenCalledTimes(1);
+    });
+
+    it("cancels a deferred automatic request when the user disables it before the turn settles", async () => {
+      const harness = makeHarness({ compaction: MANUAL_ONLY_COMPACTION });
+      const { reactor, operations } = await startReactor(harness);
+      await runtime!.runPromise(
+        reactor.setThreadSettings({ threadId: THREAD_ID, settings: AUTO_SETTINGS }),
+      );
+      harness.threadState.current = {
+        session: { ...harness.threadState.current.session!, activeTurnId: "turn-1" },
+      };
+      harness.emit(runtimeEvent("thread.token-usage.updated", highUsage));
+      await waitFor(
+        () => runtime!.runPromise(reactor.getControlState(THREAD_ID)),
+        (state) => state.status === "pending",
+      );
+      await runtime!.runPromise(
+        reactor.setThreadSettings({ threadId: THREAD_ID, settings: { autoEnabled: false } }),
+      );
+      await waitFor(
+        () => runtime!.runPromise(reactor.getControlState(THREAD_ID)),
+        (state) => state.status !== "pending",
+      );
+      harness.threadState.current = {
+        session: { ...harness.threadState.current.session!, activeTurnId: null },
+      };
+      harness.emit(runtimeEvent("turn.completed", {}));
+      await runtime!.runPromise(reactor.drain);
+      expect(harness.compactThread).not.toHaveBeenCalled();
+      const row = Option.getOrThrow(await runtime!.runPromise(operations.getByThreadId(THREAD_ID)));
+      expect(row).toMatchObject({ status: "failed", outcomeKnown: true, retryable: true });
+      expect(await runtime!.runPromise(operations.listSettings())).toEqual([
+        { threadId: THREAD_ID, settings: { autoEnabled: false } },
+      ]);
     });
 
     it("suspends as compaction-thrashing when usage stays above the trigger inside the cooldown", async () => {

@@ -24,7 +24,7 @@ describe("deriveThreadCompactionRuntimeStatus", () => {
     const status = deriveThreadCompactionRuntimeStatus({
       provider: "claudeAgent",
       capabilities: nativeCapabilities,
-      contextWindowMaxTokens: 200_000,
+      nativeTrigger: { kind: "absolute-used-tokens", usedTokens: 200_000 },
     });
     expect(status.owner).toBe("provider");
     expect(status.providerAutoEnabled).toBe(true);
@@ -34,17 +34,23 @@ describe("deriveThreadCompactionRuntimeStatus", () => {
 
   it("reports the Grok percent and Pi reserve triggers", () => {
     expect(
-      deriveThreadCompactionRuntimeStatus({ provider: "grok", capabilities: nativeCapabilities })
-        .trigger,
-    ).toEqual({ kind: "percent", percent: 85 });
+      deriveThreadCompactionRuntimeStatus({
+        provider: "grok",
+        capabilities: nativeCapabilities,
+        nativeTrigger: { kind: "percent", percent: 81 },
+      }).trigger,
+    ).toEqual({ kind: "percent", percent: 81 });
     expect(
-      deriveThreadCompactionRuntimeStatus({ provider: "pi", capabilities: nativeCapabilities })
-        .trigger,
-    ).toEqual({ kind: "remaining-tokens", reserveTokens: 16_384 });
+      deriveThreadCompactionRuntimeStatus({
+        provider: "pi",
+        capabilities: nativeCapabilities,
+        nativeTrigger: { kind: "remaining-tokens", reserveTokens: 8192 },
+      }).trigger,
+    ).toEqual({ kind: "remaining-tokens", reserveTokens: 8192 });
   });
 
   it("reports an opaque trigger for Codex and OpenCode", () => {
-    for (const provider of ["codex", "opencode", "kilo"]) {
+    for (const provider of ["codex", "opencode", "claudeAgent", "grok", "pi"]) {
       expect(
         deriveThreadCompactionRuntimeStatus({ provider, capabilities: nativeCapabilities }).trigger,
       ).toEqual({ kind: "opaque" });

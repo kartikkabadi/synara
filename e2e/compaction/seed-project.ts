@@ -1,75 +1,27 @@
-import { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, existsSync } from "node:fs";
-import { dirname } from "node:path";
+import type { Page } from "@playwright/test";
+import type { NativeApi } from "../../packages/contracts/src/ipc";
+import type { CompactionCase } from "./config";
 
-const dbPath = process.env.SYNARA_HOME
-  ? `${process.env.SYNARA_HOME}/dev/state.sqlite`
-  : "/home/ubuntu/.synara/dev/state.sqlite";
-
-const dir = dirname(dbPath);
-if (!existsSync(dir)) {
-  mkdirSync(dir, { recursive: true });
+/** Set up through the same command API used by the current app, after server readiness. */
+export async function createTestThread(page: Page, spec: CompactionCase, workspaceRoot: string): Promise<string> {
+  const projectId = randomUUID();
+  const threadId = randomUUID();
+  await page.evaluate(async ({ spec, workspaceRoot, projectId, threadId }) => {
+    const modulePath = "/src/nativeApi.ts";
+    const { ensureNativeApi } = await import(/* @vite-ignore */ modulePath) as { ensureNativeApi: () => NativeApi };
+    const api = ensureNativeApi();
+    const models = await api.provider.listModels({ provider: spec.provider, cwd: workspaceRoot, ...(spec.instanceId ? { instanceId: spec.instanceId as never } : {}) });
+    if (models.error || !models.models.some((model) => model.slug === spec.model)) {
+      throw new Error("Configured model is not available in the current provider catalog. No fallback is allowed.");
+    }
+    const modelSelection = { provider: spec.provider, model: spec.model, instanceId: spec.instanceId ?? spec.provider };
+    const createdAt = new Date().toISOString();
+    await api.orchestration.dispatchCommand({ type: "project.create", commandId: crypto.randomUUID(), projectId,
+      title: "Compaction test", workspaceRoot, defaultModelSelection: modelSelection, createdAt } as Parameters<NativeApi["orchestration"]["dispatchCommand"]>[0]);
+    await api.orchestration.dispatchCommand({ type: "thread.create", commandId: crypto.randomUUID(), threadId, projectId,
+      title: `Compaction: ${spec.provider}`, modelSelection, runtimeMode: "approval-required", interactionMode: "default",
+      branch: null, worktreePath: null, createdAt } as Parameters<NativeApi["orchestration"]["dispatchCommand"]>[0]);
+  }, { spec, workspaceRoot, projectId, threadId });
+  return threadId;
 }
-
-const workspaceRoot =
-  process.env.SYNARA_E2E_WORKSPACE_ROOT ||
-  (process.env.HOME && process.env.SYNARA_E2E_WORKSPACE_NAME
-    ? `${process.env.HOME}/${process.env.SYNARA_E2E_WORKSPACE_NAME}`
-    : "/home/ubuntu");
-
-if (workspaceRoot && !existsSync(workspaceRoot)) {
-  mkdirSync(workspaceRoot, { recursive: true });
-}
-
-const db = new Database(dbPath);
-
-db.run(`CREATE TABLE IF NOT EXISTS orchestration_events (
-  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-  event_id TEXT NOT NULL UNIQUE,
-  aggregate_kind TEXT NOT NULL,
-  stream_id TEXT NOT NULL,
-  stream_version INTEGER NOT NULL,
-  event_type TEXT NOT NULL,
-  occurred_at TEXT NOT NULL,
-  command_id TEXT,
-  causation_event_id TEXT,
-  correlation_id TEXT,
-  actor_kind TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
-  metadata_json TEXT NOT NULL
-)`);
-
-const projectId = randomUUID();
-const now = new Date().toISOString();
-
-db.run(
-  `INSERT OR IGNORE INTO orchestration_events
-    (event_id, aggregate_kind, stream_id, stream_version, event_type, occurred_at, command_id, causation_event_id, correlation_id, actor_kind, payload_json, metadata_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  [
-    `event-${projectId}`,
-    "project",
-    projectId,
-    1,
-    "project.created",
-    now,
-    "cmd-seed-project",
-    null,
-    null,
-    "user",
-    JSON.stringify({
-      projectId,
-      kind: "project",
-      title: "Home",
-      workspaceRoot,
-      scripts: [],
-      createdAt: now,
-      updatedAt: now,
-    }),
-    "{}",
-  ],
-);
-
-db.close();
-console.log(`Seeded project.created event ${projectId} at ${dbPath}`);

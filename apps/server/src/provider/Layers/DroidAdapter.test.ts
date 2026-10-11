@@ -1,31 +1,19 @@
-import { TurnId, supportsThreadCompactionFromCompaction } from "@synara/contracts";
+import { supportsThreadCompactionFromCompaction } from "@synara/shared/providerCompaction";
+import { TurnId } from "@synara/contracts";
 import { describe, expect, it } from "vitest";
-import { SYNARA_HARNESS_POLICY_MARKER } from "../../agentGateway/harnessPolicy.ts";
 
 import {
   classifyDroidPromptTurnCompletion,
-  droidCommandSignalsCompaction,
+  droidCompaction,
   extractDroidApproveSpecPlanMarkdown,
   isDroidNestedTaskToolCall,
   isExpectedDroidPlanRejection,
   isRenderableDroidAssistantDelta,
-  resolveDroidCompactionCapabilities,
   resolveDroidSessionCwd,
   scopeDroidRuntimeItemIdForTurn,
   scopeDroidToolCallStateForTurn,
   shouldIgnoreDroidInterrupt,
-  takeDroidSynaraHarnessPolicyTextPart,
 } from "./DroidAdapter.ts";
-
-describe("Droid Synara harness policy", () => {
-  it("delivers private scoped host context once", () => {
-    const state: { harnessPolicyDelivered?: boolean } = {};
-    expect(takeDroidSynaraHarnessPolicyTextPart(state, true)?.text).toContain(
-      SYNARA_HARNESS_POLICY_MARKER,
-    );
-    expect(takeDroidSynaraHarnessPolicyTextPart(state, true)).toBeNull();
-  });
-});
 
 const serverConfig = {
   cwd: "/server/cwd",
@@ -156,27 +144,9 @@ describe("DroidAdapter runtime event scoping", () => {
   });
 });
 
-describe("Droid compaction capability probe", () => {
-  // Verified against droid 0.176.0: ACP rejects /compact ("The compress
-  // command is only available in the interactive TUI right now") and never
-  // advertises a compaction command, so the default branch is unsupported.
-  it("stays unsupported when ACP advertises no compaction command", () => {
-    const compaction = resolveDroidCompactionCapabilities([
-      { name: "review" },
-      { name: "settings" },
-    ]);
-    expect(compaction.manual.mode).toBe("unsupported");
-    expect(supportsThreadCompactionFromCompaction(compaction)).toBe(false);
-  });
-
-  it("flips to supported only when ACP advertises compact/compress", () => {
-    for (const name of ["compact", "/compress", " Compact "]) {
-      expect(droidCommandSignalsCompaction(name), name).toBe(true);
-      const compaction = resolveDroidCompactionCapabilities([{ name }]);
-      expect(compaction.manual.mode).toBe("session-rollover");
-      expect(compaction.manual.mechanism).toBe("control-command");
-      expect(supportsThreadCompactionFromCompaction(compaction)).toBe(true);
-    }
-    expect(droidCommandSignalsCompaction("compactor")).toBe(false);
+describe("Droid compaction capabilities", () => {
+  it("does not advertise an unimplemented compaction lifecycle", () => {
+    expect(supportsThreadCompactionFromCompaction(droidCompaction)).toBe(false);
+    expect(droidCompaction.automatic.mode).toBe("unknown");
   });
 });
