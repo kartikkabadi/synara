@@ -108,11 +108,12 @@ function copyStateEntries(
   sourceStateDir: string,
   stagedStateDir: string,
   existingStateDir: string,
-  entries: readonly string[] = readdirSync(sourceStateDir),
+  onlyEntries?: readonly string[],
 ): string[] {
   mkdirSync(stagedStateDir, { recursive: true });
   const copiedEntries: string[] = [];
-  for (const entry of entries) {
+  for (const entry of readdirSync(sourceStateDir)) {
+    if (onlyEntries && !onlyEntries.includes(entry)) continue;
     if (EXCLUDED_STATE_ENTRIES.has(entry)) continue;
     if (STATE_DB_ENTRY_PATTERN.test(entry)) continue;
     if (entry.endsWith(".lifecycle-lock")) continue;
@@ -413,12 +414,15 @@ export async function runBetaImportIfRequested(input: {
     if (realpathSync(sourceHomeDir) === realpathSync(input.betaHomeDir)) {
       return finish(false, "import source points at the beta home itself");
     }
+    let hasSourceStateEntry = false;
     for (const sourcePath of [
       sourceStateDir,
       sourceDbPath,
       ...LIVE_SIDECAR_SUFFIXES.map((suffix) => `${sourceDbPath}${suffix}`),
     ]) {
-      if (lstatSync(sourcePath, { throwIfNoEntry: false })?.isSymbolicLink()) {
+      const entry = lstatSync(sourcePath, { throwIfNoEntry: false });
+      if (sourcePath === sourceStateDir) hasSourceStateEntry = entry !== undefined;
+      if (entry?.isSymbolicLink()) {
         return finish(false, `Cannot import a linked state entry: ${sourcePath}`);
       }
     }
@@ -437,18 +441,13 @@ export async function runBetaImportIfRequested(input: {
           input.latestMigrationId,
         );
       }
-      const copiedEntries = existsSync(sourceStateDir)
+      const copiedEntries = hasSourceStateEntry
         ? copyStateEntries(sourceStateDir, stagedStateDir, input.stateDir)
         : [];
-      const rootEntries = ["skills", "mcp"].filter(
-        (name) => lstatSync(join(sourceHomeDir, name), { throwIfNoEntry: false }) !== undefined,
-      );
-      const copiedRootEntries = copyStateEntries(
-        sourceHomeDir,
-        stagedRoot,
-        input.betaHomeDir,
-        rootEntries,
-      );
+      const copiedRootEntries = copyStateEntries(sourceHomeDir, stagedRoot, input.betaHomeDir, [
+        "skills",
+        "mcp",
+      ]);
       for (const name of copiedRootEntries) repairPrivateTreeSync(join(stagedRoot, name));
       if (!hasDatabase && copiedEntries.length === 0 && copiedRootEntries.length === 0) {
         throw new Error("Stable has no database or setup assets to import.");
