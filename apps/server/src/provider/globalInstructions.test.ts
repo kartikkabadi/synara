@@ -30,9 +30,9 @@ describe("global instructions", () => {
     const saved = await runInHome(saveGlobalInstructions(text), home);
     expect(saved.contents).not.toContain("\ufffd");
     expect(await readFile(join(home, "SYNARA.md"), "utf8")).toBe(saved.contents);
-    expect(
-      normalizeGlobalInstructions(`${"x".repeat(GLOBAL_INSTRUCTIONS_MAX_CHARS - 2)}😀`),
-    ).toHaveLength(GLOBAL_INSTRUCTIONS_MAX_CHARS);
+    expect(normalizeGlobalInstructions(`${"x".repeat(GLOBAL_INSTRUCTIONS_MAX_CHARS - 2)}😀`)).toBe(
+      `${"x".repeat(GLOBAL_INSTRUCTIONS_MAX_CHARS - 2)}😀`,
+    );
   });
 
   it("trims whitespace and caps the file before prompt composition", () => {

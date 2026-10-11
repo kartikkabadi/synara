@@ -16,6 +16,8 @@ Synara safety rules, provider capabilities, or explicit higher-priority system
 instructions. The app does not read a shared home-level file or the other flavor’s
 file. Edits to the file are picked up for the next provider session
 start or restart.
+If prompt preparation rejects a send, that session’s guidance remains pending
+until a turn carrying it is accepted; later turns in the same session omit it.
 
 If optional guidance cannot be loaded, the turn continues without it and the
 server records a warning. The editor reports the read error and disables editing

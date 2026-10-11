@@ -1016,6 +1016,10 @@ const make = Effect.gen(function* () {
   // projected thread metadata so an option changed mid-turn is still compared
   // against the old subprocess configuration before the next turn starts.
   const threadSessionModelSelections = new Map<string, ModelSelection>();
+  const pendingGlobalInstructions = new Map<
+    string,
+    { readonly provider: string; readonly sessionCreatedAt: string; readonly text: string }
+  >();
   const threadSessionComputerControl = new Map<string, boolean>();
   // Same contract as the computer-control flag: records the flag the session
   // was actually spawned with so a changed value restarts the runtime instead
@@ -1866,6 +1870,7 @@ const make = Effect.gen(function* () {
     Effect.sync(() => {
       threadProviderOptions.delete(threadId);
       threadSessionModelSelections.delete(threadId);
+      pendingGlobalInstructions.delete(threadId);
       threadSessionComputerControl.delete(threadId);
       const editResendPrefix = `${threadId}:`;
       for (const key of editResendTurnStartKeys) {
@@ -3193,20 +3198,38 @@ const make = Effect.gen(function* () {
       }),
       input.claudeCompactionCancellation,
     );
-    const globalInstructions =
+    if (
+      !settings.globalInstructionsEnabled ||
+      activeSessionBeforeEnsure === undefined ||
+      nativeSessionRestarted
+    ) {
+      pendingGlobalInstructions.delete(input.threadId);
+    }
+    if (
       settings.globalInstructionsEnabled &&
       (activeSessionBeforeEnsure === undefined || nativeSessionRestarted)
-        ? yield* loadGlobalInstructions().pipe(
-            Effect.provideService(ServerConfig, serverConfig),
-            Effect.catch(() =>
-              Effect.logWarning(
-                "Global instructions could not be loaded; continuing without optional guidance",
-                {
-                  threadId: input.threadId,
-                },
-              ).pipe(Effect.as(null)),
-            ),
-          )
+    ) {
+      const text = yield* loadGlobalInstructions().pipe(
+        Effect.provideService(ServerConfig, serverConfig),
+        Effect.catch(() =>
+          Effect.logWarning(
+            "Global instructions could not be loaded; continuing without optional guidance",
+            { threadId: input.threadId },
+          ).pipe(Effect.as(null)),
+        ),
+      );
+      if (text !== null)
+        pendingGlobalInstructions.set(input.threadId, {
+          provider: activeSession.provider,
+          sessionCreatedAt: activeSession.createdAt,
+          text,
+        });
+    }
+    const pendingGuidance = pendingGlobalInstructions.get(input.threadId);
+    const globalInstructions =
+      pendingGuidance?.provider === activeSession.provider &&
+      pendingGuidance.sessionCreatedAt === activeSession.createdAt
+        ? pendingGuidance.text
         : null;
     const globalInstructionsPrompt =
       globalInstructions === null ? null : formatGlobalInstructionsPrompt(globalInstructions);
@@ -3527,9 +3550,7 @@ const make = Effect.gen(function* () {
                 wrapLatestUserMessage: true,
               }
             : null;
-    const shouldInjectGlobalInstructions =
-      globalInstructionsPrompt !== null &&
-      (activeSessionBeforeEnsure === undefined || nativeSessionRestarted);
+    const shouldInjectGlobalInstructions = globalInstructionsPrompt !== null;
     const composeProviderInput = (bootstrap: BootstrapContextSelection | null): string =>
       [
         ...(shouldInjectGlobalInstructions ? [globalInstructionsPrompt] : []),
@@ -3690,11 +3711,20 @@ const make = Effect.gen(function* () {
             ...providerTurnInput,
             ...(messageText ? { input: messageText } : {}),
           };
-          return yield* input.claudeCompactionCancellation
+          const result = yield* input.claudeCompactionCancellation
             ? providerService.sendTurn(turnInput, {
                 claudeCompactionCancellation: input.claudeCompactionCancellation,
               })
             : providerService.sendTurn(turnInput);
+          // A preflight return or rejected send leaves guidance pending for
+          // this session's retry. Never consume a newer session's pending data.
+          if (
+            shouldInjectGlobalInstructions &&
+            pendingGlobalInstructions.get(input.threadId) === pendingGuidance
+          ) {
+            pendingGlobalInstructions.delete(input.threadId);
+          }
+          return result;
         }),
       );
 

@@ -1248,6 +1248,59 @@ describe("ProviderCommandReactor", () => {
     },
   );
 
+  it("retains session guidance across prompt overflow and consumes it only after delivery", async () => {
+    const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "synara-reactor-guidance-retry-"));
+    const file = path.join(baseDir, "SYNARA.md");
+    fs.writeFileSync(file, "PENDING-SESSION-GUIDANCE");
+    const options = {
+      baseDir,
+      serverSettings: { globalInstructionsEnabled: true },
+      formatContextPacket: "x".repeat(PROVIDER_SEND_TURN_MAX_INPUT_CHARS),
+    };
+    const harness = await createHarness(options);
+    await dispatchHarnessUserTurn(harness, {
+      messageId: "global-guidance-overflow",
+      text: "Initial work",
+      createdAt: new Date().toISOString(),
+    });
+    await waitFor(
+      async () =>
+        (await readHarnessThread(harness))?.activities.some(
+          (activity) => activity.kind === "provider.turn.start.failed",
+        ) === true,
+    );
+    await harness.drain();
+    expect(harness.startSession).toHaveBeenCalledTimes(1);
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    options.formatContextPacket = "";
+    fs.writeFileSync(file, "CHANGED-AFTER-SESSION-START");
+    await dispatchHarnessUserTurn(harness, {
+      messageId: "global-guidance-overflow-retry",
+      text: "Retry with a small prompt",
+      createdAt: new Date().toISOString(),
+    });
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await harness.drain();
+    expect(harness.startSession).toHaveBeenCalledTimes(1);
+    expect(harness.sendTurn.mock.calls[0]?.[0].input).toContain("PENDING-SESSION-GUIDANCE");
+    expect(harness.sendTurn.mock.calls[0]?.[0].input).not.toContain("CHANGED-AFTER-SESSION-START");
+    await emitHarnessTurnTerminal(harness, {
+      eventId: "global-guidance-retry-complete",
+      provider: "codex",
+      type: "completed",
+    });
+    await harness.drain();
+    await dispatchHarnessUserTurn(harness, {
+      messageId: "global-guidance-next-turn",
+      text: "Continue in the same session",
+      createdAt: new Date().toISOString(),
+    });
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    await harness.drain();
+    expect(harness.startSession).toHaveBeenCalledTimes(1);
+    expect(harness.sendTurn.mock.calls[1]?.[0].input).not.toContain("<synara_global_instructions>");
+  });
+
   it("prefixes the provider input with the project context packet", async () => {
     const harness = await createHarness({
       formatContextPacket: "Project context packet MARKER-PACKET-42",
