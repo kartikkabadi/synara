@@ -4,11 +4,16 @@ import {
   listCookieSourceProfiles,
   NetworkPolicy,
 } from "betterwright";
-import type { BrowserCookieImportInput, BrowserCookieImportResult } from "@synara/contracts";
+import {
+  BrowserCookieSource,
+  type BrowserCookieImportInput,
+  type BrowserCookieImportResult,
+} from "@synara/contracts";
+import { Schema } from "effect";
 import type { DesktopBrowserManager } from "../browserManager";
 import { synaraHostTarget } from "./betterwrightHostTarget";
 
-const SOURCES = new Set(["chrome", "safari", "edge"]);
+const isCookieSource = Schema.is(BrowserCookieSource);
 
 export class BrowserCookieImport {
   private busy = false;
@@ -23,12 +28,12 @@ export class BrowserCookieImport {
   ) {}
 
   async sources() {
-    const browsers = (await listCookieSourceBrowsers()).filter(({ id }) => SOURCES.has(id));
+    const browsers = (await listCookieSourceBrowsers()).filter(({ id }) => isCookieSource(id));
     return browsers.map(({ id, name }) => ({ id, name }));
   }
 
   async profiles(browser: string) {
-    if (!SOURCES.has(browser)) throw new Error("Unsupported cookie source.");
+    if (!isCookieSource(browser)) throw new Error("Unsupported cookie source.");
     return (await listCookieSourceProfiles(browser)).map(({ id, name }) => ({ id, name }));
   }
 

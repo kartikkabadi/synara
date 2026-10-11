@@ -378,3 +378,23 @@ The [initial qualification](qualification.md),
 retain their original scope and dates. Treat descriptions of removed features
 or earlier revisions as historical. Check current source and the release
 manifest before following an old operational recipe.
+
+## Human-initiated browser cookie import
+
+The existing browser cookie dialog supports Chrome, Safari, Edge, and Helium.
+It lists available sources and profiles, limits a site import to the visible
+origin, and requires explicit confirmation before a whole-profile import.
+Destination changes or timeout revoke the import transport. Agents cannot
+invoke this human-only path.
+
+Helium discovery and its Chromium cookie reader are macOS-only. The maintained
+BetterWright 2.7.3 patch snapshots the selected SQLite store consistently, uses
+Helium's Keychain storage key, verifies the v24 host-key digest, and passes the
+result through the existing bounded cookie-sync pipeline. Unsupported formats
+fail closed. Reader errors expose fixed codes and stages rather than paths or
+cookie values; real OS permission and Keychain prompts still apply.
+
+Synthetic reader tests use an explicitly injected disposable home and key
+material. They do not establish successful import from a real browser profile,
+actual Keychain access, or a packaged/signed app. The patch keeps the current
+SDK version and current host-target, cancellation, and network safeguards.

@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import type { BrowserCookieImportResult, BrowserVaultMethods, ThreadId } from "@synara/contracts";
+import {
+  BrowserCookieSource,
+  type BrowserCookieImportResult,
+  type BrowserVaultMethods,
+  type ThreadId,
+} from "@synara/contracts";
+import { Schema } from "effect";
 import { Button } from "./ui/button";
 import { DisclosureRegion } from "./ui/DisclosureRegion";
 
@@ -9,6 +15,7 @@ export interface BrowserCookieDestination {
   origin: string | null;
 }
 type Choice = { id: string; name: string };
+const isCookieSource = Schema.is(BrowserCookieSource);
 
 function importFailure(
   result: Extract<BrowserCookieImportResult, { ok: false }>,
@@ -109,14 +116,8 @@ export function BrowserCookieImport({
   };
 
   const run = async () => {
-    if (
-      busy ||
-      !profile ||
-      !["chrome", "safari", "edge"].includes(source) ||
-      (scope === "profile" && !confirmed)
-    )
-      return;
-    if (source !== "chrome" && source !== "safari" && source !== "edge") return;
+    if (busy || !profile || !isCookieSource(source) || (scope === "profile" && !confirmed)) return;
+    if (!isCookieSource(source)) return;
     const request = ++generation.current;
     setBusy(true);
     setStatus(null);

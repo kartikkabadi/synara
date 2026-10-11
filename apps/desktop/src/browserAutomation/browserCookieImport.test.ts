@@ -113,6 +113,28 @@ function fixture(rememberSessionImport = vi.fn(async (_domains: readonly string[
 }
 
 describe("human-only cookie import", () => {
+  it("imports Helium through the same confirmed, scoped transport", async () => {
+    mocks.sources.mockResolvedValueOnce([
+      { id: "helium", name: "Helium" },
+      { id: "unsupported", name: "Unsupported" },
+    ]);
+    const { importer, waitForAgents, rememberSessionImport } = fixture();
+    expect(await importer.sources()).toEqual([{ id: "helium", name: "Helium" }]);
+    const selected = Schema.decodeUnknownSync(BrowserCookieImportInput)({
+      ...input,
+      browser: "helium",
+    });
+    await expect(importer.import(selected)).resolves.toMatchObject({ ok: true, imported: 2 });
+    expect(waitForAgents).toHaveBeenCalledOnce();
+    expect(mocks.sync).toHaveBeenCalledWith({
+      source: { browser: "helium", profile: "Default" },
+      domains: ["example.test"],
+      windowsAppBound: "disabled",
+      timeoutMs: 30_000,
+    });
+    expect(rememberSessionImport).toHaveBeenCalledWith(["example.test"]);
+  });
+
   it("imports only the selected visible site with app-bound injection disabled and returns counts", async () => {
     const { importer, contents } = fixture();
     expect(await importer.sources()).toEqual([{ id: "chrome", name: "Chrome" }]);
