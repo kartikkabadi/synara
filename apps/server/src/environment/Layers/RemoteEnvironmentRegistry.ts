@@ -74,6 +74,29 @@ export const makeRemoteEnvironmentRegistry = Effect.fn(function* () {
         Effect.mapError(asRegistryError(`Failed to read environment descriptor ${filePath}`)),
       );
 
+  const requireDescriptorIdMatchesFileName = (fileName: string, descriptor: Descriptor) =>
+    `${descriptor.environmentId}.json` === fileName
+      ? Effect.succeed(descriptor)
+      : Effect.fail(
+          new RemoteEnvironmentError({
+            reason: `Environment descriptor id ${JSON.stringify(descriptor.environmentId)} does not match file name ${JSON.stringify(fileName)}`,
+          }),
+        );
+
+  // A single corrupt/stale file must not take down the whole listing: read
+  // each file independently, keep the valid descriptors, and log the rest.
+  const readPersistedEntry = (fileName: string) =>
+    readDescriptorFile(path.join(environmentsDir, fileName)).pipe(
+      Effect.flatMap((descriptor) => requireDescriptorIdMatchesFileName(fileName, descriptor)),
+      Effect.map(Option.some),
+      Effect.catch((error) =>
+        Effect.logWarning("Skipping invalid environment descriptor file", {
+          fileName,
+          reason: error.reason,
+        }).pipe(Effect.as(Option.none<Descriptor>())),
+      ),
+    );
+
   const listPersisted = Effect.gen(function* () {
     const exists = yield* fileSystem
       .exists(environmentsDir)
@@ -84,9 +107,8 @@ export const makeRemoteEnvironmentRegistry = Effect.fn(function* () {
       .readDirectory(environmentsDir)
       .pipe(Effect.mapError(asRegistryError("Failed to list environments directory")));
     const fileNames = entries.filter((entry) => entry.endsWith(".json")).toSorted();
-    return yield* Effect.forEach(fileNames, (fileName) =>
-      readDescriptorFile(path.join(environmentsDir, fileName)),
-    );
+    const results = yield* Effect.forEach(fileNames, readPersistedEntry);
+    return results.filter(Option.isSome).map((result) => result.value);
   });
 
   const list = () =>
@@ -132,7 +154,10 @@ export const makeRemoteEnvironmentRegistry = Effect.fn(function* () {
       const filePath = descriptorPath(environmentId);
       const exists = yield* fileSystem.exists(filePath).pipe(Effect.orElseSucceed(() => false));
       if (!exists) return Option.none<Descriptor>();
-      return Option.some(yield* readDescriptorFile(filePath));
+      const descriptor = yield* readDescriptorFile(filePath);
+      return Option.some(
+        yield* requireDescriptorIdMatchesFileName(`${environmentId}.json`, descriptor),
+      );
     });
 
   return {
