@@ -945,11 +945,16 @@ export const makeAgentGateway = Effect.gen(function* () {
             lastKnownPr: pullRequest,
           })
           .pipe(Effect.mapError((error) => new ToolInputError(errorText(error))));
-        yield* dispatchAutomaticPullRequestReview({
-          orchestrationEngine,
-          thread: target,
-          baseBranch: pullRequest.baseBranch,
-          pullRequestUrl: pullRequest.url,
+        yield* Effect.gen(function* () {
+          const currentCaller = yield* requireThreadShell(context.callerThreadId);
+          const currentTarget = yield* requireThreadShell(target.id);
+          yield* assertCallerMayDriveThread(currentCaller, currentTarget);
+          return yield* dispatchAutomaticPullRequestReview({
+            orchestrationEngine,
+            thread: currentTarget,
+            baseBranch: pullRequest.baseBranch,
+            pullRequestUrl: pullRequest.url,
+          });
         }).pipe(
           Effect.catchCause(() =>
             Effect.logWarning("automatic pull request review dispatch failed", {
