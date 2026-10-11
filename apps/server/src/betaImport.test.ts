@@ -162,6 +162,98 @@ describe("runBetaImportIfRequested", () => {
     expect(existsSync(join(betaHome, "userdata", "state.sqlite"))).toBe(true);
   });
 
+  it("never copies case variants of identity, diagnostics, database staging, or lifecycle entries", async () => {
+    const root = makeRoot();
+    const stableHome = await seedStableHome(root);
+    const stableState = join(stableHome, "userdata");
+    renameSync(join(stableState, "environment-id"), join(stableState, "ENVIRONMENT-ID"));
+    renameSync(join(stableState, "logs"), join(stableState, "LOGS"));
+    mkdirSync(join(stableState, "DIAGNOSTICS"));
+    writeFileSync(join(stableState, "DIAGNOSTICS", "private.json"), "synthetic diagnostics");
+    writeFileSync(join(stableState, "STATE.SQLITE.import-aborted"), "synthetic stale snapshot");
+    writeFileSync(join(stableState, "OTHER.SQLITE.LIFECYCLE-LOCK"), "synthetic stale lock");
+    const betaHome = join(root, ".synara-beta");
+    const betaState = join(betaHome, "userdata");
+    mkdirSync(betaState, { recursive: true });
+    writeFileSync(join(betaState, "environment-id"), "synthetic-beta-identity");
+    writeMarker(betaHome, stableHome);
+    expect(await run({ betaHomeDir: betaHome, stateDir: betaState })).toEqual({
+      consumed: true,
+      ok: true,
+    });
+    expect(readFileSync(join(betaState, "environment-id"), "utf8")).toBe("synthetic-beta-identity");
+    for (const name of [
+      "LOGS",
+      "DIAGNOSTICS",
+      "STATE.SQLITE.import-aborted",
+      "OTHER.SQLITE.LIFECYCLE-LOCK",
+    ]) {
+      expect(existsSync(join(betaState, name))).toBe(false);
+    }
+  });
+
+  it("imports canonical root setup paths on a case-insensitive volume", async ({ skip }) => {
+    const root = makeRoot();
+    const stableHome = await seedStableHome(root);
+    mkdirSync(join(stableHome, "Skills"));
+    mkdirSync(join(stableHome, "MCP"));
+    if (!existsSync(join(stableHome, "skills")) || !existsSync(join(stableHome, "mcp"))) {
+      skip();
+      return;
+    }
+    writeFileSync(join(stableHome, "Skills", "SKILL.md"), "synthetic mixed-case skill");
+    writeFileSync(join(stableHome, "MCP", "config.json"), "synthetic mixed-case MCP");
+    const betaHome = join(root, ".synara-beta");
+    writeMarker(betaHome, stableHome);
+    expect(await run({ betaHomeDir: betaHome, stateDir: join(betaHome, "userdata") })).toEqual({
+      consumed: true,
+      ok: true,
+    });
+    expect(readFileSync(join(betaHome, "skills", "SKILL.md"), "utf8")).toBe(
+      "synthetic mixed-case skill",
+    );
+    expect(readFileSync(join(betaHome, "mcp", "config.json"), "utf8")).toBe(
+      "synthetic mixed-case MCP",
+    );
+  });
+
+  it("keeps mixed-case database aliases out of the overlay on a case-insensitive volume", async ({
+    skip,
+  }) => {
+    const root = makeRoot();
+    const stableHome = await seedStableHome(root);
+    const stableState = join(stableHome, "userdata");
+    renameSync(join(stableState, "state.sqlite"), join(stableState, "STATE.SQLITE"));
+    if (!existsSync(join(stableState, "state.sqlite"))) {
+      skip();
+      return;
+    }
+    renameSync(join(stableState, "environment-id"), join(stableState, "ENVIRONMENT-ID"));
+    const betaHome = join(root, ".synara-beta");
+    const betaState = join(betaHome, "userdata");
+    mkdirSync(betaState, { recursive: true });
+    writeFileSync(join(betaState, "environment-id"), "synthetic-beta-identity");
+    writeMarker(betaHome, stableHome);
+    expect(await run({ betaHomeDir: betaHome, stateDir: betaState })).toEqual({
+      consumed: true,
+      ok: true,
+    });
+    expect(existsSync(join(betaState, "state.sqlite"))).toBe(true);
+    expect(readFileSync(join(betaState, "environment-id"), "utf8")).toBe("synthetic-beta-identity");
+    expect(readdirSync(betaState).filter((entry) => /^state\.sqlite/i.test(entry))).toEqual([
+      "state.sqlite",
+    ]);
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(join(betaState, "state.sqlite"), { readOnly: true });
+    try {
+      expect(db.prepare("SELECT title FROM threads WHERE id = 't1'").get()).toEqual({
+        title: "hello stable",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it.each(["skills", "mcp"])(
     "rejects linked %s setup before changing Beta's database or setup",
     async (name) => {

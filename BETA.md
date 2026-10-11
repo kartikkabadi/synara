@@ -244,6 +244,9 @@ sidecars (`state.sqlite-wal`/`-shm`/`-journal`), or `*.lifecycle-lock`
 directories — a leaked lock directory would make beta refuse to start while the
 stable process is alive. Nothing is ever written into the stable home: the
 marker and the result both live in the beta home.
+Reserved identity and runtime names are excluded regardless of filename case.
+Root skills and MCP folders resolve through their canonical paths, including on
+case-insensitive volumes.
 
 ### Import discovery on first launch
 

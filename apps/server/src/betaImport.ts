@@ -112,14 +112,22 @@ function copyStateEntries(
 ): string[] {
   mkdirSync(stagedStateDir, { recursive: true });
   const copiedEntries: string[] = [];
-  for (const entry of readdirSync(sourceStateDir)) {
-    if (onlyEntries && !onlyEntries.includes(entry)) continue;
-    if (EXCLUDED_STATE_ENTRIES.has(entry)) continue;
-    if (STATE_DB_ENTRY_PATTERN.test(entry)) continue;
-    if (entry.endsWith(".lifecycle-lock")) continue;
+  for (const entry of onlyEntries ?? readdirSync(sourceStateDir)) {
+    // Reserved runtime names remain excluded even when the filesystem resolves
+    // an on-disk spelling through a differently cased canonical path.
+    const reservedName = entry.toLowerCase();
+    if (EXCLUDED_STATE_ENTRIES.has(reservedName)) continue;
+    if (STATE_DB_ENTRY_PATTERN.test(reservedName)) continue;
+    if (reservedName.endsWith(".lifecycle-lock")) continue;
     const sourcePath = join(sourceStateDir, entry);
     const stagedPath = join(stagedStateDir, entry);
-    const stats = lstatSync(sourcePath);
+    const stats = lstatSync(sourcePath, { throwIfNoEntry: false });
+    if (!stats) {
+      // Root setup is optional. An enumerated user-data entry disappearing
+      // during staging is an import failure, not permission to lose it.
+      if (onlyEntries) continue;
+      throw new Error(`Import source disappeared during staging: ${sourcePath}`);
+    }
     if (stats.isSymbolicLink()) {
       throw new Error(`Cannot import a linked state entry: ${sourcePath}`);
     }
