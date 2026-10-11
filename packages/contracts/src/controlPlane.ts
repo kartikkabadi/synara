@@ -18,7 +18,7 @@ export type ControlPlaneJobResolution = typeof ControlPlaneJobResolution.Type;
 
 // Mirrors the kernel's job info: `state` is a kernel state name (e.g.
 // "pending", "leased", "uncertain", "succeeded", "dead") and `partitionKey`
-// carries the saga scope (checkpoint-revert jobs use "thread:<threadId>").
+// carries the scope (shadow reverts use "thread:<threadId>/saga:<sagaId>").
 export const ControlPlaneJob = Schema.Struct({
   jobId: TrimmedNonEmptyString,
   queue: TrimmedNonEmptyString,
@@ -60,6 +60,9 @@ export type ControlPlaneGetJobInput = typeof ControlPlaneGetJobInput.Type;
 
 export const ControlPlaneRevertContext = Schema.Struct({
   mode: Schema.Literal("shadow"),
+  status: Schema.Literals(["active", "uncertain", "completed", "aborted", "resolved"]),
+  uncertainStepId: Schema.optional(TrimmedNonEmptyString),
+  detail: Schema.optional(Schema.String),
   sagaId: TrimmedNonEmptyString,
   threadId: ThreadId,
   turnCount: NonNegativeInt,

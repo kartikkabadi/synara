@@ -1440,26 +1440,6 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             threadId: event.payload.threadId,
           });
           return;
-        case "thread.revert-started":
-        case "thread.revert-uncertain":
-          return yield* updateThreadProjection(event.payload.threadId, (thread) => ({
-            ...thread,
-            revertSaga: {
-              sagaId: event.payload.sagaId,
-              turnCount: event.payload.turnCount,
-              status: event.type === "thread.revert-started" ? "reverting" : "uncertain",
-              uncertainStepId:
-                event.type === "thread.revert-uncertain" ? event.payload.stepId : null,
-            },
-            updatedAt: maxIso(thread.updatedAt, event.occurredAt),
-          }));
-        case "thread.reverted":
-          return yield* updateThreadProjection(event.payload.threadId, (thread) => ({
-            ...thread,
-            revertSaga: null,
-            updatedAt: maxIso(thread.updatedAt, event.occurredAt),
-          }));
-
         case "thread.claude-cache-set":
           if (event.payload.review?.status === "compacting") {
             yield* projectionTurnRepository.deletePendingTurnStartByThreadId({

@@ -124,7 +124,7 @@ export function UncertainRevertJobsSection() {
             />
           ))
         )}
-        {cursors.length > 1 || jobs.length === PAGE_SIZE ? (
+        {cursors.length > 1 || jobsQuery.data.nextAfterSequence > afterSequence ? (
           <div className="flex justify-end gap-2">
             <Button
               size="sm"
@@ -137,9 +137,7 @@ export function UncertainRevertJobsSection() {
             <Button
               size="sm"
               variant="outline"
-              disabled={
-                jobs.length < PAGE_SIZE || jobsQuery.data.nextAfterSequence <= afterSequence
-              }
+              disabled={jobsQuery.data.nextAfterSequence <= afterSequence}
               onClick={() => setCursors((values) => [...values, jobsQuery.data.nextAfterSequence])}
             >
               Next
@@ -177,6 +175,11 @@ export function UncertainRevertJobsSection() {
                   <dt>Rescue snapshot reference</dt>
                   <dd>{context.rescueCheckpointRef ?? "Not recorded"}</dd>
                 </dl>
+                {context.uncertainStepId ? (
+                  <p>
+                    Uncertain step: {context.uncertainStepId}. {context.detail}
+                  </p>
+                ) : null}
                 <p className="text-muted-foreground">
                   Snapshot presence and provider rollback are not verified here. Inspect the
                   workspace and provider history before recording a decision.
@@ -226,7 +229,8 @@ export function UncertainRevertJobsSection() {
                 pending ||
                 !context ||
                 !reason.trim() ||
-                contextQuery.data?.job?.state !== "uncertain"
+                context.status !== "uncertain" ||
+                !["pending", "uncertain"].includes(contextQuery.data?.job?.state ?? "")
               }
               onClick={() => void resolveJob()}
             >

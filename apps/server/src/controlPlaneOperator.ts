@@ -1,12 +1,4 @@
-/**
- * Operator surface over the control-plane kernel for uncertain
- * checkpoint-revert jobs: paginated listing, single lookup, and resolution
- * (retry / markSucceeded / markDead). When the kernel rollout flag is off,
- * listing degrades to an empty result and mutations fail with the kernel's
- * typed "KernelDisabled" error instead of crashing.
- *
- * @module controlPlaneOperator
- */
+/** Owner-only inspection and audited closure of shadow revert observations. */
 import { Effect, Schema } from "effect";
 
 import { ControlPlaneRevertContext } from "@synara/contracts";
@@ -40,11 +32,35 @@ export const listUncertainRevertJobs = (
   return kernel
     .jobsPage({
       queue: CHECKPOINT_REVERT_QUEUE,
-      state: UNCERTAIN_JOB_STATE,
       afterSequence,
       limit: input.limit ?? DEFAULT_PAGE_LIMIT,
     })
-    .pipe(Effect.map((page) => ({ kernelEnabled: true, ...page })));
+    .pipe(
+      Effect.flatMap((page) =>
+        Effect.gen(function* () {
+          const jobs = yield* Effect.forEach(
+            page.jobs,
+            (job) =>
+              job.state === UNCERTAIN_JOB_STATE
+                ? Effect.succeed(job)
+                : getRevertContext(kernel, job.jobId).pipe(
+                    Effect.map((context) =>
+                      context?.status === "uncertain" &&
+                      (job.state === "pending" || job.state === "leased")
+                        ? job
+                        : null,
+                    ),
+                  ),
+            { concurrency: 4 },
+          );
+          return {
+            kernelEnabled: true,
+            jobs: jobs.filter((job) => job !== null),
+            nextAfterSequence: page.nextAfterSequence,
+          };
+        }),
+      ),
+    );
 };
 
 const getRevertContext = (kernel: ControlPlaneKernelShape, jobId: string) =>
@@ -87,12 +103,9 @@ const invalidResolutionTarget = (detail: string) =>
   });
 
 /**
- * Resolves one uncertain checkpoint-revert job. The target is validated
- * server-side first (it must exist, live on the checkpoint-revert queue with a
- * `thread:` partition key, and still be uncertain) so this endpoint can never
- * resolve jobs belonging to other control-plane queues. The kernel itself only
- * resolves jobs that are still uncertain at commit time, so a state change
- * between this read and the commit fails there rather than being applied.
+ * Close a verified shadow observation without changing domain or provider state.
+ * A native uncertain job is resolved conditionally; a pending observation must
+ * first acquire its own partition's lease. Audit and context updates are atomic.
  */
 export const resolveUncertainRevertJob = (
   kernel: ControlPlaneKernelShape,
@@ -118,13 +131,6 @@ export const resolveUncertainRevertJob = (
             invalidResolutionTarget(`Job ${input.jobId} is not a checkpoint-revert job.`),
           );
         }
-        if (job.state !== UNCERTAIN_JOB_STATE) {
-          return yield* Effect.fail(
-            invalidResolutionTarget(
-              `Job ${input.jobId} is in state "${job.state}", not uncertain.`,
-            ),
-          );
-        }
         if (input.resolution === "retry") {
           return yield* Effect.fail(
             invalidResolutionTarget(
@@ -138,9 +144,12 @@ export const resolveUncertainRevertJob = (
             invalidResolutionTarget("A reason of 1 to 2000 characters is required."),
           );
         }
+        const projection = `revert-job/${input.jobId}`;
+        const expectedVersion = yield* kernel.projectionVersion(projection);
         const context = yield* getRevertContext(kernel, input.jobId);
         if (
           context === null ||
+          context.status !== "uncertain" ||
           job.partitionKey !== `thread:${context.threadId}/saga:${context.sagaId}`
         ) {
           return yield* Effect.fail(
@@ -149,11 +158,52 @@ export const resolveUncertainRevertJob = (
             ),
           );
         }
+        if (!["uncertain", "pending"].includes(job.state)) {
+          return yield* Effect.fail(
+            invalidResolutionTarget(
+              `Job ${input.jobId} is in state "${job.state}", not available for a decision.`,
+            ),
+          );
+        }
+        let leaseToken: string | undefined;
+        if (job.state === "pending") {
+          const claim = yield* kernel.claimJobs({
+            queue: CHECKPOINT_REVERT_QUEUE,
+            partitionKey: job.partitionKey,
+            workerId: "shadow-observation-operator",
+            nowMs,
+            leaseMs: 30_000,
+            limit: 1,
+          });
+          leaseToken = claim.jobs.find((claimed) => claimed.jobId === input.jobId)?.leaseToken;
+          if (!leaseToken)
+            return yield* Effect.fail(
+              invalidResolutionTarget(
+                "The observation could not be claimed; reload it before recording a decision.",
+              ),
+            );
+        }
         const transactionId = yield* kernel.newId();
         const batch = {
           transactionId,
           committedAtMs: nowMs,
-          resolveUncertainJobs: [{ jobId: input.jobId, resolution: input.resolution }],
+          ...(leaseToken
+            ? { ackJobs: [{ jobId: input.jobId, leaseToken }] }
+            : { resolveUncertainJobs: [{ jobId: input.jobId, resolution: input.resolution }] }),
+          projectionPatches: [
+            {
+              projection,
+              expectedVersion,
+              puts: [
+                {
+                  key: new TextEncoder().encode("context"),
+                  value: new TextEncoder().encode(
+                    JSON.stringify({ ...context, status: "resolved" }),
+                  ),
+                },
+              ],
+            },
+          ],
           events: [
             {
               streamId: `revert-saga/${context.sagaId}`,

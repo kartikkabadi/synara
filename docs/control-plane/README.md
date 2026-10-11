@@ -25,8 +25,9 @@ partition so an earlier uncertain recording from the same thread cannot be
 claimed during a later recording's settlement. The job and its shadow context
 are created in one transaction. Completion and the observation's ACK also
 share one transaction. These records are observations, not executable recovery
-requests. An uncertain event can leave an observation pending or leased; kernel
-lease maintenance determines when its job appears in the uncertain-job list.
+requests. Uncertainty is stored in the same transaction as its trail event.
+The operator list reads this status, including pending observations, so it does
+not depend on an executor or expired-lease sweep to reveal uncertainty.
 
 The rescue-checkpoint helper keeps the first snapshot for a saga and exposes
 enumeration for manual inspection. Current checkpoint execution retains its
@@ -43,8 +44,11 @@ The UI explicitly states that snapshot presence and provider history are not
 verified by this view.
 
 Only a job with verified new shadow context can receive a terminal operator
-annotation. The decision and reason are committed atomically with the job
-resolution; a state race fails without a success claim. This never changes
+annotation. A pending shadow job is claimed only in its own recording partition;
+a failed claim stops the decision. The decision, reason, resolved observation
+status, and job ACK/resolution commit atomically. A state race fails without a
+success claim. A job ACK means the observation was closed, regardless of the
+operator's assessment of the provider outcome. This never changes
 files, provider history, or the domain saga lock. Older jobs without shadow
 context remain inspectable and require manual recovery. `retry` is rejected
 because there is no durable consumer that can execute it.

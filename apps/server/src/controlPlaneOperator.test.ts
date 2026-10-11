@@ -85,6 +85,7 @@ describe.skipIf(!addonAvailable)("controlPlaneOperator (native addon)", () => {
                 value: new TextEncoder().encode(
                   JSON.stringify({
                     mode: "shadow",
+                    status: "uncertain",
                     sagaId: jobId,
                     threadId: jobId,
                     turnCount: 1,
@@ -243,7 +244,6 @@ describe.skipIf(!addonAvailable)("controlPlaneOperator (native addon)", () => {
         );
         assert.isTrue(Exit.isFailure(exit));
         assert.include(String(exit), "InvalidResolutionTarget");
-        assert.include(String(exit), "not uncertain");
       }),
     ),
   );
@@ -283,6 +283,7 @@ describe("operator decision boundaries without a native addon", () => {
   const jobId = "a".repeat(32);
   const context = {
     mode: "shadow",
+    status: "uncertain",
     sagaId: "saga",
     threadId: "thread",
     turnCount: 1,
@@ -304,6 +305,7 @@ describe("operator decision boundaries without a native addon", () => {
         ...makeDisabledKernel("unused"),
         mode: "shadow",
         job: () => Effect.succeed(job),
+        projectionVersion: () => Effect.succeed(1),
         projectionGet: () => Effect.succeed(new TextEncoder().encode(JSON.stringify(context))),
         newId: () => Effect.succeed("b".repeat(32)),
         commit: (batch) =>
@@ -333,6 +335,7 @@ describe("operator decision boundaries without a native addon", () => {
         ...makeDisabledKernel("unused"),
         mode: "shadow",
         job: () => Effect.succeed(job),
+        projectionVersion: () => Effect.succeed(1),
         projectionGet: () => Effect.succeed(null),
         commit: () =>
           Effect.sync(() => {
@@ -353,3 +356,73 @@ describe("operator decision boundaries without a native addon", () => {
     }),
   );
 });
+
+it.effect("lists uncertain shadow observations while their job is still pending", () =>
+  Effect.gen(function* () {
+    const context = {
+      mode: "shadow",
+      status: "uncertain",
+      sagaId: "s",
+      threadId: "t",
+      turnCount: 1,
+      targetCheckpointRef: "refs/target",
+    };
+    const job = {
+      jobId: "a".repeat(32),
+      queue: CHECKPOINT_REVERT_QUEUE,
+      partitionKey: "thread:t/saga:s",
+      state: "pending",
+      attempt: 0,
+    };
+    const kernel: ControlPlaneKernelShape = {
+      ...makeDisabledKernel("unused"),
+      mode: "shadow",
+      jobsPage: () => Effect.succeed({ jobs: [job], nextAfterSequence: 1 }),
+      projectionGet: () => Effect.succeed(new TextEncoder().encode(JSON.stringify(context))),
+    };
+    assert.deepEqual((yield* listUncertainRevertJobs(kernel, {})).jobs, [job]);
+  }),
+);
+
+it.effect("does not record a decision when the exact pending observation cannot be claimed", () =>
+  Effect.gen(function* () {
+    let commits = 0;
+    const context = {
+      mode: "shadow",
+      status: "uncertain",
+      sagaId: "s",
+      threadId: "t",
+      turnCount: 1,
+      targetCheckpointRef: "refs/target",
+    };
+    const job = {
+      jobId: "a".repeat(32),
+      queue: CHECKPOINT_REVERT_QUEUE,
+      partitionKey: "thread:t/saga:s",
+      state: "pending",
+      attempt: 0,
+    };
+    const kernel: ControlPlaneKernelShape = {
+      ...makeDisabledKernel("unused"),
+      mode: "shadow",
+      job: () => Effect.succeed(job),
+      projectionVersion: () => Effect.succeed(2),
+      projectionGet: () => Effect.succeed(new TextEncoder().encode(JSON.stringify(context))),
+      claimJobs: () => Effect.succeed({ kind: "noop", staleJobs: [], jobs: [] }),
+      commit: () =>
+        Effect.sync(() => {
+          commits += 1;
+          return { transactionId: "b".repeat(32), transactionSequence: 1, committedAtMs: 0 };
+        }),
+    };
+    const error = yield* Effect.flip(
+      resolveUncertainRevertJob(kernel, {
+        jobId: job.jobId,
+        resolution: "markDead",
+        reason: "Inspected provider history",
+      }),
+    );
+    assert.equal(error.code, "InvalidResolutionTarget");
+    assert.equal(commits, 0);
+  }),
+);

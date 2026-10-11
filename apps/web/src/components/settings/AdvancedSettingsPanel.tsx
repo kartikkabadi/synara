@@ -238,7 +238,7 @@ export function AdvancedSettingsPanel(props: {
         </SettingsRow>
       </SettingsSection>
 
-      <UncertainRevertJobsSection />
+      {authSessionQuery.data?.role === "owner" ? <UncertainRevertJobsSection /> : null}
 
       <SettingsSection title="About">
         <SettingsRow

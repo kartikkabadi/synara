@@ -5018,6 +5018,14 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         },
       });
 
+      const retainedTurns = yield* sql<{
+        turn_id: string;
+      }>`SELECT turn_id FROM projection_turns WHERE thread_id = 'thread-revert' ORDER BY turn_id`;
+      assert.deepEqual(
+        retainedTurns.map((row) => row.turn_id),
+        ["turn-1"],
+      );
+
       const messageRows = yield* sql<{
         readonly messageId: string;
         readonly turnId: string | null;

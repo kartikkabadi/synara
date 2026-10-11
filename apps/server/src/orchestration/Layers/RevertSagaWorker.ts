@@ -6,8 +6,7 @@
  *   2. `thread.revert.step`      (one per legacy step)
  *   3. terminal: `thread.revert.completed` (job acked in the same commit),
  *      `thread.revert.aborted` (nothing mutated, job acked), or
- *      `thread.revert.uncertain` (job left unacked so it surfaces as
- *      uncertain instead of silently retrying).
+ *      `thread.revert.uncertain` (context marked uncertain; job left unacked).
  *
  * @module RevertSagaWorkerLive
  */
@@ -52,8 +51,22 @@ function makeHandle(
   const partitionKey = `thread:${input.threadId}/saga:${sagaId}`;
 
   const appendEvent = (eventType: string, payload: object) =>
-    kernel
-      .commit({
+    Effect.gen(function* () {
+      const projection = `revert-job/${jobId}`;
+      const expectedVersion =
+        eventType === "thread.revert.uncertain" ? yield* kernel.projectionVersion(projection) : 0;
+      const context = {
+        mode: "shadow",
+        status: "uncertain",
+        sagaId,
+        threadId: input.threadId,
+        turnCount: input.turnCount,
+        targetCheckpointRef: input.targetCheckpointRef,
+        ...(input.rescueCheckpointRef ? { rescueCheckpointRef: input.rescueCheckpointRef } : {}),
+        ...payload,
+        ...("stepId" in payload ? { uncertainStepId: payload.stepId } : {}),
+      };
+      yield* kernel.commit({
         committedAtMs: Date.now(),
         events: [
           {
@@ -63,8 +76,21 @@ function makeHandle(
             payload: encodePayload(payload),
           },
         ],
-      })
-      .pipe(Effect.asVoid, Effect.catch(logKernelFailure(eventType)));
+        ...(eventType === "thread.revert.uncertain"
+          ? {
+              projectionPatches: [
+                {
+                  projection,
+                  expectedVersion,
+                  puts: [
+                    { key: new TextEncoder().encode("context"), value: encodePayload(context) },
+                  ],
+                },
+              ],
+            }
+          : {}),
+      });
+    }).pipe(Effect.asVoid, Effect.catch(logKernelFailure(eventType)));
 
   // Observations have independent partitions: a prior uncertain recording for
   // the same thread must never be leased by this handle's settlement.
@@ -118,6 +144,8 @@ function makeHandle(
         }
         leaseToken = claimedJob.leaseToken;
       }
+      const projection = `revert-job/${jobId}`;
+      const expectedVersion = yield* kernel.projectionVersion(projection);
       yield* kernel.commit({
         committedAtMs: Date.now(),
         events: [
@@ -126,6 +154,28 @@ function makeHandle(
             eventType,
             occurredAtMs: Date.now(),
             payload: encodePayload(payload),
+          },
+        ],
+        projectionPatches: [
+          {
+            projection,
+            expectedVersion,
+            puts: [
+              {
+                key: new TextEncoder().encode("context"),
+                value: encodePayload({
+                  mode: "shadow",
+                  status: eventType === "thread.revert.completed" ? "completed" : "aborted",
+                  sagaId,
+                  threadId: input.threadId,
+                  turnCount: input.turnCount,
+                  targetCheckpointRef: input.targetCheckpointRef,
+                  ...(input.rescueCheckpointRef
+                    ? { rescueCheckpointRef: input.rescueCheckpointRef }
+                    : {}),
+                }),
+              },
+            ],
           },
         ],
         ackJobs: [{ jobId, leaseToken }],
@@ -197,6 +247,7 @@ export const makeRevertSagaWorker = (kernel: ControlPlaneKernelShape): RevertSag
           const jobId = yield* kernel.newId();
           const context = {
             mode: "shadow" as const,
+            status: "active",
             sagaId,
             threadId: input.threadId,
             turnCount: input.turnCount,

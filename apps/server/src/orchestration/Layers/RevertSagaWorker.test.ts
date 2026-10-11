@@ -232,6 +232,7 @@ describe("observational partition isolation", () => {
             return { transactionId: "1".repeat(32), transactionSequence: 1, committedAtMs: 0 };
           }),
         streamVersion: () => Effect.succeed(2),
+        projectionVersion: () => Effect.succeed(1),
         claimJobs: (request) =>
           Effect.sync(() => {
             claims.push(request.partitionKey!);

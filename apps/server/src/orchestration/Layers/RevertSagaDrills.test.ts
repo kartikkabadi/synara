@@ -1,14 +1,8 @@
 /**
- * Failure drills for the durable checkpoint-revert saga (kernel PR 5).
- *
- * Each drill simulates a crash at one boundary of the saga and asserts the
- * recovery invariants from the integration plan:
- * - no duplicate provider-rollback executions,
- * - no effects from indeterminate claims,
- * - ambiguous outcomes become Uncertain and are only resolved explicitly.
- *
- * All drills run against a real kernel store and skip when the native addon
- * is unavailable (same gating as ControlPlaneKernel.test.ts).
+ * Native kernel primitive drills for shadow observations.
+ * These exercise leases, transaction recovery and explicit state resolution.
+ * They do not execute or prove provider rollback, restart recovery or ref cleanup.
+ * All drills skip when the native addon is unavailable.
  */
 import { CheckpointRef, ThreadId } from "@synara/contracts";
 import { assert, describe, it } from "@effect/vitest";
@@ -40,7 +34,10 @@ describe.skipIf(!addonAvailable)("revert saga failure drills", () => {
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
       );
-      const kernel = yield* makeControlPlaneKernelAtPath(path.join(dir, "control-plane.db"), "on");
+      const kernel = yield* makeControlPlaneKernelAtPath(
+        path.join(dir, "control-plane.db"),
+        "shadow",
+      );
       return yield* use(kernel);
     }).pipe(Effect.scoped);
 
@@ -59,7 +56,7 @@ describe.skipIf(!addonAvailable)("revert saga failure drills", () => {
       .jobs({ queue: REVERT_SAGA_QUEUE, state, limit: 10 })
       .pipe(Effect.map((jobs) => jobs.map((job) => job.jobId)));
 
-  it.effect("drill 1: crash after arming leaves the job reclaimable at step 1", () =>
+  it.effect("drill 1: arming leaves an unclaimed observation pending", () =>
     withKernel((kernel) =>
       Effect.gen(function* () {
         yield* armSaga(kernel);
@@ -68,7 +65,7 @@ describe.skipIf(!addonAvailable)("revert saga failure drills", () => {
         const pending = yield* jobIdsByState(kernel, "pending");
         assert.equal(pending.length, 1);
 
-        // A recovery worker claims the job fresh and would resume at step 1.
+        // The native claim primitive can lease the pending observation.
         const outcome = yield* kernel.claimJobs({
           queue: REVERT_SAGA_QUEUE,
           workerId: "recovery-worker",
@@ -118,7 +115,7 @@ describe.skipIf(!addonAvailable)("revert saga failure drills", () => {
         assert.equal(recovered.jobs[0]?.attempt, claim.jobs[0]?.attempt);
         assert.deepEqual(recovered.staleJobs, []);
 
-        // The recovered token acknowledges the job: exactly one execution.
+        // The recovered token acknowledges exactly this observation.
         const job = recovered.jobs[0];
         assert.isDefined(job);
         if (job) {
@@ -129,7 +126,7 @@ describe.skipIf(!addonAvailable)("revert saga failure drills", () => {
         }
         assert.deepEqual(yield* jobIdsByState(kernel, "succeeded"), [job?.jobId]);
 
-        // No second claimable execution exists.
+        // No second claimable observation exists.
         const second = yield* kernel.claimJobs({
           queue: REVERT_SAGA_QUEUE,
           workerId: "executor-2",
@@ -142,51 +139,49 @@ describe.skipIf(!addonAvailable)("revert saga failure drills", () => {
     ),
   );
 
-  it.effect(
-    "drill 3: an ambiguous provider rollback becomes Uncertain and resolves only explicitly",
-    () =>
-      withKernel((kernel) =>
-        Effect.gen(function* () {
-          const handle = yield* armSaga(kernel);
-          assert.isTrue(yield* handle.claim());
-          yield* handle.recordStep("rescue-checkpoint");
-          yield* handle.recordStep("filesystem-restore");
+  it.effect("drill 3: an expired observed lease becomes uncertain and resolves explicitly", () =>
+    withKernel((kernel) =>
+      Effect.gen(function* () {
+        const handle = yield* armSaga(kernel);
+        assert.isTrue(yield* handle.claim());
+        yield* handle.recordStep("rescue-checkpoint");
+        yield* handle.recordStep("filesystem-restore");
 
-          // The provider call fails ambiguously: the lease is deliberately
-          // left to expire instead of acking, failing, or retrying.
-          yield* handle.recordUncertain("provider-rollback", "socket closed mid-call");
+        // The provider call fails ambiguously: the lease is deliberately
+        // left to expire instead of acking, failing, or retrying.
+        yield* handle.recordUncertain("provider-rollback", "socket closed mid-call");
 
-          // After lease expiry the reconcilable job is NOT silently
-          // reclaimed: the sweep transitions it to Uncertain.
-          const afterExpiry = yield* kernel.claimJobs({
-            queue: REVERT_SAGA_QUEUE,
-            workerId: "sweeper",
-            nowMs: Date.now() + LEASE_MS + 1,
-            leaseMs: LEASE_MS,
-            limit: 10,
+        // After lease expiry the reconcilable job is NOT silently
+        // reclaimed: the sweep transitions it to Uncertain.
+        const afterExpiry = yield* kernel.claimJobs({
+          queue: REVERT_SAGA_QUEUE,
+          workerId: "sweeper",
+          nowMs: Date.now() + LEASE_MS + 1,
+          leaseMs: LEASE_MS,
+          limit: 10,
+        });
+        assert.equal(afterExpiry.jobs.length, 0);
+        const uncertain = yield* jobIdsByState(kernel, "uncertain");
+        assert.equal(uncertain.length, 1);
+
+        // The uncertainty is on the durable trail.
+        const events = yield* kernel.eventsAfter({ after: 0, limit: 10 });
+        assert.isTrue(events.some((event) => event.eventType === "thread.revert.uncertain"));
+
+        // The native retry primitive returns it to pending. The application
+        // operator RPC refuses retry because no recovery executor exists.
+        const jobId = uncertain[0];
+        assert.isDefined(jobId);
+        if (jobId !== undefined) {
+          yield* kernel.commit({
+            committedAtMs: Date.now(),
+            resolveUncertainJobs: [{ jobId, resolution: "retry" }],
           });
-          assert.equal(afterExpiry.jobs.length, 0);
-          const uncertain = yield* jobIdsByState(kernel, "uncertain");
-          assert.equal(uncertain.length, 1);
-
-          // The uncertainty is on the durable trail.
-          const events = yield* kernel.eventsAfter({ after: 0, limit: 10 });
-          assert.isTrue(events.some((event) => event.eventType === "thread.revert.uncertain"));
-
-          // Only an explicit operator resolution moves the job again:
-          // retry returns it to pending for a fresh attempt.
-          const jobId = uncertain[0];
-          assert.isDefined(jobId);
-          if (jobId !== undefined) {
-            yield* kernel.commit({
-              committedAtMs: Date.now(),
-              resolveUncertainJobs: [{ jobId, resolution: "retry" }],
-            });
-          }
-          assert.deepEqual(yield* jobIdsByState(kernel, "uncertain"), []);
-          assert.deepEqual(yield* jobIdsByState(kernel, "pending"), [jobId]);
-        }),
-      ),
+        }
+        assert.deepEqual(yield* jobIdsByState(kernel, "uncertain"), []);
+        assert.deepEqual(yield* jobIdsByState(kernel, "pending"), [jobId]);
+      }),
+    ),
   );
 
   it.effect("drill 4: recoverTransaction distinguishes committed from absent outcomes", () =>
@@ -224,7 +219,7 @@ describe.skipIf(!addonAvailable)("revert saga failure drills", () => {
     ),
   );
 
-  it.effect("drill 5: a crashed GC step is resolved and re-run without duplicate effects", () =>
+  it.effect("drill 5: an expired lease can be explicitly retried and acknowledged", () =>
     withKernel((kernel) =>
       Effect.gen(function* () {
         const handle = yield* armSaga(kernel);
@@ -243,8 +238,7 @@ describe.skipIf(!addonAvailable)("revert saga failure drills", () => {
         const uncertain = yield* jobIdsByState(kernel, "uncertain");
         assert.equal(uncertain.length, 1);
 
-        // Ref deletion is idempotent, so the operator resolves to retry;
-        // the fresh attempt claims the job and settles it exactly once.
+        // Exercise native retry and ACK only; no ref deletion is performed.
         const jobId = uncertain[0];
         if (jobId !== undefined) {
           yield* kernel.commit({
