@@ -97,7 +97,7 @@ See [External MCP integrations](./docs/external-mcp.md) for setup, pairing, proj
 
 ### 7. Appearance and workspace preferences
 
-Configure the shell to match the way you work with light and dark themes, typography controls, density preferences, and workspace settings.
+Configure the shell to match the way you work with light and dark themes, typography controls, density preferences, and workspace settings. Appearance also offers Parthenon and Attic valley visual packs with bundled local artwork. Each pack updates both color modes while keeping your selected mode, system-font preference, and window-translucency settings; you can adjust or remove the wallpaper separately in each mode.
 
 <p align="center">
   <img src="./assets/prod/readme-appearance-dark.png" width="900" alt="Synara Appearance settings with theme, typography, and density controls">
