@@ -6421,6 +6421,29 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
           supportsAdaptiveThinking: true,
           supportsAutoMode: false,
         },
+        {
+          value: "opus-no-effort",
+          resolvedModel: "claude-opus-5",
+          displayName: "Opus without effort",
+          description: "SDK disables effort",
+          supportsEffort: false,
+        },
+        {
+          value: "opus-limited-effort",
+          resolvedModel: "claude-opus-5",
+          displayName: "Opus with limited effort",
+          description: "SDK excludes xhigh",
+          supportsEffort: true,
+          supportedEffortLevels: ["low", "medium", "high"],
+        },
+        {
+          value: "opus-full-effort",
+          resolvedModel: "claude-opus-5",
+          displayName: "Opus with full effort",
+          description: "SDK supports xhigh",
+          supportsEffort: true,
+          supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
+        },
       ];
     };
     const layer = makeClaudeAdapterLive({
@@ -6446,7 +6469,25 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
       });
       assert.equal(discovered.source, "sdk");
       assert.equal(discovered.cached, false);
-      assert.lengthOf(discovered.models, 2);
+      assert.lengthOf(discovered.models, 5);
+      const noEffort = discovered.models[2]!;
+      assert.deepEqual(noEffort.supportedReasoningEfforts, []);
+      assert.isUndefined(noEffort.optionDescriptors?.find((option) => option.id === "effort"));
+      for (const [index, expected] of [
+        [3, ["low", "medium", "high"]],
+        [4, ["low", "medium", "high", "xhigh", "max", "ultracode"]],
+      ] as const) {
+        const descriptor = discovered.models[index]!.optionDescriptors?.find(
+          (option) => option.id === "effort",
+        );
+        assert.equal(descriptor?.type, "select");
+        if (descriptor?.type === "select") {
+          assert.deepEqual(
+            descriptor.options.map((option) => option.id),
+            expected,
+          );
+        }
+      }
       const haiku = discovered.models[1]!;
       assert.deepEqual(
         haiku.supportedReasoningEfforts?.map((effort) => effort.value),

@@ -1199,7 +1199,10 @@ function mapClaudeModelInfo(model: ModelInfo): ProviderListModelsResult["models"
             ...sdkOptions,
             // Synara-only modes (e.g. Ultracode) are not SDK API effort values.
             ...staticCapabilities.reasoningEffortLevels.filter(
-              (option) => option.controlSource !== "api-effort",
+              (option) =>
+                option.controlSource !== "api-effort" &&
+                (option.apiEffortValue === undefined ||
+                  sdkEfforts?.includes(option.apiEffortValue)),
             ),
           ],
         };
