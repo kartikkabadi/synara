@@ -206,7 +206,7 @@ diff --git a/dist/src/helium-cookie-source.js b/dist/src/helium-cookie-source.js
 new file mode 100644
 --- /dev/null
 +++ b/dist/src/helium-cookie-source.js
-@@ -0,0 +1,337 @@
+@@ -0,0 +1,341 @@
 +// Helium (net.imput.helium) cookie source for hosts whose native reader does
 +// not register the browser yet. Reads the same Chromium cookie database the
 +// native reader would, decrypts v10 rows with the profile's Keychain secret,
@@ -533,12 +533,16 @@ new file mode 100644
 +        const password = await keychainPassword(Math.min(options.timeoutMs, HELIUM_KEYCHAIN_TIMEOUT_MS));
 +        if (!password) throw heliumError("source_extraction_failed", "decrypt");
 +        const key = pbkdf2Sync(password, "saltysalt", 1003, 16, "sha1");
-+        const warnings = new Map();
-+        const detailedCookies = await queryHeliumCookies(copyPath, key, warnings);
-+        return {
-+            detailedCookies,
-+            warnings: [...warnings.entries()].map(([code, count]) => ({ code, count })),
-+        };
++        try {
++            const warnings = new Map();
++            const detailedCookies = await queryHeliumCookies(copyPath, key, warnings);
++            return {
++                detailedCookies,
++                warnings: [...warnings.entries()].map(([code, count]) => ({ code, count })),
++            };
++        } finally {
++            key.fill(0);
++        }
 +    } finally {
 +        await rm(workspace, { recursive: true, force: true }).catch(() => {});
 +    }

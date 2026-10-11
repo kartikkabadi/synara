@@ -2,7 +2,7 @@ import { createCipheriv, createHash, pbkdf2Sync, randomBytes } from "node:crypto
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRequire } from "node:module";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { DatabaseSync } from "node:sqlite";
@@ -492,6 +492,40 @@ describe.skipIf(process.platform !== "darwin")("helium cookie source", () => {
       expect(error).toMatchObject(expected);
       expect(String(error)).not.toContain("security:");
       expect(String(error)).not.toContain("interaction");
+    },
+  );
+
+  it.each([false, true])(
+    "wipes derived key material after a snapshot (query failure: %s)",
+    async (failQuery) => {
+      const crypto = require("node:crypto") as typeof import("node:crypto");
+      const derive = crypto.pbkdf2Sync;
+      let derived: Buffer | undefined;
+      const spy = vi.spyOn(crypto, "pbkdf2Sync").mockImplementation((...args) => {
+        derived = derive(...args);
+        return derived;
+      });
+      syncBuiltinESMExports();
+      try {
+        if (failQuery) {
+          const database = new DatabaseSync(
+            join(home, "Library", "Application Support", "net.imput.helium", "Default", "Cookies"),
+          );
+          database.exec("DROP TABLE cookies");
+          database.close();
+        }
+        const result = heliumSource.readHeliumCookieSnapshot(heliumOptions(), {
+          home,
+          keychainPassword: async () => syntheticKeychainPassword(),
+        });
+        if (failQuery) await expect(result).rejects.toMatchObject({ cookieReaderStage: "query" });
+        else await expect(result).resolves.toHaveProperty("detailedCookies");
+        expect(derived).toBeDefined();
+        expect(derived?.every((value) => value === 0)).toBe(true);
+      } finally {
+        spy.mockRestore();
+        syncBuiltinESMExports();
+      }
     },
   );
 
