@@ -99,7 +99,7 @@ describe("RemoteEnvironmentResolver", () => {
     if (plan.kind === "ssh") {
       expect(plan.sshArgs.at(-1)).toBe(plan.remoteCommand);
       expect(plan.remoteCommand).toBe(
-        "echo $$ && cd '/srv/workspaces/repo' && exec 'codex' app-server",
+        "echo \"__SYNARA_REMOTE_PID__=$$\" && cd '/srv/workspaces/repo' && exec 'codex' app-server",
       );
       expect(plan.sshArgs).toContain("remote.test");
     }
