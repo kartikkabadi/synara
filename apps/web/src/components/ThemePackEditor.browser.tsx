@@ -132,6 +132,7 @@ it.each(["dark", "light"] as const)(
 it.each(["Parthenon", "Attic valley"])(
   "applies %s to both modes and preserves window controls",
   async (label) => {
+    await page.viewport(1120, 1000);
     const stored = { ...DEFAULT_THEME_STATE, mode: "light", systemUiFont: false };
     localStorage.setItem("synara:theme", JSON.stringify(stored));
     await render(
@@ -140,7 +141,12 @@ it.each(["Parthenon", "Attic valley"])(
         <ThemePackEditor variant="light" />
       </>,
     );
-    await page.getByRole("button", { name: new RegExp(`^${label}`) }).click();
+    const presetButton = page.getByRole("button", { name: new RegExp(`^${label}`) });
+    const cardBounds = presetButton.element().getBoundingClientRect();
+    const labelBounds = page.getByText(label, { exact: true }).element().getBoundingClientRect();
+    expect(labelBounds.top).toBeGreaterThanOrEqual(cardBounds.top);
+    expect(labelBounds.bottom).toBeLessThanOrEqual(cardBounds.bottom);
+    await presetButton.click();
     const id = label === "Parthenon" ? "parthenon" : "attic-valley";
     await expect
       .poll(() => root.style.getPropertyValue("--app-wallpaper-image"))

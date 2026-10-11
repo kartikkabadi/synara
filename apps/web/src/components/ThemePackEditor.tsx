@@ -71,7 +71,7 @@ export function ThemeVisualPresetPicker() {
           <Button
             variant="outline"
             className={cn(
-              "group block h-auto overflow-hidden rounded-lg border border-[color:var(--color-border)] text-left transition-colors hover:border-[color:var(--color-border-focus)] p-0",
+              "group block h-auto whitespace-normal overflow-hidden rounded-lg border border-[color:var(--color-border)] text-left transition-colors hover:border-[color:var(--color-border-focus)] p-0 sm:h-auto",
               SETTINGS_CONTROL_RADIUS_CLASS_NAME,
             )}
             key={preset.id}
