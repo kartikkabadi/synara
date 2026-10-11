@@ -15490,8 +15490,12 @@ describe("ProviderCommandReactor", () => {
   });
 
   it("releases a timed-out promoted turn when its live provider turn settles", async () => {
+    const clockScope = await Effect.runPromise(Scope.make("sequential"));
+    scopes.add(clockScope);
+    const clock = await Effect.runPromise(TestClock.make().pipe(Scope.provide(clockScope)));
     const harness = await createHarness({
       commandEventTimeout: Duration.millis(25),
+      clock,
     });
     await seedQueuedTurnBehindLiveTurn(harness, {
       liveTurnId: asTurnId("turn-running-timeout"),
@@ -15520,6 +15524,12 @@ describe("ProviderCommandReactor", () => {
       eventId: "evt-turn-completed-timeout",
     });
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await waitFor(async () =>
+      (await Effect.runPromise(harness.listSessions())).some(
+        (session) => session.activeTurnId === timedOutTurnId,
+      ),
+    );
+    await Effect.runPromise(clock.adjust(Duration.millis(50)).pipe(Scope.provide(clockScope)));
     await waitFor(async () =>
       Effect.runPromise(
         harness.deliveryRepository
