@@ -323,6 +323,7 @@ import {
   resolveVisibleWindowBounds,
   writeDesktopWindowState,
 } from "./windowState";
+import { BETA_IMPORT_STORAGE_FILE_NAME } from "@synara/shared/betaChannel";
 import {
   acknowledgeSynaraStorageSnapshot,
   readSynaraStorageSnapshot,
@@ -4986,7 +4987,12 @@ function requestGracefulAppQuit(reason: string): void {
 }
 
 function registerIpcHandlers(): void {
-  const storageSnapshotPath = resolveSynaraStorageSnapshotPath(app.getPath("userData"));
+  const profileSnapshotPath = resolveSynaraStorageSnapshotPath(app.getPath("userData"));
+  const importedSnapshotPath =
+    desktopFlavor === "beta"
+      ? Path.join(BASE_DIR, "userdata", BETA_IMPORT_STORAGE_FILE_NAME)
+      : null;
+  let storageSnapshotPath = profileSnapshotPath;
 
   ipcMain.removeAllListeners(IPC.betaDiagnostics.enabled);
   ipcMain.on(IPC.betaDiagnostics.enabled, (event: IpcMainEvent) => {
@@ -5004,7 +5010,16 @@ function registerIpcHandlers(): void {
 
   ipcMain.removeAllListeners(IPC.storageMigration.read);
   ipcMain.on(IPC.storageMigration.read, (event: IpcMainEvent) => {
-    event.returnValue = readSynaraStorageSnapshot(storageSnapshotPath);
+    if (importedSnapshotPath) {
+      const importedSnapshot = readSynaraStorageSnapshot(importedSnapshotPath);
+      if (importedSnapshot) {
+        storageSnapshotPath = importedSnapshotPath;
+        event.returnValue = importedSnapshot;
+        return;
+      }
+    }
+    storageSnapshotPath = profileSnapshotPath;
+    event.returnValue = readSynaraStorageSnapshot(profileSnapshotPath);
   });
 
   ipcMain.removeHandler(IPC.storageMigration.acknowledge);

@@ -300,7 +300,7 @@ describe("import storage snapshot", () => {
     writeFileSync(join(desktopDir, "synara-beta.desktop"), `Exec=${executable}\n`);
   }
 
-  it("writes the snapshot sidecar and beta-profile snapshot alongside the marker", async () => {
+  it("stages browser settings without touching the Electron profile", async () => {
     const root = makeRoot();
     fakeLinuxBetaInstall(root, "/opt/fake-beta");
     const betaHome = join(root, ".synara-beta");
@@ -316,18 +316,18 @@ describe("import storage snapshot", () => {
     const sidecar = JSON.parse(readFileSync(join(betaHome, BETA_IMPORT_STORAGE_FILE_NAME), "utf8"));
     expect(sidecar.entries["synara:theme"]).toBe('"dark"');
     const profilePath = resolveSynaraStorageSnapshotPath(betaUserDataDir);
-    expect(existsSync(profilePath)).toBe(true);
-    const profile = JSON.parse(readFileSync(profilePath, "utf8"));
-    expect(profile.version).toBe(1);
-    expect(profile.entries["synara:theme"]).toBe('"dark"');
+    expect(existsSync(profilePath)).toBe(false);
   });
 
-  it("removes the marker and both sidecars when launching beta throws", async () => {
+  it("removes the pending handoff and preserves prior profile data when launching beta throws", async () => {
     const root = makeRoot();
     fakeLinuxBetaInstall(root, "/opt/failing-beta");
     const betaHome = join(root, ".synara-beta");
     const betaUserDataDir = join(root, "beta-userdata");
     const channel = makeChannel(root, "production", { betaUserDataDir });
+    mkdirSync(betaUserDataDir, { recursive: true });
+    const profilePath = resolveSynaraStorageSnapshotPath(betaUserDataDir);
+    writeFileSync(profilePath, "existing profile snapshot");
 
     const result = await channel.importAndLaunch(join(root, ".synara"), {
       storageSnapshot: makeSnapshot(),
@@ -337,7 +337,18 @@ describe("import storage snapshot", () => {
     expect(result.error).toBe("internal");
     expect(existsSync(join(betaHome, BETA_IMPORT_REQUEST_FILE_NAME))).toBe(false);
     expect(existsSync(join(betaHome, BETA_IMPORT_STORAGE_FILE_NAME))).toBe(false);
-    expect(existsSync(resolveSynaraStorageSnapshotPath(betaUserDataDir))).toBe(false);
+    expect(readFileSync(profilePath, "utf8")).toBe("existing profile snapshot");
+  });
+
+  it("clears an older pending snapshot when copying without browser settings", async () => {
+    const root = makeRoot();
+    fakeLinuxBetaInstall(root, "/opt/fake-beta");
+    const betaHome = join(root, ".synara-beta");
+    writeBetaImportStorageSnapshot({ betaHomeDir: betaHome, snapshot: makeSnapshot() });
+
+    expect((await makeChannel(root).importAndLaunch(join(root, ".synara"))).ok).toBe(true);
+    expect(existsSync(join(betaHome, BETA_IMPORT_STORAGE_FILE_NAME))).toBe(false);
+    expect(existsSync(join(betaHome, BETA_IMPORT_REQUEST_FILE_NAME))).toBe(true);
   });
 
   it("never writes a marker for a malformed snapshot", async () => {

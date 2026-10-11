@@ -36,10 +36,7 @@ import {
   SYNARA_STABLE_WINDOWS_INSTALLER_GUID,
   type BetaImportResult,
 } from "@synara/shared/betaChannel";
-import {
-  SYNARA_DESKTOP_SMOKE_USER_DATA_ENV,
-  synaraDesktopIdentity,
-} from "@synara/shared/desktopIdentity";
+import { SYNARA_DESKTOP_SMOKE_USER_DATA_ENV } from "@synara/shared/desktopIdentity";
 import type {
   DesktopBetaActionError,
   DesktopBetaActionResult,
@@ -51,11 +48,7 @@ import type {
 
 import { installBetaFromFeed, type BetaInstallDeps, type ExpectedTeamId } from "./betaInstaller";
 
-import {
-  resolveSynaraStorageSnapshotPath,
-  validateSynaraStorageSnapshot,
-} from "./desktopStorageMigration";
-import { resolveDesktopAppDataBase, resolveDesktopUserDataPath } from "./desktopUserDataProfile";
+import { validateSynaraStorageSnapshot } from "./desktopStorageMigration";
 
 // electron-builder registers the uninstall key under the raw NSIS guid (no
 // braces); the value itself lives in @synara/shared/betaChannel.
@@ -398,15 +391,7 @@ export function writeBetaImportRequest(input: {
   renameSync(tempPath, requestPath);
 }
 
-/**
- * Writes the web-supplied storage snapshot beside the import marker for
- * debuggability (`<betaHome>/import-storage.json`). The validated snapshot is
- * also fanned out to beta's Electron profile by the caller; this sidecar
- * itself is never consumed at startup.
- *
- * Throws when the snapshot fails the shared storage-migration caps so the
- * caller can remove any half-written handoff.
- */
+/** Stages browser settings for the beta server's transactional import. */
 export function writeBetaImportStorageSnapshot(input: {
   readonly betaHomeDir: string;
   readonly snapshot: SynaraStorageSnapshot;
@@ -611,16 +596,7 @@ export class DesktopBetaChannel {
     return this.launch();
   }
 
-  /**
-   * Downloads and installs beta when needed, writes the import marker into the
-   * beta home, and launches the beta app. The beta server performs the data
-   * import itself at startup, before opening its own database, so the stable
-   * app never touches beta state directly. A supplied storage snapshot is
-   * validated before anything is written, then fanned out to both
-   * `<betaHome>/import-storage.json` (a debuggability sidecar) and beta's
-   * Electron-profile snapshot file, which beta's existing storage-migration
-   * read path consumes before its renderer stores hydrate.
-   */
+  /** Stages the requested data handoff for beta to commit during startup. */
   async importAndLaunch(
     sourceHomeDir: string,
     input?: BetaImportAndLaunchInput,
@@ -652,21 +628,17 @@ export class DesktopBetaChannel {
         "The browser settings snapshot was invalid, so nothing was handed off to Synara Beta.",
       );
     }
-    const profileTarget = validatedSnapshot ? this.resolveBetaProfileSnapshotTarget() : null;
     try {
-      writeBetaImportRequest({
-        betaHomeDir: this.deps.betaHomeDir,
-        sourceHomeDir,
-      });
       if (validatedSnapshot) {
         writeBetaImportStorageSnapshot({
           betaHomeDir: this.deps.betaHomeDir,
           snapshot: validatedSnapshot,
         });
-        if (profileTarget) {
-          this.writeBetaProfileStorageSnapshot(profileTarget, validatedSnapshot);
-        }
+      } else {
+        rmSync(join(this.deps.betaHomeDir, BETA_IMPORT_STORAGE_FILE_NAME), { force: true });
       }
+      // Publish the request only after its optional snapshot is ready.
+      writeBetaImportRequest({ betaHomeDir: this.deps.betaHomeDir, sourceHomeDir });
       this.installProgress = { phase: "opening", percent: null };
       await launchBetaInstall(detection, this.deps.platform, this.launchEnv());
       this.installProgress = null;
@@ -674,48 +646,10 @@ export class DesktopBetaChannel {
     } catch (error) {
       this.installProgress = null;
       // A marker without a launched beta would run the import on some later,
-      // unrelated beta start; remove it and both snapshot sidecars so nothing
-      // is consumed by surprise.
-      this.removeHalfWrittenHandoff(profileTarget);
+      // unrelated beta start; remove it and its pending snapshot.
+      this.removeHalfWrittenHandoff();
       return action(false, "internal", error instanceof Error ? error.message : String(error));
     }
-  }
-
-  /**
-   * Resolves where beta's Electron profile will read its storage-migration
-   * snapshot: the injected dir in tests, `SYNARA_BETA_USER_DATA` when set, else
-   * the beta identity's userData directory under the OS app-data base.
-   */
-  private resolveBetaProfileSnapshotTarget(): {
-    readonly userDataDir: string;
-    readonly snapshotPath: string;
-  } {
-    const env = this.deps.env ?? process.env;
-    const betaUserDataOverride = this.deps.betaUserDataDir ?? env[SYNARA_BETA_USER_DATA_ENV];
-    const betaUserDataDir = betaUserDataOverride
-      ? betaUserDataOverride
-      : resolveDesktopUserDataPath({
-          appDataBase: resolveDesktopAppDataBase({
-            platform: this.deps.platform,
-            env,
-            homeDir: this.deps.homeDir,
-          }),
-          userDataDirectoryName: synaraDesktopIdentity("beta").userDataDirectoryName,
-        });
-    return {
-      userDataDir: betaUserDataDir,
-      snapshotPath: resolveSynaraStorageSnapshotPath(betaUserDataDir),
-    };
-  }
-
-  private writeBetaProfileStorageSnapshot(
-    target: { readonly userDataDir: string; readonly snapshotPath: string },
-    snapshot: SynaraStorageSnapshot,
-  ): void {
-    mkdirSync(target.userDataDir, { recursive: true });
-    const profileTempPath = `${target.snapshotPath}.tmp-${process.pid}`;
-    writeFileSync(profileTempPath, `${JSON.stringify(snapshot)}\n`, "utf8");
-    renameSync(profileTempPath, target.snapshotPath);
   }
 
   /**
@@ -723,14 +657,11 @@ export class DesktopBetaChannel {
    * sidecar would be consumed by an unrelated later beta start, so a cleanup
    * miss is logged but never hides the handoff error itself.
    */
-  private removeHalfWrittenHandoff(profileTarget: { readonly snapshotPath: string } | null): void {
+  private removeHalfWrittenHandoff(): void {
     const cleanupPaths = [
       join(this.deps.betaHomeDir, BETA_IMPORT_REQUEST_FILE_NAME),
       join(this.deps.betaHomeDir, BETA_IMPORT_STORAGE_FILE_NAME),
     ];
-    if (profileTarget) {
-      cleanupPaths.push(profileTarget.snapshotPath);
-    }
     for (const cleanupPath of cleanupPaths) {
       try {
         rmSync(cleanupPath, { force: true });

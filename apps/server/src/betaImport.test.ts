@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   BETA_IMPORT_REQUEST_FILE_NAME,
   BETA_IMPORT_RESULT_FILE_NAME,
+  BETA_IMPORT_STORAGE_FILE_NAME,
 } from "@synara/shared/betaChannel";
 import { copyLiveDatabase, runBetaImportIfRequested } from "./betaImport";
 
@@ -104,7 +105,7 @@ describe("runBetaImportIfRequested", () => {
 
   it("imports the stable snapshot and reports success", async () => {
     const root = await seedStableHome(makeRoot());
-    const betaHome = join(root, ".synara-beta");
+    const betaHome = join(root, "..", ".synara-beta");
     const betaState = join(betaHome, "userdata");
     writeMarker(betaHome, root);
 
@@ -213,7 +214,7 @@ describe("runBetaImportIfRequested", () => {
     writeFileSync(join(stableState, "state.sqlite.import-999"), "stale staging file");
     writeFileSync(join(stableState, "other.sqlite.lifecycle-lock"), "foreign lock");
 
-    const betaHome = join(root, ".synara-beta");
+    const betaHome = join(root, "..", ".synara-beta");
     const betaState = join(betaHome, "userdata");
     writeMarker(betaHome, root);
 
@@ -230,7 +231,7 @@ describe("runBetaImportIfRequested", () => {
   it("imports while the stable database is held under an exclusive lock", async () => {
     const root = await seedStableHome(makeRoot());
     const stableState = join(root, "userdata");
-    const betaHome = join(root, ".synara-beta");
+    const betaHome = join(root, "..", ".synara-beta");
     const betaState = join(betaHome, "userdata");
     writeMarker(betaHome, root);
 
@@ -276,6 +277,57 @@ describe("runBetaImportIfRequested", () => {
     const result = JSON.parse(readFileSync(join(betaHome, BETA_IMPORT_RESULT_FILE_NAME), "utf8"));
     expect(result.error).toContain("beta home");
   });
+
+  it.each(["beta-inside-stable", "stable-inside-beta", "linked-parent"] as const)(
+    "rejects overlapping homes (%s) before copying",
+    async (scenario) => {
+      const root = makeRoot();
+      const stableHome = await seedStableHome(root);
+      let betaHome: string;
+      if (scenario === "beta-inside-stable") {
+        betaHome = join(stableHome, "nested-beta");
+      } else if (scenario === "stable-inside-beta") {
+        betaHome = root;
+      } else {
+        const alias = join(root, "alias");
+        symlinkSync(stableHome, alias, "dir");
+        betaHome = join(alias, "nested-beta");
+      }
+      writeMarker(betaHome, stableHome);
+
+      const outcome = await run({ betaHomeDir: betaHome, stateDir: join(betaHome, "userdata") });
+
+      expect(outcome.ok).toBe(false);
+      expect(outcome.error).toContain("homes must not overlap");
+      expect(readFileSync(join(stableHome, "userdata", "settings.json"), "utf8")).toBe(
+        JSON.stringify({ theme: "dark" }),
+      );
+      expect(existsSync(join(betaHome, "userdata", "state.sqlite"))).toBe(false);
+    },
+  );
+
+  it.each([false, true])(
+    "rejects escaped Beta state ancestors (exists: %s)",
+    async (targetExists) => {
+      const root = makeRoot();
+      const stableHome = await seedStableHome(root);
+      const betaHome = join(root, ".synara-beta");
+      const external = join(root, "external");
+      mkdirSync(external, { recursive: true });
+      if (targetExists) mkdirSync(join(external, "userdata"));
+      writeMarker(betaHome, stableHome);
+      symlinkSync(external, join(betaHome, "linked-parent"), "dir");
+
+      const outcome = await run({
+        betaHomeDir: betaHome,
+        stateDir: join(betaHome, "linked-parent", "userdata"),
+      });
+
+      expect(outcome.ok).toBe(false);
+      expect(outcome.error).toContain("must stay inside the beta home");
+      expect(existsSync(join(external, "userdata", "state.sqlite"))).toBe(false);
+    },
+  );
 
   it("reports a missing stable database without crashing startup", async () => {
     const root = makeRoot();
@@ -368,7 +420,7 @@ describe("runBetaImportIfRequested", () => {
 
   it("replaces a stale marker without retry loops", async () => {
     const root = await seedStableHome(makeRoot());
-    const betaHome = join(root, ".synara-beta");
+    const betaHome = join(root, "..", ".synara-beta");
     writeMarker(betaHome, root);
     writeFileSync(join(betaHome, BETA_IMPORT_REQUEST_FILE_NAME), "garbage");
 
@@ -384,7 +436,7 @@ describe("runBetaImportIfRequested", () => {
 
   it("refuses a source that is not the Synara data folder", async () => {
     const root = await seedStableHome(makeRoot());
-    const betaHome = join(root, ".synara-beta");
+    const betaHome = join(root, "..", ".synara-beta");
     const betaState = join(betaHome, "userdata");
     writeMarker(betaHome, root);
 
@@ -404,7 +456,7 @@ describe("runBetaImportIfRequested", () => {
     stableDb.exec("CREATE TABLE effect_sql_migrations (migration_id INTEGER, name TEXT)");
     stableDb.exec("INSERT INTO effect_sql_migrations VALUES (1, 'a'), (51, 'from-the-future')");
     stableDb.close();
-    const betaHome = join(root, ".synara-beta");
+    const betaHome = join(root, "..", ".synara-beta");
     const betaState = join(betaHome, "userdata");
     writeMarker(betaHome, root);
 
@@ -420,7 +472,7 @@ describe("runBetaImportIfRequested", () => {
 
   it("drops a stale beta WAL so it cannot replay over the imported database", async () => {
     const root = await seedStableHome(makeRoot());
-    const betaHome = join(root, ".synara-beta");
+    const betaHome = join(root, "..", ".synara-beta");
     const betaState = join(betaHome, "userdata");
     mkdirSync(betaState, { recursive: true });
 
@@ -449,6 +501,67 @@ describe("runBetaImportIfRequested", () => {
     );
     db.close();
     expect(titles).toEqual(["hello stable"]);
+  });
+
+  it.each([false, true])(
+    "commits browser settings only with a successful database import (failure: %s)",
+    async (failImport) => {
+      const stableHome = await seedStableHome(makeRoot());
+      const betaHome = join(stableHome, "..", ".synara-beta");
+      const betaState = join(betaHome, "userdata");
+      mkdirSync(betaState, { recursive: true });
+      const committedSnapshot = join(betaState, BETA_IMPORT_STORAGE_FILE_NAME);
+      writeFileSync(committedSnapshot, "prior beta snapshot");
+      writeMarker(betaHome, stableHome);
+      const pendingSnapshot = join(betaHome, BETA_IMPORT_STORAGE_FILE_NAME);
+      const storageSnapshot = JSON.stringify({
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        entries: { "synara:theme": "dark" },
+      });
+      writeFileSync(pendingSnapshot, storageSnapshot);
+      if (failImport) writeFileSync(join(stableHome, "userdata", "state.sqlite"), "corrupt");
+
+      const outcome = await run({ betaHomeDir: betaHome, stateDir: betaState });
+
+      expect(outcome.ok).toBe(!failImport);
+      expect(readFileSync(committedSnapshot, "utf8")).toBe(
+        failImport ? "prior beta snapshot" : storageSnapshot,
+      );
+      expect(existsSync(pendingSnapshot)).toBe(false);
+    },
+  );
+
+  it("clears an unacknowledged browser snapshot when a later successful import has none", async () => {
+    const stableHome = await seedStableHome(makeRoot());
+    const betaHome = join(stableHome, "..", ".synara-beta");
+    const betaState = join(betaHome, "userdata");
+    mkdirSync(betaState, { recursive: true });
+    writeFileSync(join(betaState, BETA_IMPORT_STORAGE_FILE_NAME), "old snapshot");
+    writeFileSync(join(stableHome, "userdata", BETA_IMPORT_STORAGE_FILE_NAME), "foreign snapshot");
+    writeMarker(betaHome, stableHome);
+
+    expect((await run({ betaHomeDir: betaHome, stateDir: betaState })).ok).toBe(true);
+    expect(existsSync(join(betaState, BETA_IMPORT_STORAGE_FILE_NAME))).toBe(false);
+  });
+
+  it("rejects linked browser snapshots without replacing Beta data", async () => {
+    const stableHome = await seedStableHome(makeRoot());
+    const betaHome = join(stableHome, "..", ".synara-beta");
+    const betaState = join(betaHome, "userdata");
+    mkdirSync(betaState, { recursive: true });
+    writeFileSync(join(betaState, "settings.json"), "beta settings");
+    writeMarker(betaHome, stableHome);
+    symlinkSync(
+      join(stableHome, "userdata", "settings.json"),
+      join(betaHome, BETA_IMPORT_STORAGE_FILE_NAME),
+    );
+
+    const outcome = await run({ betaHomeDir: betaHome, stateDir: betaState });
+    expect(outcome.ok).toBe(false);
+    expect(outcome.error).toContain("linked or non-file browser settings snapshot");
+    expect(readFileSync(join(betaState, "settings.json"), "utf8")).toBe("beta settings");
+    expect(existsSync(join(betaState, "state.sqlite"))).toBe(false);
   });
 
   it("copies portable skills and MCP credentials, never pending pairings", async () => {
@@ -579,6 +692,27 @@ describe("runBetaImportIfRequested", () => {
     stableDb
       .prepare("INSERT INTO projection_threads VALUES ('sibling', 'feature/c', ?, ?, 'feature/c')")
       .run(`${stableHome}-backup/wt`, `${stableHome}-backup/assoc`);
+    stableDb.exec("CREATE TABLE orchestration_events (event_type TEXT, payload_json TEXT)");
+    const addEvent = stableDb.prepare("INSERT INTO orchestration_events VALUES (?, ?)");
+    for (const eventType of ["thread.created", "thread.meta-updated"]) {
+      addEvent.run(
+        eventType,
+        JSON.stringify({
+          worktreePath: insideWorktree,
+          associatedWorktreePath: "/tmp/assoc",
+          branch: "feature/a",
+          title: "imported thread",
+        }),
+      );
+      addEvent.run(
+        eventType,
+        JSON.stringify({
+          worktreePath: "/tmp/elsewhere",
+          associatedWorktreePath: insideAssociated,
+        }),
+      );
+    }
+    addEvent.run("thread.activity-appended", JSON.stringify({ worktreePath: insideWorktree }));
     stableDb.close();
 
     const betaHome = join(root, ".synara-beta");
@@ -599,6 +733,26 @@ describe("runBetaImportIfRequested", () => {
       associated_worktree_path: string | null;
       associated_worktree_branch: string | null;
     }>;
+    const events = betaDb
+      .prepare("SELECT payload_json FROM orchestration_events ORDER BY rowid")
+      .all() as Array<{ payload_json: string }>;
+    expect(events.map((event) => JSON.parse(event.payload_json))).toEqual([
+      {
+        worktreePath: null,
+        associatedWorktreePath: "/tmp/assoc",
+        branch: "feature/a",
+        title: "imported thread",
+      },
+      { worktreePath: "/tmp/elsewhere", associatedWorktreePath: null },
+      {
+        worktreePath: null,
+        associatedWorktreePath: "/tmp/assoc",
+        branch: "feature/a",
+        title: "imported thread",
+      },
+      { worktreePath: "/tmp/elsewhere", associatedWorktreePath: null },
+      { worktreePath: insideWorktree },
+    ]);
     betaDb.close();
     expect(rows).toEqual([
       {

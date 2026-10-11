@@ -28,15 +28,21 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import * as asyncFs from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 
 import {
   BETA_IMPORT_REQUEST_FILE_NAME,
   BETA_IMPORT_RESULT_FILE_NAME,
+  BETA_IMPORT_STORAGE_FILE_NAME,
   SYNARA_STABLE_HOME_ENV,
   type BetaImportRequest,
 } from "@synara/shared/betaChannel";
+import {
+  isContainedPath,
+  resolveRealPathForCreateWithinRoot,
+} from "./workspace/realPathContainment";
 
 /** Entries that describe this install's live runtime, not user data. */
 const EXCLUDED_STATE_ENTRIES = new Set([
@@ -46,13 +52,9 @@ const EXCLUDED_STATE_ENTRIES = new Set([
   "device-boot-ownership.json",
   "server-runtime.json",
   "quit-resume.json",
-  // Beta regenerates its own environment identity on first start (see
-  // ServerEnvironment.ts persisted-id reader) and its own boot-ownership
-  // claims (see DeviceService.ts ownership path); both tolerate absence.
-  "environment-id",
-  "device-boot-ownership.json",
   BETA_IMPORT_REQUEST_FILE_NAME,
   BETA_IMPORT_RESULT_FILE_NAME,
+  BETA_IMPORT_STORAGE_FILE_NAME,
 ]);
 
 /**
@@ -348,8 +350,8 @@ async function snapshotStableDatabase(
 /**
  * Drops worktree pointers that would aim beta at stable's home. Only the two
  * path columns are nulled — branch/ref columns stay so history survives. The
- * projection table mirrors the same fields, so fix it too when both tables
- * (or older/newer shapes) are present. Missing tables or columns mean an
+ * projections and canonical events carry the same fields, so clear both to
+ * keep replay from restoring the old paths. Missing tables or columns mean an
  * older database shape: leave it alone instead of failing the import.
  * Failure here fails the import before anything commits.
  */
@@ -392,6 +394,20 @@ async function clearSourceHomeWorktreePaths(
         database
           .prepare(
             `UPDATE ${table} SET ${column} = NULL WHERE ${column} = ? OR ${column} LIKE ? ESCAPE '\\'`,
+          )
+          .run(sourceHomeDir, likePrefix);
+      }
+    }
+    // Replayed canonical events must not restore pointers removed above.
+    if (tables.has("orchestration_events")) {
+      for (const key of ["worktreePath", "associatedWorktreePath"] as const) {
+        database
+          .prepare(
+            `UPDATE orchestration_events
+             SET payload_json = json_set(payload_json, '$.${key}', NULL)
+             WHERE event_type IN ('thread.created', 'thread.meta-updated')
+               AND (json_extract(payload_json, '$.${key}') = ?
+                    OR json_extract(payload_json, '$.${key}') LIKE ? ESCAPE '\\')`,
           )
           .run(sourceHomeDir, likePrefix);
       }
@@ -482,7 +498,9 @@ export async function runBetaImportIfRequested(input: {
     return { consumed: false, ok: true };
   }
 
-  const finish = (ok: boolean, error?: string) => {
+  const pendingStoragePath = join(input.betaHomeDir, BETA_IMPORT_STORAGE_FILE_NAME);
+  const finish = async (ok: boolean, error?: string) => {
+    await asyncFs.rm(pendingStoragePath, { force: true }).catch(() => undefined);
     try {
       writeImportResult(input.betaHomeDir, { ok, ...(error ? { error } : {}) });
     } catch {
@@ -513,6 +531,7 @@ export async function runBetaImportIfRequested(input: {
     } catch {
       // best effort
     }
+    await asyncFs.rm(pendingStoragePath, { force: true }).catch(() => undefined);
     return { consumed: true, ok: true };
   }
 
@@ -531,8 +550,20 @@ export async function runBetaImportIfRequested(input: {
   }
 
   try {
-    if (realpathSync(sourceHomeDir) === realpathSync(input.betaHomeDir)) {
-      return finish(false, "import source points at the beta home itself");
+    const realSourceHome = realpathSync(sourceHomeDir);
+    const realBetaHome = realpathSync(input.betaHomeDir);
+    if (
+      isContainedPath(realSourceHome, realBetaHome) ||
+      isContainedPath(realBetaHome, realSourceHome)
+    ) {
+      return finish(false, "Stable and beta homes must not overlap");
+    }
+    const targetStateDir = await resolveRealPathForCreateWithinRoot(
+      input.betaHomeDir,
+      input.stateDir,
+    );
+    if (!targetStateDir || targetStateDir === realBetaHome) {
+      return finish(false, "beta state folder must stay inside the beta home");
     }
     for (const sourcePath of [
       sourceStateDir,
@@ -558,8 +589,25 @@ export async function runBetaImportIfRequested(input: {
       );
       // De-point before commit: a failure here fails the import while beta's
       // live database is still untouched.
-      await clearSourceHomeWorktreePaths(join(stagedStateDir, "state.sqlite"), sourceHomeDir);
+      for (const sourcePath of new Set([sourceHomeDir, realSourceHome])) {
+        await clearSourceHomeWorktreePaths(join(stagedStateDir, "state.sqlite"), sourcePath);
+      }
       const copiedEntries = copyStateEntries(sourceStateDir, stagedStateDir, input.stateDir);
+      const pendingStorage = await asyncFs.lstat(pendingStoragePath).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+        throw error;
+      });
+      if (pendingStorage) {
+        if (!pendingStorage.isFile()) {
+          throw new Error("Cannot import a linked or non-file browser settings snapshot");
+        }
+        await asyncFs.copyFile(
+          pendingStoragePath,
+          join(stagedStateDir, BETA_IMPORT_STORAGE_FILE_NAME),
+        );
+      }
+      // Commit or clear a previous unacknowledged snapshot with the database.
+      copiedEntries.push(BETA_IMPORT_STORAGE_FILE_NAME);
       const stagedHomeDir = join(stagedRoot, "home");
       const homeDirPairs = copyHomeLevelDirs(sourceHomeDir, stagedHomeDir, input.betaHomeDir);
       commitStagedImport(stagedStateDir, input.stateDir, copiedEntries, homeDirPairs);
