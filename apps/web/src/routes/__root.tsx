@@ -127,6 +127,11 @@ import { hasPendingTurnDispatch } from "../pendingTurnDispatch";
 import { derivePendingApprovals, derivePendingUserInputs } from "../pendingInteractionDerivation";
 import { canApplyThreadSnapshot, selectOrphanedThreadDetailIds } from "./-threadDetailOwnership";
 import {
+  classifySequenceProgress,
+  drainContiguousSequenceEvents,
+  shouldStartGapBackfill,
+} from "./-eventSequenceGap";
+import {
   bufferPreSnapshotThreadEvent,
   createPreSnapshotThreadEventBuffer,
   drainPreSnapshotThreadEvents,
@@ -1350,6 +1355,7 @@ function EventRouter() {
     let providerDiscoveryInvalidationFingerprint: string | null = null;
     let shellSnapshotSequence = -1;
     let shellSubscriptionGeneration = 0;
+    let connectionGeneration = 0;
     let shellSnapshotReceivedGeneration = -1;
     let pendingShellEvents: OrchestrationShellStreamEvent[] = [];
     const subscribedThreadIds = new Set<ThreadId>();
@@ -1364,7 +1370,9 @@ function EventRouter() {
     const threadSnapshotRequestInFlight = new Set<ThreadId>();
     const threadSnapshotRefreshPending = new Set<ThreadId>();
     const threadSnapshotNotFoundRetryAttempted = new Set<ThreadId>();
-    const threadReplayRequestInFlight = new Set<ThreadId>();
+    const threadReplayRequestInFlight = new Map<ThreadId, number>();
+    const threadGapBackfillAttemptedTargetById = new Map<ThreadId, number>();
+    const threadReplayedThroughSequenceById = new Map<ThreadId, number>();
     const threadProjectionReconcileInFlight = new Map<ThreadId, number>();
     const threadProjectionReconcilePendingById = new Map<ThreadId, number>();
     const threadProjectionTerminalFencePending = new Set<ThreadId>();
@@ -1508,6 +1516,9 @@ function EventRouter() {
       }
       pendingThreadEventsById.set(threadId, createPreSnapshotThreadEventBuffer());
       threadSnapshotRequestInFlight.delete(threadId);
+      threadReplayRequestInFlight.delete(threadId);
+      threadGapBackfillAttemptedTargetById.delete(threadId);
+      threadReplayedThroughSequenceById.delete(threadId);
       threadSnapshotRefreshPending.delete(threadId);
       threadSnapshotNotFoundRetryAttempted.delete(threadId);
       threadProjectionReconcileInFlight.delete(threadId);
@@ -1601,21 +1612,24 @@ function EventRouter() {
         void refreshThreadSnapshot(threadId);
         return;
       }
+      threadGapBackfillAttemptedTargetById.delete(threadId);
+      threadReplayedThroughSequenceById.delete(threadId);
       for (const event of events) {
-        if (!applyFencedThreadEvent(threadId, event, "stream")) {
-          return;
-        }
+        applyThreadStreamEvent(event);
       }
     };
 
-    const flushShellBuffer = (snapshotSequence: number) => {
+    const flushShellBuffer = (snapshotSequence: number, checkedThroughSequence = Infinity) => {
       const nextPending = pendingShellEvents
-        .filter((event) => event.sequence > snapshotSequence)
+        .filter(
+          (event) => event.sequence > snapshotSequence && event.sequence <= checkedThroughSequence,
+        )
         .toSorted((left, right) => left.sequence - right.sequence);
-      pendingShellEvents = [];
+      pendingShellEvents = pendingShellEvents.filter(
+        (event) => event.sequence > Math.max(snapshotSequence, checkedThroughSequence),
+      );
       for (const event of nextPending) {
-        shellSnapshotSequence = Math.max(shellSnapshotSequence, event.sequence);
-        applyShellEvent(event);
+        if (event.sequence > shellSnapshotSequence) applyLiveShellEvent(event);
       }
     };
 
@@ -1635,6 +1649,8 @@ function EventRouter() {
         threadSnapshotRefreshPending.delete(threadId);
         threadSnapshotNotFoundRetryAttempted.delete(threadId);
         threadReplayRequestInFlight.delete(threadId);
+        threadGapBackfillAttemptedTargetById.delete(threadId);
+        threadReplayedThroughSequenceById.delete(threadId);
         threadProjectionReconcileInFlight.delete(threadId);
         threadProjectionReconcilePendingById.delete(threadId);
         clearThreadProjectionTerminalFence(threadId);
@@ -1780,7 +1796,10 @@ function EventRouter() {
       }
     }
 
-    const applyAuthoritativeShellSnapshot = (snapshot: OrchestrationShellSnapshot) => {
+    const applyAuthoritativeShellSnapshot = (
+      snapshot: OrchestrationShellSnapshot,
+      checkedThroughSequence?: number,
+    ) => {
       if (disposed) return false;
       // A query can resolve after the live shell stream has already moved
       // forward. Never roll the store back behind the EventRouter fence.
@@ -1791,7 +1810,7 @@ function EventRouter() {
       shellSnapshotSequence = snapshot.snapshotSequence;
       syncServerShellSnapshot(snapshot);
       reconcilePromotedDraftsFromShellThreads(snapshot.threads);
-      flushShellBuffer(snapshot.snapshotSequence);
+      flushShellBuffer(snapshot.snapshotSequence, checkedThroughSequence);
       removeOrphanedTerminalsForCurrentState();
       reconcileMissingSubscribedThreadProjections(promotedDraftThreadIds);
       return true;
@@ -1861,6 +1880,7 @@ function EventRouter() {
         return scopedSubscriptionRefresh;
       }
       shellSubscriptionGeneration += 1;
+      connectionGeneration += 1;
       const generation = shellSubscriptionGeneration;
       if (shellSnapshotFallbackTimer !== null) {
         window.clearTimeout(shellSnapshotFallbackTimer);
@@ -1882,6 +1902,8 @@ function EventRouter() {
           threadSnapshotRequestInFlight.clear();
           threadSnapshotRefreshPending.clear();
           threadReplayRequestInFlight.clear();
+          threadGapBackfillAttemptedTargetById.clear();
+          threadReplayedThroughSequenceById.clear();
           threadProjectionReconcileInFlight.clear();
           threadProjectionTerminalFencePending.clear();
           threadProjectionTerminalFenceSequenceById.clear();
@@ -2052,9 +2074,21 @@ function EventRouter() {
       threadId: ThreadId,
       targetSequence?: number,
     ): Promise<number | null> => {
-      if (disposed || threadReplayRequestInFlight.has(threadId)) {
+      const subscriptionGeneration = threadSubscriptionGenerationById.get(threadId);
+      const replayConnectionGeneration = connectionGeneration;
+      if (
+        disposed ||
+        !subscribedThreadIds.has(threadId) ||
+        subscriptionGeneration === undefined ||
+        threadReplayRequestInFlight.has(threadId)
+      ) {
         return null;
       }
+      const isCurrentSubscription = () =>
+        !disposed &&
+        connectionGeneration === replayConnectionGeneration &&
+        subscribedThreadIds.has(threadId) &&
+        threadSubscriptionGenerationById.get(threadId) === subscriptionGeneration;
       const fromSequence = threadSnapshotSequenceById.get(threadId);
       if (
         fromSequence === undefined ||
@@ -2062,12 +2096,24 @@ function EventRouter() {
       ) {
         return null;
       }
-      threadReplayRequestInFlight.add(threadId);
+      threadReplayRequestInFlight.set(threadId, subscriptionGeneration);
+      const checkedThroughSequence =
+        targetSequence ??
+        Math.max(
+          fromSequence,
+          ...(pendingThreadEventsById.get(threadId)?.events.map((event) => event.sequence) ?? []),
+        );
+      let replaySucceeded = false;
       // Promise chain keeps the run-always cleanup (finally) and lets a replay
       // rejection propagate to callers exactly as the try/finally did.
       return await api.orchestration
         .replayEvents(fromSequence, threadId)
         .then((replayedEvents) => {
+          if (
+            !isCurrentSubscription() ||
+            (threadSnapshotSequenceById.get(threadId) ?? -1) < fromSequence
+          )
+            return null;
           let appliedEventCount = 0;
           for (const event of replayedEvents
             .filter((candidate) => isThreadDetailEventForThread(candidate, threadId))
@@ -2084,6 +2130,14 @@ function EventRouter() {
             }
             appliedEventCount += 1;
           }
+          replaySucceeded = true;
+          threadReplayedThroughSequenceById.set(
+            threadId,
+            Math.max(
+              threadReplayedThroughSequenceById.get(threadId) ?? fromSequence,
+              checkedThroughSequence,
+            ),
+          );
           if (appliedEventCount === 0) {
             // An empty replay is evidence of a quiet stream only if nothing
             // else moved the cursor while it ran. A replay raced by live
@@ -2096,8 +2150,66 @@ function EventRouter() {
           return appliedEventCount;
         })
         .finally(() => {
+          if (
+            !isCurrentSubscription() ||
+            threadReplayRequestInFlight.get(threadId) !== subscriptionGeneration
+          )
+            return;
           threadReplayRequestInFlight.delete(threadId);
+          if (replaySucceeded) {
+            drainBufferedThreadEvents(threadId);
+          } else {
+            // Leave the buffer intact; the catch-up timer can retry a failed read.
+            threadGapBackfillAttemptedTargetById.delete(threadId);
+          }
         });
+    };
+
+    const requestThreadGapBackfill = (threadId: ThreadId, targetSequence: number) => {
+      if (
+        !shouldStartGapBackfill({
+          attemptedTargetSequence: threadGapBackfillAttemptedTargetById.get(threadId),
+          targetSequence,
+          replayInFlight: threadReplayRequestInFlight.has(threadId),
+        })
+      )
+        return;
+      // Record only when a replay can start. A larger gap discovered mid-replay
+      // remains pending until the current replay's completion drains the buffer.
+      if (
+        disposed ||
+        !subscribedThreadIds.has(threadId) ||
+        !threadSnapshotSequenceById.has(threadId)
+      )
+        return;
+      threadGapBackfillAttemptedTargetById.set(threadId, targetSequence);
+      void replayThreadEvents(threadId, targetSequence).catch(() => undefined);
+    };
+
+    const drainBufferedThreadEvents = (threadId: ThreadId) => {
+      const buffer = pendingThreadEventsById.get(threadId);
+      const sequence = threadSnapshotSequenceById.get(threadId);
+      if (!buffer || sequence === undefined || !subscribedThreadIds.has(threadId)) return;
+      if (buffer.droppedThroughSequence > sequence) {
+        // A bounded buffer overflow needs an authoritative snapshot, not a
+        // partial drain that could vouch for dropped deltas.
+        threadSnapshotSequenceById.delete(threadId);
+        clearThreadDetailResumeCursor(threadId);
+        void refreshThreadSnapshot(threadId);
+        return;
+      }
+      const { applicable, remaining } = drainContiguousSequenceEvents(
+        sequence,
+        buffer.events,
+        threadReplayedThroughSequenceById.get(threadId),
+      );
+      buffer.events.splice(0, buffer.events.length, ...remaining);
+      if (remaining.length === 0) pendingThreadEventsById.delete(threadId);
+      for (const event of applicable) {
+        if (!applyLiveThreadEvent(threadId, event)) return;
+      }
+      const lastRemaining = remaining.at(-1);
+      if (lastRemaining) requestThreadGapBackfill(threadId, lastRemaining.sequence - 1);
     };
 
     const reconcileThreadProjection = async (
@@ -2251,27 +2363,7 @@ function EventRouter() {
     reconcileThreadSubscriptionsRef.current = (threadIds) =>
       enqueueThreadSubscriptionReconcile(threadIds);
 
-    const unsubShellEvent = api.orchestration.onShellEvent((item) => {
-      if (item.kind === "snapshot") {
-        toastManager.close("stream-overflow:shell");
-        shellSnapshotReceivedGeneration = shellSubscriptionGeneration;
-        const promotedDraftThreadIds = collectSubscribedDraftsInShell(item.snapshot.threads);
-        shellSnapshotSequence = item.snapshot.snapshotSequence;
-        syncServerShellSnapshot(item.snapshot);
-        reconcilePromotedDraftsFromShellThreads(item.snapshot.threads);
-        flushShellBuffer(item.snapshot.snapshotSequence);
-        removeOrphanedTerminalsForCurrentState();
-        reconcileMissingSubscribedThreadProjections(promotedDraftThreadIds);
-        return;
-      }
-
-      if (shellSnapshotSequence < 0) {
-        appendBounded(pendingShellEvents, item, PENDING_SHELL_EVENT_BUFFER_LIMIT);
-        return;
-      }
-      if (item.sequence <= shellSnapshotSequence) {
-        return;
-      }
+    const applyLiveShellEvent = (item: OrchestrationShellStreamEvent) => {
       shellSnapshotSequence = item.sequence;
       toastManager.close("stream-overflow:shell");
       applyShellEvent(item);
@@ -2329,9 +2421,85 @@ function EventRouter() {
       if (item.kind === "thread-upserted" && subscribedThreadIds.has(item.thread.id)) {
         void replayThreadEvents(item.thread.id, item.sequence).catch(() => undefined);
       }
+    };
+
+    const drainBufferedShellEvents = (checkedThroughSequence = shellSnapshotSequence) => {
+      const { applicable, remaining } = drainContiguousSequenceEvents(
+        shellSnapshotSequence,
+        pendingShellEvents,
+        checkedThroughSequence,
+      );
+      pendingShellEvents = [...remaining];
+      for (const event of applicable) applyLiveShellEvent(event);
+    };
+
+    let shellGapResyncGeneration: number | undefined;
+    const resyncShellSequenceGap = () => {
+      if (
+        disposed ||
+        shellSnapshotSequence < 0 ||
+        pendingShellEvents.length === 0 ||
+        shellGapResyncGeneration === shellSubscriptionGeneration
+      )
+        return;
+      const generation = shellSubscriptionGeneration;
+      const checkedThroughSequence = Math.max(...pendingShellEvents.map((event) => event.sequence));
+      shellGapResyncGeneration = generation;
+      void api.orchestration
+        .getShellSnapshot()
+        .then((snapshot) => {
+          if (disposed || generation !== shellSubscriptionGeneration) return;
+          // These are filtered global sequences. After consulting the snapshot,
+          // release this request's held upserts even when its projection is older.
+          if (snapshot.snapshotSequence > shellSnapshotSequence) {
+            applyAuthoritativeShellSnapshot(snapshot, checkedThroughSequence);
+          }
+          drainBufferedShellEvents(checkedThroughSequence);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (shellGapResyncGeneration === generation) shellGapResyncGeneration = undefined;
+        });
+    };
+
+    const unsubShellEvent = api.orchestration.onShellEvent((item) => {
+      if (item.kind === "snapshot") {
+        toastManager.close("stream-overflow:shell");
+        shellSnapshotReceivedGeneration = shellSubscriptionGeneration;
+        const promotedDraftThreadIds = collectSubscribedDraftsInShell(item.snapshot.threads);
+        shellSnapshotSequence = item.snapshot.snapshotSequence;
+        syncServerShellSnapshot(item.snapshot);
+        reconcilePromotedDraftsFromShellThreads(item.snapshot.threads);
+        flushShellBuffer(item.snapshot.snapshotSequence);
+        removeOrphanedTerminalsForCurrentState();
+        reconcileMissingSubscribedThreadProjections(promotedDraftThreadIds);
+        return;
+      }
+
+      if (shellSnapshotSequence < 0) {
+        appendBounded(pendingShellEvents, item, PENDING_SHELL_EVENT_BUFFER_LIMIT);
+        return;
+      }
+      const progress = classifySequenceProgress(shellSnapshotSequence, item.sequence);
+      if (progress.kind === "duplicate") {
+        return;
+      }
+      if (progress.kind === "gap") {
+        appendBounded(pendingShellEvents, item, PENDING_SHELL_EVENT_BUFFER_LIMIT);
+        resyncShellSequenceGap();
+        return;
+      }
+      applyLiveShellEvent(item);
+      drainBufferedShellEvents();
     });
     const applyThreadStreamEvent = (event: OrchestrationEvent) => {
       const threadId = ThreadId.makeUnsafe(String(event.aggregateId));
+      if (
+        disposed ||
+        !subscribedThreadIds.has(threadId) ||
+        !isThreadDetailEventFor(event, threadId)
+      )
+        return;
       const latestThreadSequence = threadSnapshotSequenceById.get(threadId);
       if (latestThreadSequence === undefined) {
         const pendingThreadEvents =
@@ -2356,8 +2524,22 @@ function EventRouter() {
       if (event.sequence <= latestThreadSequence) {
         return;
       }
-      if (!applyFencedThreadEvent(threadId, event, "stream")) {
+      const progress = classifySequenceProgress(latestThreadSequence, event.sequence);
+      if (progress.kind === "gap" && !queueingThreadReplayBatch) {
+        const buffer =
+          pendingThreadEventsById.get(threadId) ??
+          createPreSnapshotThreadEventBuffer<OrchestrationEvent>();
+        bufferPreSnapshotThreadEvent(buffer, event, PENDING_THREAD_EVENT_BUFFER_LIMIT);
+        pendingThreadEventsById.set(threadId, buffer);
+        drainBufferedThreadEvents(threadId);
         return;
+      }
+      if (applyLiveThreadEvent(threadId, event) && !queueingThreadReplayBatch)
+        drainBufferedThreadEvents(threadId);
+    };
+    const applyLiveThreadEvent = (threadId: ThreadId, event: OrchestrationEvent): boolean => {
+      if (!applyFencedThreadEvent(threadId, event, "stream")) {
+        return false;
       }
       if (
         event.type === "thread.session-set" &&
@@ -2375,6 +2557,7 @@ function EventRouter() {
           Date.now() + THREAD_DETAIL_PROJECTION_RECONCILE_INTERVAL_MS,
         );
       }
+      return true;
     };
     const unsubThreadEvent = api.orchestration.onThreadEvent((item) => {
       if (item.kind === "snapshot") {
@@ -2441,11 +2624,16 @@ function EventRouter() {
         // stale cached turn does not flicker through its intermediate states.
         queueingThreadReplayBatch = true;
         try {
-          for (const event of item.events) {
+          for (const event of item.events.toSorted(
+            (left, right) => left.sequence - right.sequence,
+          )) {
             applyThreadStreamEvent(event);
           }
         } finally {
           queueingThreadReplayBatch = false;
+        }
+        for (const threadId of new Set(item.events.map((event) => event.aggregateId as ThreadId))) {
+          drainBufferedThreadEvents(threadId);
         }
         domainEventFlushThrottler.cancel();
         flushPendingDomainEvents();
@@ -2496,6 +2684,7 @@ function EventRouter() {
             // their applied cursors stay on the existing connection.
             shellSnapshotSequence = -1;
             pendingShellEvents = [];
+            shellSubscriptionGeneration += 1;
             const generation = shellSubscriptionGeneration;
             void api.orchestration.subscribeShell().catch(() => {
               if (disposed || shellSubscriptionGeneration !== generation) return;
@@ -2755,11 +2944,13 @@ function EventRouter() {
     void ensureScopedSubscriptions();
     const threadDetailCatchupInterval = window.setInterval(() => {
       const now = Date.now();
+      resyncShellSequenceGap();
       let availableProjectionReconcileSlots = Math.max(
         0,
         THREAD_DETAIL_PROJECTION_RECONCILE_MAX_CONCURRENCY - threadProjectionReconcileInFlight.size,
       );
       for (const threadId of subscribedThreadIds) {
+        drainBufferedThreadEvents(threadId);
         const draftThreadAwaitingProjection = isDraftThreadAwaitingProjection(threadId);
         if (shouldPollThreadDetailCatchup(threadId)) {
           if (!threadSnapshotSequenceById.has(threadId)) {

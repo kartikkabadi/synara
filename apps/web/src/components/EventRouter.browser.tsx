@@ -84,6 +84,7 @@ import {
   resetThreadDetailResumeCursorsForTests,
   setThreadDetailResumeCursor,
 } from "../threadDetailResumeCursors";
+import { retryThreadDetailSync } from "../threadDetailSyncRetry";
 import { useWorkspacePathsStore } from "../workspacePathsStore";
 import { createWsNativeApi, resetWsNativeApiForTest } from "../wsNativeApi";
 import { registerTerminalRuntimeCleanup } from "../lib/terminalStateCleanup";
@@ -117,6 +118,13 @@ const subscribeThreadRequestCountById = new Map<ThreadId, number>();
 let subscribeThreadRequests: ThreadId[] = [];
 let replayEvents: OrchestrationEvent[] = [];
 let replayRequestCursors: number[] = [];
+let delayNextReplayResponse = false;
+let delayNextShellSnapshotResponse = false;
+const pendingRecoveryResponses: Array<{
+  readonly client: EffectRpcWebSocketClient;
+  readonly requestId: string;
+  readonly result: unknown;
+}> = [];
 let getShellSnapshotRequestCount = 0;
 let getThreadDetailSnapshotRequestCount = 0;
 const getThreadDetailSnapshotRequests: unknown[] = [];
@@ -435,6 +443,15 @@ const worker = setupWorker(
       }
       const result = resolveWsRpc(method, requestBody);
       if (
+        (method === ORCHESTRATION_WS_METHODS.replayEvents && delayNextReplayResponse) ||
+        (method === ORCHESTRATION_WS_METHODS.getShellSnapshot && delayNextShellSnapshotResponse)
+      ) {
+        if (method === ORCHESTRATION_WS_METHODS.replayEvents) delayNextReplayResponse = false;
+        else delayNextShellSnapshotResponse = false;
+        pendingRecoveryResponses.push({ client, requestId: request.id, result });
+        return;
+      }
+      if (
         method === ORCHESTRATION_WS_METHODS.getThreadDetailSnapshot &&
         delayNextThreadDetailSnapshotResponse
       ) {
@@ -579,6 +596,12 @@ function sendPendingThreadDetailSnapshotResponse() {
   sendEffectRpcExit(pending.client, pending.requestId, pending.result);
 }
 
+function sendPendingRecoveryResponse() {
+  const pending = pendingRecoveryResponses.shift();
+  if (!pending) throw new Error("No delayed recovery response is pending");
+  sendEffectRpcExit(pending.client, pending.requestId, pending.result);
+}
+
 function sendShellEventPush(event: OrchestrationShellStreamItem) {
   if (!shellStreamRequestId || !shellStreamClient) {
     throw new Error("Shell stream is not connected");
@@ -664,6 +687,9 @@ describe("EventRouter scoped orchestration sync", () => {
     subscribeThreadRequests = [];
     replayEvents = [];
     replayRequestCursors = [];
+    delayNextReplayResponse = false;
+    delayNextShellSnapshotResponse = false;
+    pendingRecoveryResponses.length = 0;
     getShellSnapshotRequestCount = 0;
     getThreadDetailSnapshotRequestCount = 0;
     getThreadDetailSnapshotRequests.length = 0;
@@ -3092,6 +3118,140 @@ describe("EventRouter scoped orchestration sync", () => {
         await mounted.cleanup();
       }
     }, 60_000);
+
+    it("drains missing, duplicated and out-of-order events once and retries a larger deferred gap", async () => {
+      const mounted = await mountApp();
+      try {
+        replayEvents = [orderingDelta(2, "A")];
+        delayNextReplayResponse = true;
+        sendThreadEventPush(orderingDelta(3, "B"));
+        await vi.waitFor(() => expect(pendingRecoveryResponses).toHaveLength(1));
+        expect(buildThreadSubscribeInput(THREAD_ID)).toMatchObject({ afterSequence: 1 });
+
+        sendThreadEventPush(orderingDelta(6, "E"));
+        sendThreadEventPush(orderingDelta(3, "B"));
+        // The response is captured when the request arrives. The next read
+        // includes only the later gap, in an intentionally unordered result.
+        replayEvents = [orderingDelta(5, "D"), orderingDelta(4, "C"), orderingDelta(4, "C")];
+        sendPendingRecoveryResponse();
+        await vi.waitFor(() => expect(orderingMessageText()).toBe("ABCDE"));
+        expect(replayRequestCursors).toEqual([1, 3]);
+        expect(buildThreadSubscribeInput(THREAD_ID)).toMatchObject({ afterSequence: 6 });
+      } finally {
+        await mounted.cleanup();
+      }
+    });
+
+    it("releases sparse thread sequences after an empty scoped replay checks the range", async () => {
+      const mounted = await mountApp();
+      try {
+        // Journal events 2-9 belong to other streams.
+        sendThreadEventPush(orderingDelta(10, "Sparse"));
+        await vi.waitFor(() => expect(orderingMessageText()).toBe("Sparse"));
+        expect(replayRequestCursors).toEqual([1]);
+        expect(buildThreadSubscribeInput(THREAD_ID)).toMatchObject({ afterSequence: 10 });
+      } finally {
+        await mounted.cleanup();
+      }
+    });
+
+    it.each(["reconnect", "thread retry"])(
+      "ignores old replay results and cleanup after %s starts another replay",
+      async (recovery) => {
+        const mounted = await mountApp();
+        try {
+          replayEvents = [orderingDelta(2, "Old")];
+          delayNextReplayResponse = true;
+          sendThreadEventPush(orderingDelta(3, " discarded"));
+          await vi.waitFor(() => expect(pendingRecoveryResponses).toHaveLength(1));
+
+          if (recovery === "reconnect") sendServerWelcomePush();
+          else await retryThreadDetailSync(THREAD_ID);
+          await vi.waitFor(() => expect(subscribeThreadRequestCountById.get(THREAD_ID)).toBe(2));
+          replayEvents = [orderingDelta(2, "New")];
+          delayNextReplayResponse = true;
+          sendThreadEventPush(orderingDelta(3, " owner"));
+          await vi.waitFor(() => expect(pendingRecoveryResponses).toHaveLength(2));
+          sendPendingRecoveryResponse();
+          await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
+          expect(buildThreadSubscribeInput(THREAD_ID)).toMatchObject({ afterSequence: 1 });
+          expect(orderingMessageText()).toBeUndefined();
+
+          // Stale cleanup must not release the current owner's in-flight guard.
+          sendThreadEventPush(orderingDelta(5, " done"));
+          replayEvents = [orderingDelta(4, " is")];
+          sendPendingRecoveryResponse();
+          await vi.waitFor(() => expect(orderingMessageText()).toBe("New owner is done"));
+          expect(replayRequestCursors).toEqual([1, 1, 3]);
+        } finally {
+          await mounted.cleanup();
+        }
+      },
+    );
+
+    it("checks shell gaps and releases held rows even if the snapshot is older", async () => {
+      const mounted = await mountApp();
+      try {
+        replayEvents = [orderingDelta(2, "Recovered by held row")];
+        const shell = createShellSnapshotFromReadModel(fixture.snapshot);
+        sendShellEventPush({
+          kind: "thread-upserted",
+          sequence: 10,
+          thread: { ...shell.threads[0]!, title: "Gap recovered" },
+        });
+        await vi.waitFor(() =>
+          expect(getThreadFromState(useStore.getState(), THREAD_ID)?.title).toBe("Gap recovered"),
+        );
+        await vi.waitFor(() => expect(orderingMessageText()).toBe("Recovered by held row"));
+        expect(getShellSnapshotRequestCount).toBe(1);
+        expect(useStore.getState().shellSnapshotSequence).toBe(10);
+      } finally {
+        await mounted.cleanup();
+      }
+    });
+
+    it("ignores a shell gap snapshot from before reconnect", async () => {
+      const mounted = await mountApp();
+      try {
+        const shell = createShellSnapshotFromReadModel(fixture.snapshot);
+        fixture.snapshot = {
+          ...fixture.snapshot,
+          snapshotSequence: 4,
+          threads: fixture.snapshot.threads.map((thread) => ({
+            ...thread,
+            title: "Old connection",
+          })),
+        };
+        delayNextShellSnapshotResponse = true;
+        sendShellEventPush({
+          kind: "thread-upserted",
+          sequence: 5,
+          thread: { ...shell.threads[0]!, title: "Old held row" },
+        });
+        await vi.waitFor(() => expect(pendingRecoveryResponses).toHaveLength(1));
+
+        // A server reset also proves that comparing sequence values alone is
+        // insufficient: the old response has the larger cursor.
+        fixture.snapshot = {
+          ...fixture.snapshot,
+          snapshotSequence: 1,
+          threads: fixture.snapshot.threads.map((thread) => ({
+            ...thread,
+            title: "Current connection",
+          })),
+        };
+        sendServerWelcomePush();
+        await vi.waitFor(() => expect(subscribeThreadRequestCountById.get(THREAD_ID)).toBe(2));
+        sendPendingRecoveryResponse();
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 150));
+        expect(getThreadFromState(useStore.getState(), THREAD_ID)?.title).toBe(
+          "Current connection",
+        );
+        expect(useStore.getState().shellSnapshotSequence).toBe(1);
+      } finally {
+        await mounted.cleanup();
+      }
+    });
 
     it("ignores a thread-stream snapshot older than the applied cursor", async () => {
       const mounted = await mountApp();
