@@ -1,110 +1,240 @@
-// FILE: UncertainRevertJobsSection.tsx
-// Purpose: Operator surface for uncertain checkpoint-revert kernel jobs —
-// lists them and offers the three resolutions (retry / mark succeeded / mark dead).
-// Layer: Settings UI components
-// Exports: UncertainRevertJobsSection
-
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import type { ControlPlaneJob, ControlPlaneJobResolution } from "@synara/contracts";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "~/components/ui/alert-dialog";
 import { Button } from "~/components/ui/button";
+import { Textarea } from "~/components/ui/textarea";
 import { toastManager } from "~/components/ui/toast";
 import { ensureNativeApi } from "~/nativeApi";
 import { SettingsListRow, SettingsSection } from "./SettingsPanelPrimitives";
 
-const UNCERTAIN_REVERT_JOBS_QUERY_KEY = ["controlPlane", "uncertainRevertJobs"] as const;
-
-const THREAD_PARTITION_PREFIX = "thread:";
-
-function jobThreadId(job: ControlPlaneJob): string | null {
-  return job.partitionKey.startsWith(THREAD_PARTITION_PREFIX)
-    ? job.partitionKey.slice(THREAD_PARTITION_PREFIX.length)
-    : null;
-}
-
-const RESOLUTIONS: ReadonlyArray<{ resolution: ControlPlaneJobResolution; label: string }> = [
-  { resolution: "retry", label: "Retry" },
-  { resolution: "markSucceeded", label: "Mark succeeded" },
-  { resolution: "markDead", label: "Mark dead" },
-];
+const PAGE_SIZE = 50;
 
 export function UncertainRevertJobsSection() {
-  const [resolvingJobId, setResolvingJobId] = useState<string | null>(null);
-
+  const [cursors, setCursors] = useState([0]);
+  const [selected, setSelected] = useState<ControlPlaneJob | null>(null);
+  const [resolution, setResolution] = useState<ControlPlaneJobResolution>("markDead");
+  const [reason, setReason] = useState("");
+  const [pending, setPending] = useState(false);
+  const afterSequence = cursors.at(-1) ?? 0;
   const jobsQuery = useQuery({
-    queryKey: UNCERTAIN_REVERT_JOBS_QUERY_KEY,
-    queryFn: () => ensureNativeApi().controlPlane.listUncertainRevertJobs({}),
+    queryKey: ["controlPlane", "uncertainRevertJobs", afterSequence],
+    queryFn: () =>
+      ensureNativeApi().controlPlane.listUncertainRevertJobs({ afterSequence, limit: PAGE_SIZE }),
   });
+  const contextQuery = useQuery({
+    queryKey: ["controlPlane", "revertJob", selected?.jobId],
+    queryFn: () => ensureNativeApi().controlPlane.getJob({ jobId: selected!.jobId }),
+    enabled: selected !== null,
+  });
+  const context = contextQuery.data?.context;
 
+  if (jobsQuery.isError) {
+    return (
+      <SettingsSection title="Checkpoint revert observations">
+        <SettingsListRow
+          title="Observations could not be loaded"
+          description={jobsQuery.error.message}
+          actions={
+            <Button size="sm" variant="outline" onClick={() => void jobsQuery.refetch()}>
+              Reload
+            </Button>
+          }
+        />
+      </SettingsSection>
+    );
+  }
   if (!jobsQuery.data?.kernelEnabled) return null;
   const jobs = jobsQuery.data.jobs;
 
-  const resolveJob = (jobId: string, resolution: ControlPlaneJobResolution) => {
-    setResolvingJobId(jobId);
-    void ensureNativeApi()
-      .controlPlane.resolveUncertainJob({ jobId, resolution })
-      .then((result) => {
-        toastManager.add({
-          type: "success",
-          title: "Revert job resolved",
-          description: `Job is now ${result.job?.state ?? "resolved"}.`,
-        });
-      })
-      .catch((error: unknown) => {
-        toastManager.add({
-          type: "error",
-          title: "Failed to resolve revert job",
-          description: error instanceof Error ? error.message : "Unable to resolve the job.",
-        });
-      })
-      .finally(() => {
-        setResolvingJobId(null);
-        void jobsQuery.refetch();
+  const resolveJob = async () => {
+    if (!selected || !context || !reason.trim() || pending) return;
+    setPending(true);
+    try {
+      await ensureNativeApi().controlPlane.resolveUncertainJob({
+        jobId: selected.jobId,
+        resolution,
+        reason,
       });
+      toastManager.add({
+        type: "success",
+        title: "Observation decision recorded",
+        description: "The conversation and workspace were not changed.",
+      });
+      setSelected(null);
+      await jobsQuery.refetch();
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Decision could not be recorded",
+        description:
+          error instanceof Error ? error.message : "Reload the observation before trying again.",
+      });
+    } finally {
+      setPending(false);
+    }
   };
 
   return (
-    <SettingsSection title="Checkpoint revert jobs">
-      {jobs.length === 0 ? (
-        <SettingsListRow
-          title="No uncertain revert jobs"
-          description="Revert jobs whose outcome could not be confirmed will appear here for manual resolution."
-        />
-      ) : (
-        jobs.map((job) => (
+    <>
+      <SettingsSection title="Checkpoint revert observations">
+        {jobs.length === 0 ? (
           <SettingsListRow
-            key={job.jobId}
-            align="start"
-            title={<span className="font-mono text-xs">{job.jobId}</span>}
-            description={
-              <>
-                <span className="block">
-                  Thread: {jobThreadId(job) ?? job.partitionKey} · Attempts: {job.attempt}
-                </span>
-                {job.errorSummary ? (
-                  <span className="block text-destructive">{job.errorSummary}</span>
-                ) : null}
-              </>
-            }
-            actions={
-              <div className="flex gap-2">
-                {RESOLUTIONS.map(({ resolution, label }) => (
-                  <Button
-                    key={resolution}
-                    size="xs"
-                    variant={resolution === "markDead" ? "destructive-outline" : "outline"}
-                    disabled={resolvingJobId !== null}
-                    onClick={() => resolveJob(job.jobId, resolution)}
-                  >
-                    {resolvingJobId === job.jobId ? "Resolving..." : label}
-                  </Button>
-                ))}
-              </div>
-            }
+            title="No uncertain observations"
+            description="Shadow records help inspect past checkpoint reverts. They do not execute recovery."
           />
-        ))
-      )}
-    </SettingsSection>
+        ) : (
+          jobs.map((job) => (
+            <SettingsListRow
+              key={job.jobId}
+              align="start"
+              title={<span className="font-mono text-ui-xs">{job.jobId}</span>}
+              description={
+                <>
+                  <span className="block break-all">
+                    Partition: {job.partitionKey} · Attempts: {job.attempt}
+                  </span>
+                  {job.errorSummary ? (
+                    <span className="block text-destructive">{job.errorSummary}</span>
+                  ) : null}
+                </>
+              }
+              actions={
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => {
+                    setSelected(job);
+                    setReason("");
+                    setResolution("markDead");
+                  }}
+                >
+                  Inspect
+                </Button>
+              }
+            />
+          ))
+        )}
+        {cursors.length > 1 || jobs.length === PAGE_SIZE ? (
+          <div className="flex justify-end gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={cursors.length === 1}
+              onClick={() => setCursors((values) => values.slice(0, -1))}
+            >
+              Previous
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={
+                jobs.length < PAGE_SIZE || jobsQuery.data.nextAfterSequence <= afterSequence
+              }
+              onClick={() => setCursors((values) => [...values, jobsQuery.data.nextAfterSequence])}
+            >
+              Next
+            </Button>
+          </div>
+        ) : null}
+      </SettingsSection>
+      <AlertDialog
+        open={selected !== null}
+        onOpenChange={(open) => {
+          if (!open && !pending) setSelected(null);
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Inspect revert observation</AlertDialogTitle>
+            <AlertDialogDescription>
+              Recording a decision changes only this shadow record. It does not roll back the
+              provider, restore files, or clear a live conversation lock. Automatic retry is
+              unavailable.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-3 px-4 py-2 text-ui-sm">
+            {contextQuery.isPending ? (
+              <p>Loading recorded context…</p>
+            ) : contextQuery.isError ? (
+              <p className="text-destructive">{contextQuery.error.message}</p>
+            ) : context ? (
+              <>
+                <dl className="space-y-1 break-all">
+                  <dt>Thread</dt>
+                  <dd>{context.threadId}</dd>
+                  <dt>Target checkpoint</dt>
+                  <dd>{context.targetCheckpointRef}</dd>
+                  <dt>Rescue snapshot reference</dt>
+                  <dd>{context.rescueCheckpointRef ?? "Not recorded"}</dd>
+                </dl>
+                <p className="text-muted-foreground">
+                  Snapshot presence and provider rollback are not verified here. Inspect the
+                  workspace and provider history before recording a decision.
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant={resolution === "markSucceeded" ? "default" : "outline"}
+                    disabled={pending}
+                    onClick={() => setResolution("markSucceeded")}
+                  >
+                    Record success
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={resolution === "markDead" ? "destructive" : "outline"}
+                    disabled={pending}
+                    onClick={() => setResolution("markDead")}
+                  >
+                    Close unresolved
+                  </Button>
+                </div>
+                <label className="block space-y-1">
+                  <span>Reason for this decision</span>
+                  <Textarea
+                    value={reason}
+                    onChange={(event) => setReason(event.target.value)}
+                    maxLength={2000}
+                    disabled={pending}
+                  />
+                </label>
+              </>
+            ) : (
+              <p>
+                This older record has no verified shadow context. Keep it for manual recovery; it
+                cannot be resolved here.
+              </p>
+            )}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" size="sm" disabled={pending} />}>
+              Cancel
+            </AlertDialogClose>
+            <Button
+              size="sm"
+              disabled={
+                pending ||
+                !context ||
+                !reason.trim() ||
+                contextQuery.data?.job?.state !== "uncertain"
+              }
+              onClick={() => void resolveJob()}
+            >
+              {pending ? "Recording…" : "Confirm decision"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+    </>
   );
 }

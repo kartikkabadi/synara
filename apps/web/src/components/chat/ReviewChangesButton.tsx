@@ -8,6 +8,7 @@
 import type { CSSProperties } from "react";
 
 import { cn } from "~/lib/utils";
+import { COMPOSER_INLINE_ACTION_PILL_CLASS_NAME } from "./composerPickerStyles";
 
 interface ReviewChangesButtonProps {
   onClick: () => void;
@@ -20,15 +21,13 @@ export const ReviewChangesButton = function ReviewChangesButton({
   onClick,
   className,
   style,
-  label = "Review",
+  label: labelProp,
 }: ReviewChangesButtonProps) {
+  const label = labelProp ?? "Review";
   return (
     <button
       type="button"
-      className={cn(
-        "shrink-0 rounded-md border border-[color:var(--color-border-light)] px-2.5 py-0.5 text-foreground/90 transition-colors hover:bg-[var(--color-background-button-secondary-hover)] hover:text-foreground",
-        className,
-      )}
+      className={cn(COMPOSER_INLINE_ACTION_PILL_CLASS_NAME, className)}
       style={style}
       onClick={onClick}
     >

@@ -298,6 +298,14 @@ export const ControlPlaneKernelLive = Layer.effect(ControlPlaneKernel)(
     if (mode === "off") {
       return makeDisabledKernel("SYNARA_CONTROL_PLANE_KERNEL is off.");
     }
+    if (mode === "on") {
+      return yield* new ControlPlaneKernelError({
+        operation: "open",
+        code: "AuthoritativeModeUnavailable",
+        detail:
+          "Authoritative checkpoint reverts require durable restart execution and lease renewal. Use off or shadow; on is not supported by this server.",
+      });
+    }
     const config = yield* ServerConfig;
     return yield* makeControlPlaneKernelAtPath(
       path.join(config.stateDir, CONTROL_PLANE_DB_FILENAME),

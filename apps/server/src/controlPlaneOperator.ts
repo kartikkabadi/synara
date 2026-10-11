@@ -7,7 +7,9 @@
  *
  * @module controlPlaneOperator
  */
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
+
+import { ControlPlaneRevertContext } from "@synara/contracts";
 
 import type {
   ControlPlaneGetJobResult,
@@ -45,11 +47,35 @@ export const listUncertainRevertJobs = (
     .pipe(Effect.map((page) => ({ kernelEnabled: true, ...page })));
 };
 
+const getRevertContext = (kernel: ControlPlaneKernelShape, jobId: string) =>
+  kernel
+    .projectionGet({ projection: `revert-job/${jobId}`, key: new TextEncoder().encode("context") })
+    .pipe(
+      Effect.flatMap((bytes) =>
+        bytes === null
+          ? Effect.succeed(null)
+          : Schema.decodeUnknownEffect(Schema.fromJsonString(ControlPlaneRevertContext))(
+              new TextDecoder().decode(bytes),
+            ).pipe(
+              Effect.mapError(() =>
+                invalidResolutionTarget(
+                  "The recorded revert context is invalid; keep the job for manual inspection.",
+                ),
+              ),
+            ),
+      ),
+    );
+
 export const getControlPlaneJob = (
   kernel: ControlPlaneKernelShape,
   input: { readonly jobId: string },
 ): Effect.Effect<ControlPlaneGetJobResult, ControlPlaneKernelError> =>
-  kernel.job(input.jobId).pipe(Effect.map((job) => ({ job })));
+  Effect.gen(function* () {
+    const job = yield* kernel.job(input.jobId);
+    const context =
+      job?.queue === CHECKPOINT_REVERT_QUEUE ? yield* getRevertContext(kernel, input.jobId) : null;
+    return { job, context };
+  });
 
 export const THREAD_PARTITION_PREFIX = "thread:";
 
@@ -70,32 +96,99 @@ const invalidResolutionTarget = (detail: string) =>
  */
 export const resolveUncertainRevertJob = (
   kernel: ControlPlaneKernelShape,
-  input: { readonly jobId: string; readonly resolution: ControlPlaneJobResolution },
+  input: {
+    readonly jobId: string;
+    readonly resolution: ControlPlaneJobResolution;
+    readonly reason: string;
+  },
   nowMs: number = Date.now(),
 ): Effect.Effect<ControlPlaneResolveUncertainJobResult, ControlPlaneKernelError> =>
   kernel.job(input.jobId).pipe(
-    Effect.flatMap((job) => {
-      if (job === null) {
-        return Effect.fail(invalidResolutionTarget(`Job ${input.jobId} does not exist.`));
-      }
-      if (
-        job.queue !== CHECKPOINT_REVERT_QUEUE ||
-        !job.partitionKey.startsWith(THREAD_PARTITION_PREFIX)
-      ) {
-        return Effect.fail(
-          invalidResolutionTarget(`Job ${input.jobId} is not a checkpoint-revert job.`),
-        );
-      }
-      if (job.state !== UNCERTAIN_JOB_STATE) {
-        return Effect.fail(
-          invalidResolutionTarget(`Job ${input.jobId} is in state "${job.state}", not uncertain.`),
-        );
-      }
-      return kernel.resolveUncertainJobs({
-        committedAtMs: nowMs,
-        resolutions: [{ jobId: input.jobId, resolution: input.resolution }],
-      });
-    }),
+    Effect.flatMap((job) =>
+      Effect.gen(function* () {
+        if (job === null) {
+          return yield* Effect.fail(invalidResolutionTarget(`Job ${input.jobId} does not exist.`));
+        }
+        if (
+          job.queue !== CHECKPOINT_REVERT_QUEUE ||
+          !job.partitionKey.startsWith(THREAD_PARTITION_PREFIX) ||
+          job.partitionKey.length === THREAD_PARTITION_PREFIX.length
+        ) {
+          return yield* Effect.fail(
+            invalidResolutionTarget(`Job ${input.jobId} is not a checkpoint-revert job.`),
+          );
+        }
+        if (job.state !== UNCERTAIN_JOB_STATE) {
+          return yield* Effect.fail(
+            invalidResolutionTarget(
+              `Job ${input.jobId} is in state "${job.state}", not uncertain.`,
+            ),
+          );
+        }
+        if (input.resolution === "retry") {
+          return yield* Effect.fail(
+            invalidResolutionTarget(
+              "Retry is unavailable: there is no durable revert executor. No provider action was scheduled.",
+            ),
+          );
+        }
+        const reason = input.reason.trim();
+        if (reason.length === 0 || reason.length > 2000) {
+          return yield* Effect.fail(
+            invalidResolutionTarget("A reason of 1 to 2000 characters is required."),
+          );
+        }
+        const context = yield* getRevertContext(kernel, input.jobId);
+        if (
+          context === null ||
+          job.partitionKey !== `thread:${context.threadId}/saga:${context.sagaId}`
+        ) {
+          return yield* Effect.fail(
+            invalidResolutionTarget(
+              "Only recorded shadow observations can be resolved here. Legacy or authoritative jobs require manual recovery.",
+            ),
+          );
+        }
+        const transactionId = yield* kernel.newId();
+        const batch = {
+          transactionId,
+          committedAtMs: nowMs,
+          resolveUncertainJobs: [{ jobId: input.jobId, resolution: input.resolution }],
+          events: [
+            {
+              streamId: `revert-saga/${context.sagaId}`,
+              eventType: "thread.revert.operator-resolved",
+              occurredAtMs: nowMs,
+              payload: new TextEncoder().encode(
+                JSON.stringify({
+                  jobId: input.jobId,
+                  resolution: input.resolution,
+                  reason,
+                  mode: "shadow",
+                }),
+              ),
+            },
+          ],
+        };
+        return yield* kernel
+          .commit(batch)
+          .pipe(
+            Effect.catch((error) =>
+              error.code !== "CommitIndeterminate"
+                ? Effect.fail(error)
+                : kernel
+                    .recoverTransaction(transactionId)
+                    .pipe(
+                      Effect.flatMap((recovery) =>
+                        recovery.kind === "committed" && recovery.receipt
+                          ? Effect.succeed(recovery.receipt)
+                          : Effect.fail(error),
+                      ),
+                    ),
+            ),
+          );
+      }),
+    ),
     Effect.andThen(kernel.job(input.jobId)),
     Effect.map((job) => ({ job })),
   );

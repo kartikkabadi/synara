@@ -15,6 +15,7 @@ import { Effect, Layer, Option } from "effect";
 
 import {
   ControlPlaneKernel,
+  ControlPlaneKernelError,
   type ControlPlaneKernelShape,
 } from "../../persistence/Services/ControlPlaneKernel.ts";
 import {
@@ -48,6 +49,7 @@ function makeHandle(
   jobId: string,
 ): RevertSagaShadowHandle {
   let heldLeaseToken: string | null = null;
+  const partitionKey = `thread:${input.threadId}/saga:${sagaId}`;
 
   const appendEvent = (eventType: string, payload: object) =>
     kernel
@@ -64,10 +66,8 @@ function makeHandle(
       })
       .pipe(Effect.asVoid, Effect.catch(logKernelFailure(eventType)));
 
-  // Claim this saga's job deterministically — scoped to its thread
-  // partition with limit 1, so the executor claim can never lease or
-  // mutate another saga's job. The partition claim leases only the
-  // per-thread FIFO head (this saga's job under the thread revert lease).
+  // Observations have independent partitions: a prior uncertain recording for
+  // the same thread must never be leased by this handle's settlement.
   const claim = () =>
     Effect.gen(function* () {
       const outcome = yield* kernel.claimJobs({
@@ -76,7 +76,7 @@ function makeHandle(
         nowMs: Date.now(),
         leaseMs: EXECUTOR_LEASE_MS,
         limit: 1,
-        partitionKey: `thread:${input.threadId}`,
+        partitionKey,
       });
       const claimedJob = outcome.jobs.find((job) => job.jobId === jobId);
       if (!claimedJob) {
@@ -92,11 +92,8 @@ function makeHandle(
       return true;
     }).pipe(Effect.catch((error) => logKernelFailure("claim")(error).pipe(Effect.as(false))));
 
-  // Acknowledge this saga's job in the same kernel transaction as the
-  // terminal event, using the held lease when the executor claimed the job
-  // up front, otherwise via a deterministic per-partition claim (shadow
-  // mode), which leases only this thread's FIFO head job and never touches
-  // another saga's job.
+  // The terminal observation and its ACK commit atomically. This does not
+  // settle the domain revert; the existing checkpoint reactor owns that.
   const settleJob = (eventType: string, payload: object) =>
     Effect.gen(function* () {
       let leaseToken = heldLeaseToken;
@@ -107,7 +104,7 @@ function makeHandle(
           nowMs: Date.now(),
           leaseMs: SHADOW_CLAIM_LEASE_MS,
           limit: 1,
-          partitionKey: `thread:${input.threadId}`,
+          partitionKey,
         });
         const claimedJob = outcome.jobs.find((job) => job.jobId === jobId);
         if (!claimedJob) {
@@ -188,10 +185,36 @@ export const makeRevertSagaWorker = (kernel: ControlPlaneKernelShape): RevertSag
     kernel.mode === "off"
       ? Effect.succeedNone
       : Effect.gen(function* () {
+          if (kernel.mode === "on") {
+            return yield* new ControlPlaneKernelError({
+              operation: "armShadowSaga",
+              code: "AuthoritativeModeUnavailable",
+              detail:
+                "This worker records observations only; authoritative restart execution is unavailable.",
+            });
+          }
           const sagaId = yield* kernel.newId();
           const jobId = yield* kernel.newId();
+          const context = {
+            mode: "shadow" as const,
+            sagaId,
+            threadId: input.threadId,
+            turnCount: input.turnCount,
+            targetCheckpointRef: input.targetCheckpointRef,
+            ...(input.rescueCheckpointRef
+              ? { rescueCheckpointRef: input.rescueCheckpointRef }
+              : {}),
+          };
+          const projection = `revert-job/${jobId}`;
           yield* kernel.commit({
             committedAtMs: Date.now(),
+            projectionPatches: [
+              {
+                projection,
+                expectedVersion: 0,
+                puts: [{ key: new TextEncoder().encode("context"), value: encodePayload(context) }],
+              },
+            ],
             events: [
               {
                 streamId: sagaStreamId(sagaId),
@@ -210,7 +233,7 @@ export const makeRevertSagaWorker = (kernel: ControlPlaneKernelShape): RevertSag
               {
                 jobId,
                 queue: REVERT_SAGA_QUEUE,
-                partitionKey: `thread:${input.threadId}`,
+                partitionKey: `thread:${input.threadId}/saga:${sagaId}`,
                 payload: encodePayload({
                   sagaId,
                   threadId: input.threadId,
@@ -223,7 +246,9 @@ export const makeRevertSagaWorker = (kernel: ControlPlaneKernelShape): RevertSag
           return Option.some(makeHandle(kernel, input, sagaId, jobId));
         }).pipe(
           Effect.catch((error) =>
-            logKernelFailure("armShadowSaga")(error).pipe(Effect.as(Option.none())),
+            kernel.mode === "on"
+              ? Effect.fail(error)
+              : logKernelFailure("armShadowSaga")(error).pipe(Effect.as(Option.none())),
           ),
         ),
 });

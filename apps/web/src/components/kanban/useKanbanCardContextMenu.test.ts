@@ -7,7 +7,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const harness = vi.hoisted(() => ({
   clicked: "delete" as string,
-  running: false,
   showContextMenu: vi.fn(),
   confirm: vi.fn(),
   clearOptimisticDispatch: vi.fn(),
@@ -18,6 +17,9 @@ const harness = vi.hoisted(() => ({
   deleteActiveThread: vi.fn(),
   archiveThread: vi.fn(),
   toast: vi.fn(),
+  sendAsGoal: vi.fn(),
+  setGoal: vi.fn(),
+  dispatchCommand: vi.fn(),
 }));
 
 vi.mock("react", async (importOriginal) => ({
@@ -30,8 +32,16 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 vi.mock("~/appSettings", () => ({
   useAppSettings: () => ({
-    settings: { confirmThreadArchive: false, confirmThreadDelete: false },
+    settings: {
+      confirmThreadArchive: false,
+      confirmThreadDelete: false,
+      defaultProvider: "codex",
+      enableAssistantStreaming: false,
+    },
   }),
+  resolveAssistantDeliveryMode: () => "buffered" as const,
+  getProviderInstanceOptions: () => [{ instanceId: "codex", provider: "codex" }],
+  getProviderStartOptions: () => undefined,
 }));
 vi.mock("~/hooks/useCopyToClipboard", () => ({
   useCopyPathToClipboard: () => vi.fn(),
@@ -43,14 +53,29 @@ vi.mock("~/lib/activeThreadDelete", () => ({
 vi.mock("~/lib/gitReactQuery", () => ({ gitRemoveWorktreeMutationOptions: () => ({}) }));
 vi.mock("~/lib/threadArchive", () => ({ archiveThreadFromClient: harness.archiveThread }));
 vi.mock("~/lib/threadRename", () => ({ dispatchThreadRename: vi.fn() }));
-vi.mock("../../composerDraftStore", () => ({
-  useComposerDraftStore: (selector: (state: unknown) => unknown) =>
+vi.mock("~/threadGoal", () => ({ dispatchThreadGoal: harness.setGoal }));
+vi.mock("~/lib/kanbanDispatch", () => ({
+  resolveKanbanDraftDispatchTarget: () => ({ instanceId: "codex", provider: "codex" }),
+  dispatchKanbanDraftCardAsGoal: harness.sendAsGoal,
+  kanbanDispatchFailureToast: vi.fn().mockReturnValue({
+    type: "error",
+    title: "Mock toast",
+    description: "mock",
+  }),
+}));
+vi.mock("../../composerDraftStore", () => {
+  const hook = (selector: (state: unknown) => unknown) =>
     selector({
       clearComposerContent: harness.clearComposerContent,
       clearDraftThread: harness.clearDraftThread,
       clearProjectDraftThreadById: harness.clearProjectDraftThreadById,
+    });
+  return {
+    useComposerDraftStore: Object.assign(hook, {
+      getState: () => ({ draftsByThreadId: {} }),
     }),
-}));
+  };
+});
 vi.mock("../../kanbanUiStore", () => ({
   useKanbanUiStore: {
     getState: () => ({ clearOptimisticDispatch: harness.clearOptimisticDispatch }),
@@ -60,7 +85,7 @@ vi.mock("../../nativeApi", () => ({
   readNativeApi: () => ({
     contextMenu: { show: harness.showContextMenu },
     dialogs: { confirm: harness.confirm },
-    orchestration: { dispatchCommand: vi.fn() },
+    orchestration: { dispatchCommand: harness.dispatchCommand },
   }),
 }));
 vi.mock("../../store", () => ({
@@ -72,7 +97,6 @@ vi.mock("../../terminalStateStore", () => ({
   useTerminalStateStore: (selector: (state: unknown) => unknown) =>
     selector({ clearTerminalState: harness.clearTerminalState }),
 }));
-vi.mock("../../session-logic", () => ({ isThreadRunningTurn: () => harness.running }));
 vi.mock("../../threadDerivation", () => ({
   getThreadFromState: () => ({ id: ThreadId.makeUnsafe("thread-kanban") }),
 }));
@@ -119,7 +143,6 @@ const EVENT = {
 
 beforeEach(() => {
   harness.clicked = "delete";
-  harness.running = false;
   for (const mock of [
     harness.showContextMenu,
     harness.confirm,
@@ -131,12 +154,17 @@ beforeEach(() => {
     harness.deleteActiveThread,
     harness.archiveThread,
     harness.toast,
+    harness.sendAsGoal,
+    harness.setGoal,
+    harness.dispatchCommand,
   ]) {
     mock.mockReset();
   }
   harness.showContextMenu.mockImplementation(async () => harness.clicked);
   harness.confirm.mockResolvedValue(true);
   harness.archiveThread.mockResolvedValue(undefined);
+  harness.setGoal.mockResolvedValue(undefined);
+  harness.sendAsGoal.mockResolvedValue({ kind: "dispatched" });
   harness.deleteActiveThread.mockImplementation(async (input: unknown) => {
     const action = input as {
       onDeleted: (input: { thread: { id: ThreadId; projectId: ProjectId } }) => void;
@@ -146,6 +174,23 @@ beforeEach(() => {
 });
 
 describe("useKanbanCardContextMenu", () => {
+  it("groups board move actions and delegates the selected target to the board", async () => {
+    harness.clicked = "move-to-inProgress";
+    const move = vi.fn();
+    const draftCard = { ...CARD, column: "draft", draftPrompt: "Start this task" } as KanbanCard;
+
+    useKanbanCardContextMenu().onCardContextMenu(draftCard, EVENT, [
+      { column: "inProgress", onMove: move },
+    ]);
+    await vi.waitFor(() => expect(move).toHaveBeenCalledOnce());
+
+    const menu = harness.showContextMenu.mock.calls[0]?.[0];
+    expect(menu).toContainEqual(
+      expect.objectContaining({ id: "move-to-inProgress", label: "Move to In Progress" }),
+    );
+    expect(harness.sendAsGoal).not.toHaveBeenCalled();
+  });
+
   it("delegates server-backed deletion and preserves Kanban-local cleanup", async () => {
     useKanbanCardContextMenu().onCardContextMenu(CARD, EVENT);
     await vi.waitFor(() => expect(harness.deleteActiveThread).toHaveBeenCalled());
@@ -156,7 +201,7 @@ describe("useKanbanCardContextMenu", () => {
     expect(harness.clearTerminalState).toHaveBeenCalledWith(THREAD_ID);
   });
 
-  it("uses the shared archive command after checking active-thread eligibility", async () => {
+  it("uses the shared archive command while server-side cleanup owns active sessions", async () => {
     harness.clicked = "archive";
 
     useKanbanCardContextMenu().onCardContextMenu(CARD, EVENT);
@@ -164,23 +209,6 @@ describe("useKanbanCardContextMenu", () => {
 
     expect(harness.clearOptimisticDispatch).toHaveBeenCalledWith(THREAD_ID);
     expect(harness.archiveThread).toHaveBeenCalledWith(expect.any(Object), THREAD_ID);
-  });
-
-  it("rejects archive while the thread is running", async () => {
-    harness.clicked = "archive";
-    harness.running = true;
-
-    useKanbanCardContextMenu().onCardContextMenu(CARD, EVENT);
-    await vi.waitFor(() => expect(harness.toast).toHaveBeenCalled());
-
-    expect(harness.archiveThread).not.toHaveBeenCalled();
-    expect(harness.clearOptimisticDispatch).not.toHaveBeenCalled();
-    expect(harness.toast).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "error",
-        title: "Cannot archive",
-      }),
-    );
   });
 
   it("deletes a local-only draft without invoking active-thread deletion", async () => {
@@ -210,5 +238,63 @@ describe("useKanbanCardContextMenu", () => {
 
     expect(harness.deleteActiveThread).not.toHaveBeenCalled();
     expect(harness.clearDraftThread).not.toHaveBeenCalled();
+  });
+
+  it("shows 'Set as goal' for a thread-backed non-draft card and writes the goal without starting a turn", async () => {
+    harness.clicked = "set-as-goal";
+
+    useKanbanCardContextMenu().onCardContextMenu(CARD, EVENT);
+    await vi.waitFor(() => expect(harness.setGoal).toHaveBeenCalled());
+
+    const menu = harness.showContextMenu.mock.calls[0]?.[0] as Array<{ id?: string }>;
+    expect(menu.some((item) => item.id === "set-as-goal")).toBe(true);
+    expect(harness.setGoal).toHaveBeenCalledWith(THREAD_ID, "Kanban thread", {
+      startBehavior: "defer",
+    });
+    expect(harness.dispatchCommand).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "thread.turn.start" }),
+    );
+    expect(harness.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "success", title: "Goal set" }),
+    );
+  });
+
+  it("sends a dispatchable draft as goal from the menu", async () => {
+    harness.clicked = "send-as-goal";
+    const draftCard = {
+      ...CARD,
+      cardId: `draft:${THREAD_ID}`,
+      column: "draft",
+      thread: null,
+      draftPrompt: "Write the goal down",
+    } as KanbanCard;
+
+    useKanbanCardContextMenu().onCardContextMenu(draftCard, EVENT);
+    await vi.waitFor(() => expect(harness.sendAsGoal).toHaveBeenCalled());
+
+    const menu = harness.showContextMenu.mock.calls[0]?.[0] as Array<{ id?: string }>;
+    expect(menu.some((item) => item.id === "send-as-goal")).toBe(true);
+    expect(harness.sendAsGoal).toHaveBeenCalledWith(
+      expect.objectContaining({ card: expect.objectContaining({ threadId: THREAD_ID }) }),
+    );
+    expect(harness.toast).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "success", title: "Goal set" }),
+    );
+  });
+
+  it("does not show 'Set as goal' for thread-less cards", async () => {
+    const localDraftCard = {
+      ...CARD,
+      cardId: `draft:${THREAD_ID}`,
+      column: "draft",
+      thread: null,
+    } as KanbanCard;
+
+    useKanbanCardContextMenu().onCardContextMenu(localDraftCard, EVENT);
+    await vi.waitFor(() => expect(harness.showContextMenu).toHaveBeenCalled());
+
+    const menu = harness.showContextMenu.mock.calls[0]?.[0] as Array<{ id?: string }>;
+    expect(menu.some((item) => item.id === "set-as-goal")).toBe(false);
+    expect(harness.setGoal).not.toHaveBeenCalled();
   });
 });

@@ -7,6 +7,10 @@ import {
 } from "@synara/contracts";
 import { Effect, Option } from "effect";
 
+import {
+  isOrdinaryProjectRow,
+  type SpaceAssignmentWorkspacePaths,
+} from "../orchestration/commandInvariants.ts";
 import type { ProjectionSnapshotQueryShape } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import type { ProjectionTurnRepositoryShape } from "../persistence/Services/ProjectionTurns.ts";
 import type { ProviderDiscoveryServiceShape } from "../provider/Services/ProviderDiscoveryService.ts";
@@ -20,6 +24,8 @@ import {
 } from "./targetResolver.ts";
 import {
   deriveAgentThreadStatus,
+  READ_THREAD_MAX_MESSAGE_CHARS,
+  READ_THREAD_MAX_MESSAGE_LIMIT,
   summarizeThreadDetail,
   summarizeThreadShell,
   summarizeWaitThreadText,
@@ -57,6 +63,7 @@ export interface ThreadReadToolsInput {
   readonly requireThreadShell: (
     threadId: string,
   ) => Effect.Effect<OrchestrationThreadShell, unknown, never>;
+  readonly workspacePaths: SpaceAssignmentWorkspacePaths;
 }
 
 export function makeThreadReadTools(input: ThreadReadToolsInput): ReadonlyArray<ToolEntry> {
@@ -66,6 +73,7 @@ export function makeThreadReadTools(input: ThreadReadToolsInput): ReadonlyArray<
     providerDiscovery,
     loadProviderAvailabilities,
     requireThreadShell,
+    workspacePaths,
   } = input;
 
   const contextTool: ToolEntry = {
@@ -170,7 +178,7 @@ export function makeThreadReadTools(input: ThreadReadToolsInput): ReadonlyArray<
     definition: {
       name: "synara_list_projects",
       description:
-        "List Synara projects (id, title, workspace root). Use before creating a thread in another project.",
+        "List Synara projects (id, title, workspace root). System-managed containers (the Chats and Studio surfaces) are not projects and are excluded. Use before creating a thread in another project.",
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
       annotations: { title: "List Synara projects", ...READ_ONLY_TOOL_ANNOTATIONS },
     },
@@ -178,12 +186,21 @@ export function makeThreadReadTools(input: ThreadReadToolsInput): ReadonlyArray<
       snapshotQuery.getShellSnapshot().pipe(
         Effect.map((snapshot) =>
           mcpToolResultJson({
-            projects: snapshot.projects.map((project) => ({
-              projectId: project.id,
-              title: project.title,
-              workspaceRoot: project.workspaceRoot,
-              isPinned: project.isPinned,
-            })),
+            projects: snapshot.projects
+              .filter((project) =>
+                isOrdinaryProjectRow({
+                  projectKind: project.kind,
+                  projectTitle: project.title,
+                  projectWorkspaceRoot: project.workspaceRoot,
+                  workspacePaths,
+                }),
+              )
+              .map((project) => ({
+                projectId: project.id,
+                title: project.title,
+                workspaceRoot: project.workspaceRoot,
+                isPinned: project.isPinned,
+              })),
           }),
         ),
         Effect.catch((error) => Effect.succeed(mcpToolResultError(errorText(error)))),
@@ -271,17 +288,45 @@ export function makeThreadReadTools(input: ThreadReadToolsInput): ReadonlyArray<
     requiredCapability: "thread:read",
     definition: {
       name: "synara_read_thread",
-      description:
-        "Read one Synara thread's status and recent messages (newest last, truncated). Pass the returned nextCursor as cursor to page older messages.",
+      description: `Read one Synara thread's status and recent messages (newest last). Pass nextCursor as cursor to page older messages. To read one settled long message losslessly, pass the summary's index, messageId, and messageVersion with messageOffsetChars 0, then follow messagePage.nextOffsetChars with the same identity and version.`,
       inputSchema: {
         type: "object",
         properties: {
           threadId: { type: "string", description: "Thread to read." },
           cursor: { type: "string", description: "Pagination cursor from a previous call." },
-          messageLimit: { type: "number", description: "Messages per page (default 20, max 100)." },
+          messageLimit: {
+            type: "integer",
+            minimum: 1,
+            maximum: READ_THREAD_MAX_MESSAGE_LIMIT,
+            description: `Messages per transcript page (default 20, max ${READ_THREAD_MAX_MESSAGE_LIMIT}).`,
+          },
           maxMessageChars: {
-            type: "number",
-            description: "Per-message truncation limit (default 1500).",
+            type: "integer",
+            minimum: 50,
+            maximum: READ_THREAD_MAX_MESSAGE_CHARS,
+            description: `Characters per message or single-message slice (default 1500, max ${READ_THREAD_MAX_MESSAGE_CHARS}). The response reports the effective value.`,
+          },
+          messageIndex: {
+            type: "integer",
+            minimum: 0,
+            description:
+              "Current transcript index of one message to read losslessly; messageId and messageVersion detect stale coordinates.",
+          },
+          messageOffsetChars: {
+            type: "integer",
+            minimum: 0,
+            description:
+              "Character offset within messageIndex (default 0); follow messagePage.nextOffsetChars until absent.",
+          },
+          messageId: {
+            type: "string",
+            description:
+              "Message identity returned in each message summary; required with messageIndex.",
+          },
+          messageVersion: {
+            type: "string",
+            description:
+              "Opaque version returned in each message summary; required with messageIndex so slices stay bound to one snapshot.",
           },
         },
         required: ["threadId"],
@@ -295,6 +340,10 @@ export function makeThreadReadTools(input: ThreadReadToolsInput): ReadonlyArray<
         const cursor = readStringArg(args, "cursor");
         const messageLimit = readNumberArg(args, "messageLimit");
         const maxMessageChars = readNumberArg(args, "maxMessageChars");
+        const messageIndex = readNumberArg(args, "messageIndex");
+        const messageOffsetChars = readNumberArg(args, "messageOffsetChars");
+        const messageId = readStringArg(args, "messageId");
+        const messageVersion = readStringArg(args, "messageVersion");
         const detail = yield* snapshotQuery.getThreadDetailById(ThreadId.makeUnsafe(threadId)).pipe(
           Effect.mapError((error) => new ToolInputError(errorText(error))),
           Effect.flatMap(
@@ -310,6 +359,10 @@ export function makeThreadReadTools(input: ThreadReadToolsInput): ReadonlyArray<
             cursor,
             messageLimit,
             maxMessageChars,
+            messageIndex,
+            messageOffsetChars,
+            messageId,
+            messageVersion,
           }),
         );
       }).pipe(Effect.catch((error) => Effect.succeed(mcpToolResultError(errorText(error))))),

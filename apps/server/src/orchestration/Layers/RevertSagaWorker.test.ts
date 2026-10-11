@@ -6,8 +6,10 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  isControlPlaneAddonFailure,
   loadControlPlaneAddon,
   makeControlPlaneKernelAtPath,
+  makeDisabledKernel,
 } from "../../persistence/Layers/ControlPlaneKernel.ts";
 import {
   ControlPlaneKernelError,
@@ -35,7 +37,7 @@ const armHandle = (worker: ReturnType<typeof makeRevertSagaWorker>) =>
 const jobStates = (kernel: ControlPlaneKernelShape, state: string) =>
   kernel.jobs({ queue: REVERT_SAGA_QUEUE, state, limit: 10 });
 
-const addonAvailable = typeof loadControlPlaneAddon() !== "string";
+const addonAvailable = !isControlPlaneAddonFailure(loadControlPlaneAddon());
 
 describe.skipIf(!addonAvailable)("RevertSagaWorker (shadow mode)", () => {
   const withKernel = <A, E>(use: (kernel: ControlPlaneKernelShape) => Effect.Effect<A, E>) =>
@@ -190,6 +192,9 @@ describe("RevertSagaWorker (kernel off)", () => {
     recoverClaim: disabled("recoverClaim"),
     recoverTransaction: disabled("recoverTransaction"),
     jobs: disabled("jobs"),
+    job: disabled("job"),
+    jobsPage: disabled("jobsPage"),
+    resolveUncertainJobs: disabled("resolveUncertainJobs"),
     projectionGet: disabled("projectionGet"),
     projectionVersion: disabled("projectionVersion"),
     streamVersion: disabled("streamVersion"),
@@ -207,6 +212,69 @@ describe("RevertSagaWorker (kernel off)", () => {
         cwd: "/tmp/workspace",
       });
       assert.isTrue(Option.isNone(handle));
+    }),
+  );
+});
+
+describe("observational partition isolation", () => {
+  it.effect("settling a second recording on the same thread cannot claim the first", () =>
+    Effect.gen(function* () {
+      const queued: import("../../persistence/Services/ControlPlaneKernel.ts").KernelJobSpec[] = [];
+      const claims: string[] = [];
+      let nextId = 0;
+      const kernel: ControlPlaneKernelShape = {
+        ...makeDisabledKernel("unused"),
+        mode: "shadow",
+        newId: () => Effect.sync(() => (++nextId).toString(16).padStart(32, "0")),
+        commit: (batch) =>
+          Effect.sync(() => {
+            queued.push(...(batch.enqueueJobs ?? []));
+            return { transactionId: "1".repeat(32), transactionSequence: 1, committedAtMs: 0 };
+          }),
+        streamVersion: () => Effect.succeed(2),
+        claimJobs: (request) =>
+          Effect.sync(() => {
+            claims.push(request.partitionKey!);
+            const job = queued.find((entry) => entry.partitionKey === request.partitionKey)!;
+            return {
+              kind: "committed",
+              staleJobs: [],
+              jobs: [
+                {
+                  ...job,
+                  jobId: job.jobId!,
+                  workerId: request.workerId,
+                  leaseToken: "lease",
+                  attempt: 1,
+                  leaseExpiresAtMs: 100,
+                },
+              ],
+            };
+          }),
+      };
+      const worker = makeRevertSagaWorker(kernel);
+      const first = yield* armHandle(worker);
+      yield* first.recordUncertain("provider-rollback", "Response lost");
+      const second = yield* armHandle(worker);
+      yield* second.complete();
+      assert.equal(queued.length, 2);
+      assert.notEqual(queued[0]?.partitionKey, queued[1]?.partitionKey);
+      assert.deepEqual(claims, [queued[1]?.partitionKey]);
+    }),
+  );
+
+  it.effect("refuses authoritative execution even when given an enabled native port", () =>
+    Effect.gen(function* () {
+      const worker = makeRevertSagaWorker({ ...makeDisabledKernel("unused"), mode: "on" });
+      const error = yield* Effect.flip(
+        worker.armShadowSaga({
+          threadId,
+          turnCount: 1,
+          targetCheckpointRef,
+          cwd: "/tmp/workspace",
+        }),
+      );
+      assert.equal(error.code, "AuthoritativeModeUnavailable");
     }),
   );
 });

@@ -251,6 +251,32 @@ describe("revert saga decider", () => {
     });
   });
 
+  it.each([
+    { sagaId: undefined, turnCount: 1, saga: activeSaga("reverting") },
+    { sagaId: SAGA_ID, turnCount: 2, saga: activeSaga("reverting") },
+    { sagaId: SAGA_ID, turnCount: 1, saga: null },
+  ])(
+    "rejects completion without matching live saga identity and target",
+    async ({ sagaId, turnCount, saga }) => {
+      const error = await Effect.runPromise(
+        Effect.flip(
+          decideOrchestrationCommand({
+            command: {
+              type: "thread.revert.complete",
+              commandId: CommandId.makeUnsafe("invalid-complete"),
+              threadId: THREAD_ID,
+              turnCount,
+              ...(sagaId ? { sagaId } : {}),
+              createdAt: NOW,
+            },
+            readModel: makeReadModel({ revertSaga: saga }),
+          }),
+        ),
+      );
+      expect(error).toMatchObject({ _tag: "OrchestrationCommandInvariantError" });
+    },
+  );
+
   it("rejects a stale thread.revert.complete from a different saga", async () => {
     const error = await Effect.runPromise(
       Effect.flip(
@@ -376,6 +402,7 @@ describe("revert saga decider", () => {
         command: {
           type: "thread.revert.complete",
           commandId: CommandId.makeUnsafe("cmd-revert-complete"),
+          sagaId: SAGA_ID,
           threadId: THREAD_ID,
           turnCount: 1,
           createdAt: NOW,

@@ -26,14 +26,14 @@ import {
 import type { Space } from "~/types";
 import { createClientPointMenuAnchor } from "~/lib/clientPointMenuAnchor";
 import {
-  VOID_SPACE_ICON,
-  VOID_SPACE_NAME,
+  DEFAULT_VOID_SPACE,
   resolveActiveSpaceId,
   spaceDisplayName,
   spaceKey,
+  type VoidSpacePresentation,
 } from "~/lib/spaceGrouping";
 import { cn } from "~/lib/utils";
-import { PencilIcon, PlusIcon, Trash2 } from "~/lib/icons";
+import { PencilIcon, PlusIcon, ResetIcon, Trash2 } from "~/lib/icons";
 import { SIDEBAR_SECTION_LABEL_CLASS_NAME } from "~/sidebarRowStyles";
 import { SpaceIcon, type SpaceIconValue } from "./SpaceIcon";
 import { ComposerPickerMenuPopup } from "./chat/ComposerPickerMenuPopup";
@@ -100,10 +100,11 @@ const SPACE_TAB_CLASS_NAME =
  * Hover and selection share one token (`--sidebar-accent`/`--sidebar-accent-active`
  * resolve to the same 4% wash), so an icon-only tab cannot lean on background alone
  * the way a labelled sidebar row does. Selection is carried by the hairline ring and
- * full-strength glyph on top of that wash.
+ * full-strength glyph on top of that wash. The ring is inset: drawn outside it would
+ * make the active tab render 26px next to a 24px hovered neighbour.
  */
 const SPACE_TAB_ACTIVE_CLASS_NAME =
-  "bg-[var(--sidebar-accent-active)] text-[var(--sidebar-accent-foreground)] ring-1 ring-border/70";
+  "bg-[var(--sidebar-accent-active)] text-[var(--sidebar-accent-foreground)] ring-1 ring-border/70 ring-inset";
 
 function SpaceActivityDot({ tone }: { tone: SpaceActivityTone }) {
   return (
@@ -136,9 +137,15 @@ function SpaceTab(props: {
   name: string;
   /** Extra tooltip/spoken context that the icon alone cannot carry (Void). */
   hint?: string;
+  /** Rendered jump-chord label (e.g. "⌘⌥2") appended to the tooltip. */
+  shortcutLabel?: string | null;
   active: boolean;
   activityTone: SpaceActivityTone | null;
   onSelect: () => void;
+  /** Opens the name/icon editor. Double-click is the discoverable half of the context menu. */
+  onEdit: () => void;
+  /** Second tooltip line naming the pointer gestures this tab supports. */
+  gestureHint?: string;
   onContextMenu?: (event: MouseEvent<HTMLButtonElement>) => void;
   /** Files the dragged project into this tab's space. */
   onProjectDrop?: (projectId: ProjectId) => void;
@@ -195,6 +202,7 @@ function SpaceTab(props: {
             tabIndex={props.active ? 0 : -1}
             aria-label={[props.name, props.hint, toneLabel].filter(Boolean).join(", ")}
             onClick={props.onSelect}
+            onDoubleClick={props.onEdit}
             {...(props.onContextMenu ? { onContextMenu: props.onContextMenu } : {})}
             {...dropHandlers}
             {...(props.sortable ? { style: props.sortable.style } : {})}
@@ -202,7 +210,7 @@ function SpaceTab(props: {
               SPACE_TAB_CLASS_NAME,
               props.active && SPACE_TAB_ACTIVE_CLASS_NAME,
               props.sortable?.isDragging && "z-20 opacity-70",
-              dropActive && "bg-[var(--sidebar-accent)] ring-1 ring-ring",
+              dropActive && "bg-[var(--sidebar-accent)] ring-1 ring-ring ring-inset",
             )}
           />
         }
@@ -213,6 +221,17 @@ function SpaceTab(props: {
       <TooltipPopup side="bottom">
         {props.name}
         {detail ? <span className="text-muted-foreground/70"> · {detail}</span> : null}
+        {props.shortcutLabel ? (
+          <span className="text-muted-foreground/70"> · {props.shortcutLabel}</span>
+        ) : null}
+        {/* Renaming and reordering are pointer gestures with no visible affordance of their
+            own, so the tooltip is the only place they can be discovered. It is a deliberate
+            hover, and the line is muted and secondary, so it stays out of the way once known. */}
+        {props.gestureHint ? (
+          <span className="mt-0.5 block text-[0.9em] text-muted-foreground/60">
+            {props.gestureHint}
+          </span>
+        ) : null}
       </TooltipPopup>
     </Tooltip>
   );
@@ -220,9 +239,11 @@ function SpaceTab(props: {
 
 function SortableSpaceTab(props: {
   space: Space;
+  shortcutLabel: string | null;
   active: boolean;
   activityTone: SpaceActivityTone | null;
   onSelect: () => void;
+  onEdit: () => void;
   onContextMenu: (event: MouseEvent<HTMLButtonElement>) => void;
   onProjectDrop: (projectId: ProjectId) => void;
 }) {
@@ -237,9 +258,12 @@ function SortableSpaceTab(props: {
     <SpaceTab
       icon={props.space.icon}
       name={props.space.name}
+      shortcutLabel={props.shortcutLabel}
       active={props.active}
       activityTone={props.activityTone}
+      gestureHint="Double-click to edit · Drag to reorder"
       onSelect={props.onSelect}
+      onEdit={props.onEdit}
       onContextMenu={props.onContextMenu}
       onProjectDrop={props.onProjectDrop}
       sortable={{
@@ -247,6 +271,9 @@ function SortableSpaceTab(props: {
         style: {
           transform: CSS.Translate.toString(sortable.transform),
           transition: sortable.transition,
+          // A tab is primarily a click target, so it only claims the drag cursor once a
+          // drag is actually under way.
+          ...(sortable.isDragging ? { cursor: "grabbing" } : {}),
         },
         isDragging: sortable.isDragging,
         listeners: sortable.listeners,
@@ -298,25 +325,24 @@ function useTabStripOverflow(dependencyKey: string) {
 
 /**
  * The active space's name doubles as its rename affordance: double-click edits in
- * place, Enter or blur commits when valid, Escape cancels. Void is not a stored row,
- * so it renders as a plain label.
+ * place, Enter or blur commits when valid, Escape cancels. Void has no stored row but
+ * renames the same way — its name is a local presentation preference, and being unable
+ * to rename the one group every install starts in is exactly the wrong asymmetry.
  */
 function SpaceNameLabel(props: {
-  activeSpace: Space | null;
   displayName: string;
-  existingNames: ReadonlyArray<string>;
-  onRename: (space: Space, name: string) => void;
+  /** Names held by the other spaces (and by Void), which this rename may not collide with. */
+  takenNames: ReadonlyArray<string>;
+  onRename: (name: string) => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
-  const space = props.activeSpace;
 
-  if (!space || draft === null) {
+  if (draft === null) {
     return (
       <span
-        className="truncate"
-        {...(space
-          ? { onDoubleClick: () => setDraft(space.name), title: "Double-click to rename" }
-          : {})}
+        className="cursor-text truncate"
+        onDoubleClick={() => setDraft(props.displayName)}
+        title="Double-click to rename"
       >
         {props.displayName}
       </span>
@@ -326,12 +352,9 @@ function SpaceNameLabel(props: {
   const trimmed = draft.trim();
   const isValid =
     trimmed.length > 0 &&
-    trimmed.toLowerCase() !== "void" &&
-    !props.existingNames.some(
-      (name) => name !== space.name && name.trim().toLowerCase() === trimmed.toLowerCase(),
-    );
+    !props.takenNames.some((name) => name.trim().toLowerCase() === trimmed.toLowerCase());
   const commit = () => {
-    if (isValid && trimmed !== space.name) props.onRename(space, trimmed);
+    if (isValid && trimmed !== props.displayName) props.onRename(trimmed);
     setDraft(null);
   };
 
@@ -366,13 +389,21 @@ interface SpaceSwitcherProps {
   spaces: ReadonlyArray<Space>;
   activeSpaceId: SpaceId | null;
   activityBySpaceId: ReadonlyMap<SpaceId | null, SpaceActivityTone>;
+  /** How the unfiled group presents itself; user-set, so never the constant. */
+  voidSpace: VoidSpacePresentation;
   onSelect: (spaceId: SpaceId | null) => void;
   onCreate: () => void;
   onEdit: (space: Space) => void;
   onDelete: (space: Space) => void;
   onReorder: (orderedSpaceIds: ReadonlyArray<SpaceId>, movedSpaceId: SpaceId) => void;
   onRenameSpace: (space: Space, name: string) => void;
+  /** Void edits are presentation-only, so they take a separate path from a Space rename. */
+  onEditVoid: () => void;
+  onRenameVoid: (name: string) => void;
+  onResetVoid: () => void;
   onDropProject: (projectId: ProjectId, spaceId: SpaceId | null) => void;
+  /** Jump-chord label for a tab position (0 = Void), shown in the tab tooltip. */
+  jumpShortcutLabelForTab?: (tabIndex: number) => string | null;
 }
 
 export function SpaceSwitcher(props: SpaceSwitcherProps) {
@@ -386,11 +417,19 @@ export function SpaceSwitcher(props: SpaceSwitcherProps) {
 }
 
 function SpaceSwitcherStrip(props: SpaceSwitcherProps) {
+  const { onSelect } = props;
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const [contextState, setContextState] = useState<{
-    space: Space;
+    /** `null` targets Void, which has no row but still owns a name and an icon. */
+    space: Space | null;
     position: { x: number; y: number };
   } | null>(null);
+  /**
+   * A finished drag still ends in a `click` on the tab that was picked up, which would
+   * navigate into the space the user was only rearranging. The flag is armed when a drag
+   * starts and disarmed by the next press, so a swallowed click can never eat the one after it.
+   */
+  const dragEndedRef = useRef(false);
   const contextAnchor = useMemo(
     () => (contextState ? createClientPointMenuAnchor(contextState.position) : null),
     [contextState],
@@ -410,7 +449,29 @@ function SpaceSwitcherStrip(props: SpaceSwitcherProps) {
   const activeSpace = activeSpaceId
     ? (props.spaces.find((space) => space.id === activeSpaceId) ?? null)
     : null;
-  const activeSpaceName = spaceDisplayName(activeSpaceId, props.spaces);
+  const activeSpaceName = spaceDisplayName(activeSpaceId, props.spaces, props.voidSpace);
+  /** Every name the header rename must not land on: the other spaces, plus Void or itself. */
+  const takenNames = [
+    ...props.spaces.filter((space) => space.id !== activeSpaceId).map((space) => space.name),
+    ...(activeSpace ? [props.voidSpace.name] : []),
+  ];
+  const voidIsCustomized =
+    props.voidSpace.name !== DEFAULT_VOID_SPACE.name ||
+    props.voidSpace.icon !== DEFAULT_VOID_SPACE.icon;
+
+  /**
+   * A tab click that only ends a drag is dropped rather than navigating (see `dragEndedRef`).
+   */
+  const selectFromClick = useCallback(
+    (spaceId: SpaceId | null) => {
+      if (dragEndedRef.current) {
+        dragEndedRef.current = false;
+        return;
+      }
+      onSelect(spaceId);
+    },
+    [onSelect],
+  );
 
   /**
    * Manual activation: the arrows move focus and Enter/Space commits (native on a
@@ -459,30 +520,48 @@ function SpaceSwitcherStrip(props: SpaceSwitcherProps) {
           // Keyed by the active space so switching spaces mid-edit discards the draft
           // instead of leaving an input bound to a different space's rename handler.
           key={spaceKey(activeSpaceId)}
-          activeSpace={activeSpace}
           displayName={activeSpaceName}
-          existingNames={props.spaces.map((space) => space.name)}
-          onRename={props.onRenameSpace}
+          takenNames={takenNames}
+          onRename={(name) => {
+            if (activeSpace) props.onRenameSpace(activeSpace, name);
+            else props.onRenameVoid(name);
+          }}
         />
       </div>
 
       {/* px-1 keeps a 24px tab's 14px glyph centred on the same x (16px) as the
-          leading glyph of a project row below, so the two lists share one optical margin. */}
-      <div className="flex items-center gap-0.5 px-1">
+          leading glyph of a project row below, so the two lists share one optical margin.
+          gap-1: adjacent washed tabs (active next to hovered) read as one blob at 2px. */}
+      <div className="flex items-center gap-1 px-1">
         <div
           role="tablist"
           aria-label="Spaces"
           aria-orientation="horizontal"
-          className="flex min-w-0 flex-1 items-center gap-0.5"
+          className="flex min-w-0 flex-1 items-center gap-1"
           onKeyDown={handleTabStripKeyDown}
+          // Every press starts a fresh interaction, so it clears any click suppression a
+          // previous drag armed but never spent (a drag cancelled with Escape, say).
+          onPointerDownCapture={() => {
+            dragEndedRef.current = false;
+          }}
         >
+          {/* Void keeps its place at the head of the strip even when renamed: it is not a
+              stored row, so it has no sort order to move, and "everything not filed" reads
+              as the origin of the list rather than one entry within it. */}
           <SpaceTab
-            icon={VOID_SPACE_ICON}
-            name={VOID_SPACE_NAME}
+            icon={props.voidSpace.icon}
+            name={props.voidSpace.name}
             hint="Unassigned projects"
+            gestureHint="Double-click to edit"
+            shortcutLabel={props.jumpShortcutLabelForTab?.(0) ?? null}
             active={activeSpaceId === null}
             activityTone={props.activityBySpaceId.get(null) ?? null}
-            onSelect={() => props.onSelect(null)}
+            onSelect={() => selectFromClick(null)}
+            onEdit={props.onEditVoid}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              setContextState({ space: null, position: { x: event.clientX, y: event.clientY } });
+            }}
             onProjectDrop={(projectId) => props.onDropProject(projectId, null)}
           />
 
@@ -490,6 +569,9 @@ function SpaceSwitcherStrip(props: SpaceSwitcherProps) {
             sensors={sensors}
             collisionDetection={closestCenter}
             modifiers={[restrictToHorizontalAxis]}
+            onDragStart={() => {
+              dragEndedRef.current = true;
+            }}
             onDragEnd={({ active, over }) => {
               if (!over || active.id === over.id) return;
               const previousIndex = props.spaces.findIndex((space) => space.id === active.id);
@@ -505,7 +587,7 @@ function SpaceSwitcherStrip(props: SpaceSwitcherProps) {
             <div
               ref={scrollerRef}
               className={cn(
-                "flex min-w-0 flex-1 gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
+                "flex min-w-0 flex-1 gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
                 TAB_STRIP_FADE_CLASS_NAME,
               )}
             >
@@ -513,13 +595,15 @@ function SpaceSwitcherStrip(props: SpaceSwitcherProps) {
                 items={props.spaces.map((space) => space.id)}
                 strategy={horizontalListSortingStrategy}
               >
-                {props.spaces.map((space) => (
+                {props.spaces.map((space, index) => (
                   <SortableSpaceTab
                     key={space.id}
                     space={space}
+                    shortcutLabel={props.jumpShortcutLabelForTab?.(index + 1) ?? null}
                     active={activeSpaceId === space.id}
                     activityTone={props.activityBySpaceId.get(space.id) ?? null}
-                    onSelect={() => props.onSelect(space.id)}
+                    onSelect={() => selectFromClick(space.id)}
+                    onEdit={() => props.onEdit(space)}
                     onProjectDrop={(projectId) => props.onDropProject(projectId, space.id)}
                     onContextMenu={(event) => {
                       event.preventDefault();
@@ -565,26 +649,44 @@ function SpaceSwitcherStrip(props: SpaceSwitcherProps) {
               <MenuItem
                 className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS_NAME}
                 onClick={() => {
+                  const target = contextState.space;
                   setContextState(null);
-                  props.onEdit(contextState.space);
+                  if (target) props.onEdit(target);
+                  else props.onEditVoid();
                 }}
               >
                 <SidebarContextMenuIcon icon={PencilIcon} />
-                <span>Edit space…</span>
+                <span>{contextState.space ? "Edit space…" : "Edit name and icon…"}</span>
               </MenuItem>
-              {/* Neutral, not red: deleting a space only files its projects back into
-                  Void, and the sibling project menu keeps its harder "Delete project"
-                  neutral too. Reddening the milder action would invert the hierarchy. */}
-              <MenuItem
-                className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS_NAME}
-                onClick={() => {
-                  setContextState(null);
-                  props.onDelete(contextState.space);
-                }}
-              >
-                <SidebarContextMenuIcon icon={Trash2} />
-                <span>Delete space</span>
-              </MenuItem>
+              {contextState.space ? (
+                // Neutral, not red: deleting a space only files its projects back into
+                // Void, and the sibling project menu keeps its harder "Delete project"
+                // neutral too. Reddening the milder action would invert the hierarchy.
+                <MenuItem
+                  className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS_NAME}
+                  onClick={() => {
+                    const target = contextState.space;
+                    setContextState(null);
+                    if (target) props.onDelete(target);
+                  }}
+                >
+                  <SidebarContextMenuIcon icon={Trash2} />
+                  <span>Delete space</span>
+                </MenuItem>
+              ) : voidIsCustomized ? (
+                // Void cannot be deleted — it is where projects live when they are nowhere —
+                // so the slot below "Edit" is the way back to the shipped name and icon.
+                <MenuItem
+                  className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS_NAME}
+                  onClick={() => {
+                    setContextState(null);
+                    props.onResetVoid();
+                  }}
+                >
+                  <SidebarContextMenuIcon icon={ResetIcon} />
+                  <span>Reset to {DEFAULT_VOID_SPACE.name}</span>
+                </MenuItem>
+              ) : null}
             </MenuGroup>
           </ComposerPickerMenuPopup>
         </Menu>

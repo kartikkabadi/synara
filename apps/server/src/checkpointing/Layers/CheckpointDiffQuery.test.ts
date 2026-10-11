@@ -7,6 +7,7 @@ import {
   type ProjectionFullThreadDiffContext,
   type ProjectionThreadCheckpointContext,
 } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { fakeProjectionSnapshotQuery } from "../../orchestration/testing/fakeProjectionSnapshotQuery.ts";
 import { checkpointRefForThreadTurn, checkpointRefForThreadTurnStart } from "../Utils.ts";
 import { CheckpointDiffQueryLive } from "./CheckpointDiffQuery.ts";
 import { CheckpointStore, type CheckpointStoreShape } from "../Services/CheckpointStore.ts";
@@ -30,6 +31,7 @@ function makeThreadCheckpointContext(input: {
     workspaceRoot: input.workspaceRoot,
     envMode: input.envMode ?? "local",
     worktreePath: input.worktreePath,
+    workingDirectory: null,
     checkpoints: [
       {
         turnId: TurnId.makeUnsafe("turn-1"),
@@ -62,6 +64,7 @@ function makeFullThreadDiffContext(input: {
     workspaceRoot: input.workspaceRoot,
     envMode: input.envMode ?? "local",
     worktreePath: input.worktreePath,
+    workingDirectory: null,
     latestCheckpointTurnCount: input.latestCheckpointTurnCount,
     baselineCheckpointRef: input.baselineCheckpointRef ?? input.toCheckpointRef,
     toCheckpointRef: input.toCheckpointRef,
@@ -119,25 +122,12 @@ describe("CheckpointDiffQueryLive", () => {
     const layer = CheckpointDiffQueryLive.pipe(
       Layer.provideMerge(Layer.succeed(CheckpointStore, checkpointStore)),
       Layer.provideMerge(
-        Layer.succeed(ProjectionSnapshotQuery, {
-          getSnapshot: () => Effect.die("unused"),
-          getCommandReadModel: () => Effect.die("unused"),
-          getCounts: () => Effect.die("unused"),
-          getSnapshotSequence: () => Effect.die("unused"),
-          getShellSnapshot: () => Effect.die("unused"),
-          getActiveProjectByWorkspaceRoot: () => Effect.die("unused"),
-          getProjectShellById: () => Effect.die("unused"),
-          getSpaceShellById: () => Effect.die("unused"),
-          getFirstActiveThreadIdByProjectId: () => Effect.die("unused"),
-          getThreadCheckpointContext: () => Effect.succeed(Option.some(threadCheckpointContext)),
-          listGeneratedImageActivitiesByTurn: () => Effect.die("unused"),
-          getFullThreadDiffContext: () => Effect.die("unused"),
-          getThreadShellById: () => Effect.die("unused"),
-          findSyntheticSubagentParentThread: () => Effect.die("unused"),
-          getThreadDetailById: () => Effect.die("unused"),
-          getThreadDetailForExportById: () => Effect.die("unused"),
-          getThreadDetailSnapshotById: () => Effect.die("unused"),
-        }),
+        Layer.succeed(
+          ProjectionSnapshotQuery,
+          fakeProjectionSnapshotQuery({
+            getThreadCheckpointContext: () => Effect.succeed(Option.some(threadCheckpointContext)),
+          }),
+        ),
       ),
     );
 
@@ -221,25 +211,12 @@ describe("CheckpointDiffQueryLive", () => {
     const layer = CheckpointDiffQueryLive.pipe(
       Layer.provideMerge(Layer.succeed(CheckpointStore, checkpointStore)),
       Layer.provideMerge(
-        Layer.succeed(ProjectionSnapshotQuery, {
-          getSnapshot: () => Effect.die("unused"),
-          getCommandReadModel: () => Effect.die("unused"),
-          getCounts: () => Effect.die("unused"),
-          getSnapshotSequence: () => Effect.die("unused"),
-          getShellSnapshot: () => Effect.die("unused"),
-          getActiveProjectByWorkspaceRoot: () => Effect.die("unused"),
-          getProjectShellById: () => Effect.die("unused"),
-          getSpaceShellById: () => Effect.die("unused"),
-          getFirstActiveThreadIdByProjectId: () => Effect.die("unused"),
-          getThreadCheckpointContext: () => Effect.die("unused"),
-          listGeneratedImageActivitiesByTurn: () => Effect.die("unused"),
-          getFullThreadDiffContext: () => Effect.succeed(Option.some(fullThreadDiffContext)),
-          getThreadShellById: () => Effect.die("unused"),
-          findSyntheticSubagentParentThread: () => Effect.die("unused"),
-          getThreadDetailById: () => Effect.die("unused"),
-          getThreadDetailForExportById: () => Effect.die("unused"),
-          getThreadDetailSnapshotById: () => Effect.die("unused"),
-        }),
+        Layer.succeed(
+          ProjectionSnapshotQuery,
+          fakeProjectionSnapshotQuery({
+            getFullThreadDiffContext: () => Effect.succeed(Option.some(fullThreadDiffContext)),
+          }),
+        ),
       ),
     );
 
@@ -292,25 +269,12 @@ describe("CheckpointDiffQueryLive", () => {
     const layer = CheckpointDiffQueryLive.pipe(
       Layer.provideMerge(Layer.succeed(CheckpointStore, checkpointStore)),
       Layer.provideMerge(
-        Layer.succeed(ProjectionSnapshotQuery, {
-          getSnapshot: () => Effect.die("unused"),
-          getCommandReadModel: () => Effect.die("unused"),
-          getCounts: () => Effect.die("unused"),
-          getSnapshotSequence: () => Effect.die("unused"),
-          getShellSnapshot: () => Effect.die("unused"),
-          getActiveProjectByWorkspaceRoot: () => Effect.die("unused"),
-          getProjectShellById: () => Effect.die("unused"),
-          getSpaceShellById: () => Effect.die("unused"),
-          getFirstActiveThreadIdByProjectId: () => Effect.die("unused"),
-          getThreadCheckpointContext: () => Effect.succeed(Option.none()),
-          listGeneratedImageActivitiesByTurn: () => Effect.die("unused"),
-          getFullThreadDiffContext: () => Effect.die("unused"),
-          getThreadShellById: () => Effect.die("unused"),
-          findSyntheticSubagentParentThread: () => Effect.die("unused"),
-          getThreadDetailById: () => Effect.die("unused"),
-          getThreadDetailForExportById: () => Effect.die("unused"),
-          getThreadDetailSnapshotById: () => Effect.die("unused"),
-        }),
+        Layer.succeed(
+          ProjectionSnapshotQuery,
+          fakeProjectionSnapshotQuery({
+            getThreadCheckpointContext: () => Effect.succeed(Option.none()),
+          }),
+        ),
       ),
     );
 
@@ -361,25 +325,12 @@ describe("CheckpointDiffQueryLive", () => {
     const layer = CheckpointDiffQueryLive.pipe(
       Layer.provideMerge(Layer.succeed(CheckpointStore, checkpointStore)),
       Layer.provideMerge(
-        Layer.succeed(ProjectionSnapshotQuery, {
-          getSnapshot: () => Effect.die("unused"),
-          getCommandReadModel: () => Effect.die("unused"),
-          getCounts: () => Effect.die("unused"),
-          getSnapshotSequence: () => Effect.die("unused"),
-          getShellSnapshot: () => Effect.die("unused"),
-          getActiveProjectByWorkspaceRoot: () => Effect.die("unused"),
-          getProjectShellById: () => Effect.die("unused"),
-          getSpaceShellById: () => Effect.die("unused"),
-          getFirstActiveThreadIdByProjectId: () => Effect.die("unused"),
-          getThreadCheckpointContext: () => Effect.succeed(Option.some(threadCheckpointContext)),
-          listGeneratedImageActivitiesByTurn: () => Effect.die("unused"),
-          getFullThreadDiffContext: () => Effect.die("unused"),
-          getThreadShellById: () => Effect.die("unused"),
-          findSyntheticSubagentParentThread: () => Effect.die("unused"),
-          getThreadDetailById: () => Effect.die("unused"),
-          getThreadDetailForExportById: () => Effect.die("unused"),
-          getThreadDetailSnapshotById: () => Effect.die("unused"),
-        }),
+        Layer.succeed(
+          ProjectionSnapshotQuery,
+          fakeProjectionSnapshotQuery({
+            getThreadCheckpointContext: () => Effect.succeed(Option.some(threadCheckpointContext)),
+          }),
+        ),
       ),
     );
 
@@ -431,25 +382,12 @@ describe("CheckpointDiffQueryLive", () => {
     const layer = CheckpointDiffQueryLive.pipe(
       Layer.provideMerge(Layer.succeed(CheckpointStore, checkpointStore)),
       Layer.provideMerge(
-        Layer.succeed(ProjectionSnapshotQuery, {
-          getSnapshot: () => Effect.die("unused"),
-          getCommandReadModel: () => Effect.die("unused"),
-          getCounts: () => Effect.die("unused"),
-          getSnapshotSequence: () => Effect.die("unused"),
-          getShellSnapshot: () => Effect.die("unused"),
-          getActiveProjectByWorkspaceRoot: () => Effect.die("unused"),
-          getProjectShellById: () => Effect.die("unused"),
-          getSpaceShellById: () => Effect.die("unused"),
-          getFirstActiveThreadIdByProjectId: () => Effect.die("unused"),
-          getThreadCheckpointContext: () => Effect.succeed(Option.some(threadCheckpointContext)),
-          listGeneratedImageActivitiesByTurn: () => Effect.die("unused"),
-          getFullThreadDiffContext: () => Effect.die("unused"),
-          getThreadShellById: () => Effect.die("unused"),
-          findSyntheticSubagentParentThread: () => Effect.die("unused"),
-          getThreadDetailById: () => Effect.die("unused"),
-          getThreadDetailForExportById: () => Effect.die("unused"),
-          getThreadDetailSnapshotById: () => Effect.die("unused"),
-        }),
+        Layer.succeed(
+          ProjectionSnapshotQuery,
+          fakeProjectionSnapshotQuery({
+            getThreadCheckpointContext: () => Effect.succeed(Option.some(threadCheckpointContext)),
+          }),
+        ),
       ),
     );
 
@@ -506,25 +444,12 @@ describe("CheckpointDiffQueryLive", () => {
     const layer = CheckpointDiffQueryLive.pipe(
       Layer.provideMerge(Layer.succeed(CheckpointStore, checkpointStore)),
       Layer.provideMerge(
-        Layer.succeed(ProjectionSnapshotQuery, {
-          getSnapshot: () => Effect.die("unused"),
-          getCommandReadModel: () => Effect.die("unused"),
-          getCounts: () => Effect.die("unused"),
-          getSnapshotSequence: () => Effect.die("unused"),
-          getShellSnapshot: () => Effect.die("unused"),
-          getActiveProjectByWorkspaceRoot: () => Effect.die("unused"),
-          getProjectShellById: () => Effect.die("unused"),
-          getSpaceShellById: () => Effect.die("unused"),
-          getFirstActiveThreadIdByProjectId: () => Effect.die("unused"),
-          getThreadCheckpointContext: () => Effect.succeed(Option.some(threadCheckpointContext)),
-          listGeneratedImageActivitiesByTurn: () => Effect.die("unused"),
-          getFullThreadDiffContext: () => Effect.die("unused"),
-          getThreadShellById: () => Effect.die("unused"),
-          findSyntheticSubagentParentThread: () => Effect.die("unused"),
-          getThreadDetailById: () => Effect.die("unused"),
-          getThreadDetailForExportById: () => Effect.die("unused"),
-          getThreadDetailSnapshotById: () => Effect.die("unused"),
-        }),
+        Layer.succeed(
+          ProjectionSnapshotQuery,
+          fakeProjectionSnapshotQuery({
+            getThreadCheckpointContext: () => Effect.succeed(Option.some(threadCheckpointContext)),
+          }),
+        ),
       ),
     );
 
@@ -577,25 +502,12 @@ describe("CheckpointDiffQueryLive", () => {
     const layer = CheckpointDiffQueryLive.pipe(
       Layer.provideMerge(Layer.succeed(CheckpointStore, checkpointStore)),
       Layer.provideMerge(
-        Layer.succeed(ProjectionSnapshotQuery, {
-          getSnapshot: () => Effect.die("unused"),
-          getCommandReadModel: () => Effect.die("unused"),
-          getCounts: () => Effect.die("unused"),
-          getSnapshotSequence: () => Effect.die("unused"),
-          getShellSnapshot: () => Effect.die("unused"),
-          getActiveProjectByWorkspaceRoot: () => Effect.die("unused"),
-          getProjectShellById: () => Effect.die("unused"),
-          getSpaceShellById: () => Effect.die("unused"),
-          getFirstActiveThreadIdByProjectId: () => Effect.die("unused"),
-          getThreadCheckpointContext: () => Effect.succeed(Option.some(threadCheckpointContext)),
-          listGeneratedImageActivitiesByTurn: () => Effect.die("unused"),
-          getFullThreadDiffContext: () => Effect.die("unused"),
-          getThreadShellById: () => Effect.die("unused"),
-          findSyntheticSubagentParentThread: () => Effect.die("unused"),
-          getThreadDetailById: () => Effect.die("unused"),
-          getThreadDetailForExportById: () => Effect.die("unused"),
-          getThreadDetailSnapshotById: () => Effect.die("unused"),
-        }),
+        Layer.succeed(
+          ProjectionSnapshotQuery,
+          fakeProjectionSnapshotQuery({
+            getThreadCheckpointContext: () => Effect.succeed(Option.some(threadCheckpointContext)),
+          }),
+        ),
       ),
     );
 

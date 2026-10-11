@@ -18,6 +18,7 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  isControlPlaneAddonFailure,
   loadControlPlaneAddon,
   makeControlPlaneKernelAtPath,
 } from "../../persistence/Layers/ControlPlaneKernel.ts";
@@ -30,7 +31,7 @@ const targetCheckpointRef = CheckpointRef.makeUnsafe("refs/synara/checkpoints/x/
 
 const LEASE_MS = 60_000;
 
-const addonAvailable = typeof loadControlPlaneAddon() !== "string";
+const addonAvailable = !isControlPlaneAddonFailure(loadControlPlaneAddon());
 
 describe.skipIf(!addonAvailable)("revert saga failure drills", () => {
   const withKernel = <A, E>(use: (kernel: ControlPlaneKernelShape) => Effect.Effect<A, E>) =>

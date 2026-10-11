@@ -6,7 +6,7 @@
 // Layer: shared contracts (schema-only, no runtime logic)
 
 import { Schema } from "effect";
-import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas";
+import { CheckpointRef, NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 
 export const CONTROL_PLANE_KERNEL_DISABLED_CODE = "CONTROL_PLANE_KERNEL_DISABLED";
 
@@ -36,7 +36,7 @@ export type ControlPlaneJob = typeof ControlPlaneJob.Type;
 export const ControlPlaneListUncertainRevertJobsInput = Schema.Struct({
   /** Pagination cursor (enqueue sequence); start from 0. */
   afterSequence: Schema.optional(NonNegativeInt),
-  limit: Schema.optional(NonNegativeInt),
+  limit: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))),
 });
 export type ControlPlaneListUncertainRevertJobsInput =
   typeof ControlPlaneListUncertainRevertJobsInput.Type;
@@ -58,8 +58,19 @@ export const ControlPlaneGetJobInput = Schema.Struct({
 });
 export type ControlPlaneGetJobInput = typeof ControlPlaneGetJobInput.Type;
 
+export const ControlPlaneRevertContext = Schema.Struct({
+  mode: Schema.Literal("shadow"),
+  sagaId: TrimmedNonEmptyString,
+  threadId: ThreadId,
+  turnCount: NonNegativeInt,
+  targetCheckpointRef: CheckpointRef,
+  rescueCheckpointRef: Schema.optional(CheckpointRef),
+});
+export type ControlPlaneRevertContext = typeof ControlPlaneRevertContext.Type;
+
 export const ControlPlaneGetJobResult = Schema.Struct({
   job: Schema.NullOr(ControlPlaneJob),
+  context: Schema.NullOr(ControlPlaneRevertContext),
 });
 export type ControlPlaneGetJobResult = typeof ControlPlaneGetJobResult.Type;
 
@@ -68,6 +79,7 @@ export type ControlPlaneGetJobResult = typeof ControlPlaneGetJobResult.Type;
 export const ControlPlaneResolveUncertainJobInput = Schema.Struct({
   jobId: TrimmedNonEmptyString,
   resolution: ControlPlaneJobResolution,
+  reason: TrimmedNonEmptyString.check(Schema.isMaxLength(2000)),
 });
 export type ControlPlaneResolveUncertainJobInput = typeof ControlPlaneResolveUncertainJobInput.Type;
 

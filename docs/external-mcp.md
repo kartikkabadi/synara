@@ -1,30 +1,46 @@
 # External MCP integrations
 
-Synara can expose a small, user-approved MCP tool surface to another local app such as Codex or
-Claude. This integration is separate from the internal `/mcp` endpoint injected into provider
-sessions.
+External MCP lets another local application—such as Codex, Claude Code, or an MCP-capable desktop
+client—create and inspect restricted Synara tasks through a user-approved integration.
 
-## Guided setup
+It is separate from the internal Agent Gateway injected into supported provider sessions already
+running inside Synara.
+
+## Internal gateway or external integration
+
+| Surface       | Caller                                  | Authority model                                                                            |
+| ------------- | --------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Agent Gateway | A provider session inside a Synara task | Thread-scoped capabilities and caller-turn authority                                       |
+| External MCP  | Another paired local application        | User-created integration with selected projects, scopes, limits, and revocable credentials |
+
+Use External MCP when work begins outside Synara but should execute through Synara's durable task
+and worktree pipeline.
+
+## Create the integration
 
 1. Start Synara and open **Settings → Integrations**.
-2. Choose **Codex**, **Claude Code**, **Claude Desktop**, or **Other MCP app**.
-3. Select the projects the app may use. Safe defaults restrict it to tasks it creates, isolated
+2. Name the connection and choose whether it may use every current and future project (the default)
+   or only selected projects. Safe execution defaults restrict it to tasks it creates, isolated
    managed worktrees, and approval-required execution. Higher-impact permissions are under
    **Advanced permissions**.
-4. Choose **Create integration**.
-5. Use **Copy pairing command**, paste it into Terminal on the same computer, and press Return. The
-   page updates from **Waiting for pairing** to **Paired** automatically. Synara generates a
-   copy-ready command using the exact executable shipped by the running installation; no global
-   `synara` command is required.
-
-6. Use the next copy button. Synara generates the correct Codex or Claude Code command, or a standard
-   JSON configuration for desktop and other clients. No credential is included in this configuration.
-7. Use **Copy example prompt**, paste it into a new client chat, and edit the goal. Synara changes the
-   status to **Connected** after the client's first request.
+3. Choose **Create integration**.
+4. For Codex, Claude Code, or another agentic MCP client, copy the generated setup prompt into the
+   client. The prompt guides that agent through the one-time pairing, installs the correct local
+   stdio configuration, and verifies the connection with `synara_overview`. For Claude Desktop or a
+   client that cannot run the setup prompt, complete pairing in Synara and use the copy-ready JSON
+   configuration instead. Synara uses the exact executable and data directory of the running
+   installation; no global `synara` command, project ID, model slug, request ID, or credential
+   path is required from the user.
+5. Synara moves from **Waiting for pairing** to **Paired** after the local credential exchange, then
+   to **Connected** after the client makes its first request.
 
 If the page is reloaded or the pairing code expires, use **Resume pairing** beside the integration.
-For an already paired integration, **Continue setup** restores the remaining copyable configuration
-and example prompt. A new pairing code never replaces an already paired credential.
+For an already paired integration, **Continue setup** restores the setup prompt. A new pairing code
+never replaces an already paired credential.
+
+The generated prompt is the recommended path for agentic clients. The commands and configuration
+below document the equivalent manual setup for Claude Desktop and other clients that cannot run the
+guided setup automatically.
 
 The guided flow avoids asking the user for project IDs, provider/model slugs, request IDs, data paths,
 or credentials. The generated launcher is structurally equivalent to:
@@ -33,22 +49,26 @@ or credentials. The generated launcher is structurally equivalent to:
 /absolute/path/to/runtime /absolute/path/to/synara-server mcp serve --integration mcp_int_REDACTED --home-dir "$HOME/.synara"
 ```
 
+External clients register as `synara-external`; `synara` is reserved for the managed internal
+gateway. This avoids combining the external stdio transport with the internal HTTP configuration.
+Existing client registrations are not renamed automatically.
+
 The Codex copy action generates:
 
 ```sh
-codex mcp add synara [--env ELECTRON_RUN_AS_NODE=1] -- /absolute/runtime /absolute/server mcp serve --integration mcp_int_REDACTED --home-dir "$HOME/.synara"
+codex mcp add synara-external [--env ELECTRON_RUN_AS_NODE=1] -- /absolute/runtime /absolute/server mcp serve --integration mcp_int_REDACTED --home-dir "$HOME/.synara"
 ```
 
 The Claude Code copy action generates a user-scoped configuration:
 
 ```sh
-claude mcp add --scope user synara [-e ELECTRON_RUN_AS_NODE=1] -- /absolute/runtime /absolute/server mcp serve --integration mcp_int_REDACTED --home-dir "$HOME/.synara"
+claude mcp add --scope user synara-external [-e ELECTRON_RUN_AS_NODE=1] -- /absolute/runtime /absolute/server mcp serve --integration mcp_int_REDACTED --home-dir "$HOME/.synara"
 ```
 
 The equivalent manual Codex `config.toml` is:
 
 ```toml
-[mcp_servers.synara]
+[mcp_servers.synara-external]
 command = "/absolute/path/to/runtime"
 args = ["/absolute/path/to/synara-server", "mcp", "serve", "--integration", "mcp_int_REDACTED", "--home-dir", "/absolute/path/to/synara-data"]
 # Desktop builds also include: env = { ELECTRON_RUN_AS_NODE = "1" }
@@ -59,7 +79,7 @@ For clients that use JSON MCP configuration:
 ```json
 {
   "mcpServers": {
-    "synara": {
+    "synara-external": {
       "command": "/absolute/path/to/runtime",
       "args": [
         "/absolute/path/to/synara-server",
@@ -110,8 +130,10 @@ principal to use.
 
 ## External tools
 
-The advertised catalog is filtered by the integration's granted scopes. The first version exposes:
+The advertised catalog is filtered by the integration's granted scopes. It exposes:
 
+- `synara_overview` — orient in one call with allowed projects, paths and activity, provider
+  availability, granted scopes, safe defaults, limits, and suggested next steps.
 - `synara_capabilities` — provider/model construction and safety limits for an allowed project.
 - `synara_list_allowed_projects` — only projects selected by the user.
 - `synara_create_task` — one task per stable `requestId`.

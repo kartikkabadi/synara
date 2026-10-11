@@ -5,12 +5,19 @@ import { ChevronRightIcon } from "~/lib/icons";
 import * as React from "react";
 
 import { cn } from "~/lib/utils";
+import { observeNativeSurfaceOverlay } from "~/lib/nativeSurfaceOcclusion";
 import {
   APP_TRANSLUCENT_POPUP_SURFACE_CLASS_NAME,
   COMPOSER_PICKER_MENU_OPTION_CLASS_NAME,
   COMPOSER_PICKER_MENU_POPUP_BODY_CLASS_NAME,
   COMPOSER_PICKER_MENU_SURFACE_CLASS_NAME,
 } from "../chat/composerPickerStyles";
+import {
+  CHECKBOX_BOX_CLASS_NAME,
+  CHECKBOX_INDICATOR_CLASS_NAME,
+  CheckboxCheckGlyph,
+} from "./checkbox";
+import { ShortcutKbd } from "./kbd";
 import { SWITCH_THUMB_CLASS_NAME, SWITCH_TRACK_CLASS_NAME } from "./switch";
 
 const MenuCreateHandle = MenuPrimitive.createHandle;
@@ -20,7 +27,12 @@ type MenuProps = MenuPrimitive.Root.Props & {
   keepOpenOnSubmenuInteraction?: boolean;
 };
 
-function Menu({ keepOpenOnSubmenuInteraction = false, onOpenChange, ...props }: MenuProps) {
+function Menu({
+  keepOpenOnSubmenuInteraction: keepOpenOnSubmenuInteractionProp,
+  onOpenChange,
+  ...props
+}: MenuProps) {
+  const keepOpenOnSubmenuInteraction = keepOpenOnSubmenuInteractionProp ?? false;
   const handleOpenChange: NonNullable<MenuPrimitive.Root.Props["onOpenChange"]> = (
     nextOpen,
     eventDetails,
@@ -55,13 +67,14 @@ function MenuTrigger({ className, children, ...props }: MenuPrimitive.Trigger.Pr
 function MenuPopupBase({
   children,
   className,
-  surface = "default",
+  surface: surfaceProp,
   pickerSize,
-  sideOffset = 4,
-  align = "center",
+  sideOffset: sideOffsetProp,
+  align: alignProp,
   alignOffset,
-  side = "bottom",
+  side: sideProp,
   anchor,
+  collisionAvoidance,
   ...props
 }: MenuPrimitive.Popup.Props & {
   align?: MenuPrimitive.Positioner.Props["align"];
@@ -69,9 +82,17 @@ function MenuPopupBase({
   alignOffset?: MenuPrimitive.Positioner.Props["alignOffset"];
   side?: MenuPrimitive.Positioner.Props["side"];
   anchor?: MenuPrimitive.Positioner.Props["anchor"];
+  /** Root menus default to flipping only along their own axis (no top/bottom fallback for
+   *  a side-placed menu); pass `{ fallbackAxisSide: "end" }` for side-placed root menus so
+   *  they drop below the anchor when neither side fits. */
+  collisionAvoidance?: MenuPrimitive.Positioner.Props["collisionAvoidance"];
   surface?: "default" | "composer";
   pickerSize?: "small" | "normal" | undefined;
 }) {
+  const surface = surfaceProp ?? "default";
+  const sideOffset = sideOffsetProp ?? 4;
+  const align = alignProp ?? "center";
+  const side = sideProp ?? "bottom";
   const popupSurfaceClassName =
     surface === "composer"
       ? COMPOSER_PICKER_MENU_SURFACE_CLASS_NAME
@@ -82,9 +103,11 @@ function MenuPopupBase({
   return (
     <MenuPrimitive.Portal>
       <MenuPrimitive.Positioner
+        ref={observeNativeSurfaceOverlay}
         align={align}
         alignOffset={alignOffset}
         anchor={anchor}
+        collisionAvoidance={collisionAvoidance}
         className={cn("z-50 min-w-32", isComposerSurface ? undefined : className)}
         data-slot="menu-positioner"
         side={side}
@@ -94,8 +117,9 @@ function MenuPopupBase({
           className={cn(
             "relative flex origin-(--transform-origin) text-[var(--color-text-foreground)] outline-none focus:outline-none",
             isComposerSurface ? "min-w-0 max-w-[92vw]" : "w-full min-w-full",
-            isComposerSurface ? className : null,
             popupSurfaceClassName,
+            // Last so a caller's className can override surface tokens (e.g. a rounder radius).
+            isComposerSurface ? className : null,
           )}
           data-slot="menu-popup"
           {...props}
@@ -127,12 +151,13 @@ function MenuGroup(props: MenuPrimitive.Group.Props) {
 function MenuItem({
   className,
   inset,
-  variant = "default",
+  variant: variantProp,
   ...props
 }: MenuPrimitive.Item.Props & {
   inset?: boolean;
   variant?: "default" | "destructive";
 }) {
+  const variant = variantProp ?? "default";
   return (
     <MenuPrimitive.Item
       className={cn(
@@ -154,11 +179,17 @@ function MenuCheckboxItem({
   className,
   children,
   checked,
-  variant = "default",
+  variant: variantProp,
   ...props
 }: MenuPrimitive.CheckboxItem.Props & {
-  variant?: "default" | "switch";
+  /**
+   * `default`: a trailing ✓ only while checked. `switch`: a trailing toggle.
+   * `checkbox`: a visible box in the leading icon slot, empty while unchecked, so the row
+   * reads as an opt-in setting rather than a selected option.
+   */
+  variant?: "default" | "switch" | "checkbox";
 }) {
+  const variant = variantProp ?? "default";
   return (
     <MenuPrimitive.CheckboxItem
       checked={checked}
@@ -169,13 +200,25 @@ function MenuCheckboxItem({
         ),
         variant === "switch"
           ? "grid-cols-[1fr_auto] gap-4 pe-1.5"
-          : "grid-cols-[1fr_auto] gap-3 px-2.5",
+          : variant === "checkbox"
+            ? "flex gap-2 pe-2"
+            : "grid-cols-[1fr_auto] gap-3 px-2.5",
         className,
       )}
       {...props}
       data-slot="menu-checkbox-item"
     >
-      {variant === "switch" ? (
+      {variant === "checkbox" ? (
+        <>
+          {/* Sized and inset like a MenuItem's leading icon so labels stay aligned. */}
+          <span aria-hidden className={cn(CHECKBOX_BOX_CLASS_NAME, "-mx-0.5 size-3.5 sm:size-3.5")}>
+            <MenuPrimitive.CheckboxItemIndicator className={CHECKBOX_INDICATOR_CLASS_NAME}>
+              <CheckboxCheckGlyph className="size-2.5 sm:size-2.5" />
+            </MenuPrimitive.CheckboxItemIndicator>
+          </span>
+          <span className="flex min-w-0 flex-1 items-center gap-2">{children}</span>
+        </>
+      ) : variant === "switch" ? (
         <>
           <span className="col-start-1">{children}</span>
           <MenuPrimitive.CheckboxItemIndicator
@@ -225,13 +268,14 @@ function MenuRadioGroup(props: MenuPrimitive.RadioGroup.Props) {
 function MenuRadioItem({
   className,
   children,
-  preserveChildLayout = false,
+  preserveChildLayout: preserveChildLayoutProp,
   trailing,
   ...props
 }: MenuPrimitive.RadioItem.Props & {
   preserveChildLayout?: boolean;
   trailing?: React.ReactNode;
 }) {
+  const preserveChildLayout = preserveChildLayoutProp ?? false;
   return (
     <MenuPrimitive.RadioItem
       className={cn(
@@ -307,7 +351,7 @@ function MenuGroupLabel({
       // headers (e.g. "Effort"). Picker menus may still override padding-block
       // via the `--picker-section-py` token on `[data-slot="menu-label"]`.
       className={cn(
-        "px-2 py-1.5 font-normal text-xs text-muted-foreground/45 data-inset:ps-9 sm:data-inset:ps-8",
+        "px-2 py-1.5 font-normal text-ui leading-snug text-muted-foreground/45 data-inset:ps-9 sm:data-inset:ps-8",
         className,
       )}
       data-inset={inset}
@@ -327,16 +371,28 @@ function MenuSeparator({ className, ...props }: MenuPrimitive.Separator.Props) {
   );
 }
 
-function MenuShortcut({ className, ...props }: React.ComponentProps<"kbd">) {
+function MenuShortcut({ className, children, ...props }: React.ComponentProps<"kbd">) {
+  if (typeof children === "string") {
+    return (
+      <ShortcutKbd
+        shortcutLabel={children}
+        data-slot="menu-shortcut"
+        groupClassName={cn("ms-auto", className)}
+        {...props}
+      />
+    );
+  }
   return (
     <kbd
       className={cn(
-        "ms-auto font-medium font-sans text-muted-foreground/72 text-[length:var(--app-font-size-ui-xs,10px)] tracking-widest",
+        "ms-auto font-medium font-sans text-muted-foreground/72 text-ui-xs tracking-widest",
         className,
       )}
       data-slot="menu-shortcut"
       {...props}
-    />
+    >
+      {children}
+    </kbd>
   );
 }
 
@@ -374,12 +430,19 @@ function FocusStableMenuSub({
   );
 }
 
-function MenuSub({ keepOpenOnFocusOut = false, ...props }: MenuSubProps) {
+function MenuSub({ keepOpenOnFocusOut: keepOpenOnFocusOutProp, ...props }: MenuSubProps) {
+  const keepOpenOnFocusOut = keepOpenOnFocusOutProp ?? false;
   return keepOpenOnFocusOut ? (
     <FocusStableMenuSub {...props} />
   ) : (
     <MenuPrimitive.SubmenuRoot data-slot="menu-sub" {...props} />
   );
+}
+
+/** Unstyled submenu trigger for bespoke layouts (e.g. the effort slider card's stacked
+ *  model label). Prefer `MenuSubTrigger` for regular option rows. */
+function MenuSubTriggerBase(props: MenuPrimitive.SubmenuTrigger.Props) {
+  return <MenuPrimitive.SubmenuTrigger data-slot="menu-sub-trigger-base" {...props} />;
 }
 
 function MenuSubTrigger({
@@ -411,19 +474,26 @@ function MenuSubTrigger({
 
 function MenuSubPopup({
   className,
-  surface = "default",
+  surface: surfaceProp,
   pickerSize,
-  sideOffset = 0,
+  sideOffset: sideOffsetProp,
   alignOffset,
-  align = "start",
+  align: alignProp,
+  side: sideProp,
   ...props
 }: MenuPrimitive.Popup.Props & {
   align?: MenuPrimitive.Positioner.Props["align"];
   sideOffset?: MenuPrimitive.Positioner.Props["sideOffset"];
   alignOffset?: MenuPrimitive.Positioner.Props["alignOffset"];
+  /** Cascade direction; `inline-start` when the parent menu already opened toward the start. */
+  side?: "inline-end" | "inline-start";
   surface?: "default" | "composer";
   pickerSize?: "small" | "normal";
 }) {
+  const surface = surfaceProp ?? "default";
+  const sideOffset = sideOffsetProp ?? 0;
+  const align = alignProp ?? "start";
+  const side = sideProp ?? "inline-end";
   const defaultAlignOffset = align !== "center" ? -5 : undefined;
 
   return (
@@ -433,7 +503,7 @@ function MenuSubPopup({
       className={className}
       data-slot="menu-sub-content"
       pickerSize={pickerSize}
-      side="inline-end"
+      side={side}
       sideOffset={sideOffset}
       surface={surface}
       {...props}
@@ -457,5 +527,6 @@ export {
   MenuShortcut,
   MenuSub,
   MenuSubTrigger,
+  MenuSubTriggerBase,
   MenuSubPopup,
 };

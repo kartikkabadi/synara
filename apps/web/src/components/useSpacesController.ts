@@ -11,6 +11,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 
 import type { SidebarThreadSortOrder } from "../appSettings";
+import { spaceKey, toSpaceIconName } from "../lib/spaceGrouping";
+import { resolveSpaceSelectionTarget } from "../lib/spaceNavigation";
 import {
   createSpace,
   deleteSpace,
@@ -24,15 +26,33 @@ import { readNativeApi } from "../nativeApi";
 import { useSpacesUiStore } from "../spacesUiStore";
 import { useStore } from "../store";
 import type { Project, SidebarThreadSummary, Space } from "../types";
-import { useWorkspaceStore } from "../workspaceStore";
+import { useVoidSpaceStore } from "../voidSpaceStore";
+import { useWorkspacePathsStore } from "../workspacePathsStore";
 import { sortThreadsForSidebar } from "./Sidebar.logic";
-import type { SpaceEditorValue } from "./SpaceEditorDialog";
+import type { SpaceEditorMode, SpaceEditorValue } from "./SpaceEditorDialog";
 import { useRouteSpaceSync } from "./useRouteSpaceSync";
 import { toastManager } from "./ui/toast";
 
 type SpaceEditorState =
   | { mode: "create"; projectIdAfterCreate: ProjectId | null }
-  | { mode: "edit"; spaceId: SpaceId };
+  | { mode: "edit"; spaceId: SpaceId }
+  // Void has no row to update, so its edit ends in a local preference rather than a command.
+  | { mode: "void" };
+
+/**
+ * Whether the server's space order already equals the one we applied optimistically.
+ *
+ * Module scope because the caller checks this inside a `try`, and React Compiler cannot lower a
+ * logical expression there — inlining it costs the whole controller its memoization.
+ */
+function spaceOrderMatches(
+  confirmed: ReadonlyArray<SpaceId>,
+  expected: ReadonlyArray<SpaceId>,
+): boolean {
+  return (
+    confirmed.length === expected.length && confirmed.every((id, index) => id === expected[index])
+  );
+}
 
 export function useSpacesController(input: {
   /** Ordinary (space-assignable) projects; computed by Sidebar because its own memos need it too. */
@@ -76,12 +96,16 @@ export function useSpacesController(input: {
   const getLastSpaceThreadId = useSpacesUiStore((store) => store.getLastThreadId);
   const getLastSpaceProjectId = useSpacesUiStore((store) => store.getLastProjectId);
   const reconcileSpacesUi = useSpacesUiStore((store) => store.reconcile);
-  const homeDir = useWorkspaceStore((store) => store.homeDir);
-  const chatWorkspaceRoot = useWorkspaceStore((store) => store.chatWorkspaceRoot);
-  const studioWorkspaceRoot = useWorkspaceStore((store) => store.studioWorkspaceRoot);
+  const voidSpace = useVoidSpaceStore((store) => store.voidSpace);
+  const setVoidSpace = useVoidSpaceStore((store) => store.setVoidSpace);
+  const resetVoidSpace = useVoidSpaceStore((store) => store.resetVoidSpace);
+  const homeDir = useWorkspacePathsStore((store) => store.homeDir);
+  const chatWorkspaceRoot = useWorkspacePathsStore((store) => store.chatWorkspaceRoot);
+  const studioWorkspaceRoot = useWorkspacePathsStore((store) => store.studioWorkspaceRoot);
+  const groupsWorkspaceRoot = useWorkspacePathsStore((store) => store.groupsWorkspaceRoot);
   const workspacePaths = useMemo(
-    () => ({ homeDir, chatWorkspaceRoot, studioWorkspaceRoot }),
-    [chatWorkspaceRoot, homeDir, studioWorkspaceRoot],
+    () => ({ homeDir, chatWorkspaceRoot, studioWorkspaceRoot, groupsWorkspaceRoot }),
+    [chatWorkspaceRoot, groupsWorkspaceRoot, homeDir, studioWorkspaceRoot],
   );
 
   const routeSpaceProject =
@@ -134,80 +158,94 @@ export function useSpacesController(input: {
     [setActiveSpaceId],
   );
 
+  // Bookmark the context being left so returning to that space restores it.
+  const rememberDepartingSpaceContext = useCallback(() => {
+    const currentRouteSpaceProject =
+      isOnKanban && routeProjectId ? (projectById.get(routeProjectId) ?? null) : activeRouteProject;
+    if (routeThreadId && isOrdinarySpaceProject(currentRouteSpaceProject, workspacePaths)) {
+      rememberSpaceThread(currentRouteSpaceProject.spaceId ?? null, routeThreadId);
+    } else if (isOnKanban && isOrdinarySpaceProject(currentRouteSpaceProject, workspacePaths)) {
+      rememberSpaceProject(currentRouteSpaceProject.spaceId ?? null, currentRouteSpaceProject.id);
+    }
+  }, [
+    activeRouteProject,
+    isOnKanban,
+    projectById,
+    rememberSpaceProject,
+    rememberSpaceThread,
+    routeProjectId,
+    routeThreadId,
+    workspacePaths,
+  ]);
+
+  /**
+   * Switch spaces without restoring the target space's last context. Used when the
+   * caller is about to navigate itself (creating a project files it into the target
+   * space and then opens its first thread) — the restore navigation would race it.
+   */
+  const handleSelectSpaceForIncomingProject = useCallback(
+    (spaceId: SpaceId | null) => {
+      // Read the live value so an async create flow can roll back a provisional
+      // selection with the same callback instance it used to select it.
+      if (spaceId === useSpacesUiStore.getState().activeSpaceId) return;
+      rememberDepartingSpaceContext();
+      selectSpaceForNavigation(spaceId);
+    },
+    [rememberDepartingSpaceContext, selectSpaceForNavigation],
+  );
+
   const handleSelectSpace = useCallback(
     (spaceId: SpaceId | null) => {
       if (spaceId === activeSpaceId) return;
 
-      const currentRouteSpaceProject =
-        isOnKanban && routeProjectId
-          ? (projectById.get(routeProjectId) ?? null)
-          : activeRouteProject;
-      if (routeThreadId && isOrdinarySpaceProject(currentRouteSpaceProject, workspacePaths)) {
-        rememberSpaceThread(currentRouteSpaceProject.spaceId ?? null, routeThreadId);
-      } else if (isOnKanban && isOrdinarySpaceProject(currentRouteSpaceProject, workspacePaths)) {
-        rememberSpaceProject(currentRouteSpaceProject.spaceId ?? null, currentRouteSpaceProject.id);
-      }
+      rememberDepartingSpaceContext();
 
       selectSpaceForNavigation(spaceId);
 
-      const availableThreads = sidebarThreads.filter((thread) => {
-        if (thread.archivedAt != null) return false;
-        const project = projectById.get(thread.projectId);
-        return (
-          isOrdinarySpaceProject(project, workspacePaths) && (project.spaceId ?? null) === spaceId
-        );
+      const target = resolveSpaceSelectionTarget({
+        spaceId,
+        projects: ordinarySpaceProjects,
+        projectById,
+        threads: sidebarThreads,
+        rememberedThreadId: getLastSpaceThreadId(spaceId),
+        rememberedProjectId: getLastSpaceProjectId(spaceId),
+        paths: workspacePaths,
+        sortThreads: (threads) => sortThreadsForSidebar(threads, sidebarThreadSortOrder),
       });
-      const rememberedThreadId = getLastSpaceThreadId(spaceId);
-      const rememberedThread = rememberedThreadId
-        ? availableThreads.find((thread) => thread.id === rememberedThreadId)
-        : null;
-      if (rememberedThread) {
-        activateThreadFromSidebarIntent(rememberedThread.id);
+
+      if (target.kind === "thread") {
+        activateThreadFromSidebarIntent(target.threadId);
         return;
       }
 
-      const rememberedProjectId = getLastSpaceProjectId(spaceId);
-      const rememberedProject = rememberedProjectId
-        ? ordinarySpaceProjects.find(
-            (project) =>
-              project.id === rememberedProjectId && (project.spaceId ?? null) === spaceId,
-          )
-        : null;
-      if (rememberedProject) {
+      if (target.kind === "project") {
         startTransition(() => {
           void navigate({
             to: "/kanban/$projectId",
-            params: { projectId: rememberedProject.id },
+            params: { projectId: target.projectId },
           });
         });
         return;
       }
 
-      const targetThread =
-        sortThreadsForSidebar(availableThreads, sidebarThreadSortOrder)[0] ?? null;
-      if (targetThread) {
-        activateThreadFromSidebarIntent(targetThread.id);
-        return;
-      }
-
+      // An empty Space still has to be entered. The landing has to say *which* Space it is
+      // entering: a bare "/" restores the last remembered thread route, which belongs to the
+      // Space being left, and useRouteSpaceSync would then adopt that thread's Space and undo
+      // the click. On an upgraded install every project keeps `spaceId = null`, so every
+      // user-created Space is empty and this is the only path a Space switch can take.
       startTransition(() => {
-        void navigate({ to: "/" });
+        void navigate({ to: "/", search: { space: spaceKey(target.spaceId) } });
       });
     },
     [
       activateThreadFromSidebarIntent,
-      activeRouteProject,
       activeSpaceId,
       getLastSpaceProjectId,
       getLastSpaceThreadId,
-      isOnKanban,
       navigate,
       ordinarySpaceProjects,
       projectById,
-      rememberSpaceProject,
-      rememberSpaceThread,
-      routeProjectId,
-      routeThreadId,
+      rememberDepartingSpaceContext,
       selectSpaceForNavigation,
       sidebarThreadSortOrder,
       sidebarThreads,
@@ -217,10 +255,17 @@ export function useSpacesController(input: {
 
   const handleSpaceEditorSubmit = useCallback(
     async (value: SpaceEditorValue) => {
+      if (spaceEditorState?.mode === "void") {
+        // Presentation only: no command, no server round trip, nothing to fail.
+        setVoidSpace(value);
+        return;
+      }
+
       const api = readNativeApi();
       if (!api || !spaceEditorState) {
         throw new Error("The app server is unavailable.");
       }
+      const icon = toSpaceIconName(value.icon);
 
       if (spaceEditorState.mode === "edit") {
         // Only actual changes are sent, so an icon-only edit cannot collide with a
@@ -228,7 +273,7 @@ export function useSpacesController(input: {
         // command — the server rejects no-op metadata updates.
         const currentSpace = spaces.find((space) => space.id === spaceEditorState.spaceId);
         const nextName = currentSpace?.name === value.name ? undefined : value.name;
-        const nextIcon = currentSpace?.icon === value.icon ? undefined : value.icon;
+        const nextIcon = currentSpace?.icon === icon ? undefined : icon;
         if (nextName === undefined && nextIcon === undefined) {
           return;
         }
@@ -241,7 +286,7 @@ export function useSpacesController(input: {
         return;
       }
 
-      const { spaceId, sequence } = await createSpace({ api, name: value.name, icon: value.icon });
+      const { spaceId, sequence } = await createSpace({ api, name: value.name, icon });
       const projectId = spaceEditorState.projectIdAfterCreate;
       if (projectId) {
         try {
@@ -273,6 +318,7 @@ export function useSpacesController(input: {
       routeProjectId,
       selectSpaceForNavigation,
       setOptimisticActiveSpaceId,
+      setVoidSpace,
       spaceEditorState,
       spaces,
     ],
@@ -293,15 +339,19 @@ export function useSpacesController(input: {
       );
       if (!confirmed) return;
 
+      // Resolved before the `try`: React Compiler cannot lower a `??` chain inside a try block.
+      const activeContextProject =
+        activeRouteProject ??
+        (isOnKanban && routeProjectId ? (projectById.get(routeProjectId) ?? null) : null);
+
       try {
         await deleteSpace({ api, spaceId });
         if (activeSpaceId === spaceId) {
           selectSpaceForNavigation(null);
-          const activeContextProject =
-            activeRouteProject ??
-            (isOnKanban && routeProjectId ? (projectById.get(routeProjectId) ?? null) : null);
           if (!isOrdinarySpaceProject(activeContextProject, workspacePaths)) {
-            void navigate({ to: "/" });
+            // Same explicit landing as an empty-Space switch: we just selected Void, so the
+            // restore must not reopen a thread that files into some other Space.
+            void navigate({ to: "/", search: { space: spaceKey(null) } });
           }
         }
       } catch (error) {
@@ -340,6 +390,13 @@ export function useSpacesController(input: {
     }
   }, []);
 
+  const handleRenameVoid = useCallback(
+    (name: string) => {
+      setVoidSpace({ name });
+    },
+    [setVoidSpace],
+  );
+
   const handleReorderSpaces = useCallback(
     (orderedSpaceIds: ReadonlyArray<SpaceId>, movedSpaceId: SpaceId) => {
       const api = readNativeApi();
@@ -352,10 +409,7 @@ export function useSpacesController(input: {
           const snapshot = await api.orchestration.getShellSnapshot();
           useStore.getState().syncServerShellSnapshot(snapshot);
           const confirmedSpaceIds = snapshot.spaces.map((space) => space.id);
-          if (
-            confirmedSpaceIds.length === orderedSpaceIds.length &&
-            confirmedSpaceIds.every((spaceId, index) => spaceId === orderedSpaceIds[index])
-          ) {
+          if (spaceOrderMatches(confirmedSpaceIds, orderedSpaceIds)) {
             return;
           }
         } catch {
@@ -388,9 +442,13 @@ export function useSpacesController(input: {
       const project = projectById.get(projectId);
       if (!api || !project || (project.spaceId ?? null) === spaceId) return;
       onCloseProjectContextMenu();
+      // Evaluated before the `try` (see `spaceOrderMatches`); none of these inputs can change
+      // across the await anyway.
+      const movesTheRoutedProject =
+        activeRouteProjectId === projectId || (isOnKanban && routeProjectId === projectId);
       try {
         await moveProjectToSpace({ api, projectId, spaceId });
-        if (activeRouteProjectId === projectId || (isOnKanban && routeProjectId === projectId)) {
+        if (movesTheRoutedProject) {
           selectSpaceForNavigation(spaceId);
         }
       } catch (error) {
@@ -417,6 +475,7 @@ export function useSpacesController(input: {
   const openSpaceEditor = useCallback((spaceId: SpaceId) => {
     setSpaceEditorState({ mode: "edit", spaceId });
   }, []);
+  const openVoidEditor = useCallback(() => setSpaceEditorState({ mode: "void" }), []);
   const closeSpaceEditor = useCallback(() => setSpaceEditorState(null), []);
   const openSpaceProjectPicker = useCallback(
     (spaceId: SpaceId) => setSpaceProjectPickerTargetId(spaceId),
@@ -434,27 +493,45 @@ export function useSpacesController(input: {
   const spaceProjectPickerTarget: Space | null = spaceProjectPickerTargetId
     ? (spaces.find((space) => space.id === spaceProjectPickerTargetId) ?? null)
     : null;
-  const spaceEditorExistingNames = spaces
-    .filter((space) => space.id !== editedSpace?.id)
-    .map((space) => space.name);
+  const editingVoid = spaceEditorState?.mode === "void";
+  /**
+   * Void shares one namespace with the stored spaces: two identically named groups in the
+   * same strip are indistinguishable, so whichever one is not being edited is off limits.
+   */
+  const spaceEditorExistingNames = [
+    ...spaces.filter((space) => space.id !== editedSpace?.id).map((space) => space.name),
+    ...(editingVoid ? [] : [voidSpace.name]),
+  ];
+  const spaceEditorInitialValue: SpaceEditorValue | null = editingVoid
+    ? voidSpace
+    : editedSpace
+      ? { name: editedSpace.name, icon: editedSpace.icon }
+      : null;
 
   return {
     activeSpace,
+    voidSpace,
     editedSpace,
     spaceEditorOpen:
       spaceEditorState?.mode === "create" ||
+      editingVoid ||
       (spaceEditorState?.mode === "edit" && editedSpace !== null),
-    spaceEditorMode: spaceEditorState?.mode ?? ("create" as const),
+    spaceEditorMode: (spaceEditorState?.mode ?? "create") as SpaceEditorMode,
+    spaceEditorInitialValue,
     spaceEditorExistingNames,
     spaceProjectPickerTarget,
     openSpaceCreator,
     openSpaceEditor,
+    openVoidEditor,
     closeSpaceEditor,
     openSpaceProjectPicker,
     closeSpaceProjectPicker,
     handleSelectSpace,
+    handleSelectSpaceForIncomingProject,
     handleReorderSpaces,
     handleRenameSpace,
+    handleRenameVoid,
+    resetVoidSpace,
     handleDeleteSpace,
     handleMoveProjectToSpace,
     handleSpaceEditorSubmit,

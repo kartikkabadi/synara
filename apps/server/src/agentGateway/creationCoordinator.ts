@@ -8,13 +8,20 @@ import {
   ProjectId,
   ThreadId,
   TurnId,
+  type ChatAttachment,
+  type MessageId,
+  type ModelSelection,
   type OrchestrationThreadShell,
+  type ProviderInteractionMode,
   type ProviderKind,
+  type RuntimeMode,
   type SynaraCreateThreadsInput,
   type SynaraCreateThreadsResult,
 } from "@synara/contracts";
 import { buildPromptThreadTitleFallback } from "@synara/shared/chatThreads";
+import { WORKTREE_BRANCH_PREFIX } from "@synara/shared/git";
 import { parseGitHubRepositoryNameWithOwnerFromPullRequestUrl } from "@synara/shared/githubRepository";
+import { runtimeModeEscalatesPrivilege } from "@synara/shared/runtimeMode";
 import { Cause, Effect, Option, Semaphore } from "effect";
 
 import type { ServerConfigShape } from "../config.ts";
@@ -48,6 +55,13 @@ import { ToolInputError, errorText } from "./toolInput.ts";
 import { GatewayToolError, gatewayToolErrorResult } from "./toolRuntime.ts";
 
 const CREATION_REPLAY_WAIT_MS = 60_000;
+
+function interactionModeForGatewayTarget(target: ModelSelection): ProviderInteractionMode {
+  if (target.provider === "opencode" && target.options?.agent === "plan") {
+    return "plan";
+  }
+  return "default";
+}
 
 interface PullRequestSelector {
   readonly number: number;
@@ -89,6 +103,22 @@ interface CreationCoordinatorDependencies {
   readonly requireThreadShell: (
     threadId: string,
   ) => Effect.Effect<OrchestrationThreadShell, ToolInputError>;
+  readonly authorizeManagedGoalCreation?: (input: {
+    readonly callerThreadId: ThreadId;
+    readonly requestedCount: number;
+  }) => Effect.Effect<void, ToolInputError>;
+  readonly recordManagedWorkerThreads?: (input: {
+    readonly callerThreadId: ThreadId;
+    readonly requestId: string;
+    readonly batchId?: string;
+    readonly threadIds: ReadonlyArray<ThreadId>;
+    readonly titles: ReadonlyArray<string>;
+    readonly prompts?: ReadonlyArray<string | null>;
+  }) => Effect.Effect<void, ToolInputError>;
+  readonly assertCreateTargetProject?: (input: {
+    readonly callerThreadId: string;
+    readonly targetProjectId: ProjectId;
+  }) => Effect.Effect<void, ToolInputError>;
 }
 
 export type GatewayCreationContext =
@@ -97,6 +127,20 @@ export type GatewayCreationContext =
       readonly callerThreadId: string;
       readonly callerTurnId: string | null;
       readonly assertAuthority: () => Effect.Effect<void, GatewayToolError>;
+    }
+  | {
+      readonly kind: "hub-work";
+      readonly inheritedRuntimeMode?: RuntimeMode | undefined;
+      readonly callerThreadId: string;
+      readonly workItemId: string;
+      readonly batchId: string;
+      readonly sourceTurnId: string | null;
+      readonly assertAuthority: () => Effect.Effect<void, GatewayToolError>;
+      readonly prepareAttachments: (
+        threadId: ThreadId,
+        messageId: MessageId,
+      ) => Effect.Effect<readonly ChatAttachment[], Error>;
+      readonly recordWorker: (threadId: ThreadId) => Effect.Effect<void, Error>;
     }
   | {
       readonly kind: "external-client";
@@ -169,6 +213,9 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
     serverConfig,
     loadProviderAvailabilities,
     requireThreadShell,
+    authorizeManagedGoalCreation,
+    recordManagedWorkerThreads,
+    assertCreateTargetProject,
   } = dependencies;
   const lockIndex = yield* Semaphore.make(1);
   const locks = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>();
@@ -307,15 +354,31 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
           ),
         );
       }
-      const callerTurnId = context.kind === "provider-session" ? context.callerTurnId! : null;
-      const caller =
+      if (
+        context.kind !== "provider-session" &&
+        input.threads.some((spec) => spec.notifyCreatorOnComplete)
+      ) {
+        return yield* Effect.fail(
+          new GatewayToolError(
+            "capability_denied",
+            "Completion delivery requires an authenticated creating thread.",
+          ),
+        );
+      }
+      const callerTurnId =
         context.kind === "provider-session"
+          ? context.callerTurnId!
+          : context.kind === "hub-work"
+            ? `hub-work:${context.workItemId}`
+            : null;
+      const caller =
+        context.kind !== "external-client"
           ? yield* requireThreadShell(context.callerThreadId)
           : null;
       const operationId = `gateway:create:${stableGatewayDigest({
         principalKind: context.kind,
         principalId:
-          context.kind === "provider-session" ? context.callerThreadId : context.integrationId,
+          context.kind !== "external-client" ? context.callerThreadId : context.integrationId,
         ...(callerTurnId ? { callerTurnId } : {}),
         requestId: input.requestId,
       })}`;
@@ -331,12 +394,12 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
         );
       }
       const operationStore: CreationOperationStore =
-        context.kind === "provider-session"
+        context.kind !== "external-client"
           ? {
               getExisting: () =>
                 operationRepository.getByScope({
                   callerThreadId: context.callerThreadId,
-                  callerTurnId: context.callerTurnId!,
+                  callerTurnId: callerTurnId!,
                   operationKind: "create_threads",
                 }),
               getById: operationRepository.getById,
@@ -344,7 +407,7 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
                 operationRepository.reserve({
                   ...reservation,
                   callerThreadId: context.callerThreadId,
-                  callerTurnId: context.callerTurnId!,
+                  callerTurnId: callerTurnId!,
                   operationKind: "create_threads",
                 }),
               markDispatching: operationRepository.markDispatching,
@@ -440,11 +503,17 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
           context.assertAuthority,
         );
       }
+      if (authorizeManagedGoalCreation && caller && context.kind === "provider-session") {
+        yield* authorizeManagedGoalCreation({
+          callerThreadId: caller.id,
+          requestedCount: input.threads.length,
+        });
+      }
       const deprecatedBranchName = input.threads.find((spec) => spec.branchName !== undefined);
       if (deprecatedBranchName) {
         return yield* Effect.fail(
           new ToolInputError(
-            '"branchName" is no longer supported for managed worktrees. Synara creates a detached HEAD; create a branch inside the new thread when the work is ready.',
+            '"branchName" is no longer supported for managed worktrees. Synara creates a managed temporary branch and renames it after the first prompt; create additional branches inside the new thread if needed.',
           ),
         );
       }
@@ -477,12 +546,11 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
               }),
             ),
           );
+          const providerAvailability = providerAvailabilities.get(spec.target.provider);
           const target = yield* resolveAgentGatewayTarget({
             target: spec.target,
             discovery: providerDiscovery,
-            ...(providerAvailabilities.get(spec.target.provider) !== undefined
-              ? { availability: providerAvailabilities.get(spec.target.provider)! }
-              : {}),
+            ...(providerAvailability !== undefined ? { availability: providerAvailability } : {}),
             cwd: project.workspaceRoot,
           });
           const externalPolicy =
@@ -504,21 +572,40 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
               ),
             );
           }
-          if (
-            context.kind === "provider-session" &&
-            spec.runtimeMode === "full-access" &&
-            caller!.runtimeMode !== "full-access"
-          ) {
-            return yield* Effect.fail(
-              new ToolInputError(
-                'Your thread runs in "approval-required" mode, so created threads cannot use "full-access".',
-              ),
-            );
-          }
           const runtimeMode =
             externalPolicy?.runtimeMode ??
             spec.runtimeMode ??
-            (context.kind === "external-client" ? "approval-required" : caller!.runtimeMode);
+            (context.kind === "hub-work" ? context.inheritedRuntimeMode : undefined) ??
+            (context.kind === "external-client" || caller!.runtimeMode === "auto"
+              ? "approval-required"
+              : caller!.runtimeMode);
+          if (
+            context.kind !== "external-client" &&
+            runtimeModeEscalatesPrivilege(caller!.runtimeMode, runtimeMode)
+          ) {
+            return yield* Effect.fail(
+              new ToolInputError(
+                `Your thread runs in "${caller!.runtimeMode}" mode, so created threads cannot use higher-privileged "${runtimeMode}".`,
+              ),
+            );
+          }
+          if (spec.enableComputerControl === true) {
+            if (context.kind !== "external-client") {
+              return yield* Effect.fail(
+                new ToolInputError(
+                  "Threads cannot delegate computer control to tasks they create.",
+                ),
+              );
+            }
+            if (!context.capabilities.has("computer:control")) {
+              return yield* Effect.fail(
+                new GatewayToolError(
+                  "capability_denied",
+                  'Computer control requires the explicit "computer:control" scope.',
+                ),
+              );
+            }
+          }
           const title = spec.title ?? buildPromptThreadTitleFallback(spec.prompt);
           let worktreeRef: string | null = null;
           let copyChangesFrom: string | null = null;
@@ -553,10 +640,18 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
                         cwd: project.workspaceRoot,
                         prNumber: pullRequest.number,
                         ...(pullRequest.repositoryNameWithOwner
-                          ? { expectedRepositoryNameWithOwner: pullRequest.repositoryNameWithOwner }
+                          ? {
+                              expectedRepositoryNameWithOwner: pullRequest.repositoryNameWithOwner,
+                            }
                           : {}),
                       })
-                      .pipe(Effect.map((ref) => ({ code: 0, stdout: ref, stderr: "" }))),
+                      .pipe(
+                        Effect.map((ref) => ({
+                          code: 0,
+                          stdout: ref,
+                          stderr: "",
+                        })),
+                      ),
                   )
             ).pipe(
               Effect.map((result) => result.stdout.trim()),
@@ -607,7 +702,13 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
             projectScripts: project.scripts,
             worktreeRef,
             copyChangesFrom,
-            newBranch: null,
+            // Deterministic like the planned path: an exact-plan retry must
+            // resolve to the same branch, and recovery reclaims it by name.
+            // The 8-hex-digit token keeps it a temporary synara/* branch.
+            newBranch:
+              environment === "worktree"
+                ? `${WORKTREE_BRANCH_PREFIX}/${stableGatewayDigest({ operationId, index, resource: "worktree-branch" }, 8)}`
+                : null,
             plannedWorktreePath,
             ownershipPreflightPassed: true,
             ids: makeAgentCreationIds(operationId, index),
@@ -704,10 +805,15 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
                           Effect.flatMap(() =>
                             worktree.branch === null
                               ? Effect.void
-                              : git.deleteBranch({
+                              : // The branch is this operation's own deterministic
+                                // synara/* name and its worktree was just force-removed.
+                                // A non-forced delete would fail whenever the pinned
+                                // ref is not merged into the root HEAD (e.g. PR heads),
+                                // stranding the name and blocking exact-plan retries.
+                                git.deleteBranch({
                                   cwd: worktree.cwd,
                                   branch: worktree.branch,
-                                  force: false,
+                                  force: true,
                                 }),
                           ),
                         )
@@ -861,6 +967,7 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
               planJson: canonicalJson(
                 prepared.map((entry) => ({
                   index: entry.index,
+                  notifyCreatorOnComplete: entry.spec.notifyCreatorOnComplete === true,
                   projectId: entry.projectId,
                   workspaceRoot: entry.workspaceRoot,
                   environment: entry.environment,
@@ -978,6 +1085,7 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
                           cwd: entry.workspaceRoot,
                           ref: entry.worktreeRef!,
                           path: entry.plannedWorktreePath,
+                          ...(entry.newBranch ? { newBranch: entry.newBranch } : {}),
                           ...(entry.copyChangesFrom
                             ? { copyChangesFrom: entry.copyChangesFrom }
                             : {}),
@@ -1035,7 +1143,14 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
                     associatedWorktreeRef = created.worktree.ref;
                   }
 
+                  const interactionMode = interactionModeForGatewayTarget(entry.target);
                   yield* context.assertAuthority();
+                  if (context.kind !== "external-client" && assertCreateTargetProject) {
+                    yield* assertCreateTargetProject({
+                      callerThreadId: context.callerThreadId,
+                      targetProjectId: entry.projectId,
+                    });
+                  }
                   yield* orchestrationEngine
                     .dispatch({
                       type: "thread.create",
@@ -1045,16 +1160,28 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
                       title: entry.title,
                       modelSelection: entry.target,
                       runtimeMode: entry.runtimeMode,
-                      interactionMode: "default",
+                      interactionMode,
                       envMode: entry.environment,
                       branch,
                       worktreePath,
                       creationSource:
                         context.kind === "external-client" ? "external_mcp" : "synara_mcp",
-                      ...(context.kind === "provider-session"
+                      ...(context.kind !== "external-client"
                         ? {
                             sourceThreadId: ThreadId.makeUnsafe(context.callerThreadId),
-                            sourceTurnId: TurnId.makeUnsafe(callerTurnId!),
+                            ...((
+                              context.kind === "provider-session"
+                                ? callerTurnId
+                                : context.sourceTurnId
+                            )
+                              ? {
+                                  sourceTurnId: TurnId.makeUnsafe(
+                                    (context.kind === "provider-session"
+                                      ? callerTurnId
+                                      : context.sourceTurnId)!,
+                                  ),
+                                }
+                              : {}),
                           }
                         : {}),
                       gatewayOperationId: operationId,
@@ -1074,6 +1201,11 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
                     );
 
                   yield* context.assertAuthority();
+                  const attachments =
+                    context.kind === "hub-work"
+                      ? yield* context.prepareAttachments(entry.ids.threadId, entry.ids.messageId)
+                      : [];
+                  yield* context.assertAuthority();
                   yield* orchestrationEngine.dispatch({
                     type: "thread.turn.start",
                     commandId: entry.ids.turnStartCommandId,
@@ -1082,13 +1214,19 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
                       messageId: entry.ids.messageId,
                       role: "user",
                       text: entry.spec.prompt,
-                      attachments: [],
+                      attachments,
                     },
                     modelSelection: entry.target,
                     dispatchMode: "queue",
                     dispatchOrigin: "agent",
                     runtimeMode: entry.runtimeMode,
-                    interactionMode: "default",
+                    interactionMode,
+                    ...(entry.spec.enableComputerControl === true
+                      ? {
+                          enableComputerControl: true,
+                          computerControlMode: "request" as const,
+                        }
+                      : {}),
                     createdAt: gatewayIsoNow(),
                   });
                   // The dispatch can outlive the caller turn. Recheck after it returns so
@@ -1110,6 +1248,9 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
                     environment: entry.environment,
                     branch,
                     worktreePath,
+                    // Ready-to-use markdown target for `message_user` replies
+                    // and thread mentions; renders as a clickable thread link.
+                    link: `thread://${entry.ids.threadId}`,
                     status: "task_dispatched" as const,
                   };
                 }),
@@ -1124,14 +1265,30 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
             threadIds: results.map((entry) => entry.threadId),
             threads: results,
           } satisfies SynaraCreateThreadsResult;
-          // Once every deterministic dispatch succeeded, durable completion is
-          // the commit point. A late client cancellation must not roll back a
-          // fully-created operation or strand it between dispatching/completed.
-          yield* operationStore.complete({
-            operationId,
-            resultJson: JSON.stringify(result),
-            now: gatewayIsoNow(),
-          });
+          const promptByThreadId = new Map(
+            createdThreads.map((entry) => [entry.ids.threadId, entry.spec.prompt]),
+          );
+          // Required Group tracking belongs to the same transaction as the
+          // replay result. Registration or commit failure rolls metadata back
+          // before the existing compensation path removes created resources.
+          // Once this completes, late cancellation cannot undo the operation.
+          yield* operationStore.complete(
+            { operationId, resultJson: JSON.stringify(result), now: gatewayIsoNow() },
+            Effect.gen(function* () {
+              if (recordManagedWorkerThreads && caller)
+                yield* recordManagedWorkerThreads({
+                  callerThreadId: caller.id,
+                  requestId: input.requestId,
+                  batchId: context.kind === "hub-work" ? context.batchId : operationId,
+                  threadIds: result.threadIds,
+                  titles: result.threads.map((thread) => thread.title),
+                  prompts: result.threadIds.map(
+                    (threadId) => promptByThreadId.get(threadId) ?? null,
+                  ),
+                });
+              if (context.kind === "hub-work") yield* context.recordWorker(result.threadIds[0]!);
+            }),
+          );
           return { kind: "created" as const, result };
         }).pipe(
           Effect.catchCause((cause) =>
@@ -1161,8 +1318,8 @@ export const makeCreateThreadsHandler = Effect.fn(function* (
     }).pipe(
       (effect) =>
         withCreationPlanLock(
-          context.kind === "provider-session"
-            ? `${context.callerThreadId}\u0000${context.callerTurnId ?? "inactive"}`
+          context.kind !== "external-client"
+            ? `${context.callerThreadId}\u0000${context.kind === "hub-work" ? context.workItemId : (context.callerTurnId ?? "inactive")}`
             : `${context.integrationId}\u0000${input.requestId}`,
           effect,
         ),

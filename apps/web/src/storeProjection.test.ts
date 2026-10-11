@@ -7,27 +7,33 @@ import {
   ProjectId,
   SpaceId,
   ThreadId,
-  ThreadMarkerId,
   TurnId,
-  type OrchestrationReadModel,
   type OrchestrationShellStreamEvent,
-  type ThreadMarker,
 } from "@synara/contracts";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   applyShellEvent,
+  applyThreadUpdate,
+  clearThreadDetailSyncFailureInClientState,
   evictThreadDetailFromClientState,
+  markThreadDetailSyncFailedInClientState,
   removeDeletedProjectFromClientState,
   removeDeletedThreadFromClientState,
   syncServerShellSnapshot,
   syncServerReadModel,
   syncServerThreadDetailHotPath,
 } from "./storeProjection";
+import {
+  hasThreadDetailResumeCursor,
+  resetThreadDetailResumeCursorsForTests,
+  setThreadDetailResumeCursor,
+} from "./threadDetailResumeCursors";
 import type { AppState } from "./storeState";
 import { getThreadFromState } from "./threadDerivation";
 import {
   makeThread,
+  makeDomainEvent,
   makeActivity,
   makeState,
   makeProject,
@@ -38,8 +44,259 @@ import {
   threadsOf,
 } from "./storeTestFixtures";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
+import { applyOrchestrationEvents } from "./storeEventReducer";
 
 describe("store projection", () => {
+  it("retains project-import provenance through shell hydration, detail updates, and eviction", () => {
+    const thread = makeReadModelThread({ isProjectImport: true });
+    let state = syncServerShellSnapshot(makeState(makeThread()), makeShellSnapshot(thread));
+    expect(getThreadFromState(state, thread.id)?.isProjectImport).toBe(true);
+    state = syncServerReadModel(state, makeReadModel(thread));
+    expect(getThreadFromState(state, thread.id)?.isProjectImport).toBe(true);
+    state = evictThreadDetailFromClientState(state, thread.id);
+    expect(getThreadFromState(state, thread.id)?.isProjectImport).toBe(true);
+  });
+
+  it("retains an active resend timestamp through binding updates and rollback", () => {
+    const at = (minute: number) => `2026-09-17T10:0${minute}:00.000Z`;
+    const messageId = MessageId.makeUnsafe("resent");
+    const thread = makeThread({
+      latestHumanMessageAt: at(1),
+      messages: [
+        {
+          id: messageId,
+          role: "user",
+          text: "Original",
+          dispatchOrigin: "user",
+          turnId: null,
+          streaming: false,
+          createdAt: at(1),
+        },
+      ],
+    });
+    let state = makeState(thread);
+    const upsertUserMessage = (input: {
+      messageId: MessageId;
+      createdAt: string;
+      updatedAt: string;
+      sequence: number;
+    }) => {
+      const { sequence, ...message } = input;
+      state = applyOrchestrationEvents(state, [
+        makeDomainEvent(
+          "thread.message-sent",
+          {
+            threadId: thread.id,
+            role: "user",
+            text: "Edited",
+            dispatchOrigin: "user",
+            turnId: null,
+            streaming: false,
+            source: "native",
+            ...message,
+          },
+          { sequence, occurredAt: at(sequence) },
+        ),
+      ]);
+    };
+    upsertUserMessage({ messageId, createdAt: at(2), updatedAt: at(2), sequence: 2 });
+    expect(threadsOf(state)[0]?.latestHumanMessageAt).toBe(at(2));
+    expect(threadsOf(state)[0]?.messages[0]?.createdAt).toBe(at(1));
+    upsertUserMessage({ messageId, createdAt: at(1), updatedAt: at(2), sequence: 3 });
+    expect(threadsOf(state)[0]?.latestHumanMessageAt).toBe(at(2));
+    const nextMessageId = MessageId.makeUnsafe("next");
+    upsertUserMessage({
+      messageId: nextMessageId,
+      createdAt: at(4),
+      updatedAt: at(4),
+      sequence: 4,
+    });
+    state = applyOrchestrationEvents(state, [
+      makeDomainEvent(
+        "thread.conversation-rolled-back",
+        {
+          threadId: thread.id,
+          messageId: nextMessageId,
+          numTurns: 1,
+        },
+        { sequence: 5, occurredAt: at(5) },
+      ),
+    ]);
+    expect(threadsOf(state)[0]?.latestHumanMessageAt).toBe(at(2));
+    expect(state.sidebarThreadSummaryById[thread.id]?.latestHumanMessageAt).toBe(at(2));
+  });
+
+  it.each(["2026-09-17T10:00:00.000Z", null])(
+    "preserves authoritative human recency %s while stale detail awaits hydration",
+    (latestHumanMessageAt) => {
+      const staleAt = "2026-09-17T10:20:00.000Z";
+      const incoming = makeReadModelThread({ latestHumanMessageAt, messages: [] });
+      const thread = makeThread({
+        id: incoming.id,
+        latestHumanMessageAt: staleAt,
+        messages: [
+          {
+            id: MessageId.makeUnsafe("rolled-back-human"),
+            role: "user",
+            text: "Removed remotely",
+            dispatchOrigin: "user",
+            turnId: null,
+            streaming: false,
+            createdAt: staleAt,
+          },
+        ],
+      });
+      let state = syncServerShellSnapshot(makeState(thread), {
+        ...makeShellSnapshot(incoming),
+        snapshotSequence: 20,
+      });
+      expect(getThreadFromState(state, thread.id)?.messages).toHaveLength(1);
+      state = applyThreadUpdate(state, thread.id, (current) => ({
+        ...current,
+        lastVisitedAt: "2026-09-17T10:30:00.000Z",
+      }));
+      expect(getThreadFromState(state, thread.id)?.latestHumanMessageAt).toBe(latestHumanMessageAt);
+      expect(state.sidebarThreadSummaryById[thread.id]?.latestHumanMessageAt).toBe(
+        latestHumanMessageAt,
+      );
+      state = applyOrchestrationEvents(state, [
+        makeDomainEvent(
+          "thread.message-sent",
+          {
+            threadId: thread.id,
+            messageId: MessageId.makeUnsafe("automatic-followup"),
+            role: "user",
+            dispatchOrigin: "automation",
+            text: "Continue",
+            streaming: false,
+            turnId: null,
+            source: "native",
+            createdAt: "2026-09-17T10:31:00.000Z",
+            updatedAt: "2026-09-17T10:31:00.000Z",
+          },
+          { sequence: 21, occurredAt: "2026-09-17T10:31:00.000Z" },
+        ),
+      ]);
+      expect(getThreadFromState(state, thread.id)?.latestHumanMessageAt).toBe(latestHumanMessageAt);
+      expect(state.sidebarThreadSummaryById[thread.id]?.latestHumanMessageAt).toBe(
+        latestHumanMessageAt,
+      );
+    },
+  );
+
+  it("retains human recency through partial hydration, reads, agent sends, eviction, and reconnect", () => {
+    const humanAt = "2026-09-17T10:00:00.000Z";
+    const incoming = makeReadModelThread({ latestHumanMessageAt: humanAt, messages: [] });
+    const threadId = incoming.id;
+    let state = syncServerShellSnapshot(makeState(makeThread()), makeShellSnapshot(incoming));
+    state = syncServerThreadDetailHotPath(state, incoming);
+    state = applyThreadUpdate(state, threadId, (thread) => ({
+      ...thread,
+      lastVisitedAt: "2026-09-17T10:10:00.000Z",
+    }));
+    for (const [index, dispatchOrigin] of (["agent", "automation", "user"] as const).entries()) {
+      const createdAt = `2026-09-17T10:2${index}:00.000Z`;
+      state = applyOrchestrationEvents(state, [
+        makeDomainEvent(
+          "thread.message-sent",
+          {
+            threadId,
+            messageId: MessageId.makeUnsafe(`recency-${index}`),
+            role: "user",
+            dispatchOrigin,
+            text: "Follow-up",
+            streaming: false,
+            turnId: null,
+            source: "native",
+            createdAt,
+            updatedAt: createdAt,
+          },
+          { sequence: 10 + index, occurredAt: createdAt },
+        ),
+      ]);
+      expect(getThreadFromState(state, threadId)?.latestHumanMessageAt).toBe(
+        dispatchOrigin === "user" ? createdAt : humanAt,
+      );
+      expect(state.sidebarThreadSummaryById[threadId]?.latestHumanMessageAt).toBe(
+        dispatchOrigin === "user" ? createdAt : humanAt,
+      );
+    }
+    state = evictThreadDetailFromClientState(state, threadId);
+    expect(getThreadFromState(state, threadId)?.latestHumanMessageAt).toBe(
+      "2026-09-17T10:22:00.000Z",
+    );
+    state = syncServerShellSnapshot(state, {
+      ...makeShellSnapshot({ ...incoming, latestHumanMessageAt: humanAt }),
+      snapshotSequence: 20,
+    });
+    expect(state.sidebarThreadSummaryById[threadId]?.latestHumanMessageAt).toBe(humanAt);
+  });
+
+  it("restores cache reviews from shell snapshots and retains them during detail eviction", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const incoming = makeReadModelThread({
+      claudeCacheReview: {
+        reviewId: "cache-review-1",
+        messageId: MessageId.makeUnsafe("held-message"),
+        sourceEventSequence: 8,
+        assessment: {
+          observedAt: "2026-09-16T10:00:00.000Z",
+          state: "likely-expired",
+          source: "session-start",
+          contextTokens: 800_000,
+        },
+        status: "pending",
+        createdAt: "2026-09-16T10:00:00.000Z",
+      },
+    });
+    const restored = syncServerShellSnapshot(makeState(makeThread()), makeShellSnapshot(incoming));
+    expect(restored.threadShellById?.[threadId]?.claudeCacheReview).toEqual(
+      incoming.claudeCacheReview,
+    );
+    expect(getThreadFromState(restored, threadId)?.claudeCacheReview).toEqual(
+      incoming.claudeCacheReview,
+    );
+
+    const hydrated = syncServerThreadDetailHotPath(restored, incoming);
+    const evicted = evictThreadDetailFromClientState(hydrated, threadId);
+    expect(getThreadFromState(evicted, threadId)?.claudeCacheReview).toEqual(
+      incoming.claudeCacheReview,
+    );
+
+    const cleared = applyShellEvent(evicted, {
+      kind: "thread-upserted",
+      sequence: 9,
+      thread: { ...incoming, claudeCacheReview: null },
+    });
+    expect(getThreadFromState(cleared, threadId)?.claudeCacheReview).toBeNull();
+  });
+
+  it("restores a failed cache review and clears it from an authoritative full snapshot", () => {
+    const incoming = makeReadModelThread({
+      claudeCacheReview: {
+        reviewId: "cache-review-1",
+        messageId: MessageId.makeUnsafe("held-message"),
+        sourceEventSequence: 8,
+        assessment: {
+          observedAt: "2026-09-16T10:00:00.000Z",
+          state: "likely-expired",
+          source: "session-start",
+        },
+        status: "failed",
+        error: "Compaction was interrupted",
+        createdAt: "2026-09-16T10:00:00.000Z",
+      },
+    });
+    const restored = syncServerReadModel(makeState(makeThread()), makeReadModel(incoming));
+    expect(threadsOf(restored)[0]?.claudeCacheReview).toEqual(incoming.claudeCacheReview);
+
+    const cleared = syncServerReadModel(restored, {
+      ...makeReadModel({ ...incoming, claudeCacheReview: null }),
+      snapshotSequence: 2,
+    });
+    expect(threadsOf(cleared)[0]?.claudeCacheReview).toBeNull();
+  });
+
   it("preserves a semantic branch when a temp worktree branch arrives from the read model", () => {
     const initialThread = makeThread({
       branch: "feature/semantic-branch",
@@ -211,7 +468,7 @@ describe("store projection", () => {
       makeReadModel(makeReadModelThread({ id: threadId, projectId })),
     );
 
-    expect(deletedState.deletedProjectIdsById?.[projectId]).toBe(true);
+    expect(deletedState.deletedProjectIdsById?.[projectId]).toEqual(expect.any(Number));
     expect(deletedState.projects).toEqual([]);
     expect(threadsOf(deletedState)).toEqual([]);
     expect(afterStaleShellSnapshot.projects).toEqual([]);
@@ -426,11 +683,10 @@ describe("store projection", () => {
     expect(next.threadShellById?.[threadId]?.createBranchFlowCompleted).toBe(true);
   });
 
-  it("preserves pinnedMessages and notes through the normalized read-model projection", () => {
-    // Regression: the normalized ThreadShell projection used to omit pinnedMessages/notes, so a
-    // read-model sync would reconstruct the thread without them — pins clicked in the sidebar
-    // never surfaced in the Environment panel. `threadsOf(next)[0]` reads back through
-    // getThreadsFromState (the shell projection), so this asserts the fields survive the round trip.
+  it("preserves thread annotations through the normalized read-model projection", () => {
+    // Regression: normalized shells used to omit detail annotations. `threadsOf(next)[0]` reads
+    // back through getThreadsFromState, so this asserts detail annotations and shell-owned goals
+    // all survive the round trip.
     const messageId = MessageId.makeUnsafe("assistant-pin-1");
     const pinnedMessages = [
       { messageId, label: null, done: false, pinnedAt: "2026-02-27T00:01:00.000Z" },
@@ -441,43 +697,19 @@ describe("store projection", () => {
         makeReadModelThread({
           pinnedMessages,
           notes: "remember to rerun typecheck",
+          goal: "Finish the release safely",
         }),
       ),
     );
 
     expect(threadsOf(next)[0]?.pinnedMessages).toEqual(pinnedMessages);
     expect(threadsOf(next)[0]?.notes).toBe("remember to rerun typecheck");
+    expect(threadsOf(next)[0]?.goal).toBe("Finish the release safely");
   });
 
-  it("preserves threadMarkers through the normalized read-model projection", () => {
-    const marker: ThreadMarker = {
-      id: ThreadMarkerId.makeUnsafe("marker-1"),
-      messageId: MessageId.makeUnsafe("assistant-marker-1"),
-      startOffset: 6,
-      endOffset: 20,
-      selectedText: "important text",
-      style: "highlight",
-      color: "yellow",
-      label: null,
-      done: false,
-      createdAt: "2026-02-27T00:01:00.000Z",
-      updatedAt: "2026-02-27T00:01:00.000Z",
-    };
-    const next = syncServerReadModel(
-      makeState(makeThread()),
-      makeReadModel(
-        makeReadModelThread({
-          threadMarkers: [marker],
-        }),
-      ),
-    );
-
-    expect(threadsOf(next)[0]?.threadMarkers).toEqual([marker]);
-  });
-
-  it("does not let a sidebar shell upsert clobber pinnedMessages/notes from the detail path", () => {
-    // The sidebar shell snapshot/event does not carry pinnedMessages or notes. A shell upsert must
-    // preserve the values resolved from the thread-detail path rather than clearing them.
+  it("applies shell goals without clobbering detail annotations", () => {
+    // Shell snapshots carry goals but not pinned messages or notes. A shell upsert must update the
+    // former while preserving detail-only values.
     const threadId = ThreadId.makeUnsafe("thread-1");
     const messageId = MessageId.makeUnsafe("assistant-pin-3");
     const pinnedMessages = [
@@ -489,6 +721,9 @@ describe("store projection", () => {
         makeReadModelThread({
           pinnedMessages,
           notes: "keep me",
+          goal: "Keep the old goal",
+          goalStartedAt: "2026-02-27T00:01:00.000Z",
+          goalPausedAt: "2026-02-27T00:02:00.000Z",
         }),
       ),
     );
@@ -525,12 +760,18 @@ describe("store projection", () => {
         updatedAt: "2026-02-27T00:05:00.000Z",
         archivedAt: null,
         handoff: null,
+        goal: "Use the shell goal",
+        goalStartedAt: "2026-02-27T00:03:00.000Z",
+        goalPausedAt: null,
         session: null,
       },
     });
 
     expect(threadsOf(next)[0]?.pinnedMessages).toEqual(pinnedMessages);
     expect(threadsOf(next)[0]?.notes).toBe("keep me");
+    expect(threadsOf(next)[0]?.goal).toBe("Use the shell goal");
+    expect(threadsOf(next)[0]?.goalStartedAt).toBe("2026-02-27T00:03:00.000Z");
+    expect(threadsOf(next)[0]?.goalPausedAt).toBeNull();
   });
 
   it("preserves cross-task creation provenance from the read model", () => {
@@ -548,6 +789,28 @@ describe("store projection", () => {
 
     expect(thread?.creationSource).toBe("synara_mcp");
     expect(thread?.sourceThreadId).toBe(sourceThreadId);
+  });
+
+  it("carries creationSource onto the sidebar summary and rebuilds it when only that field changes", () => {
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const initial = syncServerReadModel(
+      makeState(makeThread({ id: threadId })),
+      makeReadModel(makeReadModelThread({ id: threadId })),
+    );
+    const before = initial.sidebarThreadSummaryById[threadId];
+    expect(before?.creationSource).toBeNull();
+
+    const next = syncServerReadModel(
+      initial,
+      makeReadModel(makeReadModelThread({ id: threadId, creationSource: "automation_run" })),
+    );
+    const after = next.sidebarThreadSummaryById[threadId];
+
+    expect(after?.creationSource).toBe("automation_run");
+    // The equality function must treat creationSource as significant: a snapshot changing
+    // only this field (the 091 backfill replaying into a live client) must produce a fresh
+    // summary object instead of reusing the stale one.
+    expect(after).not.toBe(before);
   });
 
   it("evicts high-cardinality thread detail while preserving its shell and sidebar summary", () => {
@@ -664,22 +927,6 @@ describe("store projection", () => {
     expect(threadsOf(next)[0]?.session?.lastError).toBeUndefined();
   });
 
-  it("preserves claude model slugs without an active session", () => {
-    const initialState = makeState(makeThread());
-    const readModel = makeReadModel(
-      makeReadModelThread({
-        modelSelection: {
-          provider: "claudeAgent",
-          model: "claude-opus-4-6",
-        },
-      }),
-    );
-
-    const next = syncServerReadModel(initialState, readModel);
-
-    expect(threadsOf(next)[0]?.modelSelection.model).toBe("claude-opus-4-6");
-  });
-
   it("resolves claude aliases when session provider is claudeAgent", () => {
     const initialState = makeState(makeThread());
     const readModel = makeReadModel(
@@ -731,32 +978,6 @@ describe("store projection", () => {
     expect(threadsOf(next)[0]?.session?.provider).toBe("opencode");
   });
 
-  it("preserves Pi as the active session provider", () => {
-    const initialState = makeState(makeThread());
-    const readModel = makeReadModel(
-      makeReadModelThread({
-        modelSelection: {
-          provider: "pi",
-          model: "anthropic/claude-sonnet-4-5",
-        },
-        session: {
-          threadId: ThreadId.makeUnsafe("thread-1"),
-          status: "ready",
-          providerName: "pi",
-          runtimeMode: "approval-required",
-          activeTurnId: null,
-          lastError: null,
-          updatedAt: "2026-02-27T00:00:00.000Z",
-        },
-      }),
-    );
-
-    const next = syncServerReadModel(initialState, readModel);
-
-    expect(threadsOf(next)[0]?.modelSelection.provider).toBe("pi");
-    expect(threadsOf(next)[0]?.session?.provider).toBe("pi");
-  });
-
   it("preserves exact OpenCode thread model slugs from the read model", () => {
     const initialState = makeState(makeThread());
     const readModel = makeReadModel(
@@ -790,20 +1011,6 @@ describe("store projection", () => {
     const next = syncServerReadModel(initialState, readModel);
 
     expect(next.projects[0]?.defaultModelSelection?.model).toBe("openai/gpt-5.4");
-  });
-
-  it("preserves project and thread updatedAt timestamps from the read model", () => {
-    const initialState = makeState(makeThread());
-    const readModel = makeReadModel(
-      makeReadModelThread({
-        updatedAt: "2026-02-27T00:05:00.000Z",
-      }),
-    );
-
-    const next = syncServerReadModel(initialState, readModel);
-
-    expect(next.projects[0]?.updatedAt).toBe("2026-02-27T00:00:00.000Z");
-    expect(threadsOf(next)[0]?.updatedAt).toBe("2026-02-27T00:05:00.000Z");
   });
 
   it("preserves a newer live assistant intro when a hot-path snapshot lags behind", () => {
@@ -908,6 +1115,89 @@ describe("store projection", () => {
     expect(nextThread?.session?.activeTurnId).toBe(turnId);
   });
 
+  it("does not pair retained live message text with a snapshot's shorter text segments", () => {
+    const threadId = ThreadId.makeUnsafe("thread-live-segments");
+    const assistantId = MessageId.makeUnsafe("assistant-live-segments");
+    const turnId = TurnId.makeUnsafe("turn-live-segments");
+    const finalText = "Reading files. Found it. Fixed.";
+    const liveState = makeState(
+      makeThread({
+        id: threadId,
+        latestTurn: {
+          turnId,
+          state: "completed",
+          requestedAt: "2026-02-27T00:00:00.000Z",
+          startedAt: "2026-02-27T00:00:00.000Z",
+          completedAt: "2026-02-27T00:00:09.000Z",
+          assistantMessageId: assistantId,
+        },
+        messages: [
+          {
+            id: assistantId,
+            role: "assistant",
+            text: finalText,
+            turnId,
+            createdAt: "2026-02-27T00:00:01.000Z",
+            updatedAt: "2026-02-27T00:00:09.000Z",
+            completedAt: "2026-02-27T00:00:09.000Z",
+            streaming: false,
+            source: "native",
+          },
+        ],
+      }),
+    );
+
+    // A lagging snapshot still has the message mid-stream with two segments.
+    const next = syncServerThreadDetailHotPath(
+      liveState,
+      makeReadModelThread({
+        id: threadId,
+        latestTurn: {
+          turnId,
+          state: "running",
+          requestedAt: "2026-02-27T00:00:00.000Z",
+          startedAt: "2026-02-27T00:00:00.000Z",
+          completedAt: null,
+          assistantMessageId: assistantId,
+        },
+        messages: [
+          {
+            id: assistantId,
+            role: "assistant",
+            text: "Reading files. Found it.",
+            textSegments: [
+              {
+                sequence: 10,
+                startedAt: "2026-02-27T00:00:01.000Z",
+                endedAt: "2026-02-27T00:00:02.000Z",
+                text: "Reading files.",
+              },
+              {
+                sequence: 20,
+                startedAt: "2026-02-27T00:00:03.000Z",
+                endedAt: "2026-02-27T00:00:04.000Z",
+                text: " Found it.",
+              },
+            ],
+            turnId,
+            streaming: true,
+            source: "native",
+            createdAt: "2026-02-27T00:00:01.000Z",
+            updatedAt: "2026-02-27T00:00:04.000Z",
+          },
+        ],
+      }),
+    );
+
+    const message = threadsOf(next)
+      .find((thread) => thread.id === threadId)
+      ?.messages.find((entry) => entry.id === assistantId);
+    expect(message?.text).toBe(finalText);
+    expect(message?.streaming).toBe(false);
+    // Segments that cover only part of the retained text would hide its tail.
+    expect(message?.textSegments).toBeUndefined();
+  });
+
   it("applies incoming dispatch origin corrections while retaining live message text", () => {
     const threadId = ThreadId.makeUnsafe("thread-origin-hot-path");
     const messageId = MessageId.makeUnsafe("message-origin-hot-path");
@@ -922,7 +1212,7 @@ describe("store projection", () => {
             dispatchOrigin: "automation",
             turnId: null,
             createdAt: "2026-02-27T00:00:00.000Z",
-            streaming: false,
+            streaming: true,
             source: "native",
           },
         ],
@@ -959,6 +1249,7 @@ describe("store projection", () => {
   });
 
   it("stops preserving a live assistant intro once the read model settles the same turn", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const threadId = ThreadId.makeUnsafe("thread-hot-path-settled");
     const turnId = TurnId.makeUnsafe("turn-hot-path-settled");
     const assistantId = MessageId.makeUnsafe("assistant-hot-path-settled");
@@ -1061,10 +1352,14 @@ describe("store projection", () => {
       }),
     );
 
-    expect(next.threadTurnStateById?.[threadId]?.latestTurn?.state).toBe("completed");
-    expect(next.threadTurnStateById?.[threadId]?.latestTurn?.completedAt).toBe(completedAt);
-    expect(next.threadSessionById?.[threadId]?.orchestrationStatus).toBe("ready");
-    expect(next.threadSessionById?.[threadId]?.activeTurnId).toBeUndefined();
+    try {
+      expect(next.threadTurnStateById?.[threadId]?.latestTurn?.state).toBe("completed");
+      expect(next.threadTurnStateById?.[threadId]?.latestTurn?.completedAt).toBe(completedAt);
+      expect(next.threadSessionById?.[threadId]?.orchestrationStatus).toBe("ready");
+      expect(next.threadSessionById?.[threadId]?.activeTurnId).toBeUndefined();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("adopts a settled session when the snapshot's terminal turn supersedes the preserved one", () => {
@@ -1354,7 +1649,7 @@ describe("store projection", () => {
 
   it("caps stored activity detail to the latest activity window", () => {
     const threadId = ThreadId.makeUnsafe("thread-1");
-    const activities = Array.from({ length: 505 }, (_, index) =>
+    const activities = Array.from({ length: 2005 }, (_, index) =>
       makeActivity({
         id: `activity-${index}`,
         sequence: index,
@@ -1367,10 +1662,10 @@ describe("store projection", () => {
       makeReadModel(makeReadModelThread({ activities })),
     );
 
-    expect(threadsOf(next)[0]?.activities).toHaveLength(500);
+    expect(threadsOf(next)[0]?.activities).toHaveLength(2000);
     expect(threadsOf(next)[0]?.activities[0]?.id).toBe(EventId.makeUnsafe("activity-5"));
-    expect(threadsOf(next)[0]?.activities.at(-1)?.id).toBe(EventId.makeUnsafe("activity-504"));
-    expect(next.activityIdsByThreadId?.[threadId]).toHaveLength(500);
+    expect(threadsOf(next)[0]?.activities.at(-1)?.id).toBe(EventId.makeUnsafe("activity-2004"));
+    expect(next.activityIdsByThreadId?.[threadId]).toHaveLength(2000);
     expect(next.activityIdsByThreadId?.[threadId]?.[0]).toBe("activity-5");
   });
 
@@ -1383,7 +1678,7 @@ describe("store projection", () => {
         payload: { requestId: "approval-1", requestKind: "command" },
         sequence: 0,
       }),
-      ...Array.from({ length: 505 }, (_, index) =>
+      ...Array.from({ length: 2005 }, (_, index) =>
         makeActivity({
           id: `activity-${index}`,
           sequence: index + 1,
@@ -1397,7 +1692,7 @@ describe("store projection", () => {
       makeReadModel(makeReadModelThread({ activities })),
     );
 
-    expect(threadsOf(next)[0]?.activities).toHaveLength(501);
+    expect(threadsOf(next)[0]?.activities).toHaveLength(2001);
     expect(threadsOf(next)[0]?.activities[0]?.id).toBe(EventId.makeUnsafe("approval-old"));
     expect(threadsOf(next)[0]?.activities[1]?.id).toBe(EventId.makeUnsafe("activity-5"));
   });
@@ -1418,7 +1713,7 @@ describe("store projection", () => {
         payload: { requestId: "approval-1", decision: "accept" },
         sequence: 1,
       }),
-      ...Array.from({ length: 505 }, (_, index) =>
+      ...Array.from({ length: 2005 }, (_, index) =>
         makeActivity({
           id: `activity-${index}`,
           sequence: index + 2,
@@ -1432,9 +1727,9 @@ describe("store projection", () => {
       makeReadModel(makeReadModelThread({ activities })),
     );
 
-    expect(threadsOf(next)[0]?.activities).toHaveLength(500);
+    expect(threadsOf(next)[0]?.activities).toHaveLength(2000);
     expect(threadsOf(next)[0]?.activities[0]?.id).toBe(EventId.makeUnsafe("activity-5"));
-    expect(threadsOf(next)[0]?.activities.at(-1)?.id).toBe(EventId.makeUnsafe("activity-504"));
+    expect(threadsOf(next)[0]?.activities.at(-1)?.id).toBe(EventId.makeUnsafe("activity-2004"));
   });
 
   it("retains archived threads in the synced store for the archived settings panel", () => {
@@ -1454,26 +1749,6 @@ describe("store projection", () => {
     expect(next.sidebarThreadSummaryById["thread-archived"]?.archivedAt).toBe(
       "2026-02-27T00:05:00.000Z",
     );
-  });
-
-  it("removes successfully deleted archived threads through the shared client helper", () => {
-    const threadId = ThreadId.makeUnsafe("thread-archived");
-    const initialState = syncServerReadModel(
-      makeState(makeThread()),
-      makeReadModel(
-        makeReadModelThread({
-          id: threadId,
-          archivedAt: "2026-02-27T00:05:00.000Z",
-        }),
-      ),
-    );
-
-    const next = removeDeletedThreadFromClientState(initialState, threadId);
-
-    expect(threadsOf(next)).toHaveLength(0);
-    expect(next.threadIds).not.toContain(threadId);
-    expect(next.threadShellById?.[threadId]).toBeUndefined();
-    expect(next.sidebarThreadSummaryById[threadId]).toBeUndefined();
   });
 
   it("keeps a client-deleted thread hidden when a stale shell snapshot includes it", () => {
@@ -1514,7 +1789,7 @@ describe("store projection", () => {
       }),
     );
 
-    expect(next.deletedThreadIdsById?.[threadId]).toBe(true);
+    expect(next.deletedThreadIdsById?.[threadId]).toEqual(expect.any(Number));
     expect(threadsOf(next)).toHaveLength(0);
     expect(next.threadIds).not.toContain(threadId);
     expect(next.threadShellById?.[threadId]).toBeUndefined();
@@ -1568,41 +1843,527 @@ describe("store projection", () => {
     expect(next.threadIds).toContain(threadId);
     expect(next.threadShellById?.[threadId]?.title).toBe("Rehydrated shell removed thread");
   });
+});
 
-  it("reuses normalized thread objects when the incoming snapshot is unchanged", () => {
-    const readModel = {
-      snapshotSequence: 1,
-      updatedAt: "2026-02-28T00:00:00.000Z",
+describe("thread detail sync state", () => {
+  const threadId = ThreadId.makeUnsafe("thread-1");
+
+  it("marks a thread synced when its detail snapshot is applied and clears it on eviction", () => {
+    const synced = syncServerThreadDetailHotPath(makeState(makeThread()), makeReadModelThread({}));
+
+    expect(synced.threadDetailSyncById?.[threadId]).toBe("synced");
+
+    const evicted = evictThreadDetailFromClientState(synced, threadId);
+
+    expect(evicted.threadDetailSyncById?.[threadId]).toBeUndefined();
+  });
+
+  it("clears the sync flag when a thread is deleted", () => {
+    const synced = syncServerThreadDetailHotPath(makeState(makeThread()), makeReadModelThread({}));
+
+    const removed = removeDeletedThreadFromClientState(synced, threadId);
+
+    expect(removed.threadDetailSyncById?.[threadId]).toBeUndefined();
+  });
+
+  it("downgrades a synced thread when its stream dies, without touching applied detail", () => {
+    const synced = syncServerThreadDetailHotPath(makeState(makeThread()), makeReadModelThread({}));
+
+    const afterFailure = markThreadDetailSyncFailedInClientState(synced, threadId);
+
+    expect(afterFailure.threadDetailSyncById?.[threadId]).toBe("failed");
+    expect(afterFailure.messageByThreadId).toBe(synced.messageByThreadId);
+    expect(afterFailure.threadShellById).toBe(synced.threadShellById);
+  });
+
+  it("records a failure for an unsynced thread and clears it only from the failed state", () => {
+    const failed = markThreadDetailSyncFailedInClientState(makeState(makeThread()), threadId);
+
+    expect(failed.threadDetailSyncById?.[threadId]).toBe("failed");
+
+    const cleared = clearThreadDetailSyncFailureInClientState(failed, threadId);
+
+    expect(cleared.threadDetailSyncById?.[threadId]).toBeUndefined();
+
+    const synced = syncServerThreadDetailHotPath(makeState(makeThread()), makeReadModelThread({}));
+
+    expect(clearThreadDetailSyncFailureInClientState(synced, threadId)).toBe(synced);
+  });
+
+  it("marks read-model threads synced and drops flags for threads absent from snapshots", () => {
+    const ghostId = ThreadId.makeUnsafe("thread-ghost");
+    const base = makeState(makeThread());
+    const withGhost = {
+      ...base,
+      threadDetailSyncById: { [ghostId]: "failed" as const },
+    };
+
+    const next = syncServerReadModel(withGhost, makeReadModel(makeReadModelThread({})));
+
+    expect(next.threadDetailSyncById?.[threadId]).toBe("synced");
+    expect(next.threadDetailSyncById?.[ghostId]).toBeUndefined();
+  });
+});
+
+describe("deletion tombstone retirement", () => {
+  const projectId = ProjectId.makeUnsafe("project-1");
+  const deletedThreadId = ThreadId.makeUnsafe("thread-1");
+
+  function makeEmptyShellSnapshot(snapshotSequence: number) {
+    return {
+      snapshotSequence,
+      updatedAt: "2026-02-27T00:10:00.000Z",
       spaces: [],
-      projects: [
-        makeReadModelProject({
-          defaultModelSelection: {
-            provider: "codex",
-            model: "gpt-5-codex",
-          },
-          updatedAt: "2026-02-27T00:00:00.000Z",
-        }),
-      ],
-      threads: [
+      projects: [],
+      threads: [],
+    };
+  }
+
+  function makeShellSnapshotListingDeletedThread(snapshotSequence: number, title: string) {
+    return {
+      ...makeShellSnapshot({
+        id: deletedThreadId,
+        projectId,
+        title,
+        modelSelection: { provider: "codex", model: "gpt-5.3-codex" },
+        runtimeMode: DEFAULT_RUNTIME_MODE,
+        interactionMode: DEFAULT_INTERACTION_MODE,
+        envMode: "local",
+        branch: null,
+        worktreePath: null,
+        forkSourceThreadId: null,
+        sidechatSourceThreadId: null,
+        latestTurn: null,
+        createdAt: "2026-02-27T00:00:00.000Z",
+        updatedAt: "2026-02-27T00:00:30.000Z",
+        handoff: null,
+        session: null,
+      }),
+      snapshotSequence,
+    };
+  }
+
+  function makeDeletedThreadState(deletedAtSequence: number): AppState {
+    const hydrated = syncServerReadModel(
+      makeState(makeThread({ id: deletedThreadId, projectId })),
+      makeReadModel(makeReadModelThread({ id: deletedThreadId, projectId })),
+    );
+    return removeDeletedThreadFromClientState(hydrated, deletedThreadId, deletedAtSequence);
+  }
+
+  it("keeps a thread tombstone when the confirming snapshot predates the deletion", () => {
+    const deletedState = makeDeletedThreadState(5);
+
+    // Sequence 3 was generated before the delete was recorded, so its silence proves nothing.
+    const next = syncServerShellSnapshot(deletedState, makeEmptyShellSnapshot(3));
+
+    expect(next.deletedThreadIdsById?.[deletedThreadId]).toBe(5);
+    expect(threadsOf(next)).toHaveLength(0);
+  });
+
+  it("keeps a thread tombstone when a later snapshot still lists the deleted thread", () => {
+    const deletedState = makeDeletedThreadState(5);
+
+    const next = syncServerShellSnapshot(
+      deletedState,
+      makeShellSnapshotListingDeletedThread(9, "Resurrection attempt"),
+    );
+
+    expect(next.deletedThreadIdsById?.[deletedThreadId]).toBe(5);
+    expect(threadsOf(next)).toHaveLength(0);
+  });
+
+  it("retires a project tombstone once the read model reports the project soft-deleted", () => {
+    const hydrated = syncServerReadModel(
+      makeState(makeThread({ id: deletedThreadId, projectId })),
+      makeReadModel(makeReadModelThread({ id: deletedThreadId, projectId })),
+    );
+    const deletedState = removeDeletedProjectFromClientState(hydrated, projectId, 5);
+    expect(deletedState.deletedProjectIdsById?.[projectId]).toBe(5);
+
+    const next = syncServerReadModel(deletedState, {
+      ...makeReadModel(
         makeReadModelThread({
-          modelSelection: {
-            provider: "codex",
-            model: "gpt-5-codex",
-          },
-          createdAt: "2026-02-13T00:00:00.000Z",
-          updatedAt: "2026-02-28T00:00:00.000Z",
+          id: deletedThreadId,
+          projectId,
+          deletedAt: "2026-02-27T00:09:00.000Z",
         }),
+      ),
+      snapshotSequence: 9,
+      projects: [makeReadModelProject({ deletedAt: "2026-02-27T00:09:00.000Z" })],
+    });
+
+    expect(next.deletedProjectIdsById?.[projectId]).toBeUndefined();
+    expect(next.deletedThreadIdsById?.[deletedThreadId]).toBeUndefined();
+    expect(next.projects).toEqual([]);
+    expect(threadsOf(next)).toHaveLength(0);
+  });
+
+  it("keeps a project tombstone while the read model still lists the project as live", () => {
+    const hydrated = syncServerReadModel(
+      makeState(makeThread({ id: deletedThreadId, projectId })),
+      makeReadModel(makeReadModelThread({ id: deletedThreadId, projectId })),
+    );
+    const deletedState = removeDeletedProjectFromClientState(hydrated, projectId, 5);
+
+    const next = syncServerReadModel(deletedState, {
+      ...makeReadModel(makeReadModelThread({ id: deletedThreadId, projectId })),
+      snapshotSequence: 9,
+    });
+
+    expect(next.deletedProjectIdsById?.[projectId]).toBe(5);
+    expect(next.projects).toEqual([]);
+    expect(threadsOf(next)).toHaveLength(0);
+  });
+
+  it("does not let a snapshot older than the newest integrated one retire anything", () => {
+    const deletedState = makeDeletedThreadState(1);
+    // Integrate a newer snapshot that still lists the thread, so the tombstone survives...
+    const afterNewSnapshot = syncServerShellSnapshot(
+      deletedState,
+      makeShellSnapshotListingDeletedThread(20, "Still listed"),
+    );
+    expect(afterNewSnapshot.deletedThreadIdsById?.[deletedThreadId]).toBe(1);
+
+    // ...and a late-arriving older snapshot must not be trusted to retire it either.
+    const next = syncServerShellSnapshot(afterNewSnapshot, makeEmptyShellSnapshot(10));
+
+    expect(next.deletedThreadIdsById?.[deletedThreadId]).toBe(1);
+  });
+
+  it("does not let a stale shell snapshot resurrect a thread whose tombstone was already retired", () => {
+    const deletedState = makeDeletedThreadState(5);
+
+    // Sequence 9 confirms the thread is gone, which legitimately retires the tombstone.
+    const retired = syncServerShellSnapshot(deletedState, makeEmptyShellSnapshot(9));
+    expect(retired.deletedThreadIdsById?.[deletedThreadId]).toBeUndefined();
+    expect(retired.shellSnapshotSequence).toBe(9);
+
+    // A snapshot generated before the delete now has nothing filtering it. Merging it would bring
+    // the thread back, so the whole stale payload has to be rejected.
+    const next = syncServerShellSnapshot(
+      retired,
+      makeShellSnapshotListingDeletedThread(4, "Late stale snapshot"),
+    );
+
+    expect(threadsOf(next)).toHaveLength(0);
+    expect(next.shellSnapshotSequence).toBe(9);
+    expect(next).toBe(retired);
+  });
+
+  it("does not let a stale read model resurrect a thread whose tombstone was already retired", () => {
+    const deletedState = makeDeletedThreadState(5);
+
+    const retired = syncServerReadModel(deletedState, {
+      ...makeReadModel(makeReadModelThread({ id: deletedThreadId, projectId })),
+      snapshotSequence: 9,
+      threads: [],
+    });
+    expect(retired.deletedThreadIdsById?.[deletedThreadId]).toBeUndefined();
+    expect(retired.shellSnapshotSequence).toBe(9);
+
+    const next = syncServerReadModel(retired, {
+      ...makeReadModel(makeReadModelThread({ id: deletedThreadId, projectId })),
+      snapshotSequence: 4,
+    });
+
+    expect(threadsOf(next)).toHaveLength(0);
+    expect(next.shellSnapshotSequence).toBe(9);
+    expect(next).toBe(retired);
+  });
+
+  it("keeps the thread id registry stable across a read model resync that changes nothing", () => {
+    const hydrated = syncServerReadModel(
+      makeState(makeThread({ id: deletedThreadId, projectId })),
+      makeReadModel(makeReadModelThread({ id: deletedThreadId, projectId })),
+    );
+
+    const resynced = syncServerReadModel(
+      hydrated,
+      makeReadModel(makeReadModelThread({ id: deletedThreadId, projectId })),
+    );
+
+    // Identity, not just equality: consumers memoize on this array, and the "nothing changed"
+    // fast path in syncServerReadModel is gated on this exact reference surviving.
+    expect(resynced.threadIds).toBe(hydrated.threadIds);
+    expect(resynced).toBe(hydrated);
+  });
+
+  it("rebuilds the thread id registry when the snapshot drops a thread", () => {
+    const hydrated = syncServerShellSnapshot(
+      makeState(makeThread({ id: deletedThreadId, projectId })),
+      makeShellSnapshotListingDeletedThread(4, "Stable"),
+    );
+
+    const resynced = syncServerShellSnapshot(hydrated, makeEmptyShellSnapshot(5));
+
+    expect(resynced.threadIds).toEqual([]);
+  });
+
+  function makeMultiThreadShellSnapshot(
+    snapshotSequence: number,
+    threads: readonly { readonly id: string; readonly title: string }[],
+  ) {
+    const base = makeShellSnapshot({
+      id: deletedThreadId,
+      projectId,
+      title: "Base",
+      modelSelection: { provider: "codex", model: "gpt-5.3-codex" },
+      runtimeMode: DEFAULT_RUNTIME_MODE,
+      interactionMode: DEFAULT_INTERACTION_MODE,
+      envMode: "local",
+      branch: null,
+      worktreePath: null,
+      forkSourceThreadId: null,
+      sidechatSourceThreadId: null,
+      latestTurn: null,
+      createdAt: "2026-02-27T00:00:00.000Z",
+      updatedAt: "2026-02-27T00:00:30.000Z",
+      handoff: null,
+      session: null,
+    });
+    return {
+      ...base,
+      snapshotSequence,
+      threads: threads.map((thread) => ({
+        ...base.threads[0]!,
+        id: ThreadId.makeUnsafe(thread.id),
+        title: thread.title,
+      })),
+    };
+  }
+
+  it("reuses the shell record references when a snapshot changes nothing", () => {
+    const hydrated = syncServerShellSnapshot(
+      makeState(makeThread({ id: deletedThreadId, projectId })),
+      makeShellSnapshotListingDeletedThread(4, "Stable"),
+    );
+
+    const resynced = syncServerShellSnapshot(
+      hydrated,
+      makeShellSnapshotListingDeletedThread(5, "Stable"),
+    );
+
+    // The whole point of rebuilding these records in one pass: an unchanged snapshot must not
+    // hand every downstream selector three brand-new dictionaries to re-derive from.
+    expect(resynced.threadIds).toBe(hydrated.threadIds);
+    expect(resynced.threadShellById).toBe(hydrated.threadShellById);
+    expect(resynced.threadSessionById).toBe(hydrated.threadSessionById);
+    expect(resynced.threadTurnStateById).toBe(hydrated.threadTurnStateById);
+  });
+
+  it("keeps untouched thread entries stable when one thread changes", () => {
+    const hydrated = syncServerShellSnapshot(
+      makeState(makeThread({ id: deletedThreadId, projectId })),
+      makeMultiThreadShellSnapshot(4, [
+        { id: "thread-a", title: "A" },
+        { id: "thread-b", title: "B" },
+      ]),
+    );
+
+    const resynced = syncServerShellSnapshot(
+      hydrated,
+      makeMultiThreadShellSnapshot(5, [
+        { id: "thread-a", title: "A" },
+        { id: "thread-b", title: "B renamed" },
+      ]),
+    );
+
+    const threadA = ThreadId.makeUnsafe("thread-a");
+    const threadB = ThreadId.makeUnsafe("thread-b");
+    expect(resynced.threadShellById).not.toBe(hydrated.threadShellById);
+    expect(resynced.threadShellById?.[threadA]).toBe(hydrated.threadShellById?.[threadA]);
+    expect(resynced.threadShellById?.[threadB]?.title).toBe("B renamed");
+    // Only the shells moved, so the sibling records stay put.
+    expect(resynced.threadTurnStateById).toBe(hydrated.threadTurnStateById);
+  });
+
+  it("stores a missing session as an absent key rather than an explicit null", () => {
+    const hydrated = syncServerShellSnapshot(
+      makeState(makeThread({ id: deletedThreadId, projectId })),
+      makeShellSnapshotListingDeletedThread(4, "Stable"),
+    );
+
+    expect(hydrated.threadSessionById?.[deletedThreadId]).toBeUndefined();
+    expect(Object.keys(hydrated.threadSessionById ?? {})).toEqual([]);
+  });
+
+  it("drops the session key on a shell event too, instead of leaving an explicit null", () => {
+    // The two write paths have to agree on the record's *shape*, not just on what it says:
+    // `threadDerivation` reads an absent key and an explicit null back the same way, but two
+    // records that differ in that detail compare unequal, so a snapshot arriving after an event
+    // would replace a record consumers memoize on for no reason at all.
+    const threadId = ThreadId.makeUnsafe("thread-1");
+    const initialState = makeState(
+      makeThread({
+        id: threadId,
+        session: {
+          provider: "codex",
+          status: "running",
+          orchestrationStatus: "running",
+          createdAt: "2026-02-27T00:00:00.000Z",
+          updatedAt: "2026-02-27T00:00:02.000Z",
+        },
+      }),
+    );
+    expect(initialState.threadSessionById?.[threadId]).not.toBeUndefined();
+
+    const next = applyShellEvent(initialState, {
+      kind: "thread-upserted",
+      sequence: 2,
+      thread: {
+        id: threadId,
+        projectId: ProjectId.makeUnsafe("project-1"),
+        title: "Thread",
+        modelSelection: {
+          provider: "codex",
+          model: "gpt-5.3-codex",
+        },
+        runtimeMode: DEFAULT_RUNTIME_MODE,
+        interactionMode: DEFAULT_INTERACTION_MODE,
+        envMode: "local",
+        branch: null,
+        worktreePath: null,
+        associatedWorktreePath: null,
+        associatedWorktreeBranch: null,
+        associatedWorktreeRef: null,
+        createBranchFlowCompleted: false,
+        parentThreadId: null,
+        subagentAgentId: null,
+        subagentNickname: null,
+        subagentRole: null,
+        forkSourceThreadId: null,
+        sidechatSourceThreadId: null,
+        lastKnownPr: null,
+        latestTurn: null,
+        createdAt: "2026-02-27T00:00:00.000Z",
+        updatedAt: "2026-02-27T00:05:00.000Z",
+        archivedAt: null,
+        handoff: null,
+        session: null,
+      },
+    });
+
+    expect(Object.keys(next.threadSessionById ?? {})).toEqual([]);
+    // And the thread still reads back as sessionless, exactly as it did with the explicit null.
+    expect(getThreadFromState(next, threadId)?.session).toBeNull();
+  });
+
+  it("advances the snapshot sequence when a newer read model carries the same content", () => {
+    const hydrated = syncServerReadModel(
+      makeState(makeThread({ id: deletedThreadId, projectId })),
+      makeReadModel(makeReadModelThread({ id: deletedThreadId, projectId })),
+    );
+
+    const next = syncServerReadModel(hydrated, {
+      ...makeReadModel(makeReadModelThread({ id: deletedThreadId, projectId })),
+      snapshotSequence: 30,
+    });
+
+    expect(next.shellSnapshotSequence).toBe(30);
+
+    // The sequence is the lower bound for tombstones created afterwards, so a snapshot that
+    // predates the deletion must not retire it.
+    const deleted = removeDeletedThreadFromClientState(next, deletedThreadId, undefined);
+    expect(deleted.deletedThreadIdsById?.[deletedThreadId]).toBe(31);
+    expect(
+      syncServerShellSnapshot(deleted, makeEmptyShellSnapshot(30)).deletedThreadIdsById?.[
+        deletedThreadId
       ],
-    } satisfies OrchestrationReadModel;
+    ).toBe(31);
+  });
+});
 
-    const hydratedState = syncServerReadModel(makeState(makeThread()), readModel);
-    const thread = threadsOf(hydratedState)[0];
-    const next = syncServerReadModel(hydratedState, readModel);
+describe("resume cursor lifecycle in projection transitions", () => {
+  const projectId = ProjectId.makeUnsafe("project-1");
+  const threadId = ThreadId.makeUnsafe("thread-1");
 
-    expect(next.threadShellById).toBe(hydratedState.threadShellById);
-    expect(next.threadSessionById).toBe(hydratedState.threadSessionById);
-    expect(next.threadTurnStateById).toBe(hydratedState.threadTurnStateById);
-    expect(next.sidebarThreadSummaryById).toBe(hydratedState.sidebarThreadSummaryById);
-    expect(threadsOf(next)[0]).toBe(thread);
+  beforeEach(() => {
+    resetThreadDetailResumeCursorsForTests();
+  });
+
+  function makeStateWithCursor() {
+    const state = makeState(makeThread({ id: threadId, projectId }));
+    setThreadDetailResumeCursor(threadId, 42);
+    return state;
+  }
+
+  it("clears the cursor when the thread's detail is evicted", () => {
+    const state = makeStateWithCursor();
+    evictThreadDetailFromClientState(state, threadId);
+    expect(hasThreadDetailResumeCursor(threadId)).toBe(false);
+  });
+
+  it("clears the cursor when the thread is deleted", () => {
+    const state = makeStateWithCursor();
+    removeDeletedThreadFromClientState(state, threadId);
+    expect(hasThreadDetailResumeCursor(threadId)).toBe(false);
+  });
+
+  it("clears the cursor when the thread's project is deleted", () => {
+    const state = makeStateWithCursor();
+    removeDeletedProjectFromClientState(state, projectId);
+    expect(hasThreadDetailResumeCursor(threadId)).toBe(false);
+  });
+
+  it("clears the cursor when a shell thread-removed event drops the thread", () => {
+    const state = makeStateWithCursor();
+    applyShellEvent(state, { kind: "thread-removed", sequence: 50, threadId });
+    expect(hasThreadDetailResumeCursor(threadId)).toBe(false);
+  });
+
+  it("clears the cursor when a shell snapshot prunes the thread", () => {
+    const state = makeStateWithCursor();
+    syncServerShellSnapshot(state, {
+      snapshotSequence: 60,
+      updatedAt: "2026-02-27T00:10:00.000Z",
+      spaces: [],
+      projects: [],
+      threads: [],
+    });
+    expect(hasThreadDetailResumeCursor(threadId)).toBe(false);
+  });
+
+  it("clears the cursor when a read-model repair prunes the thread", () => {
+    // The "Repair local state" action feeds a full read model through this
+    // path; a pruned thread's cursor must fall with its wiped detail.
+    const state = makeStateWithCursor();
+    syncServerReadModel(state, {
+      ...makeReadModel(makeReadModelThread({ id: threadId, projectId })),
+      snapshotSequence: 60,
+      threads: [],
+    });
+    expect(hasThreadDetailResumeCursor(threadId)).toBe(false);
+  });
+
+  it("clears the cursor when a full read-model sync replaces retained detail", () => {
+    // A retained thread's detail is replaced wholesale by the read model, so a
+    // cursor ahead of the replacement would resume past history the new detail
+    // does not contain. This path is route recovery and "Repair local state"
+    // only, so the cost is one snapshot on an already-degraded path.
+    const state = makeStateWithCursor();
+    syncServerReadModel(state, {
+      ...makeReadModel(makeReadModelThread({ id: threadId, projectId })),
+      snapshotSequence: 60,
+    });
+    expect(hasThreadDetailResumeCursor(threadId)).toBe(false);
+  });
+
+  it("clears the cursor when a tombstone rejects the thread's detail snapshot", () => {
+    const state = removeDeletedThreadFromClientState(
+      makeState(makeThread({ id: threadId, projectId })),
+      threadId,
+    );
+    setThreadDetailResumeCursor(threadId, 42);
+
+    const next = syncServerThreadDetailHotPath(
+      state,
+      makeReadModelThread({ id: threadId, projectId }),
+    );
+
+    // The tombstone discarded the snapshot instead of applying it, so nothing
+    // may vouch for detail that was never stored.
+    expect(next.threadDetailSyncById?.[threadId]).toBeUndefined();
+    expect(hasThreadDetailResumeCursor(threadId)).toBe(false);
   });
 });

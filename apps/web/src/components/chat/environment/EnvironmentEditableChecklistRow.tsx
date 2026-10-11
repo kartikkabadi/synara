@@ -1,5 +1,5 @@
 // FILE: EnvironmentEditableChecklistRow.tsx
-// Purpose: Shared editable checklist-row interaction for pinned messages and transcript markers.
+// Purpose: Shared editable checklist-row interaction for pinned messages.
 // Layer: Environment panel UI primitive
 
 import {
@@ -15,6 +15,7 @@ import { Checkbox } from "~/components/ui/checkbox";
 import { IconButton } from "~/components/ui/icon-button";
 import { XIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
+import { ELEVATED_HOVER_SURFACE_CLASS_NAME } from "~/surfaceStyles";
 
 const JUMP_CLICK_DELAY_MS = 180;
 
@@ -139,7 +140,8 @@ export function EnvironmentEditableChecklistRow({
   return (
     <li
       className={cn(
-        "flex items-center gap-1.5 rounded-lg px-2 py-1 hover:bg-[var(--color-background-elevated-secondary)]",
+        "flex items-center gap-1.5 rounded-lg px-2 py-1",
+        ELEVATED_HOVER_SURFACE_CLASS_NAME,
         className,
       )}
     >
@@ -158,7 +160,7 @@ export function EnvironmentEditableChecklistRow({
           onBlur={handleInputBlur}
           onKeyDown={handleInputKeyDown}
           placeholder={editPlaceholder}
-          className="min-w-0 flex-1 rounded border border-input bg-background px-1 py-0.5 text-[length:var(--app-font-size-ui,12px)] text-foreground outline-none focus-visible:border-ring"
+          className="min-w-0 flex-1 rounded border border-input bg-background px-1 py-0.5 text-ui text-foreground outline-none focus-visible:border-ring"
         />
       ) : (
         <button
@@ -169,7 +171,7 @@ export function EnvironmentEditableChecklistRow({
           aria-label={labelAriaLabel}
           title={labelTitle}
           className={cn(
-            "min-w-0 flex-1 truncate text-left text-[length:var(--app-font-size-ui,12px)] outline-none transition-colors",
+            "min-w-0 flex-1 truncate text-left text-ui outline-none transition-colors",
             checked
               ? "text-muted-foreground/55 line-through"
               : "text-[var(--color-text-foreground)] hover:text-foreground",

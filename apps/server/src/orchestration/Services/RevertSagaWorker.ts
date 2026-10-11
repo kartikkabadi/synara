@@ -1,20 +1,19 @@
 /**
  * RevertSagaWorker - Durable shadow recording for checkpoint reverts.
  *
- * While `SYNARA_CONTROL_PLANE_KERNEL` is "shadow" (or "on" before the PR 5
- * flip), the legacy revert path in CheckpointReactor stays authoritative and
+ * While `SYNARA_CONTROL_PLANE_KERNEL` is "shadow", the legacy revert path in CheckpointReactor stays authoritative and
  * executes all effects. This service records the same revert as a durable
  * saga in the control-plane kernel: an armed intent (event + queued job on
- * `checkpoint-revert`, partitioned per thread), one durable event per step,
+ * `checkpoint-revert`, partitioned per recording), one durable event per step,
  * and an atomic completion that acknowledges the job in the same kernel
  * transaction as the completion event.
  *
- * Every operation is infallible from the caller's perspective: kernel
- * failures are logged, never propagated, so shadow recording can never
- * perturb the legacy path.
+ * Shadow recording failures are logged without perturbing the existing path.
+ * Authoritative on mode is refused until durable restart execution is available.
  *
  * @module RevertSagaWorker
  */
+import type { ControlPlaneKernelError } from "../../persistence/Services/ControlPlaneKernel.ts";
 import type { CheckpointRef, ThreadId } from "@synara/contracts";
 import { Option, ServiceMap } from "effect";
 import type { Effect } from "effect";
@@ -25,6 +24,7 @@ export interface ArmShadowSagaInput {
   readonly threadId: ThreadId;
   readonly turnCount: number;
   readonly targetCheckpointRef: CheckpointRef;
+  readonly rescueCheckpointRef?: CheckpointRef;
   readonly cwd: string;
 }
 
@@ -37,11 +37,8 @@ export interface RevertSagaShadowHandle {
   readonly sagaId: string;
 
   /**
-   * Take a lease on the queued job before executing effects (kernel-
-   * authoritative "on" mode). Returns false (logged) when the claim fails;
-   * the saga then falls back to settlement by scan. While the lease is
-   * held, an uncertain outcome simply leaves it to expire, which is what
-   * transitions the reconcilable job to Uncertain.
+   * Claim this observation's own partition. A false result means no lease
+   * was acquired; it never authorizes filesystem or provider operations.
    */
   readonly claim: () => Effect.Effect<boolean>;
 
@@ -81,7 +78,7 @@ export interface RevertSagaWorkerShape {
    */
   readonly armShadowSaga: (
     input: ArmShadowSagaInput,
-  ) => Effect.Effect<Option.Option<RevertSagaShadowHandle>>;
+  ) => Effect.Effect<Option.Option<RevertSagaShadowHandle>, ControlPlaneKernelError>;
 }
 
 /**

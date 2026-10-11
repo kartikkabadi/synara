@@ -86,18 +86,15 @@ describe("ControlPlaneKernel startup (fail-closed rollout)", () => {
     });
   });
 
-  it.each(["shadow", "on"] as const)(
-    "%s with an unavailable addon fails layer construction",
-    (mode) => {
-      withTempDir((dir) => {
-        vi.stubEnv("SYNARA_CONTROL_PLANE_KERNEL", mode);
-        vi.stubEnv("SYNARA_CONTROL_PLANE_ADDON_PATH", path.join(dir, "missing-addon.node"));
-        expectKernelFailure(buildLiveKernel(dir), "AddonUnavailable", "missing-addon.node");
-      });
-    },
-  );
+  it.each(["shadow"] as const)("%s with an unavailable addon fails layer construction", (mode) => {
+    withTempDir((dir) => {
+      vi.stubEnv("SYNARA_CONTROL_PLANE_KERNEL", mode);
+      vi.stubEnv("SYNARA_CONTROL_PLANE_ADDON_PATH", path.join(dir, "missing-addon.node"));
+      expectKernelFailure(buildLiveKernel(dir), "AddonUnavailable", "missing-addon.node");
+    });
+  });
 
-  it.each(["shadow", "on"] as const)(
+  it.each(["shadow"] as const)(
     "%s with an incompatible addon (missing exports) fails layer construction",
     (mode) => {
       withTempDir((dir) => {
@@ -113,11 +110,43 @@ describe("ControlPlaneKernel startup (fail-closed rollout)", () => {
   it.each(["job", "jobsPage"])("rejects addons missing the operator method %s", (missingMethod) => {
     withTempDir((dir) => {
       const stubPath = path.join(dir, "legacy-store.cjs");
-      const methods = ["close", "commit", "claimJobs", "extendLease", "recoverClaim", "recoverTransaction", "jobs", "job", "jobsPage", "projectionGet", "projectionVersion", "streamVersion", "eventsAfter"];
-      const store = methods.filter((method) => method !== missingMethod).map((method) => `${method}() {}`).join(",");
-      writeFileSync(stubPath, `module.exports = { Store: { open() { return { ${store} }; } }, newId() { return ""; } };\n`);
+      const methods = [
+        "close",
+        "commit",
+        "claimJobs",
+        "extendLease",
+        "recoverClaim",
+        "recoverTransaction",
+        "jobs",
+        "job",
+        "jobsPage",
+        "projectionGet",
+        "projectionVersion",
+        "streamVersion",
+        "eventsAfter",
+      ];
+      const store = methods
+        .filter((method) => method !== missingMethod)
+        .map((method) => `${method}() {}`)
+        .join(",");
+      writeFileSync(
+        stubPath,
+        `module.exports = { Store: { open() { return { ${store} }; } }, newId() { return ""; } };\n`,
+      );
       vi.stubEnv("SYNARA_CONTROL_PLANE_ADDON_PATH", stubPath);
-      expectKernelFailure(makeControlPlaneKernelAtPath(path.join(dir, "control-plane.db"), "on"), "AddonIncompatible", missingMethod);
+      expectKernelFailure(
+        makeControlPlaneKernelAtPath(path.join(dir, "control-plane.db"), "on"),
+        "AddonIncompatible",
+        missingMethod,
+      );
+    });
+  });
+
+  it("on refuses production startup until durable execution is available", () => {
+    withTempDir((dir) => {
+      vi.stubEnv("SYNARA_CONTROL_PLANE_KERNEL", "on");
+      vi.stubEnv("SYNARA_CONTROL_PLANE_ADDON_PATH", path.join(dir, "missing-addon.node"));
+      expectKernelFailure(buildLiveKernel(dir), "AuthoritativeModeUnavailable", "lease renewal");
     });
   });
 

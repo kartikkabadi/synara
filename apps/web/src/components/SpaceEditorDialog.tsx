@@ -1,9 +1,11 @@
 // FILE: SpaceEditorDialog.tsx
 // Purpose: Shared create/edit dialog for a Space name and curated Central icon.
 
-import { SPACE_NAME_MAX_LENGTH, type SpaceIconName } from "@synara/contracts";
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { SPACE_NAME_MAX_LENGTH } from "@synara/contracts";
+import { useEffect, useId, useRef, useState } from "react";
 
+import { handleRadioGridKeyDown } from "~/lib/radioGridKeyboard";
+import { DEFAULT_SPACE_ICON, DEFAULT_VOID_SPACE_ICON } from "~/lib/spaceGrouping";
 import { suggestSpaceIcon } from "~/lib/spaceIconSuggestion";
 
 import { Button } from "./ui/button";
@@ -15,37 +17,51 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
+  dialogFieldLabelClassName,
 } from "./ui/dialog";
 import { Input } from "./ui/input";
-import { SPACE_ICON_OPTIONS, SpaceIcon } from "./SpaceIcon";
+import {
+  SPACE_ICON_OPTIONS,
+  SpaceIcon,
+  VOID_SPACE_ICON_OPTIONS,
+  type SpaceIconValue,
+} from "./SpaceIcon";
 import { cn } from "~/lib/utils";
 
-const DEFAULT_SPACE_ICON: SpaceIconName = "bag";
-
-const FIELD_LABEL_CLASS_NAME =
-  "text-[length:var(--app-font-size-ui-sm,11px)] font-medium text-foreground/80";
+const FIELD_LABEL_CLASS_NAME = dialogFieldLabelClassName;
 
 const ICON_CELL_CLASS_NAME =
   "flex aspect-square cursor-pointer items-center justify-center rounded-lg border text-muted-foreground transition-colors outline-hidden hover:bg-foreground/6 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50";
 
 export interface SpaceEditorValue {
   readonly name: string;
-  readonly icon: SpaceIconName;
+  readonly icon: SpaceIconValue;
 }
+
+/**
+ * `void` edits the group of projects that are in no Space. It is the same form — a name and
+ * an icon — over a presentation preference instead of a stored row, so it shares this dialog
+ * rather than growing a near-identical second one.
+ */
+export type SpaceEditorMode = "create" | "edit" | "void";
 
 export function SpaceEditorDialog(props: {
   open: boolean;
-  mode: "create" | "edit";
+  mode: SpaceEditorMode;
   initialValue?: SpaceEditorValue | undefined;
+  /** Names already taken by another Space (or by Void), which this one may not collide with. */
   existingNames: ReadonlyArray<string>;
   onOpenChange: (open: boolean) => void;
   onSubmit: (value: SpaceEditorValue) => Promise<void> | void;
 }) {
+  const isVoid = props.mode === "void";
+  const iconOptions = isVoid ? VOID_SPACE_ICON_OPTIONS : SPACE_ICON_OPTIONS;
+  const defaultIcon: SpaceIconValue = isVoid ? DEFAULT_VOID_SPACE_ICON : DEFAULT_SPACE_ICON;
   const [name, setName] = useState("");
-  const [icon, setIcon] = useState<SpaceIconName>(DEFAULT_SPACE_ICON);
+  const [icon, setIcon] = useState<SpaceIconValue>(defaultIcon);
   /**
    * In create mode the icon tracks the name (`suggestSpaceIcon`) until the user taps
-   * the grid, which pins their choice. Edit mode starts pinned: a rename must never
+   * the grid, which pins their choice. Editing starts pinned: a rename must never
    * silently swap an icon someone already chose.
    */
   const [iconPinned, setIconPinned] = useState(false);
@@ -66,15 +82,15 @@ export function SpaceEditorDialog(props: {
     openedRef.current = props.open;
     if (!props.open) return;
     setName(props.initialValue?.name ?? "");
-    setIcon(props.initialValue?.icon ?? DEFAULT_SPACE_ICON);
-    setIconPinned(props.mode === "edit");
+    setIcon(props.initialValue?.icon ?? defaultIcon);
+    setIconPinned(props.mode !== "create");
     setSubmitting(false);
     setSubmitError(null);
     // Deferred a frame: the dialog moves focus itself on open, so selecting the name
     // has to happen after that lands or it is immediately undone. Matches PickerPanelShell.
     const frame = requestAnimationFrame(() => nameInputRef.current?.select());
     return () => cancelAnimationFrame(frame);
-  }, [props.initialValue?.icon, props.initialValue?.name, props.mode, props.open]);
+  }, [defaultIcon, props.initialValue?.icon, props.initialValue?.name, props.mode, props.open]);
 
   const trimmedName = name.trim();
   const duplicateName = props.existingNames.some(
@@ -82,12 +98,12 @@ export function SpaceEditorDialog(props: {
   );
   const nameError =
     trimmedName.length === 0
-      ? "Enter a space name."
-      : trimmedName.toLowerCase() === "void"
-        ? "Void is reserved for unassigned projects."
-        : duplicateName
-          ? "A space with this name already exists."
-          : null;
+      ? "Enter a name."
+      : duplicateName
+        ? // Deliberately not "a space with this name": the taken name may be Void's, which
+          // is not a space, and either way the user's next move is the same.
+          "That name is already taken."
+        : null;
   // An empty field is a starting point, not a mistake — only speak up once there is input.
   const visibleNameError = name.length > 0 ? nameError : null;
 
@@ -104,44 +120,19 @@ export function SpaceEditorDialog(props: {
     }
   };
 
-  // The grid reflows between 10 and 5 columns, so the icons are driven as one linear
-  // radio group: either axis steps to the neighbouring icon and selects it.
-  const handleIconKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
-    const stepByKey: Record<string, number | "first" | "last"> = {
-      ArrowLeft: -1,
-      ArrowUp: -1,
-      ArrowRight: 1,
-      ArrowDown: 1,
-      Home: "first",
-      End: "last",
-    };
-    const step = stepByKey[event.key];
-    if (step === undefined) return;
-    const cells = Array.from(
-      event.currentTarget.querySelectorAll<HTMLButtonElement>("[data-space-icon]"),
-    );
-    if (cells.length === 0) return;
-    const currentIndex = cells.indexOf(document.activeElement as HTMLButtonElement);
-    const nextIndex =
-      step === "first"
-        ? 0
-        : step === "last"
-          ? cells.length - 1
-          : (Math.max(currentIndex, 0) + step + cells.length) % cells.length;
-    event.preventDefault();
-    cells[nextIndex]?.focus();
-    cells[nextIndex]?.click();
-  }, []);
-
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogPopup className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>{props.mode === "create" ? "New space" : "Edit space"}</DialogTitle>
+          <DialogTitle>
+            {props.mode === "create" ? "New space" : isVoid ? "Edit unfiled group" : "Edit space"}
+          </DialogTitle>
           <DialogDescription>
             {props.mode === "create"
               ? "Group projects into a focused work context. Projects you add while a space is open land in it."
-              : "Rename this space or give it a different icon. Its projects stay where they are."}
+              : isVoid
+                ? "Name the group that holds projects you haven't filed into a space. This is a local preference — the projects in it stay where they are."
+                : "Rename this space or give it a different icon. Its projects stay where they are."}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">
@@ -171,14 +162,10 @@ export function SpaceEditorDialog(props: {
                   void submit();
                 }
               }}
-              placeholder="Work"
+              placeholder={isVoid ? "Unfiled" : "Work"}
             />
             {visibleNameError ? (
-              <p
-                id={nameErrorId}
-                role="alert"
-                className="text-[length:var(--app-font-size-ui-xs,10px)] text-destructive"
-              >
+              <p id={nameErrorId} role="alert" className="text-ui-xs text-destructive">
                 {visibleNameError}
               </p>
             ) : null}
@@ -191,10 +178,12 @@ export function SpaceEditorDialog(props: {
             <div
               role="radiogroup"
               aria-labelledby={iconLegendId}
-              onKeyDown={handleIconKeyDown}
+              // The grid reflows between 10 and 5 columns, so the icons are driven as one
+              // linear radio group: either axis steps to the neighbouring icon and selects it.
+              onKeyDown={(event) => handleRadioGridKeyDown(event, "[data-space-icon]")}
               className="grid grid-cols-10 gap-1.5 max-sm:grid-cols-5"
             >
-              {SPACE_ICON_OPTIONS.map((option) => {
+              {iconOptions.map((option) => {
                 const selected = icon === option.name;
                 return (
                   <button
@@ -224,10 +213,7 @@ export function SpaceEditorDialog(props: {
             </div>
           </fieldset>
           {submitError ? (
-            <p
-              role="alert"
-              className="text-[length:var(--app-font-size-ui-xs,10px)] text-destructive"
-            >
+            <p role="alert" className="text-ui-xs text-destructive">
               {submitError}
             </p>
           ) : null}

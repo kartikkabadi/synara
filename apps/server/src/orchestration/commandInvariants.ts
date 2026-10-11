@@ -1,4 +1,5 @@
 import type {
+  ApprovalRequestId,
   OrchestrationCommand,
   OrchestrationLatestTurn,
   OrchestrationProject,
@@ -11,12 +12,18 @@ import type {
   ProjectId,
   SpaceId,
   ThreadId,
+  TurnId,
 } from "@synara/contracts";
-import { THREAD_NOT_ARCHIVED_INVARIANT_MARKER } from "@synara/shared/errorMessages";
 import {
-  normalizeWorkspaceRootForComparison,
-  workspaceRootsEqual,
-} from "@synara/shared/threadWorkspace";
+  APPROVAL_ALREADY_ANSWERED_INVARIANT_MARKER,
+  THREAD_NOT_ARCHIVED_INVARIANT_MARKER,
+} from "@synara/shared/errorMessages";
+import {
+  isGroupContainerKind,
+  isLegacyHomeChatContainerRow as isSharedLegacyHomeChatContainerRow,
+  isOrdinaryProjectRow as isSharedOrdinaryProjectRow,
+} from "@synara/shared/projectContainers";
+import { normalizeWorkspaceRootForComparison } from "@synara/shared/threadWorkspace";
 import { Effect } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
@@ -226,16 +233,41 @@ export function isLegacyHomeChatContainerRow(input: {
   readonly projectWorkspaceRoot: string;
   readonly workspacePaths: SpaceAssignmentWorkspacePaths | undefined;
 }): boolean {
-  const homeDir = input.workspacePaths?.homeDir.trim() ?? "";
-  if (homeDir.length === 0 || input.projectTitle !== "Home") {
+  return isSharedLegacyHomeChatContainerRow({
+    projectTitle: input.projectTitle,
+    projectWorkspaceRoot: input.projectWorkspaceRoot,
+    paths: {
+      homeDir: input.workspacePaths?.homeDir ?? null,
+      chatWorkspaceRoot: input.workspacePaths?.chatWorkspaceRoot ?? null,
+    },
+    comparisonOptions: { platform: process.platform },
+  });
+}
+
+/**
+ * Server half of the web's project partitioning: ordinary projects are the user-visible
+ * ones. Managed chat, Studio, and group containers are excluded by kind alone; the legacy
+ * Home chat container kept `kind: "project"` and is recognized by its row shape instead.
+ */
+export function isOrdinaryProjectRow(input: {
+  readonly projectKind: ProjectKind | undefined;
+  readonly projectTitle: string;
+  readonly projectWorkspaceRoot: string;
+  readonly workspacePaths: SpaceAssignmentWorkspacePaths | undefined;
+}): boolean {
+  if (isGroupContainerKind(input.projectKind)) {
     return false;
   }
-  const chatWorkspaceRoot = input.workspacePaths?.chatWorkspaceRoot.trim() || homeDir;
-  const comparisonOptions = { platform: process.platform } as const;
-  return (
-    workspaceRootsEqual(input.projectWorkspaceRoot, chatWorkspaceRoot, comparisonOptions) ||
-    workspaceRootsEqual(input.projectWorkspaceRoot, homeDir, comparisonOptions)
-  );
+  return isSharedOrdinaryProjectRow({
+    projectKind: input.projectKind,
+    projectTitle: input.projectTitle,
+    projectWorkspaceRoot: input.projectWorkspaceRoot,
+    paths: {
+      homeDir: input.workspacePaths?.homeDir ?? null,
+      chatWorkspaceRoot: input.workspacePaths?.chatWorkspaceRoot ?? null,
+    },
+    comparisonOptions: { platform: process.platform },
+  });
 }
 
 /** The rejecting form for explicit assignment commands, where a bad target is an error. */
@@ -379,6 +411,36 @@ export function requireThread(input: {
   );
 }
 
+export function requireApprovalNotResponded(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly threadId: ThreadId;
+  readonly requestId: ApprovalRequestId;
+  readonly lifecycleGeneration?: string;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  const thread = findThreadById(input.readModel, input.threadId);
+  const interaction = thread?.pendingInteractions?.find(
+    (entry) =>
+      entry.interactionKind === "approval" &&
+      entry.requestId === input.requestId &&
+      (input.lifecycleGeneration === undefined ||
+        entry.lifecycleGeneration === input.lifecycleGeneration),
+  );
+  if (
+    interaction === undefined ||
+    interaction.status === "pending" ||
+    interaction.status === "retryable"
+  ) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Approval request '${input.requestId}' on thread '${input.threadId}' ${APPROVAL_ALREADY_ANSWERED_INVARIANT_MARKER}`,
+    ),
+  );
+}
+
 export function requireThreadAbsent(input: {
   readonly readModel: OrchestrationReadModel;
   readonly command: OrchestrationCommand;
@@ -433,18 +495,65 @@ export function requireThreadNotArchived(input: {
   );
 }
 
-export function requireNonNegativeInteger(input: {
-  readonly commandType: OrchestrationCommand["type"];
-  readonly field: string;
-  readonly value: number;
-}): Effect.Effect<void, OrchestrationCommandInvariantError> {
-  if (Number.isInteger(input.value) && input.value >= 0) {
-    return Effect.void;
+export type ThreadResumePreconditionViolation =
+  | "thread-archived"
+  | "turn-completed"
+  | "turn-in-flight";
+
+export interface ThreadResumePrecondition {
+  /** Turn in flight when the chat was recorded; null while the provider was still connecting. */
+  readonly recordedTurnId: TurnId | null;
+  readonly recordedAt: string;
+}
+
+/**
+ * Shared by the boot-time quit-resume planner and the decider: a chat remembered
+ * at quit is continued only while the thread is not archived, has nothing in
+ * flight, and no turn finished on its own since the record was taken — neither
+ * the recorded turn (it was running then, so it can only have completed later)
+ * nor any newer one. A turn that completed before the record is the previous
+ * turn of a chat that was still connecting and does not count; an interrupted or
+ * errored turn is exactly what a continuation is for.
+ */
+export function threadResumePreconditionViolation(
+  thread: {
+    readonly archivedAt?: string | null | undefined;
+    readonly session: Pick<OrchestrationSession, "status" | "activeTurnId"> | null;
+    readonly latestTurn: Pick<OrchestrationLatestTurn, "turnId" | "state" | "completedAt"> | null;
+  },
+  precondition: ThreadResumePrecondition,
+): ThreadResumePreconditionViolation | null {
+  if (thread.archivedAt != null) {
+    return "thread-archived";
   }
-  return Effect.fail(
-    invariantError(
-      input.commandType,
-      `${input.field} must be an integer greater than or equal to 0.`,
-    ),
-  );
+  if (threadHasInFlightTurn(thread)) {
+    return "turn-in-flight";
+  }
+  const latestTurn = thread.latestTurn;
+  if (
+    latestTurn !== null &&
+    latestTurn.state === "completed" &&
+    (latestTurn.turnId === precondition.recordedTurnId ||
+      // A completed turn without a completion time is unknowable; stay on the
+      // side of not sending an unwanted message.
+      latestTurn.completedAt === null ||
+      latestTurn.completedAt >= precondition.recordedAt)
+  ) {
+    return "turn-completed";
+  }
+  return null;
+}
+
+export function threadResumePreconditionDetail(
+  threadId: ThreadId,
+  violation: ThreadResumePreconditionViolation,
+): string {
+  switch (violation) {
+    case "thread-archived":
+      return `Thread '${threadId}' was archived after it was remembered for resume.`;
+    case "turn-completed":
+      return `Thread '${threadId}' finished on its own; there is nothing to resume.`;
+    case "turn-in-flight":
+      return `Thread '${threadId}' already has a turn in flight.`;
+  }
 }

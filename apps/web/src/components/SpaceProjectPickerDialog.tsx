@@ -10,7 +10,8 @@ import { groupItemsBySpace, spaceDisplayName } from "~/lib/spaceGrouping";
 import { isOrdinarySpaceProject } from "~/lib/spaces";
 import { cn } from "~/lib/utils";
 import { useSpacesUiStore } from "~/spacesUiStore";
-import { useWorkspaceStore } from "~/workspaceStore";
+import { useVoidSpace } from "~/voidSpaceStore";
+import { useWorkspacePathsStore } from "~/workspacePathsStore";
 import { ProjectSidebarIcon } from "./ProjectSidebarIcon";
 import { SpaceIcon } from "./SpaceIcon";
 import { Button } from "./ui/button";
@@ -40,9 +41,11 @@ export function SpaceProjectPickerDialog(props: {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const activeSpaceId = useSpacesUiStore((state) => state.activeSpaceId);
-  const homeDir = useWorkspaceStore((state) => state.homeDir);
-  const chatWorkspaceRoot = useWorkspaceStore((state) => state.chatWorkspaceRoot);
-  const studioWorkspaceRoot = useWorkspaceStore((state) => state.studioWorkspaceRoot);
+  const voidSpace = useVoidSpace();
+  const homeDir = useWorkspacePathsStore((state) => state.homeDir);
+  const chatWorkspaceRoot = useWorkspacePathsStore((state) => state.chatWorkspaceRoot);
+  const studioWorkspaceRoot = useWorkspacePathsStore((state) => state.studioWorkspaceRoot);
+  const groupsWorkspaceRoot = useWorkspacePathsStore((state) => state.groupsWorkspaceRoot);
 
   useEffect(() => {
     if (!props.open) return;
@@ -62,10 +65,21 @@ export function SpaceProjectPickerDialog(props: {
     () =>
       props.projects.filter(
         (project) =>
-          isOrdinarySpaceProject(project, { homeDir, chatWorkspaceRoot, studioWorkspaceRoot }) &&
-          (project.spaceId ?? null) !== targetSpaceId,
+          isOrdinarySpaceProject(project, {
+            homeDir,
+            chatWorkspaceRoot,
+            studioWorkspaceRoot,
+            groupsWorkspaceRoot,
+          }) && (project.spaceId ?? null) !== targetSpaceId,
       ),
-    [chatWorkspaceRoot, homeDir, props.projects, studioWorkspaceRoot, targetSpaceId],
+    [
+      chatWorkspaceRoot,
+      groupsWorkspaceRoot,
+      homeDir,
+      props.projects,
+      studioWorkspaceRoot,
+      targetSpaceId,
+    ],
   );
   const candidates = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -75,12 +89,12 @@ export function SpaceProjectPickerDialog(props: {
           normalizedQuery.length === 0 ||
           project.name.toLocaleLowerCase().includes(normalizedQuery) ||
           project.cwd.toLocaleLowerCase().includes(normalizedQuery) ||
-          spaceDisplayName(project.spaceId, props.spaces)
+          spaceDisplayName(project.spaceId, props.spaces, voidSpace)
             .toLocaleLowerCase()
             .includes(normalizedQuery),
       )
       .toSorted((left, right) => left.name.localeCompare(right.name));
-  }, [movableProjects, props.spaces, query]);
+  }, [movableProjects, props.spaces, query, voidSpace]);
   const candidateGroups = useMemo(
     () =>
       groupItemsBySpace({
@@ -88,8 +102,9 @@ export function SpaceProjectPickerDialog(props: {
         spaces: props.spaces,
         activeSpaceId,
         spaceIdOf: (project) => project.spaceId ?? null,
+        voidSpace,
       }),
-    [activeSpaceId, candidates, props.spaces],
+    [activeSpaceId, candidates, props.spaces, voidSpace],
   );
 
   const submit = async () => {
@@ -139,13 +154,13 @@ export function SpaceProjectPickerDialog(props: {
           />
           <div className="max-h-72 space-y-3 overflow-y-auto">
             {candidates.length === 0 ? (
-              <p className="px-2 py-8 text-center text-[length:var(--app-font-size-ui,12px)] text-muted-foreground/60">
+              <p className="px-2 py-8 text-center text-ui text-muted-foreground/60">
                 {emptyMessage}
               </p>
             ) : (
               candidateGroups.map((group) => (
                 <section key={group.key}>
-                  <p className="mb-1 flex items-center gap-1.5 px-2 text-[length:var(--app-font-size-ui-xs,10px)] font-medium text-muted-foreground/55">
+                  <p className="mb-1 flex items-center gap-1.5 px-2 text-ui-xs font-medium text-muted-foreground/55">
                     <SpaceIcon icon={group.icon} className="size-3" />
                     <span className="min-w-0 truncate">{group.label}</span>
                   </p>
@@ -172,9 +187,13 @@ export function SpaceProjectPickerDialog(props: {
                           )}
                         >
                           <span className="relative flex size-4 shrink-0 items-center justify-center">
-                            <ProjectSidebarIcon cwd={project.cwd} expanded={project.expanded} />
+                            <ProjectSidebarIcon
+                              cwd={project.cwd}
+                              expanded={project.expanded}
+                              appearance={project.appearance}
+                            />
                           </span>
-                          <span className="min-w-0 flex-1 truncate text-[length:var(--app-font-size-ui,12px)] text-foreground/88">
+                          <span className="min-w-0 flex-1 truncate text-ui text-foreground/88">
                             {project.name}
                           </span>
                           {/* Presentational: the row itself is the checkbox, so this must not
@@ -199,10 +218,7 @@ export function SpaceProjectPickerDialog(props: {
             )}
           </div>
           {error ? (
-            <p
-              role="alert"
-              className="text-[length:var(--app-font-size-ui-xs,10px)] text-destructive"
-            >
+            <p role="alert" className="text-ui-xs text-destructive">
               {error}
             </p>
           ) : null}

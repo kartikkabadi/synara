@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  isControlPlaneAddonFailure,
   loadControlPlaneAddon,
   makeControlPlaneKernelAtPath,
   makeDisabledKernel,
@@ -40,7 +41,11 @@ describe("controlPlaneOperator (kernel off)", () => {
   it.effect("resolveUncertainRevertJob fails with the typed KernelDisabled error", () =>
     Effect.gen(function* () {
       const exit = yield* Effect.exit(
-        resolveUncertainRevertJob(kernel, { jobId: "a".repeat(32), resolution: "retry" }),
+        resolveUncertainRevertJob(kernel, {
+          jobId: "a".repeat(32),
+          resolution: "retry",
+          reason: "Verified by the owner",
+        }),
       );
       assert.isTrue(Exit.isFailure(exit));
       assert.include(String(exit), "KernelDisabled");
@@ -50,7 +55,7 @@ describe("controlPlaneOperator (kernel off)", () => {
 
 // Runs wherever the native addon is resolvable (locally via
 // SYNARA_CONTROL_PLANE_ADDON_PATH) and is skipped elsewhere.
-const addonAvailable = typeof loadControlPlaneAddon() !== "string";
+const addonAvailable = !isControlPlaneAddonFailure(loadControlPlaneAddon());
 
 describe.skipIf(!addonAvailable)("controlPlaneOperator (native addon)", () => {
   const withTempKernel = <A, E>(use: (kernel: ControlPlaneKernelShape) => Effect.Effect<A, E>) =>
@@ -70,12 +75,32 @@ describe.skipIf(!addonAvailable)("controlPlaneOperator (native addon)", () => {
     Effect.gen(function* () {
       const jobId = yield* kernel.newId();
       yield* kernel.commit({
+        projectionPatches: [
+          {
+            projection: `revert-job/${jobId}`,
+            expectedVersion: 0,
+            puts: [
+              {
+                key: new TextEncoder().encode("context"),
+                value: new TextEncoder().encode(
+                  JSON.stringify({
+                    mode: "shadow",
+                    sagaId: jobId,
+                    threadId: jobId,
+                    turnCount: 1,
+                    targetCheckpointRef: "refs/test/target",
+                  }),
+                ),
+              },
+            ],
+          },
+        ],
         committedAtMs: nowMs,
         enqueueJobs: [
           {
             jobId,
             queue: CHECKPOINT_REVERT_QUEUE,
-            partitionKey: `thread:${jobId}`,
+            partitionKey: `thread:${jobId}/saga:${jobId}`,
             payload: new TextEncoder().encode("{}"),
           },
         ],
@@ -113,11 +138,11 @@ describe.skipIf(!addonAvailable)("controlPlaneOperator (native addon)", () => {
         assert.equal(listed.jobs[0]?.state, "uncertain");
 
         const looked = yield* getControlPlaneJob(kernel, { jobId });
-        assert.equal(looked.job?.partitionKey, `thread:${jobId}`);
+        assert.equal(looked.job?.partitionKey, `thread:${jobId}/saga:${jobId}`);
 
         const resolved = yield* resolveUncertainRevertJob(
           kernel,
-          { jobId, resolution: "markSucceeded" },
+          { jobId, resolution: "markSucceeded", reason: "Verified by the owner" },
           now + 2_000,
         );
         assert.equal(resolved.job?.state, "succeeded");
@@ -132,7 +157,11 @@ describe.skipIf(!addonAvailable)("controlPlaneOperator (native addon)", () => {
     withTempKernel((kernel) =>
       Effect.gen(function* () {
         const exit = yield* Effect.exit(
-          resolveUncertainRevertJob(kernel, { jobId: "f".repeat(32), resolution: "retry" }),
+          resolveUncertainRevertJob(kernel, {
+            jobId: "f".repeat(32),
+            resolution: "retry",
+            reason: "Verified by the owner",
+          }),
         );
         assert.isTrue(Exit.isFailure(exit));
         assert.include(String(exit), "InvalidResolutionTarget");
@@ -174,7 +203,11 @@ describe.skipIf(!addonAvailable)("controlPlaneOperator (native addon)", () => {
         assert.equal((yield* getControlPlaneJob(kernel, { jobId })).job?.state, "uncertain");
 
         const exit = yield* Effect.exit(
-          resolveUncertainRevertJob(kernel, { jobId, resolution: "markDead" }, now + 2_000),
+          resolveUncertainRevertJob(
+            kernel,
+            { jobId, resolution: "markDead", reason: "Verified by the owner" },
+            now + 2_000,
+          ),
         );
         assert.isTrue(Exit.isFailure(exit));
         assert.include(String(exit), "InvalidResolutionTarget");
@@ -202,7 +235,11 @@ describe.skipIf(!addonAvailable)("controlPlaneOperator (native addon)", () => {
         });
 
         const exit = yield* Effect.exit(
-          resolveUncertainRevertJob(kernel, { jobId, resolution: "markSucceeded" }, now + 1),
+          resolveUncertainRevertJob(
+            kernel,
+            { jobId, resolution: "markSucceeded", reason: "Verified by the owner" },
+            now + 1,
+          ),
         );
         assert.isTrue(Exit.isFailure(exit));
         assert.include(String(exit), "InvalidResolutionTarget");
@@ -219,21 +256,100 @@ describe.skipIf(!addonAvailable)("controlPlaneOperator (native addon)", () => {
         // Simulate a concurrent resolution between validation and commit.
         const racingKernel: ControlPlaneKernelShape = {
           ...kernel,
-          resolveUncertainJobs: (input) =>
+          commit: (input) =>
             kernel
               .resolveUncertainJobs({
                 committedAtMs: input.committedAtMs,
                 resolutions: [{ jobId, resolution: "markSucceeded" }],
               })
-              .pipe(Effect.andThen(kernel.resolveUncertainJobs(input))),
+              .pipe(Effect.andThen(kernel.commit(input))),
         };
 
         const exit = yield* Effect.exit(
-          resolveUncertainRevertJob(racingKernel, { jobId, resolution: "markDead" }, now + 2_000),
+          resolveUncertainRevertJob(
+            racingKernel,
+            { jobId, resolution: "markDead", reason: "Verified by the owner" },
+            now + 2_000,
+          ),
         );
         assert.isTrue(Exit.isFailure(exit));
         assert.equal((yield* getControlPlaneJob(kernel, { jobId })).job?.state, "succeeded");
       }),
     ),
+  );
+});
+
+describe("operator decision boundaries without a native addon", () => {
+  const jobId = "a".repeat(32);
+  const context = {
+    mode: "shadow",
+    sagaId: "saga",
+    threadId: "thread",
+    turnCount: 1,
+    targetCheckpointRef: "refs/target",
+  };
+  const job = {
+    jobId,
+    queue: CHECKPOINT_REVERT_QUEUE,
+    partitionKey: "thread:thread/saga:saga",
+    state: "uncertain",
+    attempt: 1,
+  };
+
+  it.effect("commits the operator reason and terminal observation in one batch", () =>
+    Effect.gen(function* () {
+      const batches: import("./persistence/Services/ControlPlaneKernel.ts").KernelCommitBatch[] =
+        [];
+      const kernel: ControlPlaneKernelShape = {
+        ...makeDisabledKernel("unused"),
+        mode: "shadow",
+        job: () => Effect.succeed(job),
+        projectionGet: () => Effect.succeed(new TextEncoder().encode(JSON.stringify(context))),
+        newId: () => Effect.succeed("b".repeat(32)),
+        commit: (batch) =>
+          Effect.sync(() => {
+            batches.push(batch);
+            return { transactionId: "b".repeat(32), transactionSequence: 1, committedAtMs: 10 };
+          }),
+      };
+      yield* resolveUncertainRevertJob(
+        kernel,
+        { jobId, resolution: "markDead", reason: "  Provider history inspected  " },
+        10,
+      );
+      assert.equal(batches.length, 1);
+      assert.deepEqual(batches[0]?.resolveUncertainJobs, [{ jobId, resolution: "markDead" }]);
+      assert.equal(batches[0]?.events?.[0]?.eventType, "thread.revert.operator-resolved");
+      const audit = JSON.parse(new TextDecoder().decode(batches[0]?.events?.[0]?.payload));
+      assert.equal(audit.reason, "Provider history inspected");
+      assert.equal(audit.mode, "shadow");
+    }),
+  );
+
+  it.effect("rejects retry, absent shadow context, and empty reasons without committing", () =>
+    Effect.gen(function* () {
+      let commits = 0;
+      const kernel: ControlPlaneKernelShape = {
+        ...makeDisabledKernel("unused"),
+        mode: "shadow",
+        job: () => Effect.succeed(job),
+        projectionGet: () => Effect.succeed(null),
+        commit: () =>
+          Effect.sync(() => {
+            commits += 1;
+            return { transactionId: "b".repeat(32), transactionSequence: 1, committedAtMs: 0 };
+          }),
+      };
+      for (const input of [
+        { jobId, resolution: "retry" as const, reason: "Try again" },
+        { jobId, resolution: "markDead" as const, reason: "No context" },
+        { jobId, resolution: "markSucceeded" as const, reason: " " },
+      ]) {
+        const exit = yield* Effect.exit(resolveUncertainRevertJob(kernel, input));
+        assert.isTrue(Exit.isFailure(exit));
+        assert.include(String(exit), "InvalidResolutionTarget");
+      }
+      assert.equal(commits, 0);
+    }),
   );
 });
