@@ -105,6 +105,17 @@ function buildSshBaseArgv(
     argv.push("-J", requireNonEmpty(transport.jumpHost, "jumpHost"));
   }
 
+  // Never inherit port forwardings from the user's SSH config, and turn a
+  // half-open channel into a deterministic failure via protocol keepalives.
+  argv.push(
+    "-o",
+    "ClearAllForwardings=yes",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=3",
+  );
+
   // Host-key verification is always strict; the policy only selects the trust
   // source. "pinned-fingerprint" additionally requires a fingerprint check
   // before spawn (see sshHostKey.ts).
@@ -119,14 +130,14 @@ function buildSshBaseArgv(
     argv.push("-o", `HostKeyAlias=${host}`);
   }
 
-  const user = transport.user !== undefined ? requireNonEmpty(transport.user, "user") : undefined;
-  argv.push(user !== undefined ? `${user}@${host}` : host);
+  const user = transport.user !== undefined ? requireSafeCliValue(requireNonEmpty(transport.user, "user"), "user") : undefined;
+  argv.push("--", user !== undefined ? `${user}@${host}` : host);
   return argv;
 }
 
 /**
- * Builds the full `ssh` argument array (without the leading `ssh`), ending
- * with `--` and the remote command string. Never embeds or forwards secret material.
+ * Builds the full `ssh` argument array (without the leading `ssh`), terminating
+ * options before the destination and remote command string. Never embeds or forwards secret material.
  */
 export function buildSshArgv(
   transport: ExecutionEnvironmentSshTransport,
@@ -134,7 +145,7 @@ export function buildSshArgv(
   executionProfile: ExecutionProfile,
 ): string[] {
   const argv = buildSshBaseArgv(transport, runtime);
-  argv.push("--", buildRemoteCommand(runtime, executionProfile));
+  argv.push(buildRemoteCommand(runtime, executionProfile));
   return argv;
 }
 
@@ -178,7 +189,7 @@ export function buildSshExecArgv(
   remoteCommand: string,
 ): string[] {
   const argv = buildSshBaseArgv(transport, runtime);
-  argv.push("--", remoteCommand);
+  argv.push(remoteCommand);
   return argv;
 }
 
@@ -213,7 +224,7 @@ export function buildScpArgv(
   if (transport.jumpHost !== undefined) {
     argv.push("-J", requireNonEmpty(transport.jumpHost, "jumpHost"));
   }
-  const user = transport.user !== undefined ? requireNonEmpty(transport.user, "user") : undefined;
+  const user = transport.user !== undefined ? requireSafeCliValue(requireNonEmpty(transport.user, "user"), "user") : undefined;
   const destination = user !== undefined ? `${user}@${host}` : host;
   const homeRelative = remotePath.startsWith("~/") ? remotePath.slice(2) : remotePath;
   argv.push("--", localPath, `${destination}:${homeRelative}`);
@@ -229,12 +240,12 @@ export function buildAgentSshArgv(
   runtime: ExecutionEnvironmentRuntime,
 ): string[] {
   const argv = buildSshBaseArgv(transport, runtime);
-  argv.push("--", buildRemoteAgentCommand(runtime));
+  argv.push(buildRemoteAgentCommand(runtime));
   return argv;
 }
 
 /**
- * Convenience formatter for logging/auditing: `ssh <args> -- <remoteCommand>`.
+ * Convenience formatter for logging/auditing: `ssh <options> -- <destination> <remoteCommand>`.
  * Contains no secret material (paths and env-var names only).
  */
 export function buildSshCommandString(
