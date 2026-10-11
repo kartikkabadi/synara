@@ -6256,6 +6256,17 @@ describe("AgentGateway", () => {
         headBranch: "fix/created-at-thread-order",
         state: "open",
       });
+      const caller = baseThreads.find((thread) => thread.id === "thread-parent")!;
+      assert.deepInclude(harness.dispatched[1] as unknown as Record<string, unknown>, {
+        type: "thread.turn.start",
+        threadId: "thread-parent",
+        modelSelection: caller.modelSelection,
+        runtimeMode: caller.runtimeMode,
+        interactionMode: caller.interactionMode,
+        reviewTarget: { type: "baseBranch", branch: "main" },
+        dispatchOrigin: "automation",
+        dispatchMode: "queue",
+      });
     }).pipe(Effect.provide(gatewayLayer));
   });
 
