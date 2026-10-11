@@ -19,7 +19,7 @@
   },
   "procedure": {
     "path": "assets/pr-screenshots/theme-packs-178/capture.config.mts",
-    "sha256": "7d13c54d498ecffafe4c5abea7914fbc5008835c077fbf2b88b448114f1a4a63",
+    "sha256": "a363443ae7920a44002aa88dd9677465e6a2d661e78ca143cddd1e90ee7e890c",
     "workingDirectory": "apps/web",
     "command": "bun run vitest run --config ../../assets/pr-screenshots/theme-packs-178/capture.config.mts src/components/ThemePackEditor.browser.tsx",
     "viewportOverride": "Capture overlay changes the ordinary 1120x1000 fixture to 1120x1200, verifies its transformation anchors, and waits for fonts and animations."

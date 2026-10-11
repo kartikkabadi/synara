@@ -28,7 +28,7 @@ export default mergeConfig(
           const before = `    if (label === "Parthenon") await page.screenshot({ path: ${JSON.stringify(resolve(captureDirectory, "before.png"))} });`;
           const after = `    await vi.waitFor(() => expect(document.getAnimations().every(animation => animation.playState !== "running")).toBe(true));
     await document.fonts.ready;
-    await page.screenshot({ path: ${JSON.stringify(captureDirectory)} + (label === "Parthenon" ? "/parthenon.png" : "/attic-valley.png") });`;
+    await page.screenshot({ path: (label === "Parthenon" ? ${JSON.stringify(resolve(captureDirectory, "parthenon.png"))} : ${JSON.stringify(resolve(captureDirectory, "attic-valley.png"))}) });`;
           return {
             code: code
               .replace("page.viewport(1120, 1000)", "page.viewport(1120, 1200)")
