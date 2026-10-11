@@ -37,6 +37,7 @@ import {
   SYNARA_STABLE_HOME_ENV,
   type BetaImportRequest,
 } from "@synara/shared/betaChannel";
+import { repairPrivateTreeSync } from "./privatePathPermissions";
 
 /** Entries that describe this install's live runtime, not user data. */
 const EXCLUDED_STATE_ENTRIES = new Set([
@@ -107,10 +108,11 @@ function copyStateEntries(
   sourceStateDir: string,
   stagedStateDir: string,
   existingStateDir: string,
+  entries: readonly string[] = readdirSync(sourceStateDir),
 ): string[] {
   mkdirSync(stagedStateDir, { recursive: true });
   const copiedEntries: string[] = [];
-  for (const entry of readdirSync(sourceStateDir)) {
+  for (const entry of entries) {
     if (EXCLUDED_STATE_ENTRIES.has(entry)) continue;
     if (STATE_DB_ENTRY_PATTERN.test(entry)) continue;
     if (entry.endsWith(".lifecycle-lock")) continue;
@@ -281,36 +283,51 @@ function commitStagedImport(
   stagedStateDir: string,
   targetStateDir: string,
   copiedEntries: readonly string[],
+  rootImport: {
+    readonly stagedDir: string;
+    readonly targetDir: string;
+    readonly entries: readonly string[];
+  },
+  includeDatabase: boolean,
 ): void {
   mkdirSync(targetStateDir, { recursive: true });
   const backupDir = mkdtempSync(join(resolve(targetStateDir, ".."), ".beta-import-backup-"));
-  const committed: Array<{ name: string; hadPrevious: boolean }> = [];
+  const committed: Array<{ targetPath: string; previousPath: string; hadPrevious: boolean }> = [];
   const entries = [
     ...copiedEntries,
-    ...LIVE_SIDECAR_SUFFIXES.map((suffix) => `state.sqlite${suffix}`),
-    "state.sqlite",
-  ];
+    ...(includeDatabase
+      ? [...LIVE_SIDECAR_SUFFIXES.map((suffix) => `state.sqlite${suffix}`), "state.sqlite"]
+      : []),
+  ].map((name) => ({
+    targetPath: join(targetStateDir, name),
+    previousPath: join(backupDir, `state-${name}`),
+    stagedPath: join(stagedStateDir, name),
+  }));
+  entries.push(
+    ...rootImport.entries.map((name) => ({
+      targetPath: join(rootImport.targetDir, name),
+      previousPath: join(backupDir, `root-${name}`),
+      stagedPath: join(rootImport.stagedDir, name),
+    })),
+  );
 
   try {
-    for (const name of entries) {
-      const targetPath = join(targetStateDir, name);
-      const previousPath = join(backupDir, name);
-      const stagedPath = join(stagedStateDir, name);
+    for (const { targetPath, previousPath, stagedPath } of entries) {
       const hadPrevious = lstatSync(targetPath, { throwIfNoEntry: false }) !== undefined;
       if (hadPrevious) renameSync(targetPath, previousPath);
-      committed.push({ name, hadPrevious });
+      committed.push({ targetPath, previousPath, hadPrevious });
       if (lstatSync(stagedPath, { throwIfNoEntry: false }) !== undefined) {
         renameSync(stagedPath, targetPath);
       }
     }
   } catch (error) {
     const rollbackErrors: string[] = [];
-    for (const { name, hadPrevious } of committed.reverse()) {
+    for (const { targetPath, previousPath, hadPrevious } of committed.reverse()) {
       try {
-        rmSync(join(targetStateDir, name), { recursive: true, force: true });
-        if (hadPrevious) renameSync(join(backupDir, name), join(targetStateDir, name));
+        rmSync(targetPath, { recursive: true, force: true });
+        if (hadPrevious) renameSync(previousPath, targetPath);
       } catch (rollbackError) {
-        rollbackErrors.push(`${name}: ${String(rollbackError)}`);
+        rollbackErrors.push(`${targetPath}: ${String(rollbackError)}`);
       }
     }
     if (rollbackErrors.length > 0) {
@@ -390,9 +407,7 @@ export async function runBetaImportIfRequested(input: {
 
   const sourceStateDir = join(sourceHomeDir, "userdata");
   const sourceDbPath = join(sourceStateDir, "state.sqlite");
-  if (!existsSync(sourceDbPath)) {
-    return finish(false, `stable database not found at ${sourceDbPath}`);
-  }
+  const hasDatabase = existsSync(sourceDbPath);
 
   try {
     if (realpathSync(sourceHomeDir) === realpathSync(input.betaHomeDir)) {
@@ -415,13 +430,40 @@ export async function runBetaImportIfRequested(input: {
     const stagedRoot = mkdtempSync(join(input.betaHomeDir, ".beta-import-"));
     try {
       const stagedStateDir = join(stagedRoot, "userdata");
-      await snapshotStableDatabase(
-        sourceDbPath,
-        join(stagedStateDir, "state.sqlite"),
-        input.latestMigrationId,
+      if (hasDatabase) {
+        await snapshotStableDatabase(
+          sourceDbPath,
+          join(stagedStateDir, "state.sqlite"),
+          input.latestMigrationId,
+        );
+      }
+      const copiedEntries = existsSync(sourceStateDir)
+        ? copyStateEntries(sourceStateDir, stagedStateDir, input.stateDir)
+        : [];
+      const rootEntries = ["skills", "mcp"].filter(
+        (name) => lstatSync(join(sourceHomeDir, name), { throwIfNoEntry: false }) !== undefined,
       );
-      const copiedEntries = copyStateEntries(sourceStateDir, stagedStateDir, input.stateDir);
-      commitStagedImport(stagedStateDir, input.stateDir, copiedEntries);
+      const copiedRootEntries = copyStateEntries(
+        sourceHomeDir,
+        stagedRoot,
+        input.betaHomeDir,
+        rootEntries,
+      );
+      for (const name of copiedRootEntries) repairPrivateTreeSync(join(stagedRoot, name));
+      if (!hasDatabase && copiedEntries.length === 0 && copiedRootEntries.length === 0) {
+        throw new Error("Stable has no database or setup assets to import.");
+      }
+      commitStagedImport(
+        stagedStateDir,
+        input.stateDir,
+        copiedEntries,
+        {
+          stagedDir: stagedRoot,
+          targetDir: input.betaHomeDir,
+          entries: copiedRootEntries,
+        },
+        hasDatabase,
+      );
     } finally {
       rmSync(stagedRoot, { recursive: true, force: true });
     }

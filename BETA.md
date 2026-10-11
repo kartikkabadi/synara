@@ -232,7 +232,13 @@ environment variables, so a demo never touches a real `~/.synara`,
   `userData` base, respectively; overriding `HOME` isolates the Electron profile exactly like
   `scripts/verify-packaged-desktop-startup.ts` does.
 
-The import copies settings, provider secrets, and a database snapshot. It never
+The import copies settings, provider secrets, root-level skills and MCP setup,
+and a database snapshot when Stable has one. If Stable has setup assets but no
+database yet, it copies those assets and keeps any existing Beta database and
+sidecars unchanged. Existing Beta-only files inside skills and MCP directories
+remain; all copied setup files are staged and checked for links before any swap.
+If a commit fails, setup files and database changes share the same rollback.
+It never
 copies logs, diagnostics queues, runtime files, other import markers, database
 sidecars (`state.sqlite-wal`/`-shm`/`-journal`), or `*.lifecycle-lock`
 directories — a leaked lock directory would make beta refuse to start while the

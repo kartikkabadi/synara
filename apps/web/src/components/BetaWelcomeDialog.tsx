@@ -126,7 +126,7 @@ export function BetaWelcomeDialog() {
     imported === true
       ? {
           icon: "circle-check",
-          text: "Your chats and settings came over from Synara.",
+          text: "Your Synara data came over.",
           className: "bg-[color-mix(in_srgb,var(--beta-accent)_12%,transparent)] text-foreground",
           iconClassName: "text-[var(--beta-accent)]",
         }

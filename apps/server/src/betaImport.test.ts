@@ -11,6 +11,7 @@ import {
   rmSync,
   symlinkSync,
   writeFileSync,
+  statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -130,6 +131,91 @@ describe("runBetaImportIfRequested", () => {
     expect(existsSync(join(betaState, "server-runtime.json"))).toBe(false);
     expect(existsSync(join(betaState, "environment-id"))).toBe(false);
     expect(existsSync(join(betaState, "device-boot-ownership.json"))).toBe(false);
+  });
+
+  it("stages root-level skills and MCP setup with the snapshot while keeping Beta-only assets", async () => {
+    const stableHome = await seedStableHome(makeRoot());
+    const betaHome = join(stableHome, "..", ".synara-beta");
+    for (const name of ["skills", "mcp"]) {
+      mkdirSync(join(stableHome, name), { recursive: true });
+      mkdirSync(join(betaHome, name), { recursive: true });
+      writeFileSync(join(stableHome, name, "shared.json"), "synthetic-stable");
+      writeFileSync(join(betaHome, name, "shared.json"), "synthetic-old");
+      writeFileSync(join(betaHome, name, "beta-only.json"), "synthetic-beta-only");
+    }
+    writeFileSync(join(stableHome, "unrelated-operator-file"), "must stay local");
+    writeMarker(betaHome, stableHome);
+    expect(await run({ betaHomeDir: betaHome, stateDir: join(betaHome, "userdata") })).toEqual({
+      consumed: true,
+      ok: true,
+    });
+    for (const name of ["skills", "mcp"]) {
+      expect(readFileSync(join(betaHome, name, "shared.json"), "utf8")).toBe("synthetic-stable");
+      expect(readFileSync(join(betaHome, name, "beta-only.json"), "utf8")).toBe(
+        "synthetic-beta-only",
+      );
+      expect(readFileSync(join(stableHome, name, "shared.json"), "utf8")).toBe("synthetic-stable");
+      if (process.platform !== "win32")
+        expect(statSync(join(betaHome, name, "shared.json")).mode & 0o077).toBe(0);
+    }
+    expect(existsSync(join(betaHome, "unrelated-operator-file"))).toBe(false);
+    expect(existsSync(join(betaHome, "userdata", "state.sqlite"))).toBe(true);
+  });
+
+  it.each(["skills", "mcp"])(
+    "rejects linked %s setup before changing Beta's database or setup",
+    async (name) => {
+      const stableHome = await seedStableHome(makeRoot());
+      const betaHome = join(stableHome, "..", ".synara-beta");
+      const betaState = join(betaHome, "userdata");
+      mkdirSync(betaState, { recursive: true });
+      mkdirSync(join(stableHome, name));
+      mkdirSync(join(betaHome, name));
+      writeFileSync(join(betaState, "state.sqlite"), "synthetic-original-beta-database");
+      writeFileSync(join(betaHome, name, "keep.json"), "synthetic-original-beta-setup");
+      symlinkSync(
+        join(stableHome, "userdata", "settings.json"),
+        join(stableHome, name, "linked.json"),
+      );
+      writeMarker(betaHome, stableHome);
+      const outcome = await run({ betaHomeDir: betaHome, stateDir: betaState });
+      expect(outcome.ok).toBe(false);
+      expect(outcome.error).toContain("linked state entry");
+      expect(readFileSync(join(betaState, "state.sqlite"), "utf8")).toBe(
+        "synthetic-original-beta-database",
+      );
+      expect(readFileSync(join(betaHome, name, "keep.json"), "utf8")).toBe(
+        "synthetic-original-beta-setup",
+      );
+      expect(existsSync(join(betaHome, name, "linked.json"))).toBe(false);
+    },
+  );
+
+  it("imports setup without a Stable database and preserves the existing Beta database and WAL", async () => {
+    const root = makeRoot();
+    const stableHome = join(root, ".synara");
+    const betaHome = join(root, ".synara-beta");
+    const betaState = join(betaHome, "userdata");
+    mkdirSync(join(stableHome, "skills"), { recursive: true });
+    mkdirSync(join(stableHome, "userdata"));
+    mkdirSync(betaState, { recursive: true });
+    writeFileSync(join(stableHome, "skills", "SKILL.md"), "synthetic setup");
+    writeFileSync(join(stableHome, "userdata", "settings.json"), '{"theme":"dark"}');
+    writeFileSync(join(betaState, "state.sqlite"), "synthetic-original-beta-database");
+    writeFileSync(join(betaState, "state.sqlite-wal"), "synthetic-original-beta-wal");
+    writeMarker(betaHome, stableHome);
+    expect(await run({ betaHomeDir: betaHome, stateDir: betaState })).toEqual({
+      consumed: true,
+      ok: true,
+    });
+    expect(readFileSync(join(betaState, "state.sqlite"), "utf8")).toBe(
+      "synthetic-original-beta-database",
+    );
+    expect(readFileSync(join(betaState, "state.sqlite-wal"), "utf8")).toBe(
+      "synthetic-original-beta-wal",
+    );
+    expect(readFileSync(join(betaHome, "skills", "SKILL.md"), "utf8")).toBe("synthetic setup");
+    expect(readFileSync(join(betaState, "settings.json"), "utf8")).toContain("dark");
   });
 
   it("keeps the existing Beta database and settings if a Stable secret is linked", async () => {
@@ -277,7 +363,7 @@ describe("runBetaImportIfRequested", () => {
     expect(result.error).toContain("beta home");
   });
 
-  it("reports a missing stable database without crashing startup", async () => {
+  it("reports an empty Stable home without crashing startup or inventing an import", async () => {
     const root = makeRoot();
     const stableHome = join(root, ".synara");
     mkdirSync(join(stableHome, "userdata"), { recursive: true });
@@ -290,7 +376,7 @@ describe("runBetaImportIfRequested", () => {
     });
     expect(outcome.consumed).toBe(true);
     expect(outcome.ok).toBe(false);
-    expect(outcome.error).toContain("stable database not found");
+    expect(outcome.error).toContain("no database or setup assets");
   });
 
   it("copies no state entries when the database snapshot fails", async () => {
