@@ -797,9 +797,7 @@ describe("runBetaImportIfRequested", () => {
       const siblingPath = join(siblingHome, "worktree");
       const expectedSiblingPath =
         realpathSync(siblingHome) === realpathSync(stableHome) ? null : siblingPath;
-      stableDb
-        .prepare("INSERT INTO projection_threads VALUES (?, ?)")
-        .run(sourcePath, siblingPath);
+      stableDb.prepare("INSERT INTO projection_threads VALUES (?, ?)").run(sourcePath, siblingPath);
       for (const eventType of ["thread.created", "thread.meta-updated"]) {
         stableDb
           .prepare("INSERT INTO orchestration_events VALUES (?, ?)")
@@ -835,6 +833,43 @@ describe("runBetaImportIfRequested", () => {
       }
     },
   );
+
+  it("clears worktree pointers that traverse Stable's home through an outward link", async () => {
+    const root = makeRoot();
+    const stableHome = await seedStableHome(root);
+    const externalWorktree = join(root, "external-worktree");
+    mkdirSync(externalWorktree);
+    symlinkSync(externalWorktree, join(stableHome, "linked-worktree"), "dir");
+    const sourceAlias = join(root, "stable-alias");
+    symlinkSync(stableHome, sourceAlias, "dir");
+    const sourcePath = join(sourceAlias, "linked-worktree");
+    const { DatabaseSync } = await import("node:sqlite");
+    const stableDb = new DatabaseSync(join(stableHome, "userdata", "state.sqlite"));
+    stableDb.exec("CREATE TABLE projection_threads (worktree_path TEXT)");
+    stableDb.exec("CREATE TABLE orchestration_events (event_type TEXT, payload_json TEXT)");
+    stableDb.prepare("INSERT INTO projection_threads VALUES (?)").run(sourcePath);
+    stableDb
+      .prepare("INSERT INTO orchestration_events VALUES (?, ?)")
+      .run("thread.created", JSON.stringify({ worktreePath: sourcePath }));
+    stableDb.close();
+    const betaHome = join(root, ".synara-beta");
+    const betaState = join(betaHome, "userdata");
+    writeMarker(betaHome, sourceAlias);
+
+    expect((await run({ betaHomeDir: betaHome, stateDir: betaState })).ok).toBe(true);
+    const betaDb = new DatabaseSync(join(betaState, "state.sqlite"), { readOnly: true });
+    try {
+      expect(betaDb.prepare("SELECT * FROM projection_threads").get()).toEqual({
+        worktree_path: null,
+      });
+      const event = betaDb.prepare("SELECT payload_json FROM orchestration_events").get() as {
+        payload_json: string;
+      };
+      expect(JSON.parse(event.payload_json)).toEqual({ worktreePath: null });
+    } finally {
+      betaDb.close();
+    }
+  });
 
   it("fails without touching beta when a skill file is linked", async () => {
     const stableHome = await seedStableHome(makeRoot());

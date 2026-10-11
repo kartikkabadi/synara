@@ -30,7 +30,7 @@ import {
 } from "node:fs";
 import * as asyncFs from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { Effect } from "effect";
@@ -380,14 +380,22 @@ async function clearSourceHomeWorktreePaths(
     const canonicalPaths = new Map<string, string>();
     const pointsIntoSourceHome = async (candidate: string): Promise<boolean> => {
       if (!isAbsolute(candidate)) return false;
-      let canonicalPath = canonicalPaths.get(candidate);
-      if (canonicalPath === undefined) {
-        canonicalPath = await Effect.runPromise(
-          realpathNearestExisting(candidate).pipe(Effect.provide(NodeServices.layer)),
-        );
-        canonicalPaths.set(candidate, canonicalPath);
+      let current = resolve(candidate);
+      while (true) {
+        let canonicalPath = canonicalPaths.get(current);
+        if (canonicalPath === undefined) {
+          canonicalPath = await Effect.runPromise(
+            realpathNearestExisting(current).pipe(Effect.provide(NodeServices.layer)),
+          );
+          canonicalPaths.set(current, canonicalPath);
+        }
+        if (isContainedPath(sourceHomeDir, canonicalPath)) return true;
+        // An outward link still traverses Stable's home. Inspect its ancestors
+        // so Beta never retains a dependency on that home's paths or aliases.
+        const parent = dirname(current);
+        if (parent === current) return false;
+        current = parent;
       }
-      return isContainedPath(sourceHomeDir, canonicalPath);
     };
     database.exec("BEGIN");
     for (const table of ["threads", "projection_threads"] as const) {

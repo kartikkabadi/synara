@@ -239,8 +239,9 @@ environment variables, so a demo never touches a real `~/.synara`,
 
 The import copies settings, provider secrets, user skills, MCP client credentials,
 and a database snapshot. Worktree pointers into Stable's home are cleared from
-thread state and replay events while branch names and worktrees outside that home
-remain. It never copies pending MCP pairings, environment identity, device ownership
+thread state and replay events, including paths through home aliases or outward
+links. Branch names and independently addressed worktrees outside that home remain.
+It never copies pending MCP pairings, environment identity, device ownership
 claims, logs, diagnostics queues, runtime files, other import markers, database
 sidecars (`state.sqlite-wal`/`-shm`/`-journal`), or `*.lifecycle-lock`
 directories — a leaked lock directory would make beta refuse to start while the
