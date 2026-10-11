@@ -33,6 +33,16 @@ function fixture() {
       };
     },
     reportCaptureFailure: vi.fn(),
+    reportCaptureReady: vi.fn(),
+    shouldOfferSave: vi.fn(async () => true),
+    trackSecret: vi.fn(),
+    askSave: vi.fn(
+      async (): Promise<{ choice: "save" | "dismiss"; explicit: boolean }> => ({
+        choice: "dismiss",
+        explicit: false,
+      }),
+    ),
+    saveCaptured: vi.fn(async () => {}),
   };
   const capture = new BrowserVaultCapture(vault as unknown as BrowserVault);
   return {
@@ -94,6 +104,110 @@ describe("native credential capture lifecycle", () => {
     unregister();
     expect(page!.isClosed()).toBe(true);
     await expect(context.newCDPSession(page!)).rejects.toThrow("unavailable");
+    await f.capture.dispose();
+  });
+});
+
+interface CaptureDeps {
+  requestSave(input: {
+    page: unknown;
+    origin: string;
+    username: string;
+    mode: string;
+  }): Promise<"save" | "dismiss">;
+  vaultCallAtOrigin(
+    session: unknown,
+    origin: string,
+    action: string,
+    payload: Record<string, unknown>,
+  ): Promise<unknown>;
+}
+
+describe("capture save provenance", () => {
+  async function installSaveFlow(askSaveResult: { choice: "save" | "dismiss"; explicit: boolean }) {
+    const f = fixture();
+    f.vault.askSave.mockResolvedValue(askSaveResult);
+    f.update({ settings: { offerSave: true, autosave: true, agentUse: true } });
+    await vi.waitFor(() => expect(mocks.install).toHaveBeenCalled());
+    const [context, deps] = mocks.install.mock.calls[0] as [CaptureContextShim, CaptureDeps];
+    const runtime = {
+      threadId: "thread-1",
+      webContents: { isDestroyed: () => false },
+    } as unknown as BrowserAutomationVisibleRuntime;
+    f.capture.register(runtime);
+    f.capture.noteAgentActivity(runtime);
+    return { f, context, deps };
+  }
+
+  it("keeps an agent-originated capture pending-owned and deduped under autosave", async () => {
+    const { f, context, deps } = await installSaveFlow({ choice: "save", explicit: false });
+    const page = context.pages()[0]!;
+    await expect(
+      deps.requestSave({ page, origin: "https://site.test", username: "u", mode: "save" }),
+    ).resolves.toBe("save");
+    await deps.vaultCallAtOrigin(page, "https://site.test", "save", {
+      username: "u",
+      password: "synthetic-agent-secret",
+      label: "l",
+    });
+    expect(f.vault.saveCaptured).toHaveBeenCalledWith(
+      "https://site.test",
+      {
+        username: "u",
+        password: "synthetic-agent-secret",
+        label: "l",
+        deferToPending: true,
+      },
+      "agent",
+    );
+    await f.capture.dispose();
+  });
+
+  it("commits an explicitly approved capture as user-owned even after agent activity", async () => {
+    const { f, context, deps } = await installSaveFlow({ choice: "save", explicit: true });
+    const page = context.pages()[0]!;
+    await deps.requestSave({ page, origin: "https://site.test", username: "u", mode: "save" });
+    await deps.vaultCallAtOrigin(page, "https://site.test", "save", {
+      username: "u",
+      password: "synthetic-agent-secret",
+      label: "l",
+    });
+    expect(f.vault.saveCaptured).toHaveBeenCalledWith(
+      "https://site.test",
+      {
+        username: "u",
+        password: "synthetic-agent-secret",
+        label: "l",
+        deferToPending: false,
+      },
+      "user",
+    );
+    await f.capture.dispose();
+  });
+  it("does not reuse approval for a different captured username", async () => {
+    const { f, context, deps } = await installSaveFlow({ choice: "save", explicit: true });
+    const page = context.pages()[0]!;
+    await deps.requestSave({
+      page,
+      origin: "https://site.test",
+      username: "approved",
+      mode: "save",
+    });
+    await deps.vaultCallAtOrigin(page, "https://site.test", "save", {
+      username: "different",
+      password: "synthetic-agent-secret",
+      label: "l",
+    });
+    expect(f.vault.saveCaptured).toHaveBeenCalledWith(
+      "https://site.test",
+      {
+        username: "different",
+        password: "synthetic-agent-secret",
+        label: "l",
+        deferToPending: true,
+      },
+      "agent",
+    );
     await f.capture.dispose();
   });
 });

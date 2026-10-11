@@ -8,7 +8,7 @@ import { BrowserVaultCapture } from "./browserVaultCapture";
 // sensor's context, page, or CDP surface must exercise the Electron adapter.
 function fixture() {
   const saveCaptured = vi.fn(async () => {});
-  const askSave = vi.fn(async () => "save" as const);
+  const askSave = vi.fn(async () => ({ choice: "save" as const, explicit: true }));
   const trackSecret = vi.fn();
   const reportCaptureReady = vi.fn();
   const reportCaptureFailure = vi.fn();
@@ -107,7 +107,7 @@ describe("BrowserVaultCapture with the installed BetterWright sensor", () => {
   it("keeps a native save prompt alive beyond the upstream 30-second default", async () => {
     vi.useFakeTimers();
     const f = fixture();
-    let answer!: (choice: "save") => void;
+    let answer!: (choice: { choice: "save"; explicit: boolean }) => void;
     f.askSave.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
@@ -138,7 +138,7 @@ describe("BrowserVaultCapture with the installed BetterWright sensor", () => {
         mode: "save",
       });
       await vi.advanceTimersByTimeAsync(90_000);
-      answer("save");
+      answer({ choice: "save", explicit: true });
       await vi.waitFor(() => expect(f.saveCaptured).toHaveBeenCalledOnce());
       expect(f.saveCaptured).toHaveBeenCalledWith(
         "https://login.example",
@@ -146,7 +146,7 @@ describe("BrowserVaultCapture with the installed BetterWright sensor", () => {
           username: "synthetic-user",
           password: "synthetic-only",
           label: "login.example",
-          deferToPending: true,
+          deferToPending: false,
         },
         "user",
       );

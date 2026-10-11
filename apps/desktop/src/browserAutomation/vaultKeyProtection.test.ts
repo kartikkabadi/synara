@@ -38,6 +38,37 @@ function keyStore(): VaultKeyStore {
 }
 
 describe("vault key protection", { timeout: VAULT_TEST_TIMEOUT_MS }, () => {
+  it("erases allocated key material when initialization fails", async () => {
+    const home = await directory();
+    const keys = new VaultKeyProtection(home, {
+      available: async () => {
+        throw new Error("synthetic OS store unavailable");
+      },
+      encrypt: () => {
+        throw new Error("unexpected encrypt");
+      },
+      decrypt: () => {
+        throw new Error("unexpected decrypt");
+      },
+    });
+    let current: Buffer | null = null;
+    let allocated: Buffer | undefined;
+    // Observe the owned buffer so this proves erasure, not just rejected access.
+    Object.defineProperty(keys, "key", {
+      get: () => current,
+      set: (value: Buffer | null) => {
+        current = value;
+        if (value) allocated = value;
+      },
+      configurable: true,
+    });
+    await expect(keys.provide()).rejects.toThrow("synthetic OS store unavailable");
+    expect(allocated).toBeInstanceOf(Buffer);
+    expect(allocated).toEqual(Buffer.alloc(32));
+    expect(current).toBeNull();
+    keys.dispose();
+  });
+
   it("requires setup without OS storage, persists only a wrapped key, and locks on restart", async () => {
     const home = await directory();
     const keys = new VaultKeyProtection(home);

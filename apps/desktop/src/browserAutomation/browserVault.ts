@@ -26,6 +26,10 @@ const Preferences = Schema.Struct({
 type Source = typeof Source.Type;
 type Payload = Parameters<LocalCredentialVault["handleRequest"]>[1];
 type Action = Parameters<LocalCredentialVault["handleRequest"]>[0];
+interface BrowserVaultSaveChoice {
+  choice: "save" | "dismiss";
+  explicit: boolean;
+}
 interface PageOrigin {
   getURL(): string;
   isDestroyed(): boolean;
@@ -320,11 +324,11 @@ export class BrowserVault {
     await this.request("save", payload, origin, source);
   }
 
-  async askSave(input: Omit<BrowserVaultSavePrompt, "id">): Promise<"save" | "dismiss"> {
+  async askSave(input: Omit<BrowserVaultSavePrompt, "id">): Promise<BrowserVaultSaveChoice> {
     await this.ready;
-    if (!this.settings.offerSave) return "dismiss";
-    if (this.settings.autosave) return "save";
-    if (this.pending.size >= 8) return "dismiss";
+    if (!this.settings.offerSave) return { choice: "dismiss", explicit: false };
+    if (this.settings.autosave) return { choice: "save", explicit: false };
+    if (this.pending.size >= 8) return { choice: "dismiss", explicit: false };
     const id = randomUUID();
     return new Promise((resolve) => {
       const timer = setTimeout(
@@ -335,7 +339,7 @@ export class BrowserVault {
         prompt: { ...input, id },
         resolve: (choice) => {
           clearTimeout(timer);
-          resolve(choice);
+          resolve({ choice, explicit: true });
         },
       });
       this.changed();

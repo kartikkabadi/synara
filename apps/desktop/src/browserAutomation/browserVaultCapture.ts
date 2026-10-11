@@ -33,6 +33,7 @@ class NativeCapturePage extends EventEmitter implements CapturePageShim {
   readonly id = randomUUID();
   closed = false;
   lastAgentActivity = 0;
+  saveApproval: { origin: string; username: string } | undefined;
   constructor(readonly runtime: BrowserAutomationVisibleRuntime) {
     super();
   }
@@ -41,6 +42,7 @@ class NativeCapturePage extends EventEmitter implements CapturePageShim {
   }
   close(): void {
     this.closed = true;
+    this.saveApproval = undefined;
     this.emit("close");
   }
 }
@@ -113,10 +115,18 @@ export class BrowserVaultCapture {
               typeof label !== "string"
             )
               throw new Error("Invalid captured login.");
+            const approved =
+              session.saveApproval?.origin === origin && session.saveApproval.username === username;
+            session.saveApproval = undefined;
+            const source = approved
+              ? "user"
+              : Date.now() - session.lastAgentActivity < 5000
+                ? "agent"
+                : "user";
             await this.vault.saveCaptured(
               origin,
-              { username, password, label, deferToPending: true },
-              Date.now() - session.lastAgentActivity < 5000 ? "agent" : "user",
+              { username, password, label, deferToPending: !approved },
+              source,
             );
             return {};
           },
@@ -125,8 +135,22 @@ export class BrowserVaultCapture {
           lastModelActivity: () => Number.NaN,
           promptTtlMs: BROWSER_VAULT_PROMPT_TTL_MS,
           shouldCapture: (input) => this.vault.shouldOfferSave(input),
-          requestSave: ({ origin, username, mode }) =>
-            this.vault.askSave({ origin, username, mode: mode === "update" ? "update" : "save" }),
+          requestSave: async ({ page, origin, username, mode }) => {
+            if (page instanceof NativeCapturePage) page.saveApproval = undefined;
+            const result = await this.vault.askSave({
+              origin,
+              username,
+              mode: mode === "update" ? "update" : "save",
+            });
+            if (
+              page instanceof NativeCapturePage &&
+              !page.isClosed() &&
+              result.choice === "save" &&
+              result.explicit
+            )
+              page.saveApproval = { origin, username };
+            return result.choice;
+          },
           matchMode: "exact-origin",
           onError: () => this.vault.reportCaptureFailure(),
           onReady: () => this.vault.reportCaptureReady(),

@@ -299,7 +299,7 @@ describe("browser vault", { timeout: VAULT_TEST_TIMEOUT_MS }, () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     const pending = (await vault.snapshot()).pending[0]!;
     vault.respond({ id: pending.id, save: true });
-    expect(await prompt).toBe("save");
+    expect(await prompt).toEqual({ choice: "save", explicit: true });
     await vault.saveCaptured(origin, { username: "human", password: "original" }, "user");
     expect(await vault.shouldOfferSave({ origin, username: "human", password: "original" })).toBe(
       false,
@@ -320,7 +320,7 @@ describe("browser vault", { timeout: VAULT_TEST_TIMEOUT_MS }, () => {
     const dismissed = vault.askSave({ origin, username: "human", mode: "update" });
     await new Promise((resolve) => setTimeout(resolve, 0));
     await vault.configure({ agentUse: true, offerSave: false, autosave: false });
-    expect(await dismissed).toBe("dismiss");
+    expect(await dismissed).toEqual({ choice: "dismiss", explicit: true });
     await vault.remove(id);
     expect((await vault.snapshot()).logins).toEqual([]);
     vault.dispose();

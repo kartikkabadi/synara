@@ -95,7 +95,10 @@ export class VaultKeyProtection {
         this.key = null;
       }
     });
-    void this.ready.catch(() => {});
+    void this.ready.catch(() => {
+      this.key?.fill(0);
+      this.key = null;
+    });
   }
 
   private async load(): Promise<void> {

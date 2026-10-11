@@ -398,3 +398,10 @@ Synthetic reader tests use an explicitly injected disposable home and key
 material. They do not establish successful import from a real browser profile,
 actual Keychain access, or a packaged/signed app. The patch keeps the current
 SDK version and current host-target, cancellation, and network safeguards.
+
+The browser-stack repair also distinguishes an explicit save approval from
+configured autosave. Explicit approval belongs to the matching page, origin,
+and username and is consumed by its save; autosaved agent captures remain
+pending. Failed vault initialization erases its allocated key buffer. A
+provenance write failure retains already committed credentials rather than
+risking deletion of an existing login.
