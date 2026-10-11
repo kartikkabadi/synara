@@ -218,6 +218,8 @@ When due, the thread returns to recent activity and Synara shows a reminder usin
 your notification settings. If Synara and its server are closed, the overdue
 reminder is recovered when they start again.
 
+Creating or opening a PR through a chat's Git action, or explicitly associating a PR through the agent tool, requests an automatic review in that chat. It uses the chat's current provider, model, permissions, and normal turn admission. Repeating the same PR/base association does not start another review; ordinary commit and push actions do not request one. Review scheduling is best-effort and does not undo a successful Git action or association. You can still request a review manually.
+
 In Stable and Beta, **Auto-fix CI** in the Environment panel's pull request menu watches open PRs
 for this chat, including other PRs in its stack. One chat can own the active watch for a
 PR. A paused watch releases ownership; resuming it requires that no other chat owns it.
