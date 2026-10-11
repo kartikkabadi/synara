@@ -18,7 +18,7 @@
   vulnerabilities or exposed credentials.
 
 Please do not include API keys, access tokens, browser cookies, private source
-code, or unredacted provider transcripts.
+code, personal data, or unredacted provider transcripts.
 
 ## What to include
 
