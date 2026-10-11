@@ -374,7 +374,8 @@ async function clearSourceHomeWorktreePaths(
     // A path inside the source home is the resolved home plus a separator
     // (or the home itself); a sibling like `<home>-backup` must not match.
     const prefix = sourceHomeDir.endsWith(sep) ? sourceHomeDir : `${sourceHomeDir}${sep}`;
-    const likePrefix = `${prefix.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+    // Keep POSIX sibling paths case-sensitive; Windows paths ignore ASCII case.
+    const pathCollation = process.platform === "win32" ? "NOCASE" : "BINARY";
     for (const table of ["threads", "projection_threads"] as const) {
       if (!tables.has(table)) continue;
       const columns = new Set(
@@ -393,9 +394,11 @@ async function clearSourceHomeWorktreePaths(
       for (const column of nullables) {
         database
           .prepare(
-            `UPDATE ${table} SET ${column} = NULL WHERE ${column} = ? OR ${column} LIKE ? ESCAPE '\\'`,
+            `UPDATE ${table} SET ${column} = NULL
+             WHERE ${column} = ? COLLATE ${pathCollation}
+                OR substr(${column}, 1, length(?)) = ? COLLATE ${pathCollation}`,
           )
-          .run(sourceHomeDir, likePrefix);
+          .run(sourceHomeDir, prefix, prefix);
       }
     }
     // Replayed canonical events must not restore pointers removed above.
@@ -406,10 +409,10 @@ async function clearSourceHomeWorktreePaths(
             `UPDATE orchestration_events
              SET payload_json = json_set(payload_json, '$.${key}', NULL)
              WHERE event_type IN ('thread.created', 'thread.meta-updated')
-               AND (json_extract(payload_json, '$.${key}') = ?
-                    OR json_extract(payload_json, '$.${key}') LIKE ? ESCAPE '\\')`,
+               AND (json_extract(payload_json, '$.${key}') = ? COLLATE ${pathCollation}
+                    OR substr(json_extract(payload_json, '$.${key}'), 1, length(?)) = ? COLLATE ${pathCollation})`,
           )
-          .run(sourceHomeDir, likePrefix);
+          .run(sourceHomeDir, prefix, prefix);
       }
     }
   } finally {

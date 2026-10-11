@@ -779,6 +779,56 @@ describe("runBetaImportIfRequested", () => {
     ]);
   });
 
+  it.skipIf(process.platform === "win32")(
+    "preserves differently cased sibling worktrees in projections and replay events",
+    async () => {
+      const root = makeRoot();
+      const stableHome = await seedStableHome(root);
+      const { DatabaseSync } = await import("node:sqlite");
+      const stableDb = new DatabaseSync(join(stableHome, "userdata", "state.sqlite"));
+      stableDb.exec(
+        "CREATE TABLE projection_threads (worktree_path TEXT, associated_worktree_path TEXT)",
+      );
+      stableDb.exec("CREATE TABLE orchestration_events (event_type TEXT, payload_json TEXT)");
+      const sourcePath = join(stableHome, "worktree");
+      const siblingPath = join(root, ".SYNARA", "worktree");
+      stableDb
+        .prepare("INSERT INTO projection_threads VALUES (?, ?)")
+        .run(sourcePath, siblingPath);
+      for (const eventType of ["thread.created", "thread.meta-updated"]) {
+        stableDb
+          .prepare("INSERT INTO orchestration_events VALUES (?, ?)")
+          .run(
+            eventType,
+            JSON.stringify({ worktreePath: sourcePath, associatedWorktreePath: siblingPath }),
+          );
+      }
+      stableDb.close();
+      const betaHome = join(root, ".synara-beta");
+      const betaState = join(betaHome, "userdata");
+      writeMarker(betaHome, stableHome);
+
+      expect((await run({ betaHomeDir: betaHome, stateDir: betaState })).ok).toBe(true);
+
+      const betaDb = new DatabaseSync(join(betaState, "state.sqlite"), { readOnly: true });
+      try {
+        expect(betaDb.prepare("SELECT * FROM projection_threads").get()).toEqual({
+          worktree_path: null,
+          associated_worktree_path: siblingPath,
+        });
+        const events = betaDb
+          .prepare("SELECT payload_json FROM orchestration_events")
+          .all() as Array<{ payload_json: string }>;
+        expect(events.map((event) => JSON.parse(event.payload_json))).toEqual([
+          { worktreePath: null, associatedWorktreePath: siblingPath },
+          { worktreePath: null, associatedWorktreePath: siblingPath },
+        ]);
+      } finally {
+        betaDb.close();
+      }
+    },
+  );
+
   it("fails without touching beta when a skill file is linked", async () => {
     const stableHome = await seedStableHome(makeRoot());
     mkdirSync(join(stableHome, "skills", "linked-skill"), { recursive: true });
