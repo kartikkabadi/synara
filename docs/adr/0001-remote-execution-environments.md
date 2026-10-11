@@ -55,7 +55,7 @@ The contract expresses this as `ExecutionProfile` (`packages/contracts/src/orche
 
 - `environmentId` — which `ExecutionEnvironmentDescriptor` the thread runs on (host-level: transport, runtime, capabilities).
 - `providerKind` — which provider binary runs there.
-- `remoteWorkspaceRoot` — the path scope: the absolute remote checkout the thread is anchored to. This is per-thread, not per-host, so it lives on the profile rather than on the environment runtime (`ExecutionEnvironmentRuntime` keeps host-level `remoteBinaryPath`, `forwardedEnvNames`, and `adapterProtocolVersion`).
+- `remoteWorkspaceRoot` — the path scope: the absolute remote checkout the thread is anchored to. This is per-thread, not per-host, so it lives on the profile rather than on the environment runtime (`ExecutionEnvironmentRuntime` keeps host-level `remoteBinaryPath` and `adapterProtocolVersion`). The contract deliberately has no generic env-var forwarding field: forwarded values are commonly credentials, so anything crossing the remote boundary must be modeled later as typed references into the credential/secret system (explicit target environment, consumer, scope, and audit semantics) or a distinct non-secret allowlist contract.
 - `repositoryRevision` (optional) — the revision the workspace is expected to be at, for repo-identity checks at probe time.
 - `bootstrapImage` (optional) — reproducible setup image/template for environments that are provisioned rather than pre-existing.
 - `adapterProtocolVersion` (optional) — per-thread override of the adapter/protocol version negotiated with the remote provider process.

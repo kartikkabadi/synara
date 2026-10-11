@@ -50,7 +50,17 @@ export const ExecutionEnvironmentSshTransport = Schema.Struct({
     Schema.withDecodingDefault(() => "known-hosts" as const),
   ),
   hostKeyFingerprint: Schema.optional(TrimmedNonEmptyString),
-});
+}).check(
+  Schema.makeFilter((transport) =>
+    transport.hostKeyVerification === "pinned-fingerprint" &&
+    transport.hostKeyFingerprint === undefined
+      ? {
+          path: ["hostKeyFingerprint"],
+          message: "hostKeyFingerprint is required when hostKeyVerification is pinned-fingerprint",
+        }
+      : undefined,
+  ),
+);
 export type ExecutionEnvironmentSshTransport = typeof ExecutionEnvironmentSshTransport.Type;
 
 export const ExecutionEnvironmentRuntime = Schema.Struct({
@@ -65,9 +75,9 @@ export const ExecutionEnvironmentRuntime = Schema.Struct({
   installPath: Schema.optional(TrimmedNonEmptyString),
   // ssh-process runtimes: provider binary on the remote host; default is a
   // remote PATH lookup. Per-thread workspace scope lives in ExecutionProfile.
+  // Deliberately no generic env forwarding: anything crossing the remote
+  // boundary must go through explicitly scoped credential/config contracts.
   remoteBinaryPath: Schema.optional(TrimmedNonEmptyString),
-  // Env-var names (never values) forwarded to the remote provider process.
-  forwardedEnvNames: Schema.Array(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => [])),
   adapterProtocolVersion: Schema.optional(TrimmedNonEmptyString),
 });
 export type ExecutionEnvironmentRuntime = typeof ExecutionEnvironmentRuntime.Type;
@@ -128,5 +138,22 @@ export const ExecutionEnvironmentDescriptor = Schema.Struct({
   runtime: Schema.optional(ExecutionEnvironmentRuntime),
   transport: Schema.optional(ExecutionEnvironmentSshTransport),
   connection: Schema.optional(ExecutionEnvironmentConnection),
-});
+}).check(
+  Schema.makeFilter((descriptor) => {
+    const runtimeType = descriptor.runtime?.runtimeType ?? "local";
+    if (runtimeType === "local" && descriptor.transport !== undefined) {
+      return {
+        path: ["transport"],
+        message: "transport must be absent for local runtimes",
+      };
+    }
+    if (runtimeType !== "local" && descriptor.transport === undefined) {
+      return {
+        path: ["transport"],
+        message: `transport is required when runtimeType is ${runtimeType}`,
+      };
+    }
+    return undefined;
+  }),
+);
 export type ExecutionEnvironmentDescriptor = typeof ExecutionEnvironmentDescriptor.Type;

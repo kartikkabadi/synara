@@ -45,7 +45,7 @@ const executionProfile = Schema.decodeUnknownSync(ExecutionProfile)({
 });
 
 const remoteCommand = buildRemoteCommand(
-  { runtimeType: "ssh-process", supervisor: "none", forwardedEnvNames: [] },
+  { runtimeType: "ssh-process", supervisor: "none" },
   executionProfile,
 );
 

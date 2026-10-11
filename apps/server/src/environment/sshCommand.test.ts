@@ -114,22 +114,9 @@ describe("buildSshArgv", () => {
     );
   });
 
-  it("forwards env names via SendEnv without values", () => {
-    const argv = buildSshArgv(
-      transport(),
-      runtime({ forwardedEnvNames: ["OPENAI_API_KEY", "HTTP_PROXY"] }),
-      profile(),
-    );
-    assert.ok(argv.includes("SendEnv=OPENAI_API_KEY"));
-    assert.ok(argv.includes("SendEnv=HTTP_PROXY"));
-    assert.ok(argv.every((entry) => !entry.includes("$OPENAI_API_KEY")));
-  });
-
-  it("rejects invalid forwarded env names", () => {
-    assert.throws(
-      () => buildSshArgv(transport(), runtime({ forwardedEnvNames: ["BAD NAME"] }), profile()),
-      SshCommandError,
-    );
+  it("does not forward ambient environment variables", () => {
+    const argv = buildSshArgv(transport(), runtime(), profile());
+    assert.ok(argv.every((entry) => !entry.startsWith("SendEnv=")));
   });
 
   it("rejects non-ssh-process runtimes", () => {

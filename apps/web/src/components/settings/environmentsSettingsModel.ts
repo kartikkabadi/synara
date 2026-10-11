@@ -145,7 +145,6 @@ export function descriptorFromEnvironmentForm(
       ...existing?.runtime,
       runtimeType: form.runtimeType,
       supervisor: existing?.runtime?.supervisor ?? "none",
-      forwardedEnvNames: existing?.runtime?.forwardedEnvNames ?? [],
       ...(remoteBinaryPath ? { remoteBinaryPath } : {}),
     },
     ...(form.host.trim() !== ""

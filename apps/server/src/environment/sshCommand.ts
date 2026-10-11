@@ -26,7 +26,6 @@ export class SshCommandError extends Schema.TaggedErrorClass<SshCommandError>()(
   }
 }
 
-const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
  * Quotes a value for a POSIX shell using single quotes, escaping embedded
@@ -120,15 +119,6 @@ function buildSshBaseArgv(
     argv.push("-o", `HostKeyAlias=${host}`);
   }
 
-  for (const name of runtime.forwardedEnvNames) {
-    if (!ENV_NAME_PATTERN.test(name)) {
-      throw new SshCommandError({
-        reason: `forwarded environment variable name is invalid: "${name}"`,
-      });
-    }
-    argv.push("-o", `SendEnv=${name}`);
-  }
-
   const user = transport.user !== undefined ? requireNonEmpty(transport.user, "user") : undefined;
   argv.push(user !== undefined ? `${user}@${host}` : host);
   return argv;
@@ -136,8 +126,7 @@ function buildSshBaseArgv(
 
 /**
  * Builds the full `ssh` argument array (without the leading `ssh`), ending
- * with `--` and the remote command string. Never embeds secret material; env
- * forwarding uses `SendEnv` with names only.
+ * with `--` and the remote command string. Never embeds or forwards secret material.
  */
 export function buildSshArgv(
   transport: ExecutionEnvironmentSshTransport,
