@@ -1,0 +1,18 @@
+{
+  "codeHead": "e53a6eb24163885738f9995ca4999baf0ef03120",
+  "fixture": "apps/web/src/components/BetaWelcomeDialog.browser.tsx",
+  "fixtureSha256": "059a295fc417823d34e58b2a8cef92e4d7ec7f8849df4e951e5b722f9acce792",
+  "scope": "Actual Chromium renders of current welcome component with synthetic bridge state; no installed-app handoff.",
+  "viewport": {
+    "width": 960,
+    "height": 700
+  },
+  "states": {
+    "first-launch.png": "Stable installed, no completed import",
+    "import-complete.png": "Import completed"
+  },
+  "imageSha256": {
+    "first-launch.png": "19ad85b6f365ff186617e10e014a6c842422b3cce3aaae46e4bb69238b993bbc",
+    "import-complete.png": "462eb8323fed26164779fde49885ab23c8556ce20489075d70364f7c706bf0b4"
+  }
+}
