@@ -99,6 +99,18 @@ export function revertSagaAlreadyActiveDetail(threadId: ThreadId): string {
   return `Thread '${threadId}' already has an active revert saga.`;
 }
 
+export function revertSagaNotActiveDetail(threadId: ThreadId): string {
+  return `Thread '${threadId}' has no active revert saga.`;
+}
+
+export function revertSagaMismatchDetail(threadId: ThreadId, sagaId: string): string {
+  return `Saga '${sagaId}' does not match the active revert saga on thread '${threadId}'.`;
+}
+
+export function revertSagaTurnCountMismatchDetail(threadId: ThreadId, turnCount: number): string {
+  return `Turn count ${turnCount} does not match the active revert saga on thread '${threadId}'.`;
+}
+
 export function checkpointRevertDeleteInProgressDetail(threadId: ThreadId): string {
   return `Thread '${threadId}' has a checkpoint revert in progress. Wait for it to finish before deleting the thread.`;
 }

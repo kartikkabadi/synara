@@ -39,6 +39,9 @@ import {
   checkpointRevertInProgressDetail,
   revertSagaAlreadyActiveDetail,
   revertSagaInProgressDetail,
+  revertSagaMismatchDetail,
+  revertSagaNotActiveDetail,
+  revertSagaTurnCountMismatchDetail,
   threadHasActiveRevertSaga,
   listActiveProjectsByWorkspaceRoot,
   listActiveSpaces,
@@ -2179,11 +2182,33 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.revert.uncertain": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      const activeSaga = thread.revertSaga ?? null;
+      if (activeSaga === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: revertSagaNotActiveDetail(command.threadId),
+        });
+      }
+      if (activeSaga.sagaId !== command.sagaId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: revertSagaMismatchDetail(command.threadId, command.sagaId),
+        });
+      }
+      if (activeSaga.turnCount !== command.turnCount) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: revertSagaTurnCountMismatchDetail(command.threadId, command.turnCount),
+        });
+      }
+      if (activeSaga.status === "uncertain" && activeSaga.uncertainStepId === command.stepId) {
+        return [];
+      }
       return {
         ...withEventBase({
           aggregateKind: "thread",
@@ -2203,11 +2228,22 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.revert.complete": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      const activeSaga = thread.revertSaga ?? null;
+      if (
+        command.sagaId !== undefined &&
+        activeSaga !== null &&
+        activeSaga.sagaId !== command.sagaId
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: revertSagaMismatchDetail(command.threadId, command.sagaId),
+        });
+      }
       const revertedEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...withEventBase({
           aggregateKind: "thread",
@@ -2219,6 +2255,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           turnCount: command.turnCount,
+          ...(command.sagaId !== undefined ? { sagaId: command.sagaId } : {}),
         },
       };
       return [
