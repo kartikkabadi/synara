@@ -317,6 +317,8 @@ function sanitizeRemoteName(value: string): string {
 }
 
 function normalizeRemoteUrl(value: string): string {
+  const repository = parseGitHubRepositoryNameWithOwnerFromRemoteUrl(value);
+  if (repository) return repository.toLowerCase();
   return value
     .trim()
     .replace(/\/+$/g, "")
@@ -324,15 +326,17 @@ function normalizeRemoteUrl(value: string): string {
     .toLowerCase();
 }
 
-function parseRemoteFetchUrls(stdout: string): Map<string, string> {
+// Config reads retain the literal identity before insteadOf transport rewrites.
+function parseConfiguredRemoteUrls(stdout: string): Map<string, string> {
   const remotes = new Map<string, string>();
-  for (const line of stdout.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.length === 0) continue;
-    const match = /^(\S+)\s+(\S+)\s+\((fetch|push)\)$/.exec(trimmed);
+  for (const record of stdout.split("\0")) {
+    const separator = record.indexOf("\n");
+    if (separator < 0) continue;
+    const match = /^remote\.(.+)\.url$/.exec(record.slice(0, separator));
     if (!match) continue;
-    const [, remoteName = "", remoteUrl = "", direction = ""] = match;
-    if (direction !== "fetch" || remoteName.length === 0 || remoteUrl.length === 0) {
+    const remoteName = match[1] ?? "";
+    const remoteUrl = record.slice(separator + 1);
+    if (remoteName.length === 0 || remoteUrl.length === 0 || remotes.has(remoteName)) {
       continue;
     }
     remotes.set(remoteName, remoteUrl);
@@ -1440,8 +1444,9 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
         const remoteFetchUrls = yield* runGitStdout(
           "GitCore.ensureRemote.listRemoteUrls",
           input.cwd,
-          ["remote", "-v"],
-        ).pipe(Effect.map((stdout) => parseRemoteFetchUrls(stdout)));
+          ["config", "-z", "--get-regexp", "^remote\\..*\\.url$"],
+          true,
+        ).pipe(Effect.map(parseConfiguredRemoteUrls));
 
         for (const [remoteName, remoteUrl] of remoteFetchUrls.entries()) {
           if (normalizeRemoteUrl(remoteUrl) === normalizedTargetUrl) {
@@ -3783,13 +3788,14 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
       Effect.gen(function* () {
         const remoteName = yield* resolvePrimaryRemoteName(input.cwd);
         if (input.expectedRepositoryNameWithOwner) {
-          const remoteUrl = yield* runGitStdout(
+          const remoteUrls = yield* runGitStdout(
             "GitCore.fetchPullRequestCommit.remoteUrl",
             input.cwd,
-            ["remote", "get-url", remoteName],
+            ["config", "-z", "--get-all", `remote.${remoteName}.url`],
           );
-          const actualRepositoryNameWithOwner =
-            parseGitHubRepositoryNameWithOwnerFromRemoteUrl(remoteUrl);
+          const actualRepositoryNameWithOwner = parseGitHubRepositoryNameWithOwnerFromRemoteUrl(
+            remoteUrls.split("\0")[0],
+          );
           if (
             actualRepositoryNameWithOwner?.toLowerCase() !==
             input.expectedRepositoryNameWithOwner.toLowerCase()
@@ -3797,7 +3803,7 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
             return yield* createGitCommandError(
               "GitCore.fetchPullRequestCommit.remoteMismatch",
               input.cwd,
-              ["remote", "get-url", remoteName],
+              ["config", "-z", "--get-all", `remote.${remoteName}.url`],
               `Pull request URL targets ${input.expectedRepositoryNameWithOwner}, but remote ${remoteName} targets ${actualRepositoryNameWithOwner ?? "a non-GitHub repository"}.`,
             );
           }

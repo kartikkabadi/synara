@@ -2408,8 +2408,20 @@ it.layer(TestLayer)("git integration", (it) => {
         const tmp = yield* makeTmpDir();
         yield* initRepoWithCommit(tmp);
         yield* git(tmp, ["remote", "add", "origin", "https://github.com/acme/current.git"]);
+        yield* git(tmp, [
+          "config",
+          "--add",
+          "remote.origin.url",
+          "https://github.com/acme/other.git",
+        ]);
+        const realCore = yield* GitCore;
+        const core = yield* makeIsolatedGitCore((input) =>
+          input.operation === "GitCore.fetchPullRequestCommit"
+            ? Effect.die(new Error("Repository mismatch must not fetch from the network"))
+            : realCore.execute(input),
+        );
 
-        const exit = yield* (yield* GitCore)
+        const exit = yield* core
           .fetchPullRequestCommit({
             cwd: tmp,
             prNumber: 42,
@@ -2432,6 +2444,114 @@ it.layer(TestLayer)("git integration", (it) => {
   // ── Full flow: checkout conflict ──
 
   describe("GitCore", () => {
+    it.effect(
+      "does not interpret embedded newlines in remote URLs as another configured remote",
+      () =>
+        Effect.gen(function* () {
+          const tmp = yield* makeTmpDir();
+          yield* initRepoWithCommit(tmp);
+          yield* git(tmp, [
+            "remote",
+            "add",
+            "origin",
+            "https://evil.example/\nremote.forged.url https://github.com/example-org/synara.git",
+          ]);
+          expect(
+            yield* (yield* GitCore).ensureRemote({
+              cwd: tmp,
+              preferredName: "origin",
+              url: "https://github.com/example-org/synara.git",
+            }),
+          ).toBe("origin-1");
+        }),
+    );
+
+    it.effect("reuses the literal GitHub remote when transport rewrites its URL", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        yield* git(tmp, [
+          "config",
+          "url.https://proxy.example/github.com/.insteadOf",
+          "https://github.com/",
+        ]);
+        yield* git(tmp, ["remote", "add", "origin", "https://github.com/example-org/synara.git"]);
+        const core = yield* GitCore;
+        expect(
+          yield* core.ensureRemote({
+            cwd: tmp,
+            preferredName: "origin",
+            url: "https://github.com/example-org/synara.git",
+          }),
+        ).toBe("origin");
+        expect((yield* git(tmp, ["remote"])).trim()).toBe("origin");
+      }),
+    );
+
+    it.effect("does not infer GitHub identity from overlapping transport rewrites", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        yield* git(tmp, [
+          "config",
+          "url.https://proxy.example/.insteadOf",
+          "https://evil.example/",
+        ]);
+        yield* git(tmp, [
+          "config",
+          "url.https://proxy.example/github.com/.insteadOf",
+          "https://github.com/",
+        ]);
+        yield* git(tmp, [
+          "remote",
+          "add",
+          "origin",
+          "https://evil.example/github.com/example-org/synara.git",
+        ]);
+        const core = yield* GitCore;
+        expect(
+          yield* core.ensureRemote({
+            cwd: tmp,
+            preferredName: "origin",
+            url: "https://github.com/example-org/synara.git",
+          }),
+        ).toBe("origin-1");
+        expect((yield* git(tmp, ["remote"])).trim().split("\n").toSorted()).toEqual([
+          "origin",
+          "origin-1",
+        ]);
+      }),
+    );
+
+    it.effect("compares the first literal fetch URL and equivalent GitHub URL forms", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        yield* git(tmp, ["remote", "add", "origin", "git@github.com:example-org/synara.git"]);
+        yield* git(tmp, [
+          "config",
+          "--add",
+          "remote.origin.url",
+          "https://github.com/other/repository.git",
+        ]);
+        const core = yield* GitCore;
+        expect(
+          yield* core.ensureRemote({
+            cwd: tmp,
+            preferredName: "origin",
+            url: "https://github.com/example-org/synara.git",
+          }),
+        ).toBe("origin");
+        expect(
+          yield* core.ensureRemote({
+            cwd: tmp,
+            preferredName: "origin",
+            url: "https://github.com/other/repository.git",
+          }),
+        ).toBe("origin-1");
+      }),
+    );
+
     it.effect(
       "reuses an existing remote when the target URL only differs by a trailing slash after .git",
       () =>
