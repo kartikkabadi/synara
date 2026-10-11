@@ -4,14 +4,14 @@
 
 import { useSyncExternalStore } from "react";
 
-import type { WorkLogEntry, WorkLogLiveActivity } from "../workLog";
+import type { WorkLogLiveActivity } from "../workLog";
 import { formatClockDuration } from "../session-logic";
-import { deriveReadableCommandDisplay } from "./toolCallLabel";
+import { startVisibleInterval } from "./visibleInterval";
 
 const NO_ACTIVITY_THRESHOLD_MS = 30_000;
 const LIVE_ACTIVITY_TICK_MS = 1_000;
 const liveActivityClockListeners = new Set<() => void>();
-let liveActivityClockIntervalId: number | null = null;
+let stopLiveActivityClock: (() => void) | null = null;
 let liveActivityClockNowMs = Date.now();
 
 function emitLiveActivityClockTick(): void {
@@ -25,17 +25,14 @@ function subscribeLiveActivityClock(listener: () => void): () => void {
   liveActivityClockListeners.add(listener);
   if (liveActivityClockListeners.size === 1) {
     liveActivityClockNowMs = Date.now();
-    liveActivityClockIntervalId = window.setInterval(
-      emitLiveActivityClockTick,
-      LIVE_ACTIVITY_TICK_MS,
-    );
+    stopLiveActivityClock = startVisibleInterval(emitLiveActivityClockTick, LIVE_ACTIVITY_TICK_MS);
   }
 
   return () => {
     liveActivityClockListeners.delete(listener);
-    if (liveActivityClockListeners.size === 0 && liveActivityClockIntervalId !== null) {
-      window.clearInterval(liveActivityClockIntervalId);
-      liveActivityClockIntervalId = null;
+    if (liveActivityClockListeners.size === 0) {
+      stopLiveActivityClock?.();
+      stopLiveActivityClock = null;
     }
   };
 }
@@ -98,76 +95,6 @@ export function liveActivityElapsedMs(activity: WorkLogLiveActivity, nowMs: numb
   return lastActivityAtMs - startedAtMs;
 }
 
-function firstCommandExecutable(rawCommand: string): string {
-  const trimmed = rawCommand.trim();
-  const match = /^(?:"([^"]+)"|'([^']+)'|(\S+))/u.exec(trimmed);
-  const executable = match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
-  return executable.split(/[\\/]/u).at(-1)?.toLowerCase() ?? "";
-}
-
-export function friendlyLiveCommandTarget(rawCommand: string): string {
-  const executable = firstCommandExecutable(rawCommand);
-  if (
-    executable === "pwsh" ||
-    executable === "pwsh.exe" ||
-    executable === "powershell" ||
-    executable === "powershell.exe"
-  ) {
-    return "PowerShell";
-  }
-  if (executable === "cmd" || executable === "cmd.exe") {
-    return "Command Prompt";
-  }
-
-  const target = deriveReadableCommandDisplay(rawCommand, true).target.trim();
-  return target.length <= 72 ? target : `${target.slice(0, 69).trimEnd()}…`;
-}
-
-function activitySubject(entry: Pick<WorkLogEntry, "itemType" | "requestKind">): string {
-  if (entry.requestKind === "command" || entry.itemType === "command_execution") return "command";
-  if (entry.requestKind === "file-read") return "file read";
-  if (entry.requestKind === "file-change" || entry.itemType === "file_change") return "edit";
-  if (entry.itemType === "web_search") return "search";
-  if (entry.itemType === "collab_agent_tool_call") return "agent";
-  return "tool";
-}
-
-function activityStateLead(activity: WorkLogLiveActivity, subject: string): string {
-  switch (activity.state) {
-    case "starting":
-      return `Starting ${subject}`;
-    case "thinking":
-      return "Thinking";
-    case "running_tool":
-      return `Running ${subject}`;
-    case "waiting":
-      return "Waiting";
-    case "streaming":
-      return "Streaming";
-    case "completed":
-      return `Completed ${subject}`;
-    case "failed":
-      return `Failed ${subject}`;
-    case "cancelled":
-      return `Cancelled ${subject}`;
-  }
-}
-
-export function formatLiveActivityPrimary(input: {
-  activity: WorkLogLiveActivity;
-  entry: Pick<WorkLogEntry, "itemType" | "requestKind">;
-  heading: string;
-  displayTarget?: string | undefined;
-  rawCommand?: string | undefined;
-}): string {
-  const subject = activitySubject(input.entry);
-  const lead = activityStateLead(input.activity, subject);
-  const target = input.rawCommand
-    ? friendlyLiveCommandTarget(input.rawCommand)
-    : (input.displayTarget || input.activity.label || input.heading).trim();
-  return target ? `${lead} · ${target}` : lead;
-}
-
 export function formatLiveActivityProgress(progress: number): string {
   const percent = progress >= 0 && progress <= 1 ? progress * 100 : progress;
   return `${Math.round(Math.min(100, Math.max(0, percent)))}%`;
@@ -202,16 +129,33 @@ export function formatLiveActivityElapsed(
   return elapsedMs === null ? null : formatClockDuration(elapsedMs);
 }
 
+export interface LiveActivityMetaOptions {
+  // Subagent rows (Cursor/Claude `Task`, Codex collab) only hear back from the child
+  // agent when it finishes, so quiet time is the expected state — never idleness.
+  readonly subagent?: boolean;
+}
+
+// Live meta only exists to explain work the row can't state on its own: how long
+// something in flight has been running, or that it ended badly. A tool call that
+// simply succeeded already reads as a finished sentence ("Searched for foo in
+// src"), so it gets no status/elapsed tail — that detail lives in the disclosure.
 export function formatLiveActivityMeta(
   activity: WorkLogLiveActivity,
   nowMs: number,
+  options?: LiveActivityMetaOptions,
 ): string | null {
+  if (activity.state === "completed") {
+    return null;
+  }
+
   const parts: string[] = [];
   const elapsed = formatLiveActivityElapsed(activity, nowMs);
   const lastActivityAtMs = parseTimestamp(activity.lastActivityAt);
 
   if (isLiveActivityInProgress(activity)) {
-    if (lastActivityAtMs !== null) {
+    if (options?.subagent) {
+      parts.push("Subagent working");
+    } else if (lastActivityAtMs !== null) {
       const idleMs = Math.max(0, nowMs - lastActivityAtMs);
       parts.push(
         idleMs >= NO_ACTIVITY_THRESHOLD_MS
@@ -222,20 +166,7 @@ export function formatLiveActivityMeta(
       );
     }
   } else {
-    switch (activity.state) {
-      case "completed":
-        parts.push(formatLiveActivityStateLabel(activity.state));
-        break;
-      case "failed":
-        parts.push(formatLiveActivityStateLabel(activity.state));
-        break;
-      case "cancelled":
-        parts.push(formatLiveActivityStateLabel(activity.state));
-        break;
-      default:
-        parts.push(activityStateLead(activity, "tool"));
-        break;
-    }
+    parts.push(formatLiveActivityStateLabel(activity.state));
   }
 
   if (elapsed !== null) {

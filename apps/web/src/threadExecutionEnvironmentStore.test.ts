@@ -24,14 +24,19 @@ describe("threadExecutionEnvironmentStore", () => {
     expect(buildThreadExecutionProfile(threadId, "codex")).toBeNull();
   });
 
-  it("omits the execution profile when the workspace root is blank", () => {
-    useThreadExecutionEnvironmentStore.getState().setThreadEnvironmentSelection(threadId, {
-      environmentId,
-      environmentLabel: "Build box",
-      remoteWorkspaceRoot: "   ",
-    });
-    expect(buildThreadExecutionProfile(threadId, "codex")).toBeNull();
-  });
+  it.each(["", "   ", "repo", "~/repo", "/", "/srv/../other", "/srv//repo", "/srv/repo/"])(
+    "rejects invalid remote workspace %j instead of falling back to local",
+    (remoteWorkspaceRoot) => {
+      useThreadExecutionEnvironmentStore.getState().setThreadEnvironmentSelection(threadId, {
+        environmentId,
+        environmentLabel: "Build box",
+        remoteWorkspaceRoot,
+      });
+      expect(() => buildThreadExecutionProfile(threadId, "codex")).toThrow(
+        "absolute remote workspace path",
+      );
+    },
+  );
 
   it("builds the profile from the selection and provider kind", () => {
     useThreadExecutionEnvironmentStore.getState().setThreadEnvironmentSelection(threadId, {
@@ -39,11 +44,22 @@ describe("threadExecutionEnvironmentStore", () => {
       environmentLabel: "Build box",
       remoteWorkspaceRoot: " /srv/work ",
     });
-    expect(buildThreadExecutionProfile(threadId, "claudeAgent")).toEqual({
+    expect(buildThreadExecutionProfile(threadId, "codex")).toEqual({
       environmentId,
-      providerKind: "claudeAgent",
+      providerKind: "codex",
       remoteWorkspaceRoot: "/srv/work",
     });
+  });
+
+  it("rejects an unsupported provider without losing the remote choice", () => {
+    useThreadExecutionEnvironmentStore.getState().setThreadEnvironmentSelection(threadId, {
+      environmentId,
+      environmentLabel: "Build box",
+      remoteWorkspaceRoot: "/srv/work",
+    });
+    expect(() => buildThreadExecutionProfile(threadId, "claudeAgent")).toThrow("Codex only");
+    expect(buildThreadExecutionProfile(threadId, "codex")?.environmentId).toBe(environmentId);
+    expect(buildThreadExecutionProfile("thread-2" as ThreadId, "codex")).toBeNull();
   });
 
   it("clears the selection back to Local and remembers the last-used selection", () => {

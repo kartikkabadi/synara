@@ -321,7 +321,7 @@ describe("remote agent end-to-end survival", () => {
 
     // SSH disconnect mid-turn: SIGKILL the ssh shim. The agent, the mock
     // Codex, and the journal all survive on the "remote host".
-    const sshPid = spawned.child.pid;
+    const sshPid = spawned.transportPid;
     expect(sshPid).toBeDefined();
     process.kill(sshPid as number, "SIGKILL");
 

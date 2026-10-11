@@ -32,6 +32,10 @@ export interface RemoteAgentSpawnedProcess {
    * owner may reconnect via attachRemoteAgent.
    */
   readonly child: ChildProcessWithoutNullStreams;
+  /** Local SSH transport only; never use as a remote provider teardown target. */
+  readonly transportPid: number | undefined;
+  /** Waits for an authoritative provider exit; transport loss rejects. */
+  readonly stop: () => Promise<void>;
   /** Subscribes to raw ssh transport stderr output (never parsed as events). */
   readonly onStderr: (callback: (chunk: string) => void) => void;
   /**

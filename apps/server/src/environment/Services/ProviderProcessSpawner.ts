@@ -31,9 +31,8 @@ export class ProviderSpawnError extends Schema.TaggedErrorClass<ProviderSpawnErr
 export interface ProviderProcessSpawnOptions {
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
-  readonly shell?: boolean | string | undefined;
-  readonly windowsHide?: boolean | undefined;
-  readonly windowsVerbatimArguments?: boolean | undefined;
+  readonly lowerPriority?: boolean | undefined;
+  readonly requireExecutable?: boolean | undefined;
 }
 
 export interface ProviderProcessSpawnerShape {

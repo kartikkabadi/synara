@@ -34,13 +34,13 @@ describe("validateEnvironmentForm", () => {
     ).toEqual([]);
   });
 
-  it("requires a host for remote runtimes but not local", () => {
+  it("requires a host and rejects unsupported runtimes", () => {
     expect(validateEnvironmentForm({ ...validForm(), host: "" }, noExisting)).toEqual([
       "Host is required for remote runtimes.",
     ]);
-    expect(
-      validateEnvironmentForm({ ...validForm(), host: "", runtimeType: "local" }, noExisting),
-    ).toEqual([]);
+    expect(validateEnvironmentForm({ ...validForm(), runtimeType: "local" }, noExisting)).toEqual([
+      "Remote execution supports SSH process environments only.",
+    ]);
   });
 
   it("bounds the port to 1-65535 integers", () => {
@@ -66,9 +66,12 @@ describe("validateEnvironmentForm", () => {
     ).toEqual(["Identity file must be a path or fingerprint, never key material."]);
   });
 
-  it("requires at least one provider", () => {
+  it("requires Codex and rejects unsupported providers", () => {
+    expect(
+      validateEnvironmentForm({ ...validForm(), providerKinds: ["claudeAgent"] }, noExisting),
+    ).toEqual(["Remote execution supports Codex only."]);
     expect(validateEnvironmentForm({ ...validForm(), providerKinds: [] }, noExisting)).toEqual([
-      "Select at least one provider.",
+      "Remote execution supports Codex only.",
     ]);
   });
 });
@@ -110,6 +113,19 @@ describe("descriptorFromEnvironmentForm", () => {
     expect(next.serverVersion).toBe("1.2.3");
     expect(next.capabilities.shell).toBe(true);
     expect(next.connection?.connectionStatus).toBe("connected");
+  });
+
+  it("clears a custom binary path and preserves the SSH jump host on edit", () => {
+    const existing = descriptorFromEnvironmentForm(validForm(), undefined);
+    const next = descriptorFromEnvironmentForm(
+      { ...validForm(), remoteBinaryPath: "" },
+      {
+        ...existing,
+        transport: { ...existing.transport!, jumpHost: "bastion" },
+      },
+    );
+    expect(next.runtime?.remoteBinaryPath).toBeUndefined();
+    expect(next.transport?.jumpHost).toBe("bastion");
   });
 
   it("drops the fingerprint when verification falls back to known hosts", () => {

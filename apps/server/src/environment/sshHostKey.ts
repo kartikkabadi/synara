@@ -4,7 +4,7 @@
 //          read wrapped in Effect. Never stores or accepts secret material.
 // Layer: Server utility (parsers are IO-free; file read is isolated)
 
-import { createHash } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -45,6 +45,13 @@ export function fingerprintOfPublicKey(base64Key: string): string {
 
 function hostPatternMatches(pattern: string, host: string, port: number): boolean {
   const target = port === 22 ? host : `[${host}]:${port}`;
+  if (pattern.startsWith("|1|")) {
+    const [, , salt, hash] = pattern.split("|");
+    if (!salt || !hash) return false;
+    const actual = createHmac("sha1", Buffer.from(salt, "base64")).update(target).digest();
+    const expected = Buffer.from(hash, "base64");
+    return actual.length === expected.length && timingSafeEqual(actual, expected);
+  }
   return pattern
     .split(",")
     .some((candidate) => candidate === target || (port === 22 && candidate === `[${host}]:22`));
@@ -62,8 +69,9 @@ export function knownHostsFingerprintFromContents(
 ): string | null {
   for (const line of contents.split("\n")) {
     const trimmed = line.trim();
-    if (trimmed.length === 0 || trimmed.startsWith("#") || trimmed.startsWith("|")) continue;
-    const fields = trimmed.startsWith("@") ? trimmed.split(/\s+/).slice(1) : trimmed.split(/\s+/);
+    if (trimmed.length === 0 || trimmed.startsWith("#")) continue;
+    if (trimmed.startsWith("@")) continue;
+    const fields = trimmed.split(/\s+/);
     if (fields.length < 3) continue;
     const [pattern, , base64Key] = fields;
     if (pattern === undefined || base64Key === undefined) continue;
@@ -118,4 +126,25 @@ export function verifyPinnedFingerprint(
   const pinned = transport.hostKeyFingerprint?.trim() ?? "";
   if (pinned.length === 0) return false;
   return normalizeFingerprint(pinned) === normalizeFingerprint(observedFingerprint);
+}
+
+/** Select only the exact pinned host key; revoked keys and certificates cannot become pins. */
+export function pinnedKnownHostEntryFromContents(
+  contents: string,
+  transport: ExecutionEnvironmentSshTransport,
+): { keyType: string; publicKey: string } | null {
+  const candidates: { keyType: string; publicKey: string }[] = [];
+  for (const line of contents.split("\n")) {
+    const fields = line.trim().split(/\s+/);
+    const revoked = fields[0] === "@revoked";
+    if (revoked) fields.shift();
+    const [pattern, keyType, publicKey] = fields;
+    if (!pattern || !keyType || !publicKey || pattern.startsWith("@") || keyType.includes("-cert-"))
+      continue;
+    if (!hostPatternMatches(pattern, transport.host, transport.port)) continue;
+    if (!verifyPinnedFingerprint(transport, fingerprintOfPublicKey(publicKey))) continue;
+    if (revoked) return null;
+    candidates.push({ keyType, publicKey });
+  }
+  return candidates[0] ?? null;
 }

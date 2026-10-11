@@ -104,6 +104,12 @@ function handle(message) {
         ? Buffer.from(params.payload.slice(4), "base64")
         : Buffer.from(params.payload, "utf8");
       respond(id, { ok: true });
+      if (data.toString("utf8") === "flood-unread-output") {
+        for (let index = 0; index < 48; index++) {
+          emitEvent(params.threadId, "stdout", "x".repeat(128 * 1024));
+        }
+        return;
+      }
       emitEvent(params.threadId, "stdout", "echo:" + data.toString("utf8"));
       return;
     }
@@ -341,10 +347,35 @@ async function waitFor(predicate: () => boolean, label: string, timeoutMs = 5_00
 }
 
 describe("RemoteAgentProvider", () => {
+  it("bounds unread provider output while cancellation still receives the confirmed exit", async () => {
+    const journalDir = mkdtempSync(path.join(tempDir, "journal-unread-"));
+    const spawned = await Effect.runPromise(
+      provider.spawnRemoteAgent(makePlan("thread-unread"), makeOptions(journalDir)),
+    );
+    const errors: Error[] = [];
+    spawned.child.on("error", (error) => errors.push(error));
+    try {
+      spawned.child.stdin.write("flood-unread-output");
+      await waitFor(() => errors.length > 0, "unread output failure");
+      expect(errors).toHaveLength(1);
+      expect(errors[0]?.message).toContain("unread buffer limit");
+      expect(
+        spawned.child.stdout.readableLength + spawned.child.stdout.writableLength +
+        spawned.child.stderr.readableLength + spawned.child.stderr.writableLength,
+      ).toBeLessThanOrEqual(4 * 1024 * 1024);
+      await spawned.stop();
+      expect(spawned.child.exitCode).toBe(0);
+    } finally {
+      if (spawned.child.exitCode === null) await spawned.stop();
+    }
+  });
   it("connects, spawns, forwards stdout/stderr, echoes stdin sends, and exits on kill", async () => {
     const journalDir = mkdtempSync(path.join(tempDir, "journal-spawn-"));
     const spawned = await Effect.runPromise(
-      provider.spawnRemoteAgent(makePlan("thread-spawn"), makeOptions(journalDir)),
+      provider.spawnRemoteAgent(makePlan("thread-spawn"), {
+        ...makeOptions(journalDir),
+        cwd: "/nonexistent/remote/workspace",
+      }),
     );
     const stdout = collect(spawned.child.stdout);
     const stderr = collect(spawned.child.stderr);
@@ -462,7 +493,7 @@ describe("RemoteAgentProvider", () => {
     first.child.once("disconnect", () => {
       disconnected = true;
     });
-    process.kill(first.child.pid as number, "SIGKILL");
+    process.kill(first.transportPid as number, "SIGKILL");
     await waitFor(() => disconnected, "transport disconnect");
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(exited).toBe(false);

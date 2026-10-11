@@ -37,6 +37,7 @@ writeFileSync(
     `echo '{"jsonrpc":"2.0","id":1,"result":{"ok":true}}'`,
     `echo '{"jsonrpc":"2.0","method":"sessionConfigured"}'`,
     'echo "mock-ssh diagnostics" >&2',
+    'if [ -n "$MOCK_SSH_TERMINATE_SELF" ]; then kill -TERM $$; fi',
     'exit "${MOCK_SSH_EXIT_CODE:-0}"',
     "",
   ].join("\n"),
@@ -157,6 +158,20 @@ describe("SshProcessProvider (mock ssh)", () => {
     expect(() => spawned.kill("SIGTERM")).not.toThrow();
   });
 
+  it.skipIf(process.platform === "win32")(
+    "does not report a signalled SSH channel as clean",
+    async () => {
+      const spawned = await spawnMock(undefined, { env: { MOCK_SSH_TERMINATE_SELF: "1" } });
+      await collectStdout(spawned);
+      const exit = await spawned.exit;
+      expect(exit.kind).toBe("ssh-transport-error");
+      if (exit.kind === "ssh-transport-error") {
+        expect(exit.error.message).toContain("SIGTERM");
+        expect(exit.error.message).toContain("cleanup is unverified");
+      }
+    },
+  );
+
   it("reassembles the sentinel PID line when it is split across chunks", async () => {
     const spawned = await spawnMock(undefined, { env: { MOCK_SSH_SPLIT_PID: "1" } });
     const stdout = await collectStdout(spawned);
@@ -174,6 +189,7 @@ describe("SshProcessProvider (mock ssh)", () => {
 
     expect(await spawned.remotePid).toBeNull();
     expect((await streamError).message).toContain("Remote PID sentinel violation");
+    expect((await spawned.exit).kind).toBe("ssh-transport-error");
   });
 
   it("does not run ssh from the remote workspace root (which may not exist locally)", async () => {

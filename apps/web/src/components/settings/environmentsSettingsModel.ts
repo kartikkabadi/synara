@@ -60,7 +60,7 @@ export function environmentFormFromDescriptor(
     hostKeyVerification: descriptor.transport?.hostKeyVerification ?? "known-hosts",
     hostKeyFingerprint: descriptor.transport?.hostKeyFingerprint ?? "",
     remoteBinaryPath: descriptor.runtime?.remoteBinaryPath ?? "codex",
-    providerKinds: descriptor.capabilities.providerKinds,
+    providerKinds: descriptor.capabilities.providerKinds.filter((kind) => kind === "codex"),
   };
 }
 
@@ -84,7 +84,10 @@ export function validateEnvironmentForm(
   } else if (environmentId !== options.editingId && options.existingIds.has(environmentId)) {
     errors.push(`An environment with ID "${environmentId}" already exists.`);
   }
-  if (form.runtimeType !== "local" && form.host.trim().length === 0) {
+  if (form.runtimeType !== "ssh-process") {
+    errors.push("Remote execution supports SSH process environments only.");
+  }
+  if (form.host.trim().length === 0) {
     errors.push("Host is required for remote runtimes.");
   }
   const port = Number(form.port.trim());
@@ -103,8 +106,8 @@ export function validateEnvironmentForm(
       errors.push(`${label} must be a path or fingerprint, never key material.`);
     }
   }
-  if (form.providerKinds.length === 0) {
-    errors.push("Select at least one provider.");
+  if (form.providerKinds.length !== 1 || form.providerKinds[0] !== "codex") {
+    errors.push("Remote execution supports Codex only.");
   }
   return errors;
 }
@@ -125,6 +128,7 @@ export function descriptorFromEnvironmentForm(
   const identityFile = optionalTrimmed(form.identityFile);
   const sshConfigPath = optionalTrimmed(form.sshConfigPath);
   const hostKeyFingerprint = optionalTrimmed(form.hostKeyFingerprint);
+  const { remoteBinaryPath: _previousBinaryPath, ...existingRuntime } = existing?.runtime ?? {};
   return {
     environmentId,
     label: form.displayName.trim() || environmentId,
@@ -142,7 +146,7 @@ export function descriptorFromEnvironmentForm(
       providerKinds: form.providerKinds,
     },
     runtime: {
-      ...existing?.runtime,
+      ...existingRuntime,
       runtimeType: form.runtimeType,
       supervisor: existing?.runtime?.supervisor ?? "none",
       ...(remoteBinaryPath ? { remoteBinaryPath } : {}),
@@ -153,6 +157,7 @@ export function descriptorFromEnvironmentForm(
             host: form.host.trim(),
             port: Number(form.port.trim()),
             hostKeyVerification: form.hostKeyVerification,
+            ...(existing?.transport?.jumpHost ? { jumpHost: existing.transport.jumpHost } : {}),
             ...(user ? { user } : {}),
             ...(identityFile ? { identityFile } : {}),
             ...(sshConfigPath ? { sshConfigPath } : {}),

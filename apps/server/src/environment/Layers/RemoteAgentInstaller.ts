@@ -1,3 +1,4 @@
+import { sshProcessEnv } from "../sshProcessEnv";
 // FILE: RemoteAgentInstaller.ts
 // Purpose: Layer implementing RemoteAgentInstaller. Probes the remote agent
 //          with agent/hello over ssh; on miss/mismatch/timeout it copies the
@@ -5,7 +6,7 @@
 //          the runtime's install path and verifies with a second hello. Every
 //          step is idempotent: mkdir -p, write-to-temp + atomic mv, re-probe.
 
-import { spawn } from "node:child_process";
+import { spawnProcess } from "@synara/shared/processRuntime";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -38,6 +39,7 @@ const HELLO_PROBE_TIMEOUT_MS = 15_000;
 const COMMAND_TIMEOUT_MS = 60_000;
 const SSH_TRANSPORT_EXIT_CODE = 255;
 const STDERR_TAIL_MAX_CHARS = 2_048;
+const STDOUT_MAX_BYTES = 64 * 1024;
 
 interface RunResult {
   readonly kind: "exited";
@@ -45,6 +47,7 @@ interface RunResult {
   readonly stdout: string;
   readonly stderrTail: string;
   readonly timedOut: boolean;
+  readonly outputExceeded: boolean;
 }
 
 interface RunSpawnFailure {
@@ -60,15 +63,35 @@ interface RunSpawnFailure {
 function runChild(
   binary: string,
   args: readonly string[],
-  options: { readonly stdin?: string; readonly timeoutMs: number },
+  options: { readonly stdin?: string; readonly timeoutMs: number; readonly env: NodeJS.ProcessEnv },
 ): Promise<RunResult | RunSpawnFailure> {
   return new Promise((resolve) => {
-    const child = spawn(binary, [...args], { stdio: ["pipe", "pipe", "pipe"] });
+    let child: ReturnType<typeof spawnProcess>;
+    try {
+      child = spawnProcess(binary, [...args], {
+        env: options.env,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch (cause) {
+      const error = cause as NodeJS.ErrnoException;
+      resolve({ kind: "spawn-failed", code: error.code, reason: error.message ?? String(cause) });
+      return;
+    }
     let stdout = "";
     let stderrTail = "";
     let timedOut = false;
+    let outputExceeded = false;
+    let stdoutBytes = 0;
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
+      if (outputExceeded) return;
+      stdoutBytes += Buffer.byteLength(chunk);
+      if (stdoutBytes > STDOUT_MAX_BYTES) {
+        outputExceeded = true;
+        stdout = "";
+        child.kill("SIGKILL");
+        return;
+      }
       stdout += chunk;
     });
     child.stderr.setEncoding("utf8");
@@ -85,7 +108,7 @@ function runChild(
     });
     child.once("close", (exitCode) => {
       clearTimeout(timer);
-      resolve({ kind: "exited", exitCode, stdout, stderrTail, timedOut });
+      resolve({ kind: "exited", exitCode, stdout, stderrTail, timedOut, outputExceeded });
     });
     // A child that exits before reading (e.g. a missing remote binary)
     // EPIPEs the write; that is already reflected in the exit code.
@@ -105,17 +128,19 @@ type ProbeOutcome =
 
 /**
  * Starts the agent at the install path over ssh and performs one agent/hello
- * round trip. A missing binary, malformed reply, or timeout all classify as
- * "absent" (installable); ssh exit 255 is a transport failure (not).
+ * round trip. A missing binary or malformed successful reply is installable;
+ * transport failures, timeouts and oversized output refuse bootstrap.
  */
 async function probeHello(
   sshBinaryPath: string,
   descriptor: RemoteAgentInstallDescriptor,
+  env: NodeJS.ProcessEnv,
 ): Promise<ProbeOutcome> {
   const argv = buildSshExecArgv(
     descriptor.transport,
     descriptor.runtime,
     buildRemoteAgentCommand(descriptor.runtime),
+    descriptor.sshTrustArgs,
   );
   const hello = JSON.stringify({
     jsonrpc: "2.0",
@@ -126,9 +151,32 @@ async function probeHello(
   const result = await runChild(sshBinaryPath, argv, {
     stdin: `${hello}\n`,
     timeoutMs: HELLO_PROBE_TIMEOUT_MS,
+    env,
   });
   if (result.kind === "spawn-failed") {
     return { kind: "connection-failed", reason: `ssh spawn failed: ${result.reason}` };
+  }
+  if (
+    result.outputExceeded ||
+    result.timedOut ||
+    result.exitCode === null ||
+    result.exitCode === SSH_TRANSPORT_EXIT_CODE
+  ) {
+    return {
+      kind: "connection-failed",
+      reason: result.outputExceeded
+        ? "agent/hello output exceeded 64 KiB"
+        : result.timedOut
+          ? `agent/hello timed out after ${HELLO_PROBE_TIMEOUT_MS}ms`
+          : result.stderrTail ||
+            `ssh exited without a verified successful channel (${result.exitCode})`,
+    };
+  }
+  if (result.exitCode !== 0) {
+    return {
+      kind: "absent",
+      reason: `agent exited with code ${result.exitCode}: ${result.stderrTail}`,
+    };
   }
   for (const line of result.stdout.split("\n")) {
     const trimmed = line.trim();
@@ -146,12 +194,6 @@ async function probeHello(
     }
     return actual === REMOTE_AGENT_PROTOCOL_VERSION ? { kind: "ok" } : { kind: "mismatch", actual };
   }
-  if (result.exitCode === SSH_TRANSPORT_EXIT_CODE) {
-    return { kind: "connection-failed", reason: result.stderrTail || "ssh exited with code 255" };
-  }
-  if (result.timedOut) {
-    return { kind: "absent", reason: `agent/hello timed out after ${HELLO_PROBE_TIMEOUT_MS}ms` };
-  }
   return {
     kind: "absent",
     reason: `agent exited with code ${result.exitCode} before responding: ${result.stderrTail}`,
@@ -162,7 +204,9 @@ export function makeRemoteAgentInstaller(config: {
   readonly sshBinaryPath: string;
   readonly scpBinaryPath: string;
   readonly bundlePath: string;
+  readonly env?: NodeJS.ProcessEnv;
 }): RemoteAgentInstallerShape {
+  const env = config.env ?? sshProcessEnv(process.env);
   const runSsh = (
     descriptor: RemoteAgentInstallDescriptor,
     remoteCommand: string,
@@ -170,16 +214,23 @@ export function makeRemoteAgentInstaller(config: {
   ) =>
     runChild(
       config.sshBinaryPath,
-      buildSshExecArgv(descriptor.transport, descriptor.runtime, remoteCommand),
-      { ...(stdin !== undefined ? { stdin } : {}), timeoutMs: COMMAND_TIMEOUT_MS },
+      buildSshExecArgv(
+        descriptor.transport,
+        descriptor.runtime,
+        remoteCommand,
+        descriptor.sshTrustArgs,
+      ),
+      { ...(stdin !== undefined ? { stdin } : {}), timeoutMs: COMMAND_TIMEOUT_MS, env },
     );
 
   const describeFailure = (result: RunResult | RunSpawnFailure): string =>
     result.kind === "spawn-failed"
       ? `ssh spawn failed: ${result.reason}`
-      : result.timedOut
-        ? `timed out after ${COMMAND_TIMEOUT_MS}ms`
-        : `exit code ${result.exitCode}: ${result.stderrTail}`;
+      : result.outputExceeded
+        ? "stdout exceeded 64 KiB"
+        : result.timedOut
+          ? `timed out after ${COMMAND_TIMEOUT_MS}ms`
+          : `exit code ${result.exitCode}: ${result.stderrTail}`;
 
   const isConnectionFailure = (result: RunResult | RunSpawnFailure): boolean =>
     result.kind === "exited" && result.exitCode === SSH_TRANSPORT_EXIT_CODE;
@@ -193,14 +244,20 @@ export function makeRemoteAgentInstaller(config: {
     // streaming the bundle as base64 through the ssh channel itself.
     const scp = await runChild(
       config.scpBinaryPath,
-      buildScpArgv(descriptor.transport, descriptor.runtime, config.bundlePath, stagingPath),
-      { timeoutMs: COMMAND_TIMEOUT_MS },
+      buildScpArgv(
+        descriptor.transport,
+        descriptor.runtime,
+        config.bundlePath,
+        stagingPath,
+        descriptor.sshTrustArgs,
+      ),
+      { timeoutMs: COMMAND_TIMEOUT_MS, env },
     );
     if (scp.kind === "exited") {
       if (isConnectionFailure(scp)) {
         return new SshConnectionFailedError({ reason: describeFailure(scp) });
       }
-      if (scp.exitCode !== 0) {
+      if (scp.exitCode !== 0 || scp.timedOut || scp.outputExceeded) {
         return new CopyFailedError({ reason: `scp failed: ${describeFailure(scp)}` });
       }
     } else {
@@ -223,7 +280,12 @@ export function makeRemoteAgentInstaller(config: {
       if (isConnectionFailure(write)) {
         return new SshConnectionFailedError({ reason: describeFailure(write) });
       }
-      if (write.kind === "spawn-failed" || write.exitCode !== 0 || write.timedOut) {
+      if (
+        write.kind === "spawn-failed" ||
+        write.exitCode !== 0 ||
+        write.timedOut ||
+        write.outputExceeded
+      ) {
         return new CopyFailedError({ reason: `base64 upload failed: ${describeFailure(write)}` });
       }
     }
@@ -235,7 +297,12 @@ export function makeRemoteAgentInstaller(config: {
     if (isConnectionFailure(move)) {
       return new SshConnectionFailedError({ reason: describeFailure(move) });
     }
-    if (move.kind === "spawn-failed" || move.exitCode !== 0 || move.timedOut) {
+    if (
+      move.kind === "spawn-failed" ||
+      move.exitCode !== 0 ||
+      move.timedOut ||
+      move.outputExceeded
+    ) {
       return new CopyFailedError({ reason: `install move failed: ${describeFailure(move)}` });
     }
     return undefined;
@@ -243,7 +310,7 @@ export function makeRemoteAgentInstaller(config: {
 
   const ensureAgentInstalled = (descriptor: RemoteAgentInstallDescriptor) =>
     Effect.gen(function* () {
-      const probe = yield* Effect.promise(() => probeHello(config.sshBinaryPath, descriptor));
+      const probe = yield* Effect.promise(() => probeHello(config.sshBinaryPath, descriptor, env));
       if (probe.kind === "ok") return;
       if (probe.kind === "connection-failed") {
         return yield* Effect.fail(new SshConnectionFailedError({ reason: probe.reason }));
@@ -259,7 +326,12 @@ export function makeRemoteAgentInstaller(config: {
       if (isConnectionFailure(mkdir)) {
         return yield* Effect.fail(new SshConnectionFailedError({ reason: describeFailure(mkdir) }));
       }
-      if (mkdir.kind === "spawn-failed" || mkdir.exitCode !== 0 || mkdir.timedOut) {
+      if (
+        mkdir.kind === "spawn-failed" ||
+        mkdir.exitCode !== 0 ||
+        mkdir.timedOut ||
+        mkdir.outputExceeded
+      ) {
         return yield* Effect.fail(
           new InstallDirectoryCreationFailedError({ reason: describeFailure(mkdir) }),
         );
@@ -272,7 +344,7 @@ export function makeRemoteAgentInstaller(config: {
         return yield* Effect.fail(copyError);
       }
 
-      const verify = yield* Effect.promise(() => probeHello(config.sshBinaryPath, descriptor));
+      const verify = yield* Effect.promise(() => probeHello(config.sshBinaryPath, descriptor, env));
       switch (verify.kind) {
         case "ok":
           return;

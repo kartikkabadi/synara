@@ -55,7 +55,7 @@ export const makeRemoteEnvironmentRegistry = Effect.fn(function* () {
   const descriptorPath = (environmentId: string) =>
     path.join(environmentsDir, `${environmentId}.json`);
 
-  const localEnvironmentId = yield* serverEnvironment.getEnvironmentId;
+  const localEnvironmentId = (yield* serverEnvironment.getDescriptor).environmentId;
 
   const requireRemoteEnvironmentId = (environmentId: EnvironmentId) =>
     environmentId === localEnvironmentId

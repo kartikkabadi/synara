@@ -1,15 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { WorkLogLiveActivity } from "../workLog";
-import {
-  formatLiveActivityMeta,
-  formatLiveActivityElapsed,
-  formatLiveActivityPrimary,
-  formatLiveActivityProgress,
-  formatLiveActivityStateLabel,
-  friendlyLiveCommandTarget,
-  liveActivityElapsedMs,
-} from "./liveActivityPresentation";
+import { formatLiveActivityMeta, liveActivityElapsedMs } from "./liveActivityPresentation";
 
 const STARTED_AT = "2026-07-26T14:00:00.000Z";
 
@@ -25,35 +17,6 @@ function runningActivity(overrides: Partial<WorkLogLiveActivity> = {}): WorkLogL
 }
 
 describe("live activity presentation", () => {
-  it("uses a friendly PowerShell name instead of leaking the full wrapper command", () => {
-    const command =
-      '"C:\\Users\\Example\\AppData\\Local\\Microsoft\\WindowsApps\\pwsh.exe" -Command "powershell -NoProfile -Command \\"1..8\\""';
-
-    expect(friendlyLiveCommandTarget(command)).toBe("PowerShell");
-    expect(
-      formatLiveActivityPrimary({
-        activity: runningActivity(),
-        entry: { itemType: "command_execution" },
-        heading: "Running command",
-        rawCommand: command,
-      }),
-    ).toBe("Running command · PowerShell");
-  });
-
-  it("preserves the existing target for non-command activity", () => {
-    expect(
-      formatLiveActivityPrimary({
-        activity: runningActivity({
-          state: "completed",
-          label: "Read",
-        }),
-        entry: { requestKind: "file-read" },
-        heading: "Read",
-        displayTarget: "Read app.ts",
-      }),
-    ).toBe("Completed file read · Read app.ts");
-  });
-
   it("renders recent activity and elapsed time from one normalized state", () => {
     const activity = runningActivity();
     const nowMs = Date.parse("2026-07-26T14:02:14.000Z");
@@ -74,6 +37,32 @@ describe("live activity presentation", () => {
     ).toBe("No activity for 30s · 2m 14s elapsed");
   });
 
+  it("never reports a quiet subagent as idle while it is still running", () => {
+    const quietSubagent: WorkLogLiveActivity = {
+      state: "running_tool",
+      label: "Explore composer model/effort UI",
+      startedAt: STARTED_AT,
+      lastActivityAt: "2026-07-26T14:00:00.100Z",
+    };
+    const nowMs = Date.parse("2026-07-26T14:04:55.000Z");
+
+    expect(formatLiveActivityMeta(quietSubagent, nowMs, { subagent: true })).toBe(
+      "Subagent working · 4m 55s elapsed",
+    );
+    // Same activity without the subagent hint keeps the generic idle wording.
+    expect(formatLiveActivityMeta(quietSubagent, nowMs)).toBe(
+      "No activity for 4m 54s · 4m 55s elapsed",
+    );
+    // Terminal states are unaffected by the hint.
+    expect(
+      formatLiveActivityMeta(
+        { ...quietSubagent, state: "failed", lastActivityAt: "2026-07-26T14:04:55.000Z" },
+        nowMs,
+        { subagent: true },
+      ),
+    ).toBe("Failed · 4m 55s elapsed");
+  });
+
   it("keeps progress and terminal states provider-agnostic", () => {
     const completed = runningActivity({
       state: "completed",
@@ -82,9 +71,15 @@ describe("live activity presentation", () => {
       progress: 1,
     });
 
-    expect(formatLiveActivityMeta(completed, Date.parse("2026-07-26T14:03:00.000Z"))).toBe(
-      "Completed · 2m 14s elapsed · 100%",
-    );
+    // A tool call that simply succeeded says so with its own verb; no status tail.
+    expect(formatLiveActivityMeta(completed, Date.parse("2026-07-26T14:03:00.000Z"))).toBeNull();
+
+    expect(
+      formatLiveActivityMeta(
+        { ...completed, state: "failed" },
+        Date.parse("2026-07-26T14:03:00.000Z"),
+      ),
+    ).toBe("Failed · 2m 14s elapsed · 100%");
   });
 
   it("does not invent elapsed time when a terminal event has no known start", () => {
@@ -95,21 +90,6 @@ describe("live activity presentation", () => {
     };
 
     expect(liveActivityElapsedMs(activity, Date.parse("2026-07-26T14:03:00.000Z"))).toBeNull();
-    expect(formatLiveActivityMeta(activity, Date.parse("2026-07-26T14:03:00.000Z"))).toBe(
-      "Completed",
-    );
-  });
-
-  it("shares normalized state, elapsed, and progress labels across activity surfaces", () => {
-    const activity = runningActivity({
-      state: "running_tool",
-      progress: 0.42,
-    });
-
-    expect(formatLiveActivityStateLabel(activity.state)).toBe("Running tool");
-    expect(formatLiveActivityElapsed(activity, Date.parse("2026-07-26T14:02:14.000Z"))).toBe(
-      "2m 14s",
-    );
-    expect(formatLiveActivityProgress(activity.progress ?? 0)).toBe("42%");
+    expect(formatLiveActivityMeta(activity, Date.parse("2026-07-26T14:03:00.000Z"))).toBeNull();
   });
 });

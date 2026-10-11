@@ -110,7 +110,7 @@ describe("RemoteEnvironmentRegistryLive", () => {
     await withRegistry((registry) =>
       Effect.gen(function* () {
         const serverEnvironment = yield* ServerEnvironment;
-        const localEnvironmentId = yield* serverEnvironment.getEnvironmentId;
+        const localEnvironmentId = (yield* serverEnvironment.getDescriptor).environmentId;
 
         const descriptor = makeDescriptor("env-removable");
         yield* registry.upsert(descriptor);
@@ -137,7 +137,7 @@ describe("RemoteEnvironmentRegistryLive", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const serverEnvironment = yield* ServerEnvironment;
-        const localEnvironmentId = yield* serverEnvironment.getEnvironmentId;
+        const localEnvironmentId = (yield* serverEnvironment.getDescriptor).environmentId;
 
         yield* registry.upsert(makeDescriptor("env-valid"));
         yield* fileSystem.writeFileString(`${environmentsDir}/env-corrupt.json`, "{not json");
@@ -157,7 +157,7 @@ describe("RemoteEnvironmentRegistryLive", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const serverEnvironment = yield* ServerEnvironment;
-        const localEnvironmentId = yield* serverEnvironment.getEnvironmentId;
+        const localEnvironmentId = (yield* serverEnvironment.getDescriptor).environmentId;
 
         yield* registry.upsert(makeDescriptor("env-original"));
         yield* fileSystem.copy(

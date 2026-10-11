@@ -3,6 +3,10 @@
 //          environment descriptor, validates provider support, verifies the
 //          ssh host key (fail-closed), and returns a SpawnPlan. No spawning.
 
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir, hostname } from "node:os";
+import path from "node:path";
 import type { ExecutionProfile, ProviderSessionStartInput } from "@synara/contracts";
 import { Effect, Layer, Option } from "effect";
 
@@ -14,7 +18,8 @@ import {
   REMOTE_APP_SERVER_ARG,
   SshCommandError,
 } from "../sshCommand";
-import { knownHostsFingerprint, verifyPinnedFingerprint } from "../sshHostKey";
+import { pinnedKnownHostEntryFromContents } from "../sshHostKey";
+import { ServerConfig } from "../../config";
 import { RemoteEnvironmentRegistry } from "../Services/RemoteEnvironmentRegistry";
 import {
   KnownHostsPath,
@@ -27,10 +32,22 @@ import {
   type SpawnPlan,
 } from "../Services/RemoteEnvironmentResolver";
 
-export const makeRemoteEnvironmentResolver = Effect.fn(function* () {
+export const makeRemoteEnvironmentResolver = Effect.fn(function* (options?: {
+  readonly originId?: string;
+}) {
   const registry = yield* RemoteEnvironmentRegistry;
   const knownHostsPath = yield* KnownHostsPath;
+  const config = yield* Effect.serviceOption(ServerConfig);
+  const originId =
+    options?.originId ??
+    Option.map(config, (value) => `${hostname()}:${value.environmentIdPath}`).pipe(
+      Option.getOrUndefined,
+    );
 
+  const trustDir = yield* Effect.acquireRelease(
+    Effect.promise(() => mkdtemp(path.join(tmpdir(), "synara-ssh-trust-"))),
+    (directory) => Effect.promise(() => rm(directory, { recursive: true, force: true })),
+  );
   const resolve = (
     executionProfile: ExecutionProfile,
     providerSessionStartInput: ProviderSessionStartInput,
@@ -69,35 +86,57 @@ export const makeRemoteEnvironmentResolver = Effect.fn(function* () {
         );
       }
 
-      // Host-key verification is always on and fails closed. "known-hosts"
-      // requires an entry for the host; "pinned-fingerprint" additionally
-      // requires the observed fingerprint to match the pinned one.
-      const observedFingerprint = yield* knownHostsFingerprint(
-        transport.host,
-        transport.port,
-        knownHostsPath,
-      ).pipe(
-        Effect.mapError(
-          (error) => new RemoteEnvironmentHostKeyError({ environmentId, reason: error.reason }),
-        ),
-      );
-      if (
-        transport.hostKeyVerification === "pinned-fingerprint" &&
-        !verifyPinnedFingerprint(transport, observedFingerprint)
-      ) {
-        return yield* Effect.fail(
-          new RemoteEnvironmentHostKeyError({
-            environmentId,
-            reason: `observed host key ${observedFingerprint} does not match the pinned fingerprint`,
-          }),
-        );
+      // OpenSSH owns aliases, hashed host entries and configured trust sources in
+      // known-hosts mode. A pin instead uses an isolated file containing ONLY
+      // that public key so a different trusted key cannot satisfy the connection.
+      let sshTrustArgs: readonly string[] = [];
+      if (transport.hostKeyVerification === "pinned-fingerprint") {
+        sshTrustArgs = yield* Effect.tryPromise({
+          try: async () => {
+            const contents = await readFile(knownHostsPath, "utf8");
+            const pinned = pinnedKnownHostEntryFromContents(contents, transport);
+            if (!pinned) throw new Error("The pinned key is missing or revoked in known_hosts");
+            const alias = `synara-pinned-${createHash("sha256").update(pinned.publicKey).digest("hex")}`;
+            const trustFile = path.join(trustDir, alias);
+            await writeFile(trustFile, `${alias} ${pinned.keyType} ${pinned.publicKey}\n`, {
+              mode: 0o600,
+            });
+            return [
+              "-o",
+              `UserKnownHostsFile="${trustFile.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`,
+              "-o",
+              "GlobalKnownHostsFile=none",
+              "-o",
+              "KnownHostsCommand=none",
+              "-o",
+              "VerifyHostKeyDNS=no",
+              "-o",
+              "UpdateHostKeys=no",
+              "-o",
+              `HostKeyAlias=${alias}`,
+              "-o",
+              `HostKeyAlgorithms=${pinned.keyType}`,
+            ];
+          },
+          catch: (cause) =>
+            new RemoteEnvironmentHostKeyError({ environmentId, reason: String(cause) }),
+        });
       }
 
       // reconnect: "remote-agent" selects the persistent agent transport
       // (Architecture B); everything else keeps the direct ssh exec path.
       if (descriptor.capabilities.reconnect === "remote-agent") {
+        if (!originId)
+          return yield* Effect.fail(
+            new SshCommandError({
+              reason: "Remote agent requires an isolated server origin identity",
+            }),
+          );
+        const endpointId = createHash("sha256")
+          .update(JSON.stringify([originId, environmentId, providerSessionStartInput.threadId]))
+          .digest("hex");
         const sshArgs = yield* Effect.try({
-          try: () => buildAgentSshArgv(transport, runtime),
+          try: () => buildAgentSshArgv(transport, runtime, sshTrustArgs, endpointId),
           catch: (cause) =>
             cause instanceof SshCommandError
               ? cause
@@ -115,11 +154,12 @@ export const makeRemoteEnvironmentResolver = Effect.fn(function* () {
           ],
           transport,
           runtime,
+          sshTrustArgs,
         } satisfies SpawnPlan;
       }
 
       const sshArgs = yield* Effect.try({
-        try: () => buildSshArgv(transport, runtime, executionProfile),
+        try: () => buildSshArgv(transport, runtime, executionProfile, sshTrustArgs),
         catch: (cause) =>
           cause instanceof SshCommandError ? cause : new SshCommandError({ reason: String(cause) }),
       });

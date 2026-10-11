@@ -48,6 +48,7 @@ export interface RemoteAgentSpawnPlan {
   readonly providerArgv: readonly string[];
   /** Transport/runtime the installer needs to bootstrap the agent binary. */
   readonly transport: ExecutionEnvironmentSshTransport;
+  readonly sshTrustArgs?: readonly string[];
   readonly runtime: ExecutionEnvironmentRuntime;
 }
 

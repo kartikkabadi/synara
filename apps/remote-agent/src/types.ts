@@ -11,6 +11,9 @@ export interface ThreadState {
   child: ChildProcess;
   seq: number;
   status: RemoteAgentThreadStatus;
+  completed: Promise<void>;
+  stopping?: Promise<void>;
+  failure?: Error;
 }
 
 export interface JsonRpcRequest {

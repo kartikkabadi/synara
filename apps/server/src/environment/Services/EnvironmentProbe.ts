@@ -43,6 +43,7 @@ export interface EnvironmentProbeShape {
    */
   readonly check: (
     executionProfile: ExecutionProfile,
+    options?: { readonly minimumVersion?: string },
   ) => Effect.Effect<ExecutionEnvironmentConnection, EnvironmentProbeError>;
 }
 

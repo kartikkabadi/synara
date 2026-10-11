@@ -1,9 +1,8 @@
 // FILE: LocalProcessSpawner.ts
 // Purpose: Local implementation of ProviderProcessSpawner. Spawns the process
-//          on this machine via node:child_process with piped stdio, preserving
-//          the exact behavior of the previous direct `spawn` call.
+//          on this machine via the shared platform/process boundary with piped stdio.
 
-import { spawn } from "node:child_process";
+import { spawnProcess } from "@synara/shared/processRuntime";
 
 import { Effect, Layer } from "effect";
 
@@ -17,13 +16,12 @@ export const makeLocalProcessSpawner = (): ProviderProcessSpawnerShape => ({
   spawn: (command, args, options) =>
     Effect.try({
       try: () =>
-        spawn(command, [...args], {
+        spawnProcess(command, args, {
           cwd: options.cwd,
           env: options.env,
           stdio: ["pipe", "pipe", "pipe"],
-          shell: options.shell,
-          windowsHide: options.windowsHide,
-          windowsVerbatimArguments: options.windowsVerbatimArguments,
+          lowerPriority: options.lowerPriority,
+          requireExecutable: options.requireExecutable,
         }),
       catch: (cause) =>
         new ProviderSpawnError({

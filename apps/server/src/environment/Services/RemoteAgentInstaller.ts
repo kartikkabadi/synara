@@ -80,6 +80,7 @@ export type RemoteAgentInstallerError =
 /** The transport/runtime slice of the environment descriptor the installer needs. */
 export interface RemoteAgentInstallDescriptor {
   readonly transport: ExecutionEnvironmentSshTransport;
+  readonly sshTrustArgs?: readonly string[];
   readonly runtime: ExecutionEnvironmentRuntime;
 }
 

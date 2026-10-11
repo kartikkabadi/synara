@@ -1,3 +1,4 @@
+import { sshProcessEnv } from "../sshProcessEnv";
 // FILE: EnvironmentProbe.ts
 // Purpose: Layer implementing EnvironmentProbe. Resolves the profile into an
 //          ssh spawn plan, verifies the remote workspace root, runs
@@ -15,16 +16,17 @@ import { ThreadId } from "@synara/contracts";
 import { Effect, Layer, Option } from "effect";
 
 import {
-  isCodexCliVersionSupported,
+  compareCodexCliVersions,
   MINIMUM_CODEX_CLI_VERSION,
   parseCodexCliVersion,
 } from "../../provider/codexCliVersion";
-import { DEFAULT_REMOTE_BINARY, posixQuote } from "../sshCommand";
+import { DEFAULT_REMOTE_BINARY, posixQuote, REMOTE_PID_SENTINEL_PREFIX } from "../sshCommand";
 import {
   EnvironmentProbe,
   type EnvironmentProbeShape,
   RemoteEnvironmentUnsupportedVersionError,
 } from "../Services/EnvironmentProbe";
+import { ProviderSpawnError } from "../Services/ProviderProcessSpawner";
 import { RemoteEnvironmentRegistry } from "../Services/RemoteEnvironmentRegistry";
 import {
   RemoteEnvironmentNotFoundError,
@@ -85,16 +87,52 @@ export const makeEnvironmentProbe = Effect.fn(function* () {
 
   const runProbeCommand = (plan: SshSpawnPlan | RemoteAgentSpawnPlan, remoteCommand: string) =>
     sshProvider
-      .spawnSsh(probePlan(plan, remoteCommand), { cwd: process.cwd(), env: process.env })
+      .spawnSsh(probePlan(plan, remoteCommand), {
+        cwd: process.cwd(),
+        env: sshProcessEnv(process.env),
+      })
       .pipe(
         Effect.flatMap((spawned) =>
-          Effect.promise(async (): Promise<{ exit: SshProcessExit; stdout: string }> => {
-            let stdout = "";
-            spawned.child.stdout.on("data", (chunk: Buffer) => {
-              stdout += chunk.toString("utf8");
-            });
-            const exit = await spawned.exit;
-            return { exit, stdout };
+          Effect.tryPromise({
+            try: (signal) =>
+              new Promise<{ exit: SshProcessExit; stdout: string }>((resolve, reject) => {
+                let stdout = "";
+                let settled = false;
+                const finish = (error?: Error, exit?: SshProcessExit) => {
+                  if (settled) return;
+                  settled = true;
+                  clearTimeout(timer);
+                  signal.removeEventListener("abort", abort);
+                  if (error) {
+                    spawned.kill("SIGTERM");
+                    const escalation = setTimeout(() => spawned.kill("SIGKILL"), 1_000);
+                    escalation.unref();
+                    spawned.child.once("close", () => clearTimeout(escalation));
+                    reject(error);
+                  } else if (exit) resolve({ exit, stdout });
+                };
+                const abort = () => finish(new Error("Remote environment probe cancelled"));
+                const timer = setTimeout(
+                  () => finish(new Error("Remote environment probe timed out after 15 seconds")),
+                  15_000,
+                );
+                signal.addEventListener("abort", abort, { once: true });
+                spawned.child.stdout.on("error", (error) => finish(error));
+                spawned.child.stdout.on("data", (chunk: Buffer) => {
+                  if (settled) return;
+                  if (Buffer.byteLength(stdout) + chunk.length > 65_536) {
+                    finish(new Error("Remote environment probe output exceeded 64 KiB"));
+                    return;
+                  }
+                  stdout += chunk.toString("utf8");
+                });
+                void spawned.exit.then(
+                  (exit) => finish(undefined, exit),
+                  (error: Error) => finish(error),
+                );
+                if (signal.aborted) abort();
+              }),
+            catch: (cause) => new ProviderSpawnError({ reason: String(cause) }),
           }),
         ),
       );
@@ -104,7 +142,10 @@ export const makeEnvironmentProbe = Effect.fn(function* () {
     connection: ExecutionEnvironmentConnection,
   ) => registry.upsert({ ...descriptor, connection });
 
-  const check: EnvironmentProbeShape["check"] = (executionProfile: ExecutionProfile) =>
+  const check: EnvironmentProbeShape["check"] = (
+    executionProfile: ExecutionProfile,
+    options?: { readonly minimumVersion?: string },
+  ) =>
     Effect.gen(function* () {
       const { environmentId } = executionProfile;
       const found = yield* registry.getById(environmentId);
@@ -126,7 +167,7 @@ export const makeEnvironmentProbe = Effect.fn(function* () {
 
       const workspaceProbe = yield* runProbeCommand(
         plan,
-        `echo $$ && test -d ${posixQuote(workspaceRoot)}`,
+        `echo "${REMOTE_PID_SENTINEL_PREFIX}$$" && test -d ${posixQuote(workspaceRoot)}`,
       );
       if (workspaceProbe.exit.kind === "ssh-transport-error") {
         const connection = failedConnection(workspaceProbe.exit.error.message);
@@ -143,7 +184,7 @@ export const makeEnvironmentProbe = Effect.fn(function* () {
 
       const versionProbe = yield* runProbeCommand(
         plan,
-        `echo $$ && cd ${posixQuote(workspaceRoot)} && exec ${posixQuote(binary)} --version`,
+        `echo "${REMOTE_PID_SENTINEL_PREFIX}$$" && cd ${posixQuote(workspaceRoot)} && exec ${posixQuote(binary)} --version`,
       );
       if (versionProbe.exit.kind !== "clean") {
         const connection = failedConnection(versionProbe.exit.error.message);
@@ -152,11 +193,12 @@ export const makeEnvironmentProbe = Effect.fn(function* () {
       }
 
       const version = parseCodexCliVersion(versionProbe.stdout);
-      if (version === null || !isCodexCliVersionSupported(version)) {
+      const minimumVersion = options?.minimumVersion ?? MINIMUM_CODEX_CLI_VERSION;
+      if (version === null || compareCodexCliVersions(version, minimumVersion) < 0) {
         const error = new RemoteEnvironmentUnsupportedVersionError({
           environmentId,
           version,
-          minimumVersion: MINIMUM_CODEX_CLI_VERSION,
+          minimumVersion,
         });
         yield* recordConnection(descriptor, failedConnection(error.message));
         return yield* Effect.fail(error);

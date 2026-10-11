@@ -26,17 +26,11 @@ describe("buildCodexTurnInput", () => {
     expect(buildCodexTurnInput({ input: "" })).toEqual([]);
   });
 
-  it("accepts non-text input items without inventing text", () => {
+  it("preserves local image paths without converting them to URLs", () => {
     expect(
       buildCodexTurnInput({
-        attachments: [{ type: "image", url: "file:///tmp/image.png" }],
-        skills: [{ name: "review", path: "/skills/review/SKILL.md" }],
-        mentions: [{ name: "README", path: "/repo/README.md" }],
+        attachments: [{ type: "localImage", path: "/tmp/screenshot.png" }],
       }),
-    ).toEqual([
-      { type: "image", url: "file:///tmp/image.png" },
-      { type: "skill", name: "review", path: "/skills/review/SKILL.md" },
-      { type: "mention", name: "README", path: "/repo/README.md" },
-    ]);
+    ).toEqual([{ type: "localImage", path: "/tmp/screenshot.png" }]);
   });
 });

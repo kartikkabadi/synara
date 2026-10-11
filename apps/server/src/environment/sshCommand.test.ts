@@ -89,6 +89,16 @@ describe("buildSshArgv", () => {
       "ServerAliveCountMax=3",
       "-o",
       "StrictHostKeyChecking=yes",
+      "-o",
+      "ForwardAgent=no",
+      "-o",
+      "ForwardX11=no",
+      "-o",
+      "PermitLocalCommand=no",
+      "-o",
+      "ControlMaster=no",
+      "-o",
+      "ControlPath=none",
       "--",
       "build.example.com",
       "echo \"__SYNARA_REMOTE_PID__=$$\" && cd '/srv/workspaces/repo' && exec 'codex' app-server",
@@ -103,7 +113,8 @@ describe("buildSshArgv", () => {
     );
     assert.deepEqual(parseLikeOpenSsh(argv), {
       destination: "deploy@build.example.com",
-      remoteCommand: "echo \"__SYNARA_REMOTE_PID__=$$\" && cd '/srv/workspaces/repo' && exec 'codex' app-server",
+      remoteCommand:
+        "echo \"__SYNARA_REMOTE_PID__=$$\" && cd '/srv/workspaces/repo' && exec 'codex' app-server",
     });
   });
 
@@ -124,7 +135,7 @@ describe("buildSshArgv", () => {
     const argv = buildSshArgv(transport(), runtime(), profile());
     assert.equal(argv.indexOf("--"), argv.length - 3);
     assert.equal(argv[argv.length - 2], "build.example.com");
-    assert.ok(argv[argv.length - 1]?.startsWith("echo \"__SYNARA_REMOTE_PID__=$$\" && "));
+    assert.ok(argv[argv.length - 1]?.startsWith('echo "__SYNARA_REMOTE_PID__=$$" && '));
   });
 
   it("maps port, identity file, ssh config, jump host, and user", () => {
@@ -158,7 +169,7 @@ describe("buildSshArgv", () => {
     assert.ok(!buildSshArgv(transport(), runtime(), profile()).includes("-p"));
   });
 
-  it("adds HostKeyAlias for pinned-fingerprint verification", () => {
+  it("carries the resolver-provided isolated trust source for a pin", () => {
     const argv = buildSshArgv(
       transport({
         hostKeyVerification: "pinned-fingerprint",
@@ -166,9 +177,10 @@ describe("buildSshArgv", () => {
       }),
       runtime(),
       profile(),
+      ["-o", "HostKeyAlias=isolated-pinned-key", "-o", "UserKnownHostsFile=/private/pin"],
     );
     assert.ok(argv.includes("StrictHostKeyChecking=yes"));
-    assert.ok(argv.includes("HostKeyAlias=build.example.com"));
+    assert.ok(argv.includes("HostKeyAlias=isolated-pinned-key"));
   });
 
   it("rejects pinned-fingerprint without a fingerprint", () => {
@@ -253,6 +265,6 @@ describe("buildSshCommandString", () => {
   it("prefixes ssh and terminates options before the destination", () => {
     const rendered = buildSshCommandString(transport(), runtime(), profile());
     assert.ok(rendered.startsWith("ssh -o BatchMode=yes"));
-    assert.ok(rendered.includes(" -- build.example.com echo \"__SYNARA_REMOTE_PID__=$$\" && cd "));
+    assert.ok(rendered.includes(' -- build.example.com echo "__SYNARA_REMOTE_PID__=$$" && cd '));
   });
 });

@@ -56,6 +56,10 @@ if (command.startsWith("exec node ")) {
     process.stderr.write("node: cannot find module\\n");
     process.exit(1);
   }
+  if (existsSync(join(stateDir, "mode-output-flood"))) {
+    process.stdout.write("x".repeat(128 * 1024), () => process.exit(0));
+    return;
+  }
   const protocolVersion = readFileSync(installedPath, "utf8").trim();
   readStdin((data) => {
     const request = JSON.parse(data.split("\\n")[0]);
@@ -66,7 +70,7 @@ if (command.startsWith("exec node ")) {
         result: { agentVersion: "fake-agent", protocolVersion },
       }) + "\\n",
     );
-    process.exit(0);
+    process.exit(existsSync(join(stateDir, "mode-hello-exit-failure")) ? 255 : 0);
   });
 } else if (command.startsWith("mkdir -p ")) {
   if (existsSync(join(stateDir, "mode-mkdir-fail"))) {
@@ -137,7 +141,12 @@ function makeState(): { stateDir: string; log: () => Array<{ tool: string; comma
 }
 
 const makeInstaller = (scpBinaryPath: string = missingScpPath) =>
-  makeRemoteAgentInstaller({ sshBinaryPath: fakeSshPath, scpBinaryPath, bundlePath });
+  makeRemoteAgentInstaller({
+    env: process.env,
+    sshBinaryPath: fakeSshPath,
+    scpBinaryPath,
+    bundlePath,
+  });
 
 const installedContent = (stateDir: string) =>
   readFileSync(path.join(stateDir, "installed.cjs"), "utf8");
@@ -154,6 +163,21 @@ describe("RemoteAgentInstaller", () => {
     expect(commands[0]).toMatch(/^exec node /);
     expect(installedContent(stateDir)).toBe(REMOTE_AGENT_PROTOCOL_VERSION);
   });
+
+  it.each(["mode-output-flood", "mode-hello-exit-failure"])(
+    "refuses an unverified hello without writing remote files (%s)",
+    async (mode) => {
+      const { stateDir, log } = makeState();
+      writeFileSync(path.join(stateDir, "installed.cjs"), REMOTE_AGENT_PROTOCOL_VERSION);
+      writeFileSync(path.join(stateDir, mode), "");
+      const error = await Effect.runPromise(
+        makeInstaller().ensureAgentInstalled(descriptor).pipe(Effect.flip),
+      );
+      expect(error._tag).toBe("SshConnectionFailedError");
+      expect(log()).toHaveLength(1);
+      expect(installedContent(stateDir)).toBe(REMOTE_AGENT_PROTOCOL_VERSION);
+    },
+  );
 
   it("installs via the base64-over-ssh fallback when the agent is missing and scp is unavailable", async () => {
     const { stateDir, log } = makeState();
@@ -225,6 +249,7 @@ describe("RemoteAgentInstaller", () => {
     writeFileSync(staleBundlePath, "0.0.9");
 
     const installer = makeRemoteAgentInstaller({
+      env: process.env,
       sshBinaryPath: fakeSshPath,
       scpBinaryPath: missingScpPath,
       bundlePath: staleBundlePath,

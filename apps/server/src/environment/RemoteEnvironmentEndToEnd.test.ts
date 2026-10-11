@@ -1,3 +1,5 @@
+import { sshProcessEnv } from "./sshProcessEnv";
+const resolverScopes: Scope.Closeable[] = [];
 // FILE: RemoteEnvironmentEndToEnd.test.ts
 // Purpose: End-to-end wiring tests for remote execution (#99 PR F): an
 //          executionProfile flows from ProviderService through the Codex
@@ -19,7 +21,7 @@ import {
   ProviderSessionStartInput,
   ThreadId,
 } from "@synara/contracts";
-import { Effect, Layer, Option, PubSub, Schema, ServiceMap, Stream } from "effect";
+import { Exit, Scope, Effect, Layer, Option, PubSub, Schema, ServiceMap, Stream } from "effect";
 import { it as effectIt, vi as effectVi } from "@effect/vitest";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
@@ -74,13 +76,14 @@ writeFileSync(
   mockSshPath,
   [
     "#!/usr/bin/env bash",
-    "echo 4242",
-    'echo "codex-cli ${MOCK_CODEX_VERSION:-0.45.0}"',
+    'echo "__SYNARA_REMOTE_PID__=4242"',
+    'echo "codex-cli $(cat "$(dirname "$0")/version")"',
     "exit 0",
     "",
   ].join("\n"),
 );
 chmodSync(mockSshPath, 0o755);
+writeFileSync(path.join(tempDir, "version"), "0.125.0");
 
 afterAll(() => {
   rmSync(tempDir, { recursive: true, force: true });
@@ -179,23 +182,25 @@ describe("CodexAppServerManager remote spawn dispatch", () => {
     });
 
     expect(seams.resolve).toHaveBeenCalledWith(executionProfile, sessionStartInput);
-    expect(seams.spawnSsh).toHaveBeenCalledWith(sshPlan, { cwd: tempDir, env: process.env });
+    expect(seams.spawnSsh).toHaveBeenCalledWith(sshPlan, {
+      cwd: tempDir,
+      env: sshProcessEnv(process.env),
+    });
     expect(seams.spawn).not.toHaveBeenCalled();
     expect(child).toBe(seams.remoteChild);
   });
 
-  it("falls back to the local spawner when the resolver returns a local plan", async () => {
+  it("refuses local fallback when a remote profile resolves to a local runtime", async () => {
     const seams = makeSeams({ kind: "local" });
-    const child = await seams.spawnCodexAppServer({
-      binaryPath: "codex",
-      cwd: tempDir,
-      env: process.env,
-      remote: { executionProfile, sessionStartInput },
-    });
-
-    expect(seams.resolve).toHaveBeenCalledOnce();
-    expect(seams.spawnSsh).not.toHaveBeenCalled();
-    expect(child).toBe(seams.localChild);
+    await expect(
+      seams.spawnCodexAppServer({
+        binaryPath: "codex",
+        cwd: tempDir,
+        env: process.env,
+        remote: { executionProfile, sessionStartInput },
+      }),
+    ).rejects.toThrow("refusing local fallback");
+    expect(seams.spawn).not.toHaveBeenCalled();
   });
 
   it("uses the LocalProcessSpawner without touching the resolver when no profile is set", async () => {
@@ -203,7 +208,7 @@ describe("CodexAppServerManager remote spawn dispatch", () => {
     const child = await seams.spawnCodexAppServer({
       binaryPath: "codex",
       cwd: tempDir,
-      env: process.env,
+      env: { ...process.env, CODEX_SQLITE_HOME: tempDir },
     });
 
     expect(seams.resolve).not.toHaveBeenCalled();
@@ -312,7 +317,8 @@ describe("checkEnvironment probe (mock ssh)", () => {
   async function makeProbe(descriptors: readonly Descriptor[]) {
     const { registry, upsert, store } = makeInMemoryRegistry(descriptors);
     const resolver = await Effect.runPromise(
-      makeRemoteEnvironmentResolver().pipe(
+      makeRemoteEnvironmentResolver({ originId: "isolated-test-origin" }).pipe(
+        Effect.provideService(Scope.Scope, await newResolverScope()),
         Effect.provideService(RemoteEnvironmentRegistry, registry),
         Effect.provideService(KnownHostsPath, knownHostsPath),
       ),
@@ -333,20 +339,20 @@ describe("checkEnvironment probe (mock ssh)", () => {
 
     expect(connection.connectionStatus).toBe("connected");
     expect(connection.healthCheckResult?.status).toBe("passed");
-    expect(connection.healthCheckResult?.message).toBe("codex v0.45.0");
+    expect(connection.healthCheckResult?.message).toBe("codex v0.125.0");
     expect(upsert).toHaveBeenCalled();
     expect(store.get("env-remote")?.connection).toEqual(connection);
   });
 
   it("fails with RemoteEnvironmentUnsupportedVersionError below the minimum version", async () => {
-    process.env.MOCK_CODEX_VERSION = "0.30.0";
+    writeFileSync(path.join(tempDir, "version"), "0.30.0");
     try {
       const { probe, store } = await makeProbe([makeDescriptor()]);
       const error = await Effect.runPromise(probe.check(executionProfile).pipe(Effect.flip));
       expect(error._tag).toBe("RemoteEnvironmentUnsupportedVersionError");
       expect(store.get("env-remote")?.connection?.healthCheckResult?.status).toBe("failed");
     } finally {
-      delete process.env.MOCK_CODEX_VERSION;
+      writeFileSync(path.join(tempDir, "version"), "0.125.0");
     }
   });
 
@@ -363,4 +369,13 @@ describe("checkEnvironment probe (mock ssh)", () => {
     const error = await Effect.runPromise(probe.check(executionProfile).pipe(Effect.flip));
     expect(error._tag).toBe("RemoteEnvironmentNotFoundError");
   });
+});
+
+async function newResolverScope(): Promise<Scope.Closeable> {
+  const scope = await Effect.runPromise(Scope.make());
+  resolverScopes.push(scope);
+  return scope;
+}
+afterAll(async () => {
+  for (const scope of resolverScopes) await Effect.runPromise(Scope.close(scope, Exit.void));
 });

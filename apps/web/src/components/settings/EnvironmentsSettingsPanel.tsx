@@ -6,16 +6,16 @@
 // Exports: EnvironmentsSettingsPanel
 
 import {
-  type EnvironmentId,
+  AbsolutePosixPath,
   type ExecutionEnvironmentConnection,
   type ExecutionEnvironmentDescriptor,
   type ExecutionEnvironmentRuntimeType,
   PROVIDER_DISPLAY_NAMES,
-  ProviderKind,
   type SshHostKeyVerificationPolicy,
 } from "@synara/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useMemo, useState } from "react";
+import { Schema } from "effect";
 
 import { Button } from "~/components/ui/button";
 import { Checkbox } from "~/components/ui/checkbox";
@@ -55,7 +55,7 @@ const HOST_KEY_VERIFICATION_LABELS: Record<SshHostKeyVerificationPolicy, string>
 function FormField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="flex min-w-0 flex-col gap-1">
-      <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
+      <span className="text-ui-sm font-medium text-muted-foreground">{label}</span>
       {children}
     </label>
   );
@@ -81,7 +81,7 @@ function EnvironmentForm({
   const patch = (partial: Partial<EnvironmentFormState>) =>
     setForm((current) => ({ ...current, ...partial }));
   return (
-    <div className="space-y-3 px-4 py-4">
+    <fieldset disabled={saving} className="space-y-3 px-4 py-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <FormField label="Environment ID (required, unique)">
           <Input
@@ -110,11 +110,13 @@ function EnvironmentForm({
               patch({ runtimeType: value as ExecutionEnvironmentRuntimeType })
             }
           >
-            {Object.entries(RUNTIME_TYPE_LABELS).map(([value, label]) => (
-              <SelectItem key={value} value={value}>
-                {label}
-              </SelectItem>
-            ))}
+            {Object.entries(RUNTIME_TYPE_LABELS)
+              .filter(([value]) => value === "ssh-process")
+              .map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
           </SettingsSelectControl>
         </FormField>
         <FormField label="Remote binary path">
@@ -196,10 +198,10 @@ function EnvironmentForm({
         ) : null}
       </div>
       <div className="space-y-1">
-        <span className="text-[11px] font-medium text-muted-foreground">Providers</span>
+        <span className="text-ui-sm font-medium text-muted-foreground">Providers</span>
         <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-          {ProviderKind.literals.map((kind) => (
-            <label key={kind} className="flex items-center gap-1.5 text-xs text-foreground">
+          {(["codex"] as const).map((kind) => (
+            <label key={kind} className="flex items-center gap-1.5 text-ui-sm text-foreground">
               <Checkbox
                 checked={form.providerKinds.includes(kind)}
                 onCheckedChange={(checked) =>
@@ -217,7 +219,7 @@ function EnvironmentForm({
         </div>
       </div>
       {errors.length > 0 ? (
-        <ul className="space-y-0.5 text-xs text-destructive">
+        <ul className="space-y-0.5 text-ui-sm text-destructive">
           {errors.map((error) => (
             <li key={error}>{error}</li>
           ))}
@@ -231,7 +233,7 @@ function EnvironmentForm({
           {saving ? "Saving…" : editingId !== null ? "Save changes" : "Add environment"}
         </Button>
       </div>
-    </div>
+    </fieldset>
   );
 }
 
@@ -252,16 +254,13 @@ function EnvironmentCheckForm({
   onClose: () => void;
 }) {
   const [remoteWorkspaceRoot, setRemoteWorkspaceRoot] = useState("");
-  const [providerKind, setProviderKind] = useState<ProviderKind>(
-    environment.capabilities.providerKinds[0] ?? "codex",
-  );
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const runCheck = async () => {
-    if (remoteWorkspaceRoot.trim() === "") {
-      setError("Remote workspace root is required.");
+    if (!Schema.is(AbsolutePosixPath)(remoteWorkspaceRoot.trim())) {
+      setError("Enter an absolute remote workspace path.");
       return;
     }
     setPending(true);
@@ -271,7 +270,7 @@ function EnvironmentCheckForm({
       const { connection } = await ensureNativeApi().server.checkEnvironment({
         executionProfile: {
           environmentId: environment.environmentId,
-          providerKind,
+          providerKind: "codex",
           remoteWorkspaceRoot: remoteWorkspaceRoot.trim(),
         },
       });
@@ -294,24 +293,9 @@ function EnvironmentCheckForm({
             onChange={(event) => setRemoteWorkspaceRoot(event.target.value)}
           />
         </FormField>
-        <FormField label="Provider">
-          <SettingsSelectControl
-            value={providerKind}
-            ariaLabel="Check provider"
-            triggerClassName="w-full"
-            valueContent={PROVIDER_DISPLAY_NAMES[providerKind]}
-            onValueChange={(value) => setProviderKind(value as ProviderKind)}
-          >
-            {ProviderKind.literals.map((kind) => (
-              <SelectItem key={kind} value={kind}>
-                {PROVIDER_DISPLAY_NAMES[kind]}
-              </SelectItem>
-            ))}
-          </SettingsSelectControl>
-        </FormField>
       </div>
-      {result ? <p className="text-xs text-foreground">{result}</p> : null}
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {result ? <p className="text-ui-sm text-foreground">{result}</p> : null}
+      {error ? <p className="text-ui-sm text-destructive">{error}</p> : null}
       <div className="flex items-center justify-end gap-2">
         <Button size="xs" variant="ghost" onClick={onClose}>
           Close
@@ -326,7 +310,7 @@ function EnvironmentCheckForm({
 
 export function EnvironmentsSettingsPanel({ active }: { readonly active: boolean }) {
   const queryClient = useQueryClient();
-  const environmentsQuery = useQuery(serverEnvironmentsQueryOptions());
+  const environmentsQuery = useQuery({ ...serverEnvironmentsQueryOptions(), enabled: active });
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<EnvironmentFormState>(emptyEnvironmentForm);
@@ -391,7 +375,7 @@ export function EnvironmentsSettingsPanel({ active }: { readonly active: boolean
     if (!confirmed) return;
     try {
       await api.server.removeEnvironment({
-        environmentId: descriptor.environmentId as EnvironmentId,
+        environmentId: descriptor.environmentId,
       });
       await refresh();
     } catch (error) {
@@ -410,7 +394,12 @@ export function EnvironmentsSettingsPanel({ active }: { readonly active: boolean
       <SettingsSectionShell
         title="Execution environments"
         action={
-          <Button size="xs" variant="outline" onClick={formOpen ? closeForm : openCreateForm}>
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={saving}
+            onClick={formOpen ? closeForm : openCreateForm}
+          >
             {formOpen ? "Close" : "Add environment"}
           </Button>
         }
@@ -429,8 +418,7 @@ export function EnvironmentsSettingsPanel({ active }: { readonly active: boolean
           </DisclosureRegion>
           {!formOpen ? (
             <div className={`px-4 py-3 ${SETTINGS_CARD_ROW_DESCRIPTION_CLASS_NAME}`}>
-              Register remote hosts Synara can run providers on. Only paths and fingerprints are
-              stored — never keys or passwords.
+              Run Codex on an SSH host. Save paths to SSH keys and host fingerprints here.
             </div>
           ) : null}
         </SettingsCard>
@@ -456,7 +444,7 @@ export function EnvironmentsSettingsPanel({ active }: { readonly active: boolean
                 title={environment.label}
                 description={
                   <div className="space-y-1">
-                    <code className="block truncate text-[11px] text-muted-foreground">
+                    <code className="block truncate text-ui-sm text-muted-foreground">
                       {environment.environmentId}
                     </code>
                     <div className={SETTINGS_CARD_ROW_DESCRIPTION_CLASS_NAME}>
@@ -488,6 +476,10 @@ export function EnvironmentsSettingsPanel({ active }: { readonly active: boolean
                     <Button
                       size="xs"
                       variant="outline"
+                      disabled={
+                        environment.runtime?.runtimeType !== "ssh-process" ||
+                        !environment.capabilities.providerKinds.includes("codex")
+                      }
                       onClick={() =>
                         setCheckingId((current) =>
                           current === environment.environmentId ? null : environment.environmentId,
@@ -496,12 +488,18 @@ export function EnvironmentsSettingsPanel({ active }: { readonly active: boolean
                     >
                       Check
                     </Button>
-                    <Button size="xs" variant="outline" onClick={() => openEditForm(environment)}>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={saving}
+                      onClick={() => openEditForm(environment)}
+                    >
                       Edit
                     </Button>
                     <Button
                       size="xs"
                       variant="destructive"
+                      disabled={saving}
                       onClick={() => void deleteEnvironment(environment)}
                     >
                       Delete

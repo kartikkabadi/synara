@@ -9,6 +9,7 @@
   },
   "devDependencies": {
     "@synara/contracts": "workspace:*",
+    "@synara/shared": "workspace:*",
     "@types/node": "catalog:",
     "effect": "catalog:",
     "typescript": "catalog:",

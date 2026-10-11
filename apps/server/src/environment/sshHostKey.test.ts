@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -8,6 +9,7 @@ import { Effect, Schema } from "effect";
 import { afterAll, beforeAll, describe, it } from "vitest";
 
 import {
+  pinnedKnownHostEntryFromContents,
   fingerprintOfPublicKey,
   knownHostsFingerprint,
   knownHostsFingerprintFromContents,
@@ -158,5 +160,31 @@ describe("verifyPinnedFingerprint", () => {
 
   it("rejects when no fingerprint is pinned", () => {
     assert.equal(verifyPinnedFingerprint(transport(), KEY_FINGERPRINT), false);
+  });
+});
+
+describe("pinnedKnownHostEntryFromContents", () => {
+  it("selects only the matching key when another trusted key is listed first", () => {
+    const contents = `build.example.com ssh-ed25519 ${Buffer.from("other-key").toString("base64")}\nbuild.example.com ssh-ed25519 ${KEY_BASE64}\n`;
+    assert.deepEqual(pinnedKnownHostEntryFromContents(contents, transport(KEY_FINGERPRINT)), {
+      keyType: "ssh-ed25519",
+      publicKey: KEY_BASE64,
+    });
+  });
+  it("refuses a revoked pin even when an ordinary entry also contains it", () => {
+    const entry = `build.example.com ssh-ed25519 ${KEY_BASE64}`;
+    assert.equal(
+      pinnedKnownHostEntryFromContents(`${entry}\n@revoked ${entry}`, transport(KEY_FINGERPRINT)),
+      null,
+    );
+  });
+  it("matches a hashed OpenSSH hostname", () => {
+    const salt = Buffer.from("fixture-salt");
+    const hash = createHmac("sha1", salt).update("build.example.com").digest("base64");
+    const entry = `|1|${salt.toString("base64")}|${hash} ssh-ed25519 ${KEY_BASE64}`;
+    assert.equal(
+      pinnedKnownHostEntryFromContents(entry, transport(KEY_FINGERPRINT))?.publicKey,
+      KEY_BASE64,
+    );
   });
 });

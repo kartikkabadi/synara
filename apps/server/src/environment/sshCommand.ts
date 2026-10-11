@@ -32,7 +32,6 @@ export class SshCommandError extends Schema.TaggedErrorClass<SshCommandError>()(
   }
 }
 
-
 /**
  * Quotes a value for a POSIX shell using single quotes, escaping embedded
  * single quotes via the `'\''` idiom. Single audited quoting entry point.
@@ -88,6 +87,7 @@ export function buildRemoteCommand(
 function buildSshBaseArgv(
   transport: ExecutionEnvironmentSshTransport,
   runtime: ExecutionEnvironmentRuntime,
+  sshTrustArgs: readonly string[] = [],
 ): string[] {
   if (runtime.runtimeType !== "ssh-process") {
     throw new SshCommandError({
@@ -134,10 +134,29 @@ function buildSshBaseArgv(
         reason: 'hostKeyFingerprint is required when hostKeyVerification is "pinned-fingerprint"',
       });
     }
-    argv.push("-o", `HostKeyAlias=${host}`);
+    if (sshTrustArgs.length === 0)
+      throw new SshCommandError({
+        reason: "Pinned host verification requires a resolved trust source",
+      });
   }
 
-  const user = transport.user !== undefined ? requireSafeCliValue(requireNonEmpty(transport.user, "user"), "user") : undefined;
+  argv.push(
+    "-o",
+    "ForwardAgent=no",
+    "-o",
+    "ForwardX11=no",
+    "-o",
+    "PermitLocalCommand=no",
+    "-o",
+    "ControlMaster=no",
+    "-o",
+    "ControlPath=none",
+    ...sshTrustArgs,
+  );
+  const user =
+    transport.user !== undefined
+      ? requireSafeCliValue(requireNonEmpty(transport.user, "user"), "user")
+      : undefined;
   argv.push("--", user !== undefined ? `${user}@${host}` : host);
   return argv;
 }
@@ -150,8 +169,9 @@ export function buildSshArgv(
   transport: ExecutionEnvironmentSshTransport,
   runtime: ExecutionEnvironmentRuntime,
   executionProfile: ExecutionProfile,
+  sshTrustArgs: readonly string[] = [],
 ): string[] {
-  const argv = buildSshBaseArgv(transport, runtime);
+  const argv = buildSshBaseArgv(transport, runtime, sshTrustArgs);
   argv.push(buildRemoteCommand(runtime, executionProfile));
   return argv;
 }
@@ -181,8 +201,11 @@ export function quoteRemotePath(remotePath: string): string {
  * (reconnect: "remote-agent"). Runs the bundled cjs through `node` so the
  * install does not depend on the file's executable bit.
  */
-export function buildRemoteAgentCommand(runtime: ExecutionEnvironmentRuntime): string {
-  return `exec node ${quoteRemotePath(resolveRemoteAgentInstallPath(runtime))}`;
+export function buildRemoteAgentCommand(
+  runtime: ExecutionEnvironmentRuntime,
+  endpointId?: string,
+): string {
+  return `exec node ${quoteRemotePath(resolveRemoteAgentInstallPath(runtime))}${endpointId ? ` --connect ${posixQuote(endpointId)}` : ""}`;
 }
 
 /**
@@ -194,8 +217,9 @@ export function buildSshExecArgv(
   transport: ExecutionEnvironmentSshTransport,
   runtime: ExecutionEnvironmentRuntime,
   remoteCommand: string,
+  sshTrustArgs: readonly string[] = [],
 ): string[] {
-  const argv = buildSshBaseArgv(transport, runtime);
+  const argv = buildSshBaseArgv(transport, runtime, sshTrustArgs);
   argv.push(remoteCommand);
   return argv;
 }
@@ -210,6 +234,7 @@ export function buildScpArgv(
   runtime: ExecutionEnvironmentRuntime,
   localPath: string,
   remotePath: string,
+  sshTrustArgs: readonly string[] = [],
 ): string[] {
   if (runtime.runtimeType !== "ssh-process") {
     throw new SshCommandError({
@@ -231,8 +256,28 @@ export function buildScpArgv(
   if (transport.jumpHost !== undefined) {
     argv.push("-J", requireNonEmpty(transport.jumpHost, "jumpHost"));
   }
-  const user = transport.user !== undefined ? requireSafeCliValue(requireNonEmpty(transport.user, "user"), "user") : undefined;
+  argv.push(
+    "-o",
+    "ForwardAgent=no",
+    "-o",
+    "ForwardX11=no",
+    "-o",
+    "PermitLocalCommand=no",
+    "-o",
+    "ControlMaster=no",
+    "-o",
+    "ControlPath=none",
+    ...sshTrustArgs,
+  );
+  const user =
+    transport.user !== undefined
+      ? requireSafeCliValue(requireNonEmpty(transport.user, "user"), "user")
+      : undefined;
   const destination = user !== undefined ? `${user}@${host}` : host;
+  if (transport.hostKeyVerification === "pinned-fingerprint" && sshTrustArgs.length === 0)
+    throw new SshCommandError({
+      reason: "Pinned host verification requires a resolved trust source",
+    });
   const homeRelative = remotePath.startsWith("~/") ? remotePath.slice(2) : remotePath;
   argv.push("--", localPath, `${destination}:${homeRelative}`);
   return argv;
@@ -245,9 +290,11 @@ export function buildScpArgv(
 export function buildAgentSshArgv(
   transport: ExecutionEnvironmentSshTransport,
   runtime: ExecutionEnvironmentRuntime,
+  sshTrustArgs: readonly string[] = [],
+  endpointId?: string,
 ): string[] {
-  const argv = buildSshBaseArgv(transport, runtime);
-  argv.push(buildRemoteAgentCommand(runtime));
+  const argv = buildSshBaseArgv(transport, runtime, sshTrustArgs);
+  argv.push(buildRemoteAgentCommand(runtime, endpointId));
   return argv;
 }
 

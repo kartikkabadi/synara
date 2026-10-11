@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 
-import { EnvironmentId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
+import { EnvironmentId, NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 import { ExecutionProfile, RemoteAgentConnectionStatus } from "./orchestration";
 
 // RPC schemas for the persistent remote agent that keeps provider sessions
@@ -28,7 +28,7 @@ export type RemoteAgentSpawnInput = typeof RemoteAgentSpawnInput.Type;
 
 export const RemoteAgentAttachInput = Schema.Struct({
   threadId: TrimmedNonEmptyString,
-  lastSeq: Schema.Int,
+  lastSeq: NonNegativeInt,
 });
 export type RemoteAgentAttachInput = typeof RemoteAgentAttachInput.Type;
 
@@ -47,6 +47,22 @@ export type RemoteAgentKillInput = typeof RemoteAgentKillInput.Type;
 export const RemoteAgentThreadStatus = Schema.Literals(["running", "exited", "unknown"]);
 export type RemoteAgentThreadStatus = typeof RemoteAgentThreadStatus.Type;
 
+export const RemoteAgentAttachOutput = Schema.Struct({
+  status: RemoteAgentThreadStatus,
+  lastSeq: NonNegativeInt,
+});
+export type RemoteAgentAttachOutput = typeof RemoteAgentAttachOutput.Type;
+
+export const RemoteAgentRpcResponse = Schema.Struct({
+  jsonrpc: Schema.Literal("2.0"),
+  id: Schema.optional(Schema.Union([Schema.Int, Schema.String, Schema.Null])),
+  method: Schema.optional(Schema.String),
+  params: Schema.optional(Schema.Unknown),
+  result: Schema.optional(Schema.Unknown),
+  error: Schema.optional(Schema.Struct({ code: Schema.Int, message: Schema.String })),
+});
+export type RemoteAgentRpcResponse = typeof RemoteAgentRpcResponse.Type;
+
 export const RemoteAgentStatusInput = Schema.Struct({});
 export type RemoteAgentStatusInput = typeof RemoteAgentStatusInput.Type;
 
@@ -54,7 +70,7 @@ export const RemoteAgentStatusOutput = Schema.Struct({
   threads: Schema.Array(
     Schema.Struct({
       threadId: TrimmedNonEmptyString,
-      seq: Schema.Int,
+      seq: NonNegativeInt,
       status: RemoteAgentThreadStatus,
     }),
   ),
@@ -66,7 +82,7 @@ export type RemoteAgentEventKind = typeof RemoteAgentEventKind.Type;
 
 export const RemoteAgentOutputEventEnvelope = Schema.Struct({
   threadId: TrimmedNonEmptyString,
-  seq: Schema.Int,
+  seq: NonNegativeInt,
   kind: Schema.Literals(["stdout", "stderr"]),
   data: TrimmedNonEmptyString,
 });
@@ -74,7 +90,7 @@ export type RemoteAgentOutputEventEnvelope = typeof RemoteAgentOutputEventEnvelo
 
 export const RemoteAgentExitEventEnvelope = Schema.Struct({
   threadId: TrimmedNonEmptyString,
-  seq: Schema.Int,
+  seq: NonNegativeInt,
   kind: Schema.Literal("exit"),
   exitCode: Schema.Int,
 });
@@ -93,8 +109,8 @@ export const RemoteAgentConnectionStatusChanged = Schema.Struct({
   threadId: ThreadId,
   environmentId: EnvironmentId,
   status: RemoteAgentConnectionStatus,
-  retryCount: Schema.Number,
-  lastSeq: Schema.Number,
+  retryCount: NonNegativeInt,
+  lastSeq: NonNegativeInt,
   message: Schema.optional(Schema.String),
 });
 export type RemoteAgentConnectionStatusChanged = typeof RemoteAgentConnectionStatusChanged.Type;

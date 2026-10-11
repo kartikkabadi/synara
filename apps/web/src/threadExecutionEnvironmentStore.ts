@@ -3,7 +3,14 @@
 // Layer: Web session state (in-memory only; selection applies at thread start)
 // Exports: useThreadExecutionEnvironmentStore, ThreadEnvironmentSelection
 
-import type { EnvironmentId, ExecutionProfile, ProviderKind, ThreadId } from "@synara/contracts";
+import {
+  AbsolutePosixPath,
+  type EnvironmentId,
+  type ExecutionProfile,
+  type ProviderKind,
+  type ThreadId,
+} from "@synara/contracts";
+import { Schema } from "effect";
 import { create } from "zustand";
 
 export interface ThreadEnvironmentSelection {
@@ -14,7 +21,7 @@ export interface ThreadEnvironmentSelection {
 
 interface ThreadExecutionEnvironmentState {
   selectionByThreadId: Readonly<Record<ThreadId, ThreadEnvironmentSelection>>;
-  // Seeds the next thread's picker with the previous remote choice.
+  // Remembers the workspace when this environment is explicitly selected again.
   lastUsedSelection: ThreadEnvironmentSelection | null;
   setThreadEnvironmentSelection: (
     threadId: ThreadId,
@@ -56,12 +63,17 @@ export function buildThreadExecutionProfile(
   providerKind: ProviderKind,
 ): ExecutionProfile | null {
   const selection = readThreadEnvironmentSelection(threadId);
-  if (!selection || selection.remoteWorkspaceRoot.trim().length === 0) {
-    return null;
+  if (!selection) return null;
+  if (providerKind !== "codex") {
+    throw new Error("Remote execution supports Codex only. Choose Codex or This machine.");
+  }
+  const remoteWorkspaceRoot = selection.remoteWorkspaceRoot.trim();
+  if (!Schema.is(AbsolutePosixPath)(remoteWorkspaceRoot)) {
+    throw new Error("Enter an absolute remote workspace path before sending.");
   }
   return {
     environmentId: selection.environmentId,
     providerKind,
-    remoteWorkspaceRoot: selection.remoteWorkspaceRoot.trim(),
+    remoteWorkspaceRoot,
   };
 }

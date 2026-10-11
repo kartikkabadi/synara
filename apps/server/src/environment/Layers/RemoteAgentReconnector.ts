@@ -136,7 +136,15 @@ export class RemoteAgentReconnector {
       request.onStatusChange?.({ status: "reconnecting", retryCount: attempt });
       try {
         await request.ensureInstalled();
+        if (state.cancelled || request.isSettled()) {
+          state.active = false;
+          return;
+        }
         const status = await request.reattach();
+        if (state.cancelled || request.isSettled()) {
+          state.active = false;
+          return;
+        }
         if (status === "exited") {
           // Authoritative terminal state: the thread exited while we were
           // disconnected; the adapter is settled, nothing to reconnect.
@@ -149,6 +157,10 @@ export class RemoteAgentReconnector {
         request.onStatusChange?.({ status: "connected", retryCount: attempt });
         return;
       } catch (cause) {
+        if (state.cancelled || request.isSettled()) {
+          state.active = false;
+          return;
+        }
         lastReason = cause instanceof Error ? cause.message : String(cause);
         state.status = "degraded";
         request.onStatusChange?.({ status: "degraded", retryCount: attempt, message: lastReason });

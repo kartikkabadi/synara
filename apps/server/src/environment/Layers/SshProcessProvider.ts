@@ -5,7 +5,8 @@
 //          separately, and classifies exit codes (255 = ssh transport,
 //          non-zero = provider) plus local spawn failures (ssh transport).
 
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawnProcess } from "@synara/shared/processRuntime";
 import { PassThrough, type Readable } from "node:stream";
 
 import { Effect, Layer } from "effect";
@@ -63,7 +64,7 @@ function stripRemotePidLine(stdout: Readable): {
   stdout.on("data", (chunk: Buffer) => {
     if (failed) return;
     if (pidConsumed) {
-      filtered.write(chunk);
+      if (!filtered.write(chunk)) stdout.pause();
       return;
     }
     pending = Buffer.concat([pending, chunk]);
@@ -72,6 +73,10 @@ function stripRemotePidLine(stdout: Readable): {
       if (pending.length > PID_LINE_MAX_BYTES) {
         fail(`no newline within the first ${PID_LINE_MAX_BYTES} bytes of stdout`);
       }
+      return;
+    }
+    if (newlineIndex > PID_LINE_MAX_BYTES) {
+      fail("remote PID sentinel exceeds its byte limit");
       return;
     }
     const firstLine = pending.subarray(0, newlineIndex).toString("utf8").trimEnd();
@@ -86,14 +91,22 @@ function stripRemotePidLine(stdout: Readable): {
     pidConsumed = true;
     pending = Buffer.alloc(0);
     const pid = Number.parseInt(match[1] ?? "", 10);
-    resolvePid(Number.isInteger(pid) && pid > 0 ? pid : null);
+    if (!Number.isSafeInteger(pid) || pid <= 0) {
+      fail("invalid remote PID");
+      return;
+    }
+    resolvePid(pid);
     if (rest.length > 0) {
-      filtered.write(rest);
+      if (!filtered.write(rest)) stdout.pause();
     }
   });
+  filtered.on("drain", () => stdout.resume());
   stdout.on("end", () => {
     if (failed) return;
-    if (!pidConsumed) resolvePid(null);
+    if (!pidConsumed) {
+      fail("remote stream ended before the PID sentinel");
+      return;
+    }
     filtered.end();
   });
   stdout.on("error", (error) => {
@@ -117,7 +130,7 @@ export const makeSshProcessProvider = (sshBinaryPath: string): SshProcessProvide
         // the *remote* workspace root, which usually does not exist on this
         // machine. `remoteWorkspaceRoot` only appears inside the remote
         // command; ssh itself inherits the server process's cwd.
-        const child = spawn(sshBinaryPath, [...plan.sshArgs], {
+        const child = spawnProcess(sshBinaryPath, [...plan.sshArgs], {
           env: options.env,
           stdio: ["pipe", "pipe", "pipe"],
         }) as ChildProcessWithoutNullStreams;
@@ -147,8 +160,17 @@ export const makeSshProcessProvider = (sshBinaryPath: string): SshProcessProvide
               }),
             });
           });
-          child.once("close", (code, signal) => {
-            if (code === SSH_TRANSPORT_EXIT_CODE) {
+          child.once("close", async (code, signal) => {
+            const pid = await remotePid;
+            if (signal !== null || code === null) {
+              resolve({
+                kind: "ssh-transport-error",
+                error: new SshTransportError({
+                  reason: `ssh channel terminated without a successful exit${signal ? ` (${signal})` : ""}; remote process cleanup is unverified`,
+                  stderrTail,
+                }),
+              });
+            } else if (code === SSH_TRANSPORT_EXIT_CODE) {
               resolve({
                 kind: "ssh-transport-error",
                 error: new SshTransportError({
@@ -165,6 +187,14 @@ export const makeSshProcessProvider = (sshBinaryPath: string): SshProcessProvide
                   stderrTail,
                 }),
               });
+            } else if (pid === null) {
+              resolve({
+                kind: "ssh-transport-error",
+                error: new SshTransportError({
+                  reason: "ssh exited without a valid remote PID sentinel",
+                  stderrTail,
+                }),
+              });
             } else {
               resolve({ kind: "clean", signal });
             }
@@ -178,11 +208,10 @@ export const makeSshProcessProvider = (sshBinaryPath: string): SshProcessProvide
           onStderr: (callback: (chunk: string) => void) => {
             stderrCallbacks.push(callback);
           },
-          // Signalling the local ssh child closes the channel; sshd then HUPs
-          // the exec'd remote provider. TODO(PR F): remote PID-scoped
-          // `ssh <host> kill <pid>` fallback for an already-closed channel.
+          // Signals close the local channel; they do not prove remote process exit.
+          // Permit escalation while the child is still alive, even after TERM.
           kill: (signal?: NodeJS.Signals) => {
-            if (child.exitCode === null && !child.killed) {
+            if (child.exitCode === null && child.signalCode === null) {
               child.kill(signal);
             }
           },

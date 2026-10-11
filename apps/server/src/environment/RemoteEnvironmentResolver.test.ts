@@ -1,8 +1,9 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+const resolverScopes: Scope.Closeable[] = [];
+import { readFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { Effect, Option, Schema } from "effect";
+import { Exit, Scope, Effect, Option, Schema } from "effect";
 import { afterAll, describe, expect, it } from "vitest";
 
 import {
@@ -57,11 +58,12 @@ const makeInMemoryRegistry = (
     ),
 });
 
-const makeResolver = (
+const makeResolver = async (
   descriptors: readonly Descriptor[],
 ): Promise<RemoteEnvironmentResolverShape> =>
   Effect.runPromise(
-    makeRemoteEnvironmentResolver().pipe(
+    makeRemoteEnvironmentResolver({ originId: "isolated-test-origin" }).pipe(
+      Effect.provideService(Scope.Scope, await newResolverScope()),
       Effect.provideService(RemoteEnvironmentRegistry, makeInMemoryRegistry(descriptors)),
       Effect.provideService(KnownHostsPath, knownHostsPath),
     ),
@@ -133,17 +135,16 @@ describe("RemoteEnvironmentResolver", () => {
     expect(error._tag).toBe("RemoteEnvironmentUnsupportedRuntimeError");
   });
 
-  it("fails closed when the host has no known_hosts entry", async () => {
+  it("leaves known-host aliases and configured trust files to strict OpenSSH verification", async () => {
     const resolver = await makeResolver([
       makeDescriptor({
         runtime: { runtimeType: "ssh-process" },
-        transport: { host: "unknown.test" },
+        transport: { host: "configured-alias" },
       }),
     ]);
-    const error = await Effect.runPromise(
-      resolver.resolve(makeProfile(), startInput).pipe(Effect.flip),
-    );
-    expect(error._tag).toBe("RemoteEnvironmentHostKeyError");
+    const plan = await Effect.runPromise(resolver.resolve(makeProfile(), startInput));
+    expect(plan.kind).toBe("ssh");
+    if (plan.kind !== "local") expect(plan.sshArgs).toContain("StrictHostKeyChecking=yes");
   });
 
   it("verifies pinned fingerprints and fails closed on mismatch", async () => {
@@ -159,6 +160,15 @@ describe("RemoteEnvironmentResolver", () => {
     ]);
     const plan = await Effect.runPromise(matching.resolve(makeProfile(), startInput));
     expect(plan.kind).toBe("ssh");
+    if (plan.kind !== "local") {
+      expect(plan.sshArgs).toContain("GlobalKnownHostsFile=none");
+      expect(plan.sshArgs).toContain("KnownHostsCommand=none");
+      expect(plan.sshArgs).toContain("ControlPath=none");
+      const fileOption = plan.sshArgs.find((arg) => arg.startsWith("UserKnownHostsFile="))!;
+      const file = fileOption.slice('UserKnownHostsFile="'.length, -1);
+      expect(readFileSync(file, "utf8")).toContain(`ssh-ed25519 ${hostPublicKey}`);
+      expect(readFileSync(file, "utf8").trim().split("\n")).toHaveLength(1);
+    }
 
     const mismatching = await makeResolver([
       makeDescriptor({
@@ -175,4 +185,13 @@ describe("RemoteEnvironmentResolver", () => {
     );
     expect(error._tag).toBe("RemoteEnvironmentHostKeyError");
   });
+});
+
+async function newResolverScope(): Promise<Scope.Closeable> {
+  const scope = await Effect.runPromise(Scope.make());
+  resolverScopes.push(scope);
+  return scope;
+}
+afterAll(async () => {
+  for (const scope of resolverScopes) await Effect.runPromise(Scope.close(scope, Exit.void));
 });

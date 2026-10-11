@@ -2,7 +2,13 @@
 // Purpose: Defines the normalized web-store state shape and stable empty slice sentinels.
 // Exports: AppState, its initial value, and immutable empty normalized records.
 
-import type { MessageId, RemoteAgentConnectionStatus, ThreadId, TurnId } from "@synara/contracts";
+import type {
+  MessageId,
+  RemoteAgentConnectionStatus,
+  ThreadId,
+  TurnId,
+  OrchestrationThreadHistory,
+} from "@synara/contracts";
 
 import type {
   ChatMessage,
@@ -19,7 +25,7 @@ import type {
  * Per-thread detail hydration status. Absence means "idle": no detail snapshot
  * has been applied yet, so shell-only threads must not be treated as empty.
  */
-export type ThreadDetailSyncState = "synced" | "failed";
+export type ThreadDetailSyncState = "synced" | "failed" | "cached";
 
 /** Latest remote agent transport status for a thread (#99 PR VI). */
 export interface RemoteAgentThreadStatus {
@@ -48,6 +54,9 @@ export interface AppState {
   proposedPlanByThreadId?: Record<ThreadId, Record<string, Thread["proposedPlans"][number]>>;
   turnDiffIdsByThreadId?: Record<ThreadId, TurnId[]>;
   turnDiffSummaryByThreadId?: Record<ThreadId, Record<TurnId, Thread["turnDiffSummaries"][number]>>;
+  threadHistoryById?: Record<ThreadId, OrchestrationThreadHistory>;
+  /** Cursor that describes committed detail, never the queued event fence. */
+  threadDetailAppliedSequenceById?: Record<ThreadId, number>;
   threadDetailSyncById?: Record<ThreadId, ThreadDetailSyncState>;
   remoteAgentStatusByThreadId?: Record<ThreadId, RemoteAgentThreadStatus>;
   /**
@@ -106,6 +115,8 @@ export const initialState: AppState = {
   turnDiffSummaryByThreadId: {},
   threadDetailSyncById: {},
   remoteAgentStatusByThreadId: {},
+  threadHistoryById: {},
+  threadDetailAppliedSequenceById: {},
   deletedProjectIdsById: {},
   deletedThreadIdsById: {},
 };

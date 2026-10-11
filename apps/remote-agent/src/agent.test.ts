@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
@@ -9,6 +9,8 @@ import { RemoteAgentEventEnvelope } from "@synara/contracts/remoteAgent";
 
 const packageRoot = join(__dirname, "..");
 const binaryPath = join(packageRoot, "dist", "remote-agent.cjs");
+
+const posixTest = test.skipIf(process.platform === "win32");
 
 const decodeEvent = Schema.decodeUnknownSync(RemoteAgentEventEnvelope);
 
@@ -31,9 +33,10 @@ class AgentHarness {
   }> = [];
   private buffer = "";
   private nextId = 1;
+  private closing: Promise<void> | undefined;
 
   constructor() {
-    this.journalDir = mkdtempSync(join(tmpdir(), "synara-agent-test-"));
+    this.journalDir = realpathSync(mkdtempSync(join(tmpdir(), "synara-agent-test-")));
     this.child = spawn(process.execPath, [binaryPath], {
       env: { ...process.env, SYNARA_AGENT_JOURNAL_DIR: this.journalDir },
       stdio: ["pipe", "pipe", "pipe"],
@@ -91,9 +94,28 @@ class AgentHarness {
     );
   }
 
-  close(): void {
-    this.child.kill("SIGKILL");
-    rmSync(this.journalDir, { recursive: true, force: true });
+  close(): Promise<void> {
+    this.closing ??= new Promise<void>((resolve, reject) => {
+      const deadline = setTimeout(() => {
+        this.child.kill("SIGKILL");
+        reject(new Error(`Agent cleanup is unproven; journal retained at ${this.journalDir}`));
+      }, 10_000);
+      const settled = () => {
+        clearTimeout(deadline);
+        if (this.child.exitCode !== 0 || this.child.signalCode !== null) {
+          reject(new Error(`Agent cleanup failed; journal retained at ${this.journalDir}`));
+          return;
+        }
+        rmSync(this.journalDir, { recursive: true, force: true });
+        resolve();
+      };
+      if (this.child.exitCode !== null || this.child.signalCode !== null) settled();
+      else {
+        this.child.once("close", settled);
+        this.child.stdin?.end();
+      }
+    });
+    return this.closing;
   }
 }
 
@@ -106,18 +128,19 @@ const executionProfile = {
 let harness: AgentHarness;
 
 beforeAll(() => {
+  if (process.platform === "win32") return;
   execFileSync("bun", ["run", "build"], { cwd: packageRoot, stdio: "inherit" });
 });
 
-afterEach(() => {
-  harness?.close();
-});
+afterEach(async () => {
+  await harness?.close();
+}, 15_000);
 
-afterAll(() => {
-  harness?.close();
-});
+afterAll(async () => {
+  await harness?.close();
+}, 15_000);
 
-test("agent/hello returns versions", async () => {
+posixTest("agent/hello returns versions", async () => {
   harness = new AgentHarness();
   const response = await harness.request("agent/hello", {
     agentVersion: "0.0.0",
@@ -126,7 +149,7 @@ test("agent/hello returns versions", async () => {
   expect(response.result).toEqual({ agentVersion: "0.1.0", protocolVersion: "0.1.0" });
 });
 
-test("agent/spawn emits journaled stdout and exit events", async () => {
+posixTest("agent/spawn emits journaled stdout and exit events", async () => {
   harness = new AgentHarness();
   const threadId = "thread-spawn";
   const response = await harness.request("agent/spawn", {
@@ -152,7 +175,9 @@ test("agent/spawn emits journaled stdout and exit events", async () => {
     .join("");
   expect(combined).toBe("hello from provider");
 
-  const journal = readFileSync(join(harness.journalDir, `${threadId}.journal`), "utf8")
+  const journalFiles = readdirSync(harness.journalDir).filter((file) => file.endsWith(".journal"));
+  expect(journalFiles).toHaveLength(1);
+  const journal = readFileSync(join(harness.journalDir, journalFiles[0]!), "utf8")
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line) as { seq: number; kind: string });
@@ -168,7 +193,7 @@ test("agent/spawn emits journaled stdout and exit events", async () => {
   expect(duplicate.error?.message).toContain("already exists");
 });
 
-test("agent/spawn settles a thread whose executable cannot be launched", async () => {
+posixTest("agent/spawn settles a thread whose executable cannot be launched", async () => {
   harness = new AgentHarness();
   const threadId = "thread-enoent";
   const response = await harness.request("agent/spawn", {
@@ -176,7 +201,7 @@ test("agent/spawn settles a thread whose executable cannot be launched", async (
     executionProfile,
     providerArgv: ["/nonexistent/synara-provider-binary"],
   });
-  expect(response.result).toEqual({ ok: true });
+  expect(response.error?.message).toContain("ENOENT");
 
   const exitEvent = await harness.waitFor(
     (message) =>
@@ -207,14 +232,16 @@ test("agent/spawn settles a thread whose executable cannot be launched", async (
   expect(attach.result?.["status"]).toBe("exited");
   expect(attach.result?.["lastSeq"]).toBe(exitEvent.params?.["seq"]);
 
-  const journal = readFileSync(join(harness.journalDir, `${threadId}.journal`), "utf8")
+  const journalFiles = readdirSync(harness.journalDir).filter((file) => file.endsWith(".journal"));
+  expect(journalFiles).toHaveLength(1);
+  const journal = readFileSync(join(harness.journalDir, journalFiles[0]!), "utf8")
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line) as { kind: string });
   expect(journal[journal.length - 1]?.kind).toBe("exit");
 });
 
-test("agent/attach replays journal entries after lastSeq", async () => {
+posixTest("agent/attach replays journal entries after lastSeq", async () => {
   harness = new AgentHarness();
   const threadId = "thread-attach";
   await harness.request("agent/spawn", {
@@ -241,7 +268,7 @@ test("agent/attach replays journal entries after lastSeq", async () => {
   expect(unknown.result?.["status"]).toBe("unknown");
 });
 
-test("agent/send forwards raw and base64 payloads to provider stdin", async () => {
+posixTest("agent/send forwards raw and base64 payloads to provider stdin", async () => {
   harness = new AgentHarness();
   const threadId = "thread-send";
   await harness.request("agent/spawn", {
@@ -272,7 +299,7 @@ test("agent/send forwards raw and base64 payloads to provider stdin", async () =
   await harness.request("agent/kill", { threadId });
 });
 
-test("agent/kill terminates a running provider", async () => {
+posixTest("agent/kill terminates a running provider", async () => {
   harness = new AgentHarness();
   const threadId = "thread-kill";
   await harness.request("agent/spawn", {
@@ -295,7 +322,7 @@ test("agent/kill terminates a running provider", async () => {
   expect(threads.find((thread) => thread.threadId === threadId)?.status).toBe("exited");
 });
 
-test("agent/status lists running and journaled threads", async () => {
+posixTest("agent/status lists running and journaled threads", async () => {
   harness = new AgentHarness();
   const runningId = "thread-running";
   const exitedId = "thread-exited";

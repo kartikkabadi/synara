@@ -5,12 +5,16 @@
 //          ChildProcess-shaped object with real stdout/stderr/stdin streams
 //          so codexAppServerManager treats it like a local provider child.
 
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawnProcess } from "@synara/shared/processRuntime";
 import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";
 
 import {
   RemoteAgentEventEnvelope,
+  RemoteAgentAttachOutput,
+  RemoteAgentHelloOutput,
+  RemoteAgentRpcResponse,
   ThreadId,
   type RemoteAgentConnectionStatusChanged,
 } from "@synara/contracts";
@@ -35,7 +39,6 @@ import type { ProviderProcessSpawnOptions } from "../Services/ProviderProcessSpa
 import {
   REMOTE_AGENT_PROTOCOL_VERSION,
   RemoteAgentProvider,
-  type RemoteAgentAttachResult,
   type RemoteAgentProviderShape,
   type RemoteAgentSpawnedProcess,
 } from "../Services/RemoteAgentProvider";
@@ -50,21 +53,14 @@ import {
 
 const HELLO_TIMEOUT_MS = 15_000;
 const STDERR_TAIL_MAX_CHARS = 8_192;
+const MAX_PENDING_PROVIDER_OUTPUT_BYTES = 4 * 1024 * 1024;
 
 const decodeEventEnvelope = Schema.decodeUnknownSync(RemoteAgentEventEnvelope);
-
-interface JsonRpcResponse {
-  readonly jsonrpc: "2.0";
-  readonly id?: number | string | null;
-  readonly method?: string;
-  readonly params?: unknown;
-  readonly result?: unknown;
-  readonly error?: { readonly code: number; readonly message: string };
-}
 
 interface PendingRequest {
   readonly resolve: (result: unknown) => void;
   readonly reject: (error: Error) => void;
+  readonly timer: NodeJS.Timeout;
 }
 
 /**
@@ -81,7 +77,13 @@ class AgentRpcConnection {
   constructor(private readonly child: ChildProcessWithoutNullStreams) {
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
+      if (this.closed) return;
       this.buffer += chunk;
+      if (Buffer.byteLength(this.buffer) > 16 * 1024 * 1024) {
+        this.rejectAll(new Error("Remote agent frame exceeded 16 MiB"));
+        child.kill();
+        return;
+      }
       let newline = this.buffer.indexOf("\n");
       while (newline !== -1) {
         const line = this.buffer.slice(0, newline).trim();
@@ -104,11 +106,16 @@ class AgentRpcConnection {
     }
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Remote agent ${method} timed out`));
+      }, 15_000);
+      this.pending.set(id, { resolve, reject, timer });
       this.child.stdin.write(
         `${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`,
         (error) => {
           if (error) {
+            clearTimeout(timer);
             this.pending.delete(id);
             reject(error);
           }
@@ -118,9 +125,9 @@ class AgentRpcConnection {
   }
 
   private handleLine(line: string): void {
-    let message: JsonRpcResponse;
+    let message: RemoteAgentRpcResponse;
     try {
-      message = JSON.parse(line) as JsonRpcResponse;
+      message = Schema.decodeUnknownSync(RemoteAgentRpcResponse)(JSON.parse(line));
     } catch {
       // Non-JSON noise on the agent channel (e.g. login banners) is ignored;
       // the hello handshake fails closed if the agent never responds.
@@ -133,6 +140,7 @@ class AgentRpcConnection {
     if (typeof message.id !== "number") return;
     const pending = this.pending.get(message.id);
     if (pending === undefined) return;
+    clearTimeout(pending.timer);
     this.pending.delete(message.id);
     if (message.error !== undefined) {
       pending.reject(new Error(message.error.message));
@@ -143,7 +151,9 @@ class AgentRpcConnection {
 
   private rejectAll(error: Error): void {
     this.closed = true;
+    this.buffer = "";
     for (const pending of this.pending.values()) {
+      clearTimeout(pending.timer);
       pending.reject(error);
     }
     this.pending.clear();
@@ -172,6 +182,7 @@ class RemoteAgentChildAdapter extends EventEmitter {
 
   private agent: AgentConnection | undefined;
   private highestSeq = 0;
+  private failure: Error | undefined;
   private readonly transportStderrCallbacks: Array<(chunk: string) => void> = [];
 
   constructor(
@@ -179,6 +190,10 @@ class RemoteAgentChildAdapter extends EventEmitter {
     private readonly onDisconnect?: (code: number, signal: NodeJS.Signals | null) => void,
   ) {
     super();
+    // Startup notifications can arrive before the process owner attaches listeners.
+    this.on("error", (error: Error) => {
+      this.failure ??= error;
+    });
     this.stdin = new Writable({
       write: (chunk: Buffer | string, _encoding, callback) => {
         const connection = this.agent?.connection;
@@ -195,8 +210,16 @@ class RemoteAgentChildAdapter extends EventEmitter {
     });
   }
 
+  get transportPid(): number | undefined {
+    return this.agent?.sshChild.pid;
+  }
+
   get lastReceivedSeq(): number {
     return this.highestSeq;
+  }
+
+  assertHealthy(): void {
+    if (this.failure) throw this.failure;
   }
 
   /**
@@ -217,7 +240,8 @@ class RemoteAgentChildAdapter extends EventEmitter {
   bind(agent: AgentConnection): void {
     const previous = this.agent;
     this.agent = agent;
-    this.pid = agent.sshChild.pid;
+    // A local transport PID must never masquerade as the remote provider PID.
+    this.pid = undefined;
     if (previous !== undefined && previous.sshChild.exitCode === null) {
       previous.sshChild.kill();
     }
@@ -233,6 +257,7 @@ class RemoteAgentChildAdapter extends EventEmitter {
       // a transport death never settles the provider: keep streams open,
       // surface a disconnect, and let the owning layer reconnect.
       if (this.agent !== agent || this.exitCode !== null || this.killed) return;
+      this.agent = undefined;
       this.emit("disconnect", code, signal);
       this.onDisconnect?.(code ?? -1, signal ?? null);
     });
@@ -254,36 +279,60 @@ class RemoteAgentChildAdapter extends EventEmitter {
     // Replayed events (agent/attach) at or below the high-water mark were
     // already forwarded on a previous connection.
     if (envelope.seq <= this.highestSeq) return;
-    this.highestSeq = envelope.seq;
-    switch (envelope.kind) {
-      case "stdout":
-        this.stdout.write(Buffer.from(envelope.data, "base64"));
+    if (envelope.kind !== "exit") {
+      if (this.failure) return;
+      const data = Buffer.from(envelope.data, "base64");
+      const pending = this.stdout.readableLength + this.stdout.writableLength +
+        this.stderr.readableLength + this.stderr.writableLength;
+      if (pending + data.length > MAX_PENDING_PROVIDER_OUTPUT_BYTES) {
+        onParseError(new RemoteAgentEventParseError({
+          reason: "Remote provider output exceeded the unread buffer limit",
+        }));
+        // Keep consuming control frames so the owner can still confirm agent/kill.
         return;
-      case "stderr":
-        this.stderr.write(Buffer.from(envelope.data, "base64"));
-        return;
-      case "exit":
-        this.settleExit(envelope.exitCode, null);
-        return;
+      }
+      this.highestSeq = envelope.seq;
+      (envelope.kind === "stdout" ? this.stdout : this.stderr).write(data);
+      return;
     }
+    this.highestSeq = envelope.seq;
+    this.settleExit(envelope.exitCode, null);
   }
 
-  kill(signal?: NodeJS.Signals): boolean {
+  async stop(): Promise<void> {
     this.killed = true;
+    if (this.exitCode !== null) return;
     const agent = this.agent;
-    if (agent === undefined) {
-      this.settleExit(-1, signal ?? null);
-      return true;
-    }
-    const finalize = () => {
-      if (agent.sshChild.exitCode === null && !agent.sshChild.killed) {
-        agent.sshChild.kill(signal);
-      }
-      // The kill flow completed: settle even if the exit event never arrived
-      // (e.g. the transport dropped it) so teardown runs exactly once.
-      this.settleExit(-1, signal ?? null);
-    };
-    agent.connection.request("agent/kill", { threadId: this.threadId }).then(finalize, finalize);
+    if (!agent)
+      throw new Error("Remote transport is disconnected; provider termination is unverified");
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.off("exit", exited);
+      };
+      const exited = () => {
+        cleanup();
+        agent.sshChild.kill();
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        cleanup();
+        agent.sshChild.kill();
+        reject(new Error("Remote provider did not confirm exit after cancellation"));
+      }, 10_000);
+      this.once("exit", exited);
+      void agent.connection
+        .request("agent/kill", { threadId: this.threadId })
+        .catch((cause: unknown) => {
+          cleanup();
+          agent.sshChild.kill();
+          reject(new Error("Remote provider termination is unverified", { cause }));
+        });
+    });
+  }
+
+  kill(_signal?: NodeJS.Signals): boolean {
+    void this.stop().catch((error: Error) => this.emit("error", error));
     return true;
   }
 
@@ -311,8 +360,8 @@ function connectToAgent(
 ): Effect.Effect<AgentConnection, ProviderSpawnError> {
   return Effect.try({
     try: () => {
-      const sshChild = spawn(sshBinaryPath, [...plan.sshArgs], {
-        cwd: options.cwd,
+      const sshChild = spawnProcess(sshBinaryPath, [...plan.sshArgs], {
+        // This is the local SSH client; the workspace path belongs to the remote host.
         env: options.env,
         stdio: ["pipe", "pipe", "pipe"],
       }) as ChildProcessWithoutNullStreams;
@@ -362,13 +411,12 @@ function performHello(
         }),
       );
     }
-    const hello = maybeResult.value as { protocolVersion?: string } | undefined;
-    const actual = hello?.protocolVersion;
-    if (typeof actual !== "string" || actual.length === 0) {
-      return yield* Effect.fail(
-        new RemoteAgentHelloFailedError({ reason: "agent/hello returned no protocolVersion" }),
-      );
-    }
+    const hello = yield* Effect.try({
+      try: () => Schema.decodeUnknownSync(RemoteAgentHelloOutput)(maybeResult.value),
+      catch: () =>
+        new RemoteAgentHelloFailedError({ reason: "agent/hello returned an invalid response" }),
+    });
+    const actual = hello.protocolVersion;
     if (actual !== REMOTE_AGENT_PROTOCOL_VERSION) {
       return yield* Effect.fail(
         new RemoteAgentVersionMismatchError({
@@ -411,12 +459,17 @@ export const makeRemoteAgentProvider = (
     const agent = await Effect.runPromise(connectToAgent(sshBinaryPath, plan, options));
     try {
       await Effect.runPromise(performHello(agent.connection));
+      if (adapter.killed || adapter.exitCode !== null)
+        throw new Error("Remote reconnect cancelled");
       // Bind before agent/attach so replayed events land on the proxy streams.
       adapter.bind(agent);
-      const result = (await agent.connection.request("agent/attach", {
-        threadId: plan.threadId,
-        lastSeq: adapter.lastReceivedSeq,
-      })) as RemoteAgentAttachResult;
+      const result = Schema.decodeUnknownSync(RemoteAgentAttachOutput)(
+        await agent.connection.request("agent/attach", {
+          threadId: plan.threadId,
+          lastSeq: adapter.lastReceivedSeq,
+        }),
+      );
+      if (adapter.killed) throw new Error("Remote reconnect cancelled");
       if (result.status === "exited") {
         // The replayed exit event normally settles the adapter with the real
         // code; settle from the attach result if it was already consumed.
@@ -456,13 +509,17 @@ export const makeRemoteAgentProvider = (
         disconnectCode: code,
         ensureInstalled: () =>
           Effect.runPromise(
-            installer.ensureAgentInstalled({ transport: plan.transport, runtime: plan.runtime }),
+            installer.ensureAgentInstalled({
+              transport: plan.transport,
+              runtime: plan.runtime,
+              sshTrustArgs: plan.sshTrustArgs,
+            }),
           ),
         reattach: () => reattach(plan, options, adapter),
         isSettled: () => adapter.exitCode !== null || adapter.killed,
         onExhausted: (error) => {
           adapter.emit("error", error);
-          adapter.settleExit(code, null);
+          // Retry exhaustion says nothing about the remote provider lifetime.
         },
         onStatusChange: (change) => emitStatusChange(adapter, change),
       });
@@ -470,7 +527,14 @@ export const makeRemoteAgentProvider = (
     adapter.once("exit", () => reconnector.finalize(plan.threadId));
     const spawned: RemoteAgentSpawnedProcess = {
       child: adapter as unknown as ChildProcessWithoutNullStreams,
+      get transportPid() {
+        return adapter.transportPid;
+      },
       onStderr: (callback: (chunk: string) => void) => adapter.onTransportStderr(callback),
+      stop: async () => {
+        reconnector.cancel(plan.threadId);
+        await adapter.stop();
+      },
       kill: (signal?: NodeJS.Signals) => {
         reconnector.cancel(plan.threadId);
         adapter.kill(signal);
@@ -482,7 +546,11 @@ export const makeRemoteAgentProvider = (
   return {
     spawnRemoteAgent: (plan: RemoteAgentSpawnPlan, options: ProviderProcessSpawnOptions) =>
       Effect.gen(function* () {
-        yield* installer.ensureAgentInstalled({ transport: plan.transport, runtime: plan.runtime });
+        yield* installer.ensureAgentInstalled({
+          transport: plan.transport,
+          runtime: plan.runtime,
+          sshTrustArgs: plan.sshTrustArgs,
+        });
         const agent = yield* connectToAgent(sshBinaryPath, plan, options);
         const closeOnFailure = <A, E>(effect: Effect.Effect<A, E>) =>
           Effect.tapError(effect, () => Effect.sync(() => agent.sshChild.kill()));
@@ -501,6 +569,18 @@ export const makeRemoteAgentProvider = (
             catch: (cause) => mapSpawnRejection(plan.threadId, cause),
           }),
         );
+        yield* closeOnFailure(Effect.tryPromise({
+          try: async () => {
+            try {
+              adapter.assertHealthy();
+            } catch (cause) {
+              // A successful spawn belongs to this caller even if early output failed.
+              await adapter.stop();
+              throw cause;
+            }
+          },
+          catch: (cause) => mapSpawnRejection(plan.threadId, cause),
+        }));
         return spawned;
       }),
     attachRemoteAgent: (
@@ -527,7 +607,21 @@ export const makeRemoteAgentProvider = (
               }),
           }),
         );
-        const attach = result as RemoteAgentAttachResult;
+        const attach = yield* closeOnFailure(
+          Effect.try({
+            try: () => Schema.decodeUnknownSync(RemoteAgentAttachOutput)(result),
+            catch: () =>
+              new RemoteAgentAttachFailedError({
+                reason: "agent/attach returned an invalid response",
+              }),
+          }),
+        );
+        yield* closeOnFailure(Effect.try({
+          try: () => adapter.assertHealthy(),
+          catch: (cause) => new RemoteAgentAttachFailedError({
+            reason: cause instanceof Error ? cause.message : String(cause),
+          }),
+        }));
         return { process: spawned, attach };
       }),
   };

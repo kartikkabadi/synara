@@ -105,3 +105,31 @@ The architectural invariant across all of it: **backends may differ, but users s
 5. Version-skew policy for B: read-degraded + user-invoked drain-then-upgrade (per #366), or something stricter?
 6. Which providers must the A slice support first (Codex and Claude are the natural candidates)?
    - **Assumed answer: Codex-first, Claude next behind the same seam.** `codexAppServerManager.ts` is the most complete session broker and the whole Codex path is already stdio-shaped; upstream #467 (Claude over SSH) is the precedent proving the same mechanism works for Claude, so nothing in the Codex-first order forecloses it.
+
+## Repair verification boundaries
+
+Remote environment listing, registration, removal, and probes require the
+existing owner session authorization. Remote output is data and cannot grant
+local credentials, folder access, approvals, or execution policy changes.
+
+SSH completion is successful only after an exit code of zero and a valid PID
+sentinel. A signal or absent sentinel is a transport failure; closing the SSH
+channel does not prove remote process-tree termination. Persistent-agent
+cancellation requires the agent acknowledgement and proven owned group exit.
+Bootstrap commands bound captured stdout to 64 KiB. An unverified channel,
+timeout, or oversized hello response refuses installation rather than treating
+that result as an absent agent. Matching hello content from a failed channel
+cannot establish successful installation.
+
+Source checks and mock transports do not establish a live SSH/provider session,
+native Windows behavior, or signed desktop startup.
+
+The current repair supports Codex over direct SSH, or the persistent agent when
+the registered environment advertises `remote-agent` reconnect capability. The
+earlier architecture assumptions above describe the original decision package;
+they do not prove cleanup on direct SSH disconnect. The agent journal can replay
+after transport loss, while cancellation must still receive its terminal event.
+Unread provider stdout and stderr are bounded to 4 MiB in the local adapter. If a
+consumer stops draining them, the owner receives an error; control frames remain
+readable so cancellation can still confirm exit. An output failure does not
+count as proof that the remote process has stopped.
