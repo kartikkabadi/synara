@@ -42,6 +42,7 @@ const CHECKPOINT_RUNTIME_RETENTION_DELETE_LIMIT = 1024;
 const ProviderRuntimeEventJson = Schema.fromJsonString(ProviderRuntimeEvent);
 const encodeEvent = Schema.encodeEffect(ProviderRuntimeEventJson);
 const decodeEvent = Schema.decodeUnknownEffect(ProviderRuntimeEventJson);
+const normalizeEvent = Schema.decodeUnknownEffect(ProviderRuntimeEvent);
 
 const StoredRowSchema = Schema.Struct({
   sequence: NonNegativeInt,
@@ -97,7 +98,10 @@ export const shrinkRuntimeEventStrings = (value: unknown): unknown => {
 const encodePersistableEvent = (event: ProviderRuntimeEvent) =>
   Effect.gen(function* () {
     event = stripDiagnosticImages(event) as ProviderRuntimeEvent;
-    const eventJson = yield* encodeEvent(event).pipe(
+    const normalized = yield* normalizeEvent(event).pipe(
+      Effect.mapError(toPersistenceDecodeError("ProviderRuntimeEvent.append.normalize")),
+    );
+    const eventJson = yield* encodeEvent(normalized).pipe(
       Effect.mapError(toPersistenceDecodeError("ProviderRuntimeEvent.append.encode")),
     );
     // Decode the serialized representation before indexing it. Encoders may
