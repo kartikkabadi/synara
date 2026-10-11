@@ -334,7 +334,7 @@ describe("CheckpointStoreLive rescue checkpoints (real Git)", () => {
     return cwd;
   });
 
-  it("captures a rescue checkpoint of a dirty worktree at the rescue ref", async () => {
+  it("captures a rescue checkpoint of a dirty worktree at the saga-keyed rescue ref", async () => {
     runtime = ManagedRuntime.make(RescueTestLayer);
 
     await runtime.runPromise(
@@ -345,16 +345,66 @@ describe("CheckpointStoreLive rescue checkpoints (real Git)", () => {
         const checkpointRef = yield* store.captureRescueCheckpoint({
           cwd,
           threadId,
-          timestampMs: 1_700_000_000_000,
+          sagaId: "saga-1",
         });
 
         expect(checkpointRef).toBe(
-          `refs/synara-rescue/${Encoding.encodeBase64Url(threadId)}/1700000000000`,
+          `refs/synara-rescue/${Encoding.encodeBase64Url(threadId)}/${Encoding.encodeBase64Url("saga-1")}`,
         );
         expect(yield* store.hasCheckpointRef({ cwd, checkpointRef })).toBe(true);
 
         const capturedFiles = yield* git(cwd, ["ls-tree", "--name-only", "-r", checkpointRef]);
-        expect(capturedFiles.split("\n").sort()).toEqual(["tracked.txt", "untracked.txt"]);
+        expect(capturedFiles.split("\n").toSorted()).toEqual(["tracked.txt", "untracked.txt"]);
+      }),
+    );
+  });
+
+  it("retries for the same saga deterministically overwrite the same rescue ref", async () => {
+    runtime = ManagedRuntime.make(RescueTestLayer);
+
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const store = yield* CheckpointStore;
+        const cwd = yield* setupDirtyRepo;
+
+        const firstRef = yield* store.captureRescueCheckpoint({ cwd, threadId, sagaId: "saga-1" });
+        yield* fs.writeFileString(path.join(cwd, "tracked.txt"), "retried\n");
+        const secondRef = yield* store.captureRescueCheckpoint({ cwd, threadId, sagaId: "saga-1" });
+
+        expect(secondRef).toBe(firstRef);
+        expect(yield* store.listRescueRefs({ cwd, threadId })).toEqual([firstRef]);
+
+        const captured = yield* git(cwd, ["show", `${firstRef}:tracked.txt`]);
+        expect(captured).toBe("retried");
+      }),
+    );
+  });
+
+  it("enumerates rescue refs leaked by a crash between capture and delete", async () => {
+    runtime = ManagedRuntime.make(RescueTestLayer);
+
+    await runtime.runPromise(
+      Effect.gen(function* () {
+        const store = yield* CheckpointStore;
+        const cwd = yield* setupDirtyRepo;
+        const otherThreadId = ThreadId.makeUnsafe("other-thread");
+
+        // Simulate a crash after capture: the refs exist and no delete ran.
+        const leakedRef = yield* store.captureRescueCheckpoint({ cwd, threadId, sagaId: "saga-1" });
+        const otherRef = yield* store.captureRescueCheckpoint({
+          cwd,
+          threadId: otherThreadId,
+          sagaId: "saga-2",
+        });
+
+        expect(yield* store.listRescueRefs({ cwd, threadId })).toEqual([leakedRef]);
+        expect((yield* store.listRescueRefs({ cwd })).toSorted()).toEqual(
+          [leakedRef, otherRef].toSorted(),
+        );
+
+        yield* store.deleteRescueRef({ cwd, checkpointRef: leakedRef });
+        expect(yield* store.listRescueRefs({ cwd, threadId })).toEqual([]);
       }),
     );
   });
@@ -368,7 +418,11 @@ describe("CheckpointStoreLive rescue checkpoints (real Git)", () => {
         const store = yield* CheckpointStore;
         const cwd = yield* setupDirtyRepo;
 
-        const checkpointRef = yield* store.captureRescueCheckpoint({ cwd, threadId });
+        const checkpointRef = yield* store.captureRescueCheckpoint({
+          cwd,
+          threadId,
+          sagaId: "saga-1",
+        });
 
         yield* fs.writeFileString(path.join(cwd, "tracked.txt"), "mangled by revert\n");
         yield* fs.remove(path.join(cwd, "untracked.txt"));
@@ -392,7 +446,11 @@ describe("CheckpointStoreLive rescue checkpoints (real Git)", () => {
         const store = yield* CheckpointStore;
         const cwd = yield* setupDirtyRepo;
 
-        const checkpointRef = yield* store.captureRescueCheckpoint({ cwd, threadId });
+        const checkpointRef = yield* store.captureRescueCheckpoint({
+          cwd,
+          threadId,
+          sagaId: "saga-1",
+        });
         expect(yield* store.hasCheckpointRef({ cwd, checkpointRef })).toBe(true);
 
         yield* store.deleteRescueRef({ cwd, checkpointRef });

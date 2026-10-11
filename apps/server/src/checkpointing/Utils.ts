@@ -87,16 +87,36 @@ export function checkpointRefForThreadTurnStartInManagedFamily(
   );
 }
 
+const RESCUE_CHECKPOINT_REF_PATTERN = /^refs\/synara-rescue\/([A-Za-z0-9_-]+)\/([A-Za-z0-9_-]+)$/;
+
+export interface RescueCheckpointRefParts {
+  readonly threadToken: string;
+  readonly sagaToken: string;
+}
+
 // Pre-revert safety snapshot for the checkpoint-revert compensated saga: captured
 // before a revert mutates the workspace so a failed/uncertain revert can be
-// compensated by restoring the pre-revert workspace state.
-export function rescueCheckpointRefForThread(
+// compensated by restoring the pre-revert workspace state. Keyed by the durable
+// saga id so retries of the same saga deterministically target the same ref.
+export function rescueCheckpointRefForThreadSaga(
   threadId: ThreadId,
-  timestampMs: number,
+  sagaId: string,
 ): CheckpointRef {
   return CheckpointRef.makeUnsafe(
-    `${RESCUE_REFS_PREFIX}/${Encoding.encodeBase64Url(threadId)}/${timestampMs}`,
+    `${RESCUE_REFS_PREFIX}/${Encoding.encodeBase64Url(threadId)}/${Encoding.encodeBase64Url(sagaId)}`,
   );
+}
+
+export function parseRescueCheckpointRef(value: string): RescueCheckpointRefParts | null {
+  const match = RESCUE_CHECKPOINT_REF_PATTERN.exec(value);
+  if (!match) return null;
+  const [, threadToken, sagaToken] = match;
+  if (!threadToken || !sagaToken) return null;
+  return { threadToken, sagaToken };
+}
+
+export function isRescueCheckpointRefForThread(value: string, threadId: ThreadId): boolean {
+  return parseRescueCheckpointRef(value)?.threadToken === Encoding.encodeBase64Url(threadId);
 }
 
 // Throwaway ref used to snapshot the working tree mid-turn so a live diff can be

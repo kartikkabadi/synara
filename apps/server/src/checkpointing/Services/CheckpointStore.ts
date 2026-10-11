@@ -61,9 +61,10 @@ export interface CaptureRescueCheckpointInput {
   readonly cwd: string;
   readonly threadId: ThreadId;
   /**
-   * Timestamp used in the rescue ref name. Defaults to the current time.
+   * Durable saga/job identity the rescue snapshot belongs to. Retries of the
+   * same saga deterministically target the same rescue ref.
    */
-  readonly timestampMs?: number;
+  readonly sagaId: string;
 }
 
 export interface RestoreRescueCheckpointInput {
@@ -74,6 +75,14 @@ export interface RestoreRescueCheckpointInput {
 export interface DeleteRescueRefInput {
   readonly cwd: string;
   readonly checkpointRef: CheckpointRef;
+}
+
+export interface ListRescueRefsInput {
+  readonly cwd: string;
+  /**
+   * Restrict the listing to rescue refs belonging to one thread.
+   */
+  readonly threadId?: ThreadId;
 }
 
 export interface DeleteCheckpointRefsInput {
@@ -176,6 +185,14 @@ export interface CheckpointStoreShape {
   readonly deleteRescueRef: (
     input: DeleteRescueRefInput,
   ) => Effect.Effect<void, CheckpointStoreError>;
+
+  /**
+   * Enumerate existing rescue refs so a reconciliation pass can restore or
+   * clean up refs leaked by a crash between capture and delete.
+   */
+  readonly listRescueRefs: (
+    input: ListRescueRefsInput,
+  ) => Effect.Effect<ReadonlyArray<CheckpointRef>, CheckpointStoreError>;
 }
 
 /**
