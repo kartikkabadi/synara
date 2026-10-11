@@ -125,26 +125,34 @@ layer("reconcileMigrationLineage", (it) => {
       }),
   );
 
-  it.effect("preserves legacy sessions and bound execution profiles when the additive migration replays", () =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      yield* runMigrations({ toMigrationInclusive: 134 });
-      const columns = yield* sql<{ name: string }>`PRAGMA table_info(projection_thread_sessions)`;
-      assert.notInclude(columns.map((column) => column.name), "execution_profile_json");
-      yield* sql`INSERT INTO projection_thread_sessions
+  it.effect(
+    "preserves legacy sessions and bound execution profiles when the additive migration replays",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* runMigrations({ toMigrationInclusive: 134 });
+        const columns = yield* sql<{ name: string }>`PRAGMA table_info(projection_thread_sessions)`;
+        assert.notInclude(
+          columns.map((column) => column.name),
+          "execution_profile_json",
+        );
+        yield* sql`INSERT INTO projection_thread_sessions
         (thread_id, provider_name, status, updated_at)
         VALUES ('legacy-remote-session', 'codex', 'ready', '2026-10-11T00:00:00.000Z')`;
-      yield* runMigrations();
-      const read = () => sql<{ provider: string; profile: string | null }>`
+        yield* runMigrations();
+        const read = () => sql<{ provider: string; profile: string | null }>`
         SELECT provider_name AS provider, execution_profile_json AS profile
         FROM projection_thread_sessions WHERE thread_id = 'legacy-remote-session'`;
-      assert.deepStrictEqual(yield* read(), [{ provider: "codex", profile: null }]);
-      const profile = JSON.stringify({ environmentId: "remote-owner", remoteWorkspaceRoot: "/work" });
-      yield* sql`UPDATE projection_thread_sessions SET execution_profile_json = ${profile}
+        assert.deepStrictEqual(yield* read(), [{ provider: "codex", profile: null }]);
+        const profile = JSON.stringify({
+          environmentId: "remote-owner",
+          remoteWorkspaceRoot: "/work",
+        });
+        yield* sql`UPDATE projection_thread_sessions SET execution_profile_json = ${profile}
         WHERE thread_id = 'legacy-remote-session'`;
-      yield* ThreadExecutionProfileMigration;
-      assert.deepStrictEqual(yield* read(), [{ provider: "codex", profile }]);
-    }),
+        yield* ThreadExecutionProfileMigration;
+        assert.deepStrictEqual(yield* read(), [{ provider: "codex", profile }]);
+      }),
   );
 
   it.effect("leaves a healthy tracker alone", () =>

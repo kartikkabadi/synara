@@ -282,12 +282,17 @@ class RemoteAgentChildAdapter extends EventEmitter {
     if (envelope.kind !== "exit") {
       if (this.failure) return;
       const data = Buffer.from(envelope.data, "base64");
-      const pending = this.stdout.readableLength + this.stdout.writableLength +
-        this.stderr.readableLength + this.stderr.writableLength;
+      const pending =
+        this.stdout.readableLength +
+        this.stdout.writableLength +
+        this.stderr.readableLength +
+        this.stderr.writableLength;
       if (pending + data.length > MAX_PENDING_PROVIDER_OUTPUT_BYTES) {
-        onParseError(new RemoteAgentEventParseError({
-          reason: "Remote provider output exceeded the unread buffer limit",
-        }));
+        onParseError(
+          new RemoteAgentEventParseError({
+            reason: "Remote provider output exceeded the unread buffer limit",
+          }),
+        );
         // Keep consuming control frames so the owner can still confirm agent/kill.
         return;
       }
@@ -569,18 +574,20 @@ export const makeRemoteAgentProvider = (
             catch: (cause) => mapSpawnRejection(plan.threadId, cause),
           }),
         );
-        yield* closeOnFailure(Effect.tryPromise({
-          try: async () => {
-            try {
-              adapter.assertHealthy();
-            } catch (cause) {
-              // A successful spawn belongs to this caller even if early output failed.
-              await adapter.stop();
-              throw cause;
-            }
-          },
-          catch: (cause) => mapSpawnRejection(plan.threadId, cause),
-        }));
+        yield* closeOnFailure(
+          Effect.tryPromise({
+            try: async () => {
+              try {
+                adapter.assertHealthy();
+              } catch (cause) {
+                // A successful spawn belongs to this caller even if early output failed.
+                await adapter.stop();
+                throw cause;
+              }
+            },
+            catch: (cause) => mapSpawnRejection(plan.threadId, cause),
+          }),
+        );
         return spawned;
       }),
     attachRemoteAgent: (
@@ -616,12 +623,15 @@ export const makeRemoteAgentProvider = (
               }),
           }),
         );
-        yield* closeOnFailure(Effect.try({
-          try: () => adapter.assertHealthy(),
-          catch: (cause) => new RemoteAgentAttachFailedError({
-            reason: cause instanceof Error ? cause.message : String(cause),
+        yield* closeOnFailure(
+          Effect.try({
+            try: () => adapter.assertHealthy(),
+            catch: (cause) =>
+              new RemoteAgentAttachFailedError({
+                reason: cause instanceof Error ? cause.message : String(cause),
+              }),
           }),
-        }));
+        );
         return { process: spawned, attach };
       }),
   };

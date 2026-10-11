@@ -18,12 +18,20 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { spawnProcess } from "@synara/shared/processRuntime";
 import { RemoteAgent } from "./agent";
-import { defaultJournalDir, endpointHash, ensurePrivateDirectory, errorCode, openPrivateFile } from "./storage";
+import {
+  defaultJournalDir,
+  endpointHash,
+  ensurePrivateDirectory,
+  errorCode,
+  openPrivateFile,
+} from "./storage";
 
 function endpointPaths(id: string) {
   if (process.platform === "win32") throw new Error("Remote agents require a POSIX host");
   if (!/^[A-Za-z0-9_-]{1,96}$/.test(id)) throw new Error("Invalid remote-agent endpoint id");
-  const directory = process.env.SYNARA_AGENT_RUNTIME_DIR ?? join(realpathSync(tmpdir()), `synara-agent-${process.getuid!()}`);
+  const directory =
+    process.env.SYNARA_AGENT_RUNTIME_DIR ??
+    join(realpathSync(tmpdir()), `synara-agent-${process.getuid!()}`);
   ensurePrivateDirectory(directory);
   const key = endpointHash(id).slice(0, 32);
   const socket = join(directory, `${key}.sock`);
@@ -45,10 +53,14 @@ function socketStat(path: string): Stats | undefined {
 }
 
 async function connect(socketPath: string): Promise<Socket> {
-  if (!socketStat(socketPath)) throw Object.assign(new Error("Agent socket not ready"), { code: "ENOENT" });
+  if (!socketStat(socketPath))
+    throw Object.assign(new Error("Agent socket not ready"), { code: "ENOENT" });
   return new Promise((resolve, reject) => {
     const socket = createConnection(socketPath);
-    const timer = setTimeout(() => socket.destroy(new Error("Agent socket connection timed out")), 1_000);
+    const timer = setTimeout(
+      () => socket.destroy(new Error("Agent socket connection timed out")),
+      1_000,
+    );
     socket.once("error", reject);
     socket.once("connect", () => {
       clearTimeout(timer);
@@ -141,7 +153,10 @@ export async function runDaemon(id: string): Promise<void> {
   let current: Socket | undefined;
   let stopping = false;
   const server = createServer((socket) => {
-    if (stopping) { socket.destroy(); return; }
+    if (stopping) {
+      socket.destroy();
+      return;
+    }
     current?.destroy();
     current = socket;
     agent.attachInput(socket, socket);
@@ -152,7 +167,9 @@ export async function runDaemon(id: string): Promise<void> {
   ensurePrivateDirectory(endpoints);
   const agent = new RemoteAgent(null, {
     journalDir: join(endpoints, paths.key),
-    onFatal: (error) => { void shutdown(error); },
+    onFatal: (error) => {
+      void shutdown(error);
+    },
   });
   const shutdown = async (failure?: unknown) => {
     if (stopping) return;
@@ -176,11 +193,21 @@ export async function runDaemon(id: string): Promise<void> {
     }
     process.exit(exitCode);
   };
-  process.on("SIGTERM", () => { void shutdown(); });
-  process.on("SIGINT", () => { void shutdown(); });
-  process.on("uncaughtException", (error) => { void shutdown(error); });
-  process.on("unhandledRejection", (error) => { void shutdown(error); });
-  server.on("error", (error) => { void shutdown(error); });
+  process.on("SIGTERM", () => {
+    void shutdown();
+  });
+  process.on("SIGINT", () => {
+    void shutdown();
+  });
+  process.on("uncaughtException", (error) => {
+    void shutdown(error);
+  });
+  process.on("unhandledRejection", (error) => {
+    void shutdown(error);
+  });
+  server.on("error", (error) => {
+    void shutdown(error);
+  });
   server.listen(paths.socket, () => {
     chmodSync(paths.socket, 0o600);
     ownedSocket = socketStat(paths.socket);
@@ -197,11 +224,15 @@ export async function connectDaemon(id: string): Promise<void> {
       socket = await connect(paths.socket);
     } catch (error) {
       if (errorCode(error) !== "ENOENT" && errorCode(error) !== "ECONNREFUSED") throw error;
-      if (Date.now() >= deadline) throw new Error(`Remote-agent startup timed out; inspect ${paths.log}`);
+      if (Date.now() >= deadline)
+        throw new Error(`Remote-agent startup timed out; inspect ${paths.log}`);
       if (!launched) {
         const entrypoint = process.argv[1];
         if (!entrypoint) throw new Error("Missing remote-agent entrypoint");
-        const log = openPrivateFile(paths.log, constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT);
+        const log = openPrivateFile(
+          paths.log,
+          constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT,
+        );
         try {
           const daemon = spawnProcess(process.execPath, [entrypoint, "--daemon", id], {
             ownProcessGroup: true,

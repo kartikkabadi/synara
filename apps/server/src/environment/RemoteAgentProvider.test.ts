@@ -360,8 +360,10 @@ describe("RemoteAgentProvider", () => {
       expect(errors).toHaveLength(1);
       expect(errors[0]?.message).toContain("unread buffer limit");
       expect(
-        spawned.child.stdout.readableLength + spawned.child.stdout.writableLength +
-        spawned.child.stderr.readableLength + spawned.child.stderr.writableLength,
+        spawned.child.stdout.readableLength +
+          spawned.child.stdout.writableLength +
+          spawned.child.stderr.readableLength +
+          spawned.child.stderr.writableLength,
       ).toBeLessThanOrEqual(4 * 1024 * 1024);
       await spawned.stop();
       expect(spawned.child.exitCode).toBe(0);

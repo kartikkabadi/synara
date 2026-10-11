@@ -40,7 +40,10 @@ export class RemoteAgent {
   private detachInput: (() => void) | undefined;
   private closing = false;
 
-  constructor(output: Writable | null, private readonly options: AgentOptions = {}) {
+  constructor(
+    output: Writable | null,
+    private readonly options: AgentOptions = {},
+  ) {
     this.output = output;
     this.journal = new AgentJournal(options.journalDir ?? defaultJournalDir());
     this.killGraceMs = options.killGraceMs ?? KILL_GRACE_MS;
@@ -130,7 +133,9 @@ export class RemoteAgent {
       case "agent/spawn": {
         const decoded = Schema.decodeUnknownSync(RemoteAgentSpawnInput)(params);
         // Published schemas trim strings; argv and stdin bytes must stay exact.
-        const raw = Schema.decodeUnknownSync(Schema.Struct({ providerArgv: Schema.Array(Schema.String) }))(params);
+        const raw = Schema.decodeUnknownSync(
+          Schema.Struct({ providerArgv: Schema.Array(Schema.String) }),
+        )(params);
         return this.handleSpawn({ ...decoded, providerArgv: raw.providerArgv });
       }
       case "agent/attach":
@@ -175,10 +180,14 @@ export class RemoteAgent {
       stdio: ["pipe", "pipe", "pipe"],
     });
     let complete!: () => void;
-    const completed = new Promise<void>((resolve) => { complete = resolve; });
+    const completed = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
     const state: ThreadState = { threadId, child, seq, status: "running", completed };
     this.threads.set(threadId, state);
-    const closed = new Promise<void>((resolve) => { child.once("close", () => resolve()); });
+    const closed = new Promise<void>((resolve) => {
+      child.once("close", () => resolve());
+    });
     let finishing = false;
     const finish = async (exitCode: number) => {
       if (finishing) return;
@@ -202,7 +211,9 @@ export class RemoteAgent {
     child.stdin.on("error", (error) => {
       this.emitOutput(state, "stderr", Buffer.from(`provider stdin error: ${error.message}`));
     });
-    child.once("exit", (code) => { void finish(code ?? -1); });
+    child.once("exit", (code) => {
+      void finish(code ?? -1);
+    });
     await new Promise<void>((resolve, reject) => {
       child.once("spawn", resolve);
       child.once("error", (error) => {
@@ -234,20 +245,31 @@ export class RemoteAgent {
       throw new Error(`Thread not running: ${params.threadId}`);
     }
     const { payload } = params;
-    if (payload.startsWith("b64:") && !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(payload.slice(4))) {
+    if (
+      payload.startsWith("b64:") &&
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(payload.slice(4))
+    ) {
       throw new Error("Invalid base64 stdin payload");
     }
-    const data = payload.startsWith("b64:") ? Buffer.from(payload.slice(4), "base64") : Buffer.from(payload);
+    const data = payload.startsWith("b64:")
+      ? Buffer.from(payload.slice(4), "base64")
+      : Buffer.from(payload);
     const stdin = state.child.stdin;
     if (!stdin || stdin.destroyed || !stdin.writable) throw new Error("Provider stdin is closed");
     await new Promise<void>((resolve, reject) => {
-      stdin.write(data, (error) => { if (error) reject(error); else resolve(); });
+      stdin.write(data, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
     });
     return { ok: true };
   }
 
   private handleStatus(): unknown {
-    const threads = new Map<string, { threadId: string; seq: number; status: RemoteAgentThreadStatus }>();
+    const threads = new Map<
+      string,
+      { threadId: string; seq: number; status: RemoteAgentThreadStatus }
+    >();
     for (const threadId of this.journal.threadIds()) {
       let seq = 0;
       let status: RemoteAgentThreadStatus = "unknown";
@@ -257,17 +279,20 @@ export class RemoteAgent {
       }
       threads.set(threadId, { threadId, seq, status });
     }
-    for (const { threadId, seq, status } of this.threads.values()) threads.set(threadId, { threadId, seq, status });
+    for (const { threadId, seq, status } of this.threads.values())
+      threads.set(threadId, { threadId, seq, status });
     return { threads: [...threads.values()] };
   }
 
   async shutdown(): Promise<void> {
     this.closing = true;
-    const results = await Promise.allSettled([...this.threads.values()].map(async (state) => {
-      await this.stop(state);
-      await state.completed;
-      if (state.failure) throw state.failure;
-    }));
+    const results = await Promise.allSettled(
+      [...this.threads.values()].map(async (state) => {
+        await this.stop(state);
+        await state.completed;
+        if (state.failure) throw state.failure;
+      }),
+    );
     const failed = results.find((result) => result.status === "rejected");
     if (failed?.status === "rejected") throw failed.reason;
   }
@@ -298,7 +323,12 @@ export class RemoteAgent {
     this.options.onFatal?.(error);
   }
 
-  private respondError(output: Writable | null, id: number | string | null, code: number, message: string): void {
+  private respondError(
+    output: Writable | null,
+    id: number | string | null,
+    code: number,
+    message: string,
+  ): void {
     this.writeLine(output, { jsonrpc: "2.0", id, error: { code, message } });
   }
 
