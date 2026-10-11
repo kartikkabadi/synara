@@ -1,6 +1,6 @@
 // Verifies the current Synara ACP boundary against an official-SDK subprocess.
 
-import { spawn } from "node:child_process";
+import { spawnProcess as spawn } from "@synara/shared/processRuntime";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
