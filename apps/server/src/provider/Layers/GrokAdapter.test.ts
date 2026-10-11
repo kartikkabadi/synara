@@ -28,6 +28,7 @@ import {
   mergeGrokModelDescriptors,
   parseXaiLanguageModelDescriptors,
   resolveGrokPlanHookResponse,
+  readGrokIntraCompactionTriggerPercent,
   scopeGrokRuntimeItemIdForTurn,
   scopeGrokToolCallStateForTurn,
   takeGrokSynaraHarnessPolicyTextPart,
@@ -201,6 +202,42 @@ describe("Grok native user questions", () => {
       annotations: {},
     });
     expect(makeGrokQuestionResponse(request, {})).toEqual({ outcome: "cancelled" });
+  });
+});
+
+describe("Grok native compaction trigger discovery", () => {
+  it("reads the intra_compaction trigger threshold from initialize _meta", () => {
+    expect(
+      readGrokIntraCompactionTriggerPercent({
+        protocolVersion: 1,
+        _meta: { intra_compaction: { trigger_threshold_percent: 85 } },
+      }),
+    ).toBe(85);
+    expect(
+      readGrokIntraCompactionTriggerPercent({
+        protocolVersion: 1,
+        agentCapabilities: {
+          _meta: { intra_compaction: { trigger_threshold_percent: 85 } },
+        },
+      }),
+    ).toBe(85);
+  });
+
+  it("omits the trigger when initialize does not advertise a valid threshold", () => {
+    expect(readGrokIntraCompactionTriggerPercent({ protocolVersion: 1 })).toBeUndefined();
+    expect(
+      readGrokIntraCompactionTriggerPercent({
+        protocolVersion: 1,
+        _meta: { intra_compaction: { trigger_threshold_percent: "85" } },
+      }),
+    ).toBeUndefined();
+    expect(
+      readGrokIntraCompactionTriggerPercent({
+        protocolVersion: 1,
+        _meta: { intra_compaction: { trigger_threshold_percent: 0 } },
+      }),
+    ).toBeUndefined();
+    expect(readGrokIntraCompactionTriggerPercent(undefined)).toBeUndefined();
   });
 });
 

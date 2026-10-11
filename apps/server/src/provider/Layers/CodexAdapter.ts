@@ -22,6 +22,7 @@ import {
   type ServerVoiceTranscriptionResult,
   type ThreadTokenUsageSnapshot,
   type ProviderUserInputAnswers,
+  EventId,
   RuntimeItemId,
   RuntimeRequestId,
   RuntimeTaskId,
@@ -1075,16 +1076,47 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "thread/compacting") {
+    const compactingPayload = {
+      itemType: "context_compaction",
+      status: "inProgress",
+      title: "Context compaction",
+      detail: event.message ?? "Compacting context",
+      ...(event.payload !== undefined ? { data: event.payload } : {}),
+    } as const;
     return [
       {
         ...runtimeEventBase(event, canonicalThreadId),
+        eventId: EventId.makeUnsafe(`${event.id}:compaction-started`),
+        type: "item.started",
+        payload: compactingPayload,
+      },
+      {
+        ...runtimeEventBase(event, canonicalThreadId),
         type: "item.updated",
+        payload: compactingPayload,
+      },
+    ];
+  }
+
+  if (event.method === "thread/compacted") {
+    return [
+      {
+        ...runtimeEventBase(event, canonicalThreadId),
+        eventId: EventId.makeUnsafe(`${event.id}:compaction-completed`),
+        type: "item.completed",
         payload: {
           itemType: "context_compaction",
-          status: "inProgress",
+          status: "completed",
           title: "Context compaction",
-          detail: event.message ?? "Compacting context",
           ...(event.payload !== undefined ? { data: event.payload } : {}),
+        },
+      },
+      {
+        type: "thread.state.changed",
+        ...runtimeEventBase(event, canonicalThreadId),
+        payload: {
+          state: "compacted",
+          ...(event.payload !== undefined ? { detail: event.payload } : {}),
         },
       },
     ];
@@ -1094,8 +1126,7 @@ function mapToRuntimeEvents(
     event.method === "thread/status/changed" ||
     event.method === "thread/archived" ||
     event.method === "thread/unarchived" ||
-    event.method === "thread/closed" ||
-    event.method === "thread/compacted"
+    event.method === "thread/closed"
   ) {
     return [
       {
@@ -1107,9 +1138,7 @@ function mapToRuntimeEvents(
               ? "archived"
               : event.method === "thread/closed"
                 ? "closed"
-                : event.method === "thread/compacted"
-                  ? "compacted"
-                  : toThreadState(asObject(payload?.thread)?.state ?? payload?.state),
+                : toThreadState(asObject(payload?.thread)?.state ?? payload?.state),
           ...(event.payload !== undefined ? { detail: event.payload } : {}),
         },
       },
@@ -2116,10 +2145,30 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
             sizeOf: codexRuntimeIngressItemBytes,
           },
         );
+        const latestUsageEventByThread = new Map<string, ProviderRuntimeEvent>();
         const listener = (event: ProviderEvent) => {
-          const runtimeEvents = assignDerivedProviderRuntimeEventIds(
-            mapToRuntimeEvents(event, event.threadId),
-          ).map(compactProviderRuntimeEventForIngress);
+          let mappedEvents = mapToRuntimeEvents(event, event.threadId);
+          for (const runtimeEvent of mappedEvents) {
+            if (runtimeEvent.type === "thread.token-usage.updated") {
+              latestUsageEventByThread.set(runtimeEvent.threadId, runtimeEvent);
+            }
+          }
+          if (event.method === "thread/compacted") {
+            const latestUsageEvent = latestUsageEventByThread.get(event.threadId);
+            if (latestUsageEvent !== undefined) {
+              mappedEvents = [
+                {
+                  ...latestUsageEvent,
+                  eventId: EventId.makeUnsafe(`${event.id}:usage-refresh`),
+                  createdAt: event.createdAt,
+                },
+                ...mappedEvents,
+              ];
+            }
+          }
+          const runtimeEvents = assignDerivedProviderRuntimeEventIds(mappedEvents).map(
+            compactProviderRuntimeEventForIngress,
+          );
           const result = ingress.offer({
             nativeEvent: compactCodexNativeEventForIngress(event),
             runtimeEvents,

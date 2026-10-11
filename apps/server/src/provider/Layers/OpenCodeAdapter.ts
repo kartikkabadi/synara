@@ -174,6 +174,12 @@ interface OpenCodeSessionContext {
   readonly modelContextLimitBySlug: Map<string, number>;
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
   lastEmittedTokenUsageKey: string | undefined;
+  // True while a compaction pass has an open context_compaction item
+  // lifecycle; gates the single item.started per pass.
+  compactionItemOpen: boolean;
+  // auto/overflow flags from the latest compaction part, reported on the
+  // pass's item.completed data.
+  compactionPassFlags: { readonly auto?: boolean; readonly overflow?: boolean } | undefined;
   latestTurnCostUsd: number | undefined;
   activeTurnId: TurnId | undefined;
   activeTurnEventSerial: number;
@@ -1245,6 +1251,23 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           readonly data?: unknown;
         },
       ) {
+        if (!context.compactionItemOpen) {
+          context.compactionItemOpen = true;
+          yield* emit(context, {
+            ...buildEventBase({
+              threadId: context.session.threadId,
+              turnId: input.turnId,
+              raw: input.raw,
+            }),
+            type: "item.started",
+            payload: {
+              itemType: "context_compaction",
+              status: "inProgress",
+              detail: input.detail ?? "Compacting context",
+              ...(input.data !== undefined ? { data: input.data } : {}),
+            },
+          });
+        }
         yield* emit(context, {
           ...buildEventBase({
             threadId: context.session.threadId,
@@ -1275,6 +1298,43 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
           },
           { clearLastError: true },
         );
+        // Refresh the token-usage snapshot so the post-compaction state
+        // downstream reflects the latest provider-reported usage.
+        if (context.lastKnownTokenUsage !== undefined) {
+          yield* emit(context, {
+            ...buildEventBase({
+              threadId: context.session.threadId,
+              turnId: input.turnId,
+              raw: input.raw,
+            }),
+            type: "thread.token-usage.updated",
+            payload: { usage: context.lastKnownTokenUsage },
+          });
+        }
+        const passFlags = context.compactionPassFlags;
+        context.compactionItemOpen = false;
+        context.compactionPassFlags = undefined;
+        yield* emit(context, {
+          ...buildEventBase({
+            threadId: context.session.threadId,
+            turnId: input.turnId,
+            raw: input.raw,
+          }),
+          type: "item.completed",
+          payload: {
+            itemType: "context_compaction",
+            status: "completed",
+            title: "Context compacted",
+            data: {
+              ...(passFlags?.auto !== undefined
+                ? { auto: passFlags.auto, trigger: "provider-auto" }
+                : {}),
+              ...(passFlags?.overflow
+                ? { overflow: passFlags.overflow, reason: "provider context overflow" }
+                : {}),
+            },
+          },
+        });
         yield* emit(context, {
           ...buildEventBase({
             threadId: context.session.threadId,
@@ -2375,6 +2435,10 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
             }
 
             if (part.type === "compaction") {
+              context.compactionPassFlags = {
+                ...(part.auto !== undefined ? { auto: part.auto } : {}),
+                ...(part.overflow !== undefined ? { overflow: part.overflow } : {}),
+              };
               yield* emitContextCompactionProgress(context, {
                 turnId,
                 raw: event,
@@ -3642,6 +3706,8 @@ export function makeOpenCodeAdapterLive(options?: OpenCodeAdapterLiveOptions) {
                   turns: [],
                   modelContextLimitBySlug: started.modelContextLimitBySlug,
                   lastKnownTokenUsage: undefined,
+                  compactionItemOpen: false,
+                  compactionPassFlags: undefined,
                   lastEmittedTokenUsageKey: undefined,
                   latestTurnCostUsd: undefined,
                   activeTurnId: undefined,

@@ -5625,7 +5625,7 @@ describe("ProviderRuntimeIngestion", () => {
     });
   });
 
-  it("projects compacted thread state into context compaction activities", async () => {
+  it("projects compaction item completion, not compacted thread state, into activities", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
 
@@ -5641,6 +5641,19 @@ describe("ProviderRuntimeIngestion", () => {
         detail: { source: "provider" },
       },
     });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-thread-compaction-item"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-1"),
+      payload: {
+        itemType: "context_compaction",
+        status: "completed",
+        title: "Context compacted",
+      },
+    });
 
     const thread = await waitForThread(harness.engine, (entry) =>
       entry.activities.some(
@@ -5648,11 +5661,12 @@ describe("ProviderRuntimeIngestion", () => {
       ),
     );
 
-    const activity = thread.activities.find(
+    const activities = thread.activities.filter(
       (candidate: ProviderRuntimeTestActivity) => candidate.kind === "context-compaction",
     );
-    expect(activity?.summary).toBe("Context compacted manually");
-    expect(activity?.tone).toBe("info");
+    expect(activities).toHaveLength(1);
+    expect(activities[0]?.summary).toBe("Context compacted");
+    expect(activities[0]?.tone).toBe("info");
   });
 
   it("projects context compaction progress updates into thread activities", async () => {
