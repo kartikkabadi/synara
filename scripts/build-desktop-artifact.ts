@@ -1198,7 +1198,44 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   };
   const bundledClientEntry = path.join(distDirs.serverDist, "client/index.html");
 
+  const buildEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    SYNARA_DESKTOP_SIGNED: options.signed ? "1" : "0",
+    SYNARA_WINDOWS_UPDATER_SIGNED: options.platform === "win" && options.signed ? "1" : "0",
+  };
+  for (const [key, value] of Object.entries(buildEnv)) {
+    if (value === "") {
+      delete buildEnv[key];
+    }
+  }
+  if (!options.signed) {
+    buildEnv.CSC_IDENTITY_AUTO_DISCOVERY = "false";
+    delete buildEnv.CSC_LINK;
+    delete buildEnv.CSC_KEY_PASSWORD;
+    delete buildEnv.APPLE_API_KEY;
+    delete buildEnv.APPLE_API_KEY_ID;
+    delete buildEnv.APPLE_API_ISSUER;
+  }
+
+  if (process.platform === "win32") {
+    const python = resolvePythonForNodeGyp();
+    if (python) {
+      buildEnv.PYTHON = python;
+      buildEnv.npm_config_python = python;
+    }
+    buildEnv.npm_config_msvs_version = buildEnv.npm_config_msvs_version ?? "2022";
+    buildEnv.GYP_MSVS_VERSION = buildEnv.GYP_MSVS_VERSION ?? "2022";
+  }
+
   if (options.skipBuild && process.env.SYNARA_PORTABLE_BUILD_MANIFEST) {
+    if (
+      options.platform === "win" &&
+      process.env.SYNARA_WINDOWS_UPDATER_SIGNED !== buildEnv.SYNARA_WINDOWS_UPDATER_SIGNED
+    ) {
+      return yield* new BuildScriptError({
+        message: "Shared Windows updater signing decision does not match artifact signing.",
+      });
+    }
     yield* Effect.try({
       try: () =>
         verifyPortableBuild(
@@ -1218,6 +1255,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         ChildProcess.make({
           cwd: repoRoot,
           ...commandOutputOptions(options.verbose),
+          env: buildEnv,
           // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
           shell: process.platform === "win32",
         })`bun run build:desktop`,
@@ -1351,33 +1389,6 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   if (options.platform === "linux") {
     yield* verifyStagedNodePty(stageAppDir, options.verbose);
-  }
-
-  const buildEnv: NodeJS.ProcessEnv = {
-    ...process.env,
-  };
-  for (const [key, value] of Object.entries(buildEnv)) {
-    if (value === "") {
-      delete buildEnv[key];
-    }
-  }
-  if (!options.signed) {
-    buildEnv.CSC_IDENTITY_AUTO_DISCOVERY = "false";
-    delete buildEnv.CSC_LINK;
-    delete buildEnv.CSC_KEY_PASSWORD;
-    delete buildEnv.APPLE_API_KEY;
-    delete buildEnv.APPLE_API_KEY_ID;
-    delete buildEnv.APPLE_API_ISSUER;
-  }
-
-  if (process.platform === "win32") {
-    const python = resolvePythonForNodeGyp();
-    if (python) {
-      buildEnv.PYTHON = python;
-      buildEnv.npm_config_python = python;
-    }
-    buildEnv.npm_config_msvs_version = buildEnv.npm_config_msvs_version ?? "2022";
-    buildEnv.GYP_MSVS_VERSION = buildEnv.GYP_MSVS_VERSION ?? "2022";
   }
 
   yield* Effect.log(

@@ -16,6 +16,7 @@ const required = [
   "apps/server/dist/device-helper/build.sh",
 ];
 const buildVariables = [
+  "SYNARA_WINDOWS_UPDATER_SIGNED",
   "AZURE_TRUSTED_SIGNING_SUBJECT_DN",
   "SYNARA_WEB_SOURCEMAP",
   "SYNARA_SERVER_SOURCEMAP",

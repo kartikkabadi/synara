@@ -36,12 +36,13 @@ describe("portable release outputs", () => {
       verifyPortableBuild(root, commit, JSON.parse(JSON.stringify(manifest)), {}),
     ).not.toThrow();
   });
-  it("rejects stale source, lockfile, publisher and Vite settings", () => {
+  it("rejects stale source, lockfile, signing and Vite settings", () => {
     const root = fixture();
     const manifest = portableBuildManifest(root, commit, {});
     expect(() => verifyPortableBuild(root, "b".repeat(40), manifest, {})).toThrow("mismatch");
     for (const env of [
       { AZURE_TRUSTED_SIGNING_SUBJECT_DN: "publisher" },
+      { SYNARA_WINDOWS_UPDATER_SIGNED: "1" },
       { VITE_FEEDBACK_ENDPOINT: "https://example.test" },
       { SYNARA_WEB_SOURCEMAP: "1" },
     ])

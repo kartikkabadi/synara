@@ -33,7 +33,8 @@ on:
 permissions: {}
 
 env:
-  # The same build setting is fingerprinted on every portable-output consumer.
+  # The Windows signing decision is shared by the portable build and every consumer.
+  SYNARA_WINDOWS_UPDATER_SIGNED: ${{ secrets.AZURE_TENANT_ID != '' && secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_CLIENT_SECRET != '' && secrets.AZURE_TRUSTED_SIGNING_ENDPOINT != '' && secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME != '' && secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME != '' && secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME != '' && secrets.AZURE_TRUSTED_SIGNING_SUBJECT_DN != '' && '1' || '0' }}
   AZURE_TRUSTED_SIGNING_SUBJECT_DN: ${{ secrets.AZURE_TRUSTED_SIGNING_SUBJECT_DN }}
 
 concurrency:
