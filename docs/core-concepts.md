@@ -482,6 +482,17 @@ Regular Markdown links remain relative to the document directory. Code, escaped
 Wiki syntax, embeds, and heading/block links are left literal; this is basic file
 navigation rather than full Obsidian support.
 
+Absolute file previews use short-lived, per-file grants. The server checks the
+canonical file against registered project folders (including additional folders),
+task worktrees and working directories, managed worktrees, chat/Studio/Groups
+workspaces, and the private scratch workspace root. A resolved or relocated path
+alone does not grant access: text files and PDFs outside those roots require their
+folder to be registered as a project or additional source folder first.
+Desktop and Downloads image captures can also receive grants; this exception does
+not include documents or symlinks escaping those folders. Grants expire after two
+minutes and cannot be reused for a different file. Generated-image
+previews and grants share the same configured and live Codex account allowlist.
+
 ### Terminal panels
 
 Each chat has one main-view terminal panel and can have multiple independent

@@ -1,5 +1,8 @@
 import { makeGitActionRunner } from "./git/gitActionRunner";
 import http from "node:http";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 import {
   EventId,
@@ -9,6 +12,7 @@ import {
   WS_BOOTSTRAP_METHOD,
   WS_METHODS,
   WsGitRunStackedActionRpc,
+  WsProjectsCreateLocalFilePreviewGrantRpc,
   WS_BOOTSTRAP_PATH,
   WS_COMPATIBILITY_QUERY,
   WS_NEGOTIATE_HTTP_PATH,
@@ -40,7 +44,12 @@ import {
 import { ServerConfig } from "./config";
 import { makeBoundedNodeHttpServer, MAX_WEBSOCKET_MESSAGE_BYTES } from "./nodeHttpServer";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite";
-import { makeWebsocketNegotiationRouteLayer, makeWebsocketRpcRouteLayer } from "./wsRpc";
+import {
+  makeLocalPreviewGrantHandler,
+  makeWebsocketNegotiationRouteLayer,
+  makeWebsocketRpcRouteLayer,
+} from "./wsRpc";
+import { resolveLocalPreviewGrantRealPath } from "./localImageFiles";
 import {
   makeWsConnectionSessions,
   WS_CONNECTION_SESSION_HEADER,
@@ -66,7 +75,13 @@ const BudgetStreamRpc = Rpc.make("test.budget-stream", {
   error: WsRpcError,
   stream: true,
 });
-const PingRpcGroup = RpcGroup.make(PingRpc, SlowRpc, WsGitRunStackedActionRpc, BudgetStreamRpc);
+const PingRpcGroup = RpcGroup.make(
+  PingRpc,
+  SlowRpc,
+  WsGitRunStackedActionRpc,
+  BudgetStreamRpc,
+  WsProjectsCreateLocalFilePreviewGrantRpc,
+);
 
 interface RunningTestServer {
   readonly origin: string;
@@ -203,7 +218,7 @@ function ping(socket: WebSocket, timeoutMs = 2_000): Promise<void> {
   });
 }
 
-async function startTestServer(): Promise<RunningTestServer> {
+async function startTestServer(previewWorkspaceRoot?: string): Promise<RunningTestServer> {
   const baseConfigLayer = ServerConfig.layerTest(process.cwd(), {
     prefix: "synara-ws-lifecycle-test-",
   }).pipe(Layer.provide(NodeServices.layer));
@@ -275,6 +290,7 @@ async function startTestServer(): Promise<RunningTestServer> {
   const budgetRelease = await Effect.runPromise(Deferred.make<void>());
   const handlerLayer = PingRpcGroup.toLayer(
     Effect.gen(function* () {
+      const config = yield* ServerConfig;
       const runGitAction = yield* makeGitActionRunner((input, publish) =>
         Effect.gen(function* () {
           observedGitAction.started++;
@@ -299,6 +315,16 @@ async function startTestServer(): Promise<RunningTestServer> {
         ),
       );
       return {
+        [WS_METHODS.projectsCreateLocalFilePreviewGrant]: makeLocalPreviewGrantHandler({
+          config,
+          getShellSnapshot: () =>
+            Effect.succeed({
+              projects: previewWorkspaceRoot
+                ? [{ workspaceRoot: previewWorkspaceRoot, additionalFolders: [] }]
+                : [],
+              threads: [],
+            }),
+        }),
         [WS_METHODS.gitRunStackedAction]: runGitAction,
         "test.budget-stream": ({
           mode,
@@ -934,6 +960,68 @@ describe("websocket permessage-deflate negotiation", () => {
 });
 
 describe("websocketRpcRouteLayer connection lifecycle", () => {
+  it("scopes authenticated preview grants to server-owned roots despite caller-supplied roots", async () => {
+    const fixture = await fs.mkdtemp(path.join(os.tmpdir(), "synara-ws-preview-"));
+    const workspace = path.join(fixture, "workspace");
+    const outside = path.join(fixture, "outside");
+    await fs.mkdir(workspace);
+    await fs.mkdir(outside);
+    const allowed = path.join(workspace, "report.txt");
+    const denied = path.join(outside, "secret.txt");
+    await fs.writeFile(allowed, "allowed");
+    await fs.writeFile(denied, "denied");
+    await fs.symlink(
+      outside,
+      path.join(workspace, "escape"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    const server = await startTestServer(workspace);
+    try {
+      const { socket } = await connectSession(server);
+      const exits = new Map<
+        string,
+        { _tag: string; value?: { grant: string; expiresAt: string } }
+      >();
+      socket.on("message", (data: RawData) => {
+        const frame = JSON.parse(data.toString());
+        if (frame._tag === "Exit") exits.set(String(frame.requestId), frame.exit);
+      });
+      let nextId = 600;
+      const request = async (requestedPath: string) => {
+        const id = String(nextId++);
+        socket.send(
+          JSON.stringify({
+            _tag: "Request",
+            id,
+            tag: WS_METHODS.projectsCreateLocalFilePreviewGrant,
+            payload: { path: requestedPath, allowedRoots: [fixture], cwd: fixture },
+            headers: [],
+          }),
+        );
+        await waitForObserved(() => exits.has(id));
+        return exits.get(id)!;
+      };
+      const valid = await request(allowed);
+      expect(valid._tag).toBe("Success");
+      expect(resolveLocalPreviewGrantRealPath({ token: valid.value?.grant })).toBe(
+        await fs.realpath(allowed),
+      );
+      for (const requestedPath of [
+        denied,
+        `${workspace}/../outside/secret.txt`,
+        path.join(workspace, "escape", "secret.txt"),
+      ]) {
+        const result = await request(requestedPath);
+        expect(result._tag).toBe("Failure");
+        expect(result.value).toBeUndefined();
+        expect(JSON.stringify(result)).toContain("outside the allowed workspace roots");
+      }
+    } finally {
+      await server.close();
+      await fs.rm(fixture, { recursive: true, force: true });
+    }
+  });
+
   it("exposes the authenticated session to RPC handlers for the connection lifetime", async () => {
     const server = await startTestServer();
     try {

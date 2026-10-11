@@ -1,7 +1,7 @@
 import * as NodeFs from "node:fs/promises";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { describe, expect } from "vitest";
+import { describe, expect, vi } from "vitest";
 import { it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Path } from "effect";
 
@@ -121,7 +121,7 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
           yield* writeTextFile(outside, "Downloads/report.txt", "local file\n");
           const absolutePath = path.join(outside, "Downloads/report.txt");
           const grant = yield* Effect.promise(() =>
-            createLocalPreviewGrant({ requestedPath: absolutePath }),
+            createLocalPreviewGrant({ requestedPath: absolutePath, allowedRoots: [outside] }),
           );
 
           const result = yield* workspaceFileSystem.readFile({
@@ -160,6 +160,41 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
         expect(error.message).toContain(
           `Workspace file path must be relative to the project root: ${absolutePath}`,
         );
+      }),
+    );
+
+    it.effect("rejects forged, mismatched and expired absolute-file grants", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const outside = yield* makeTempDir;
+        yield* writeTextFile(cwd, "allowed.txt", "allowed");
+        yield* writeTextFile(outside, "secret.txt", "secret");
+        const allowed = path.join(cwd, "allowed.txt");
+        const denied = path.join(outside, "secret.txt");
+        const grant = yield* Effect.promise(() =>
+          createLocalPreviewGrant({ requestedPath: allowed, allowedRoots: [cwd] }),
+        );
+        for (const previewGrant of ["forged-preview-token", grant.grant]) {
+          const error = yield* workspaceFileSystem
+            .readFile({ cwd, relativePath: denied, previewGrant })
+            .pipe(Effect.flip);
+          expect(error.message).toContain(
+            "Workspace file path must be relative to the project root",
+          );
+        }
+        const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse(grant.expiresAt));
+        try {
+          const error = yield* workspaceFileSystem
+            .readFile({ cwd: outside, relativePath: allowed, previewGrant: grant.grant })
+            .pipe(Effect.flip);
+          expect(error.message).toContain(
+            "Workspace file path must be relative to the project root",
+          );
+        } finally {
+          clock.mockRestore();
+        }
       }),
     );
 

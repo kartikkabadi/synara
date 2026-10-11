@@ -34,6 +34,8 @@ import {
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationProject,
+  type OrchestrationProjectShell,
+  type OrchestrationThreadShell,
   type ProjectDevServerEvent,
   type ProviderStartOptions,
   type OrchestrationShellStreamEvent,
@@ -96,6 +98,7 @@ import { ServerConfig, type ServerConfigShape } from "./config";
 import { realpathNearestExisting } from "./realpathNearestExisting";
 import { isGroupContainerKind } from "@synara/shared/projectContainers";
 import { PROJECT_FOLDERS_WORKTREE_ISSUE } from "@synara/shared/projectFolders";
+import { isSupportedLocalImagePath } from "@synara/shared/localPreviewFiles";
 import { workspaceRootsEqual } from "@synara/shared/threadWorkspace";
 import { WORKSPACE_FILE_WRITE_CONFLICT_CODE } from "@synara/shared/workspaceFileWrite";
 import {
@@ -137,6 +140,9 @@ import {
 } from "./gitHandoffOperations";
 import { DEFAULT_RESOLVED_KEYBINDINGS, Keybindings } from "./keybindings";
 import { createLocalPreviewGrant } from "./localImageFiles";
+import type { CodexGeneratedImageHomeCandidate } from "./codexGeneratedImages";
+import { codexPreviewHomes } from "./codexPreviewHomes";
+import { resolveScratchWorkspacesRoot } from "./scratchWorkspaces";
 import { listLocalServers, stopLocalServer } from "./localServerMonitor";
 import {
   archivedWorktreeHasNoOtherOwners,
@@ -487,6 +493,70 @@ export function makeProjectWorktreeGuard<E1, R1, E2, R2>(dependencies: {
           ? Effect.fail(new WsRpcError({ message: PROJECT_FOLDERS_WORKTREE_ISSUE }))
           : Effect.void,
       ),
+    );
+}
+
+/** Grant authority comes from server configuration and persisted workspace ownership. */
+export function makeLocalPreviewGrantHandler<E, R>(dependencies: {
+  readonly codexHomePaths?: Effect.Effect<readonly CodexGeneratedImageHomeCandidate[]>;
+  readonly config: Pick<
+    ServerConfigShape,
+    "homeDir" | "worktreesDir" | "chatWorkspaceRoot" | "studioWorkspaceRoot" | "groupsWorkspaceRoot"
+  >;
+  readonly getShellSnapshot: () => Effect.Effect<
+    {
+      readonly projects: ReadonlyArray<
+        Pick<OrchestrationProjectShell, "workspaceRoot" | "additionalFolders">
+      >;
+      readonly threads: ReadonlyArray<
+        Pick<
+          OrchestrationThreadShell,
+          "worktreePath" | "workingDirectory" | "associatedWorktreePath"
+        >
+      >;
+    },
+    E,
+    R
+  >;
+}) {
+  const { config } = dependencies;
+  return (input: { readonly path: string }) =>
+    dependencies.getShellSnapshot().pipe(
+      Effect.flatMap((snapshot) =>
+        Effect.gen(function* () {
+          const codexHomePaths = isSupportedLocalImagePath(input.path)
+            ? yield* dependencies.codexHomePaths ?? Effect.succeed([])
+            : [];
+          return yield* Effect.tryPromise({
+            try: () =>
+              createLocalPreviewGrant({
+                requestedPath: input.path,
+                allowedRoots: [
+                  ...snapshot.projects.flatMap((project) => [
+                    project.workspaceRoot,
+                    ...project.additionalFolders,
+                  ]),
+                  ...snapshot.threads.flatMap((thread) =>
+                    [
+                      thread.worktreePath,
+                      thread.workingDirectory,
+                      thread.associatedWorktreePath,
+                    ].filter((root): root is string => typeof root === "string"),
+                  ),
+                  config.worktreesDir,
+                  config.chatWorkspaceRoot,
+                  config.studioWorkspaceRoot,
+                  config.groupsWorkspaceRoot,
+                  resolveScratchWorkspacesRoot({ homeDirectory: config.homeDir }),
+                ],
+                captureHome: config.homeDir,
+                codexHomePaths,
+              }),
+            catch: (cause) => cause,
+          });
+        }),
+      ),
+      Effect.mapError((cause) => toWsRpcError(cause, "Failed to create local file preview grant")),
     );
 }
 
@@ -1710,11 +1780,14 @@ const makeWsRpcHandlersLayer = () =>
             })),
             "Failed to resolve file reference outside the workspace",
           ),
-        [WS_METHODS.projectsCreateLocalFilePreviewGrant]: (input) =>
-          rpcEffect(
-            Effect.promise(() => createLocalPreviewGrant({ requestedPath: input.path })),
-            "Failed to create local file preview grant",
+        [WS_METHODS.projectsCreateLocalFilePreviewGrant]: makeLocalPreviewGrantHandler({
+          config,
+          getShellSnapshot: projectionReadModelQuery.getShellSnapshot,
+          codexHomePaths: codexPreviewHomes.pipe(
+            Effect.provideService(ServerSettingsService, serverSettings),
+            Effect.provideService(ProviderAdapterRegistry, providerAdapterRegistry),
           ),
+        }),
         [WS_METHODS.projectsWriteFile]: (input) =>
           workspaceFileSystem.writeFile(input).pipe(
             Effect.mapError((cause) =>

@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, it } from "vitest";
+import { afterEach, describe, it, vi } from "vitest";
 
 import { resolveCodexHomeOverlayAccountSegment } from "./codexHomePaths.ts";
-import { resolveAllowedLocalPreviewFile } from "./localImageFiles.ts";
+import {
+  createLocalPreviewGrant,
+  resolveAllowedLocalPreviewFile,
+  resolveLocalPreviewGrantRealPath,
+} from "./localImageFiles.ts";
 
 const tempDirs: string[] = [];
 
@@ -305,5 +309,176 @@ describe("resolveAllowedLocalPreviewFile", () => {
     });
 
     assert.equal(result, null);
+  });
+});
+
+describe("createLocalPreviewGrant", () => {
+  it("canonicalizes both the workspace root and in-root symlinks", async () => {
+    const root = makeTempDir("synara-preview-grant-");
+    const workspace = path.join(root, "workspace");
+    const alias = path.join(root, "alias");
+    mkdirSync(workspace);
+    symlinkSync(workspace, alias, process.platform === "win32" ? "junction" : "dir");
+    const file = path.join(workspace, "report.txt");
+    writeFileSync(file, "report");
+    const grant = await createLocalPreviewGrant({
+      requestedPath: path.join(alias, "report.txt"),
+      allowedRoots: [alias, path.join(root, "missing")],
+    });
+    assert.equal(resolveLocalPreviewGrantRealPath({ token: grant.grant }), realpathSync(file));
+  });
+
+  it("rejects outside roots, traversal, prefix siblings, symlink escapes and implicit temp roots", async () => {
+    const root = makeTempDir("synara-preview-grant-boundary-");
+    const workspace = path.join(root, "workspace");
+    const outside = path.join(root, "workspace-other");
+    mkdirSync(workspace);
+    mkdirSync(outside);
+    const secret = path.join(outside, "report.pdf");
+    writeFileSync(secret, "%PDF-1.7");
+    symlinkSync(
+      outside,
+      path.join(workspace, "escape"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    for (const requestedPath of [
+      secret,
+      `${workspace}/../workspace-other/report.pdf`,
+      path.join(workspace, "escape", "report.pdf"),
+    ]) {
+      await assert.rejects(
+        createLocalPreviewGrant({ requestedPath, allowedRoots: [workspace] }),
+        /outside the allowed workspace roots/,
+      );
+    }
+    await assert.rejects(
+      createLocalPreviewGrant({ requestedPath: secret, allowedRoots: [] }),
+      /outside the allowed workspace roots/,
+    );
+  });
+
+  it("allows only canonical image captures under Desktop and Downloads", async () => {
+    const home = makeTempDir("synara-preview-capture-");
+    const sibling = path.join(home, "Desktop-other");
+    mkdirSync(sibling);
+    writeFileSync(path.join(sibling, "secret.png"), "secret");
+    for (const directory of ["Desktop", "Downloads"]) {
+      const captureRoot = path.join(home, directory);
+      mkdirSync(captureRoot);
+      const image = path.join(captureRoot, "simulator.png");
+      writeFileSync(image, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      const grant = await createLocalPreviewGrant({
+        requestedPath: image,
+        allowedRoots: [],
+        captureHome: home,
+      });
+      assert.equal(resolveLocalPreviewGrantRealPath({ token: grant.grant }), realpathSync(image));
+      for (const extension of ["txt", "pdf"]) {
+        const document = path.join(captureRoot, `report.${extension}`);
+        writeFileSync(document, "document");
+        await assert.rejects(
+          createLocalPreviewGrant({ requestedPath: document, allowedRoots: [], captureHome: home }),
+          /outside the allowed workspace roots/,
+        );
+      }
+      const escape = path.join(captureRoot, "escape");
+      symlinkSync(sibling, escape, process.platform === "win32" ? "junction" : "dir");
+      await assert.rejects(
+        createLocalPreviewGrant({
+          requestedPath: path.join(escape, "secret.png"),
+          allowedRoots: [],
+          captureHome: home,
+        }),
+        /outside the allowed workspace roots/,
+      );
+    }
+    await assert.rejects(
+      createLocalPreviewGrant({
+        requestedPath: path.join(sibling, "secret.png"),
+        allowedRoots: [],
+        captureHome: home,
+      }),
+      /outside the allowed workspace roots/,
+    );
+  });
+
+  it("does not allow a capture-folder symlink to authorize an unrelated root", async () => {
+    const home = makeTempDir("synara-preview-capture-home-");
+    const outside = makeTempDir("synara-preview-capture-outside-");
+    const image = path.join(outside, "secret.png");
+    writeFileSync(image, "image");
+    symlinkSync(
+      outside,
+      path.join(home, "Desktop"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    await assert.rejects(
+      createLocalPreviewGrant({
+        requestedPath: path.join(home, "Desktop", "secret.png"),
+        allowedRoots: [],
+        captureHome: home,
+      }),
+      /outside the allowed workspace roots/,
+    );
+  });
+
+  it("grants configured generated images without granting the rest of their data home", async () => {
+    const root = makeTempDir("synara-preview-generated-grants-");
+    const sourceHome = path.join(root, "source-home");
+    const runtimeHome = path.join(root, "instance-state");
+    const overlay = path.join(runtimeHome, "codex-home-overlay");
+    const generatedRoot = path.join(overlay, "generated_images");
+    const codexHomePaths = [{ homePath: sourceHome, environment: { SYNARA_HOME: runtimeHome } }];
+    mkdirSync(generatedRoot, { recursive: true });
+    mkdirSync(sourceHome);
+    const image = path.join(generatedRoot, "output.png");
+    writeFileSync(image, "image");
+    const grant = await createLocalPreviewGrant({
+      requestedPath: image,
+      allowedRoots: [],
+      codexHomePaths,
+    });
+    assert.equal(resolveLocalPreviewGrantRealPath({ token: grant.grant }), realpathSync(image));
+    await assert.rejects(
+      createLocalPreviewGrant({ requestedPath: image, allowedRoots: [], codexHomePaths: [] }),
+      /outside the allowed workspace roots/,
+    );
+    const sibling = path.join(overlay, "private.png");
+    const pdf = path.join(generatedRoot, "private.pdf");
+    writeFileSync(sibling, "private");
+    writeFileSync(pdf, "document");
+    for (const requestedPath of [sibling, pdf]) {
+      await assert.rejects(
+        createLocalPreviewGrant({ requestedPath, allowedRoots: [], codexHomePaths }),
+        /outside the allowed workspace roots/,
+      );
+    }
+    const outside = path.join(root, "unrelated");
+    mkdirSync(outside);
+    const outsideImage = path.join(outside, "private.png");
+    writeFileSync(outsideImage, "private");
+    symlinkSync(
+      outside,
+      path.join(sourceHome, "generated_images"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    await assert.rejects(
+      createLocalPreviewGrant({ requestedPath: outsideImage, allowedRoots: [], codexHomePaths }),
+      /outside the allowed workspace roots/,
+    );
+  });
+
+  it("rejects forged and expired tokens", async () => {
+    const root = makeTempDir("synara-preview-grant-expiry-");
+    const file = path.join(root, "report.txt");
+    writeFileSync(file, "report");
+    const grant = await createLocalPreviewGrant({ requestedPath: file, allowedRoots: [root] });
+    assert.equal(resolveLocalPreviewGrantRealPath({ token: "forged-preview-token" }), null);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse(grant.expiresAt));
+    try {
+      assert.equal(resolveLocalPreviewGrantRealPath({ token: grant.grant }), null);
+    } finally {
+      clock.mockRestore();
+    }
   });
 });

@@ -14,7 +14,7 @@ import {
 } from "@synara/contracts";
 import { DateTime, Effect, Exit, Layer, Scope, Stream } from "effect";
 import { HttpRouter } from "effect/unstable/http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ServerAuth, type ServerAuthShape } from "./auth/Services/ServerAuth";
 import {
@@ -335,7 +335,10 @@ describe("localImageEffectRouteLayer", () => {
     writeFileSync(imagePath, Buffer.from("%PDF-1.7"));
     const config = makeServerConfig({ cwd: workspace });
 
-    const grant = await createLocalPreviewGrant({ requestedPath: imagePath });
+    const grant = await createLocalPreviewGrant({
+      requestedPath: imagePath,
+      allowedRoots: [externalRoot],
+    });
 
     await withEffectServer(config, localImageEffectRouteLayer, async (origin) => {
       const params = new URLSearchParams({ path: imagePath, cwd: workspace, grant: grant.grant });
@@ -349,7 +352,43 @@ describe("localImageEffectRouteLayer", () => {
     });
   });
 
-  it("previews and downloads a simulator PNG outside the allowed roots only with its own grant", async () => {
+  it("rejects denied, forged, mismatched and expired grants through the HTTP route", async () => {
+    const workspace = makeTempDir("synara-preview-chain-workspace-");
+    const outside = makeTempDir("synara-preview-chain-outside-");
+    const allowed = path.join(workspace, "report.pdf");
+    const denied = path.join(outside, "secret.pdf");
+    writeFileSync(path.join(workspace, ".git"), "gitdir: .git");
+    writeFileSync(allowed, "%PDF-1.7");
+    writeFileSync(denied, "%PDF-1.7");
+    await expect(
+      createLocalPreviewGrant({ requestedPath: denied, allowedRoots: [workspace] }),
+    ).rejects.toThrow("outside the allowed workspace roots");
+    const grant = await createLocalPreviewGrant({
+      requestedPath: allowed,
+      allowedRoots: [workspace],
+    });
+    await withEffectServer(
+      makeServerConfig({ cwd: workspace }),
+      localImageEffectRouteLayer,
+      async (origin) => {
+        for (const token of ["forged-preview-token", grant.grant]) {
+          const params = new URLSearchParams({ path: denied, cwd: workspace, grant: token });
+          expect((await fetch(`${origin}/api/local-image?${params}`)).status).toBe(404);
+        }
+        // A different panel cwd requires the grant even for an authorized file.
+        const params = new URLSearchParams({ path: allowed, cwd: outside, grant: grant.grant });
+        expect((await fetch(`${origin}/api/local-image?${params}`)).status).toBe(200);
+        const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse(grant.expiresAt));
+        try {
+          expect((await fetch(`${origin}/api/local-image?${params}`)).status).toBe(404);
+        } finally {
+          clock.mockRestore();
+        }
+      },
+    );
+  });
+
+  it("previews and downloads a Desktop simulator PNG only with its own capture grant", async () => {
     // Keep this outside os.tmpdir(): temporary images are already allowlisted.
     const externalRoot = mkdtempSync(path.join(process.cwd(), ".simulator-preview-"));
     tempDirs.push(externalRoot);
@@ -368,7 +407,11 @@ describe("localImageEffectRouteLayer", () => {
       params.set("download", "1");
       expect((await fetch(`${origin}/api/local-image?${params}`)).status).toBe(404);
 
-      const grant = await createLocalPreviewGrant({ requestedPath: imagePath });
+      const grant = await createLocalPreviewGrant({
+        requestedPath: imagePath,
+        allowedRoots: [],
+        captureHome: externalRoot,
+      });
       params.set("grant", grant.grant);
       for (const download of [false, true]) {
         if (download) params.set("download", "1");

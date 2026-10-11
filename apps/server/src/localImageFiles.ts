@@ -21,6 +21,8 @@ import {
   resolveCodexGeneratedImageHomes,
 } from "./codexGeneratedImages.ts";
 
+import { isContainedPath, resolveRealPathWithinRoot } from "./workspace/realPathContainment";
+
 export { LOCAL_IMAGE_ROUTE_PATH };
 
 export interface ResolvedLocalPreviewFile {
@@ -64,14 +66,6 @@ export function resolveLocalPreviewGrantRealPath(input: {
   pruneExpiredPreviewGrants(nowMs);
   const grant = localPreviewGrantByToken.get(token);
   return grant !== undefined && grant.expiresAtMs > nowMs ? grant.realFilePath : null;
-}
-
-function isPathInside(candidate: string, root: string): boolean {
-  const relative = path.relative(root, candidate);
-  return (
-    relative === "" ||
-    (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
-  );
 }
 
 async function realpathOrNull(candidate: string | undefined): Promise<string | null> {
@@ -127,6 +121,26 @@ async function resolveWorkspaceRoot(cwd: string | null): Promise<string | null> 
   return (gitRoot ? await realpathOrNull(gitRoot) : realCwd) ?? null;
 }
 
+async function resolveCanonicalGeneratedImageRoots(
+  codexHomeCandidates: readonly CodexGeneratedImageHomeCandidate[],
+): Promise<string[]> {
+  return Promise.all(
+    [...new Set(codexHomeCandidates.flatMap((home) => resolveCodexGeneratedImageHomes(home)))].map(
+      async (home) => {
+        const [realHome, realRoot] = await Promise.all([
+          realpathOrNull(home),
+          realpathOrNull(path.join(home, "generated_images")),
+        ]);
+        // A generated_images symlink must not turn a configured Codex home into
+        // an allowlist for an unrelated directory.
+        return realHome !== null && realRoot !== null && isContainedPath(realHome, realRoot)
+          ? realRoot
+          : null;
+      },
+    ),
+  ).then((roots) => roots.filter((root): root is string => root !== null));
+}
+
 export async function resolveAllowedLocalPreviewFile(input: {
   readonly requestedPath: string | null;
   readonly cwd: string | null;
@@ -167,7 +181,7 @@ export async function resolveAllowedLocalPreviewFile(input: {
   // The workspace check covers the common case (file previews), so resolve it
   // first and skip the broader root lookups entirely when it passes.
   const workspaceRoot = await resolveWorkspaceRoot(input.cwd);
-  if (workspaceRoot !== null && isPathInside(realFilePath, workspaceRoot)) {
+  if (workspaceRoot !== null && isContainedPath(workspaceRoot, realFilePath)) {
     return resolved;
   }
 
@@ -181,7 +195,7 @@ export async function resolveAllowedLocalPreviewFile(input: {
     ...(configuredScratchRoot ? [configuredScratchRoot] : []),
     ...tempRoots.map((root) => path.join(root, SCRATCH_WORKSPACES_DIRNAME)),
   ];
-  if (scratchWorkspaceRoots.some((root) => isPathInside(realFilePath, root))) {
+  if (scratchWorkspaceRoots.some((root) => isContainedPath(root, realFilePath))) {
     return resolved;
   }
 
@@ -209,29 +223,19 @@ export async function resolveAllowedLocalPreviewFile(input: {
       : input.codexHomePath === undefined
         ? input.codexHomePaths
         : [input.codexHomePath, ...input.codexHomePaths];
-  const generatedImagesRoots = await Promise.all(
-    [...new Set(codexHomeCandidates.flatMap((home) => resolveCodexGeneratedImageHomes(home)))].map(
-      async (home) => {
-        const [realHome, realRoot] = await Promise.all([
-          realpathOrNull(home),
-          realpathOrNull(path.join(home, "generated_images")),
-        ]);
-        // A generated_images symlink must not turn a configured Codex home into
-        // an allowlist for an unrelated directory.
-        return realHome !== null && realRoot !== null && isPathInside(realRoot, realHome)
-          ? realRoot
-          : null;
-      },
-    ),
-  ).then((roots) => roots.filter((root): root is string => root !== null));
+  const generatedImagesRoots = await resolveCanonicalGeneratedImageRoots(codexHomeCandidates);
   const allowed =
-    generatedImagesRoots.some((root) => isPathInside(realFilePath, root)) ||
-    tempRoots.some((root) => isPathInside(realFilePath, root));
+    generatedImagesRoots.some((root) => isContainedPath(root, realFilePath)) ||
+    tempRoots.some((root) => isContainedPath(root, realFilePath));
   return allowed ? resolved : null;
 }
 
 export async function createLocalPreviewGrant(input: {
   readonly requestedPath: string;
+  readonly allowedRoots: ReadonlyArray<string>;
+  /** Server-owned home for Desktop/Downloads image captures, never caller-supplied. */
+  readonly captureHome?: string;
+  readonly codexHomePaths?: readonly CodexGeneratedImageHomeCandidate[];
 }): Promise<LocalPreviewGrantResult> {
   const requestedPath = input.requestedPath.trim();
   if (!requestedPath || requestedPath.includes("\0") || !path.isAbsolute(requestedPath)) {
@@ -245,6 +249,35 @@ export async function createLocalPreviewGrant(input: {
   const stat = await fs.stat(realFilePath).catch(() => null);
   if (!stat?.isFile()) {
     throw new Error("Preview path is not a file.");
+  }
+
+  const realAllowedRoots = await Promise.all(
+    [...new Set(input.allowedRoots)].filter((root) => path.isAbsolute(root)).map(realpathOrNull),
+  );
+  const isImage =
+    isSupportedLocalImagePath(requestedPath) && isSupportedLocalImagePath(realFilePath);
+  const generatedImageRoots = isImage
+    ? await resolveCanonicalGeneratedImageRoots(input.codexHomePaths ?? [])
+    : [];
+  // Captures in Desktop/Downloads use the same grant flow as file panels. Keep
+  // this exception image-only, including the canonical target of any symlink.
+  const captureHome = input.captureHome;
+  const captureRoots =
+    captureHome && isImage
+      ? await Promise.all(
+          ["Desktop", "Downloads"].map((directory) =>
+            resolveRealPathWithinRoot(captureHome, path.join(captureHome, directory)).catch(
+              () => null,
+            ),
+          ),
+        )
+      : [];
+  if (
+    ![...realAllowedRoots, ...captureRoots, ...generatedImageRoots].some(
+      (root) => root !== null && isContainedPath(root, realFilePath),
+    )
+  ) {
+    throw new Error("Preview path is outside the allowed workspace roots.");
   }
 
   const expiresAtMs = Date.now() + LOCAL_PREVIEW_GRANT_TTL_MS;
