@@ -402,7 +402,7 @@ export const THEME_VISUAL_PRESETS: readonly ThemeVisualPreset[] = [
       theme: makeVisualTheme("dark", {
         accent: "#d5a85e",
         contrast: 10,
-        fonts: { code: "JetBrains Mono", ui: "Avenir Next" },
+        fonts: { code: "JetBrains Mono", ui: "Avenir Next, system-ui, sans-serif" },
         ink: "#f7f1e3",
         opaqueWindows: false,
         surface: "#1b2430",
@@ -416,7 +416,7 @@ export const THEME_VISUAL_PRESETS: readonly ThemeVisualPreset[] = [
       theme: makeVisualTheme("light", {
         accent: "#2f6f9f",
         contrast: 6,
-        fonts: { code: "JetBrains Mono", ui: "Avenir Next" },
+        fonts: { code: "JetBrains Mono", ui: "Avenir Next, system-ui, sans-serif" },
         ink: "#304255",
         surface: "#f3eee3",
         wallpaper: { blur: 10, dim: 0.2, id: "parthenon", opacity: 0.24 },
@@ -430,7 +430,7 @@ export const THEME_VISUAL_PRESETS: readonly ThemeVisualPreset[] = [
       theme: makeVisualTheme("dark", {
         accent: "#d7a75c",
         contrast: 8,
-        fonts: { code: "IBM Plex Mono", ui: "IBM Plex Sans" },
+        fonts: { code: "IBM Plex Mono", ui: "IBM Plex Sans, system-ui, sans-serif" },
         ink: "#f3ecda",
         surface: "#202820",
         wallpaper: { blur: 14, dim: 0.54, id: "attic-valley", opacity: 0.28 },
@@ -443,7 +443,7 @@ export const THEME_VISUAL_PRESETS: readonly ThemeVisualPreset[] = [
       theme: makeVisualTheme("light", {
         accent: "#7b7a43",
         contrast: 5,
-        fonts: { code: "IBM Plex Mono", ui: "IBM Plex Sans" },
+        fonts: { code: "IBM Plex Mono", ui: "IBM Plex Sans, system-ui, sans-serif" },
         ink: "#3b372d",
         surface: "#f1ead6",
         wallpaper: { blur: 12, dim: 0.2, id: "attic-valley", opacity: 0.22 },

@@ -156,6 +156,9 @@ it.each(["Parthenon", "Attic valley"])(
     expect(saved.chromeThemes.dark.wallpaper?.id).toBe(id);
     expect(saved.translucency).toEqual(stored.translucency);
     expect(saved.systemUiFont).toBe(false);
+    expect(root.style.getPropertyValue("--theme-font-ui-family")).toContain(
+      "system-ui, sans-serif",
+    );
     await expect.element(page.getByRole("radio", { name: "Solid", exact: true })).toBeVisible();
     await expect
       .element(page.getByRole("slider", { name: "Light theme wallpaper opacity" }))
