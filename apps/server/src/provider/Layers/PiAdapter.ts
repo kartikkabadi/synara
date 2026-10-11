@@ -3981,7 +3981,6 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
               issue: "A Pi turn is already active for this thread.",
             });
           }
-          const providerText = buildProviderText(context, payload.text);
           if (joinedTurnId !== undefined) {
             // Wait for the old run to stop and publish its completion before
             // assigning the new turn, including retries and pending approvals.
@@ -4005,7 +4004,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           context.activeTurnId = turnId;
           context.turns.push({ id: turnId, items: [], toolItemIndexes: new Map() });
           context.session = makeSessionSnapshot(context);
-          startPrompt(context, turnId, providerText, payload.images);
+          startPrompt(context, turnId, buildProviderText(context, payload.text), payload.images);
           return dispatchResult(context, turnId);
         }),
       );
