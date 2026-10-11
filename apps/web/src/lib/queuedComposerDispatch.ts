@@ -5,7 +5,10 @@
 
 import type { AssistantDeliveryMode, MessageId, ThreadId } from "@synara/contracts";
 
-import { persistModelSelectionBeforeRuntimeMode } from "../components/ChatView.logic";
+import {
+  hasServerReceivedSentMessage,
+  persistModelSelectionBeforeRuntimeMode,
+} from "../components/ChatView.logic";
 import { useComposerDraftStore, type QueuedComposerTurn } from "../composerDraftStore";
 import { readNativeApi } from "../nativeApi";
 import { clearPendingTurnDispatch, markPendingTurnDispatch } from "../pendingTurnDispatch";
@@ -62,8 +65,16 @@ async function dispatchQueuedComposerTurnOnce(
   }
 
   const createdAt = new Date().toISOString();
-  const messageId = input.messageId ?? newMessageId();
   const queuedTurn = input.queuedTurn;
+  const messageId = input.messageId ?? newMessageId();
+  const retryAcknowledged = () =>
+    queuedTurn.kind === "chat" &&
+    queuedTurn.retryMessageId !== undefined &&
+    hasServerReceivedSentMessage(
+      getThreadFromState(useStore.getState(), input.threadId),
+      queuedTurn.retryMessageId,
+    );
+  if (retryAcknowledged()) return true;
 
   if (queuedTurn.kind === "plan-follow-up") {
     const trimmed = queuedTurn.text.trim();
@@ -154,15 +165,23 @@ async function dispatchQueuedComposerTurnOnce(
   );
   const outgoingTextSeed =
     messageText || (queuedTurn.images.length > 0 ? IMAGE_ONLY_BOOTSTRAP_PROMPT : "");
-  if (!outgoingTextSeed.trim() && queuedTurn.images.length === 0) {
+  if (
+    !outgoingTextSeed.trim() &&
+    !queuedTurn.retryMessageText?.trim() &&
+    queuedTurn.images.length === 0 &&
+    queuedTurn.files.length === 0 &&
+    queuedTurn.assistantSelections.length === 0
+  ) {
     return false;
   }
-  const outgoingMessageText = formatOutgoingComposerPrompt({
-    provider: queuedTurn.selectedProvider,
-    model: queuedTurn.selectedModel,
-    effort: queuedTurn.selectedPromptEffort,
-    text: outgoingTextSeed,
-  });
+  const outgoingMessageText =
+    queuedTurn.retryMessageText ??
+    formatOutgoingComposerPrompt({
+      provider: queuedTurn.selectedProvider,
+      model: queuedTurn.selectedModel,
+      effort: queuedTurn.selectedPromptEffort,
+      text: outgoingTextSeed,
+    });
   const mentionedSkills = filterPromptSkillReferences(
     outgoingMessageText,
     queuedTurn.skills,
@@ -188,8 +207,13 @@ async function dispatchQueuedComposerTurnOnce(
       createdAt,
     });
     const stagedTurnAttachments = await turnAttachmentsPromise;
-    await stagedTurnAttachments.runWithDispatch((turnAttachments) =>
-      api.orchestration
+    await stagedTurnAttachments.runWithDispatch(async (turnAttachments) => {
+      if (retryAcknowledged()) {
+        await stagedTurnAttachments.cleanup();
+        clearPendingTurnDispatch(input.threadId);
+        return;
+      }
+      await api.orchestration
         .dispatchCommand({
           type: "thread.turn.start",
           commandId: newCommandId(),
@@ -222,8 +246,8 @@ async function dispatchQueuedComposerTurnOnce(
           ) {
             throw error;
           }
-        }),
-    );
+        });
+    });
     return true;
   } catch {
     await turnAttachmentsPromise.then(
@@ -231,7 +255,13 @@ async function dispatchQueuedComposerTurnOnce(
       () => undefined,
     );
     clearPendingTurnDispatch(input.threadId);
-    return false;
+    return (
+      retryAcknowledged() ||
+      hasServerReceivedSentMessage(
+        getThreadFromState(useStore.getState(), input.threadId),
+        messageId,
+      )
+    );
   }
 }
 

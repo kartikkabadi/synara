@@ -10,6 +10,7 @@ import type { AssistantDeliveryMode, MessageId, ThreadId } from "@synara/contrac
 
 import {
   createLocalDispatchSnapshot,
+  hasServerReceivedSentMessage,
   hasLiveTurnTakenOver,
   LOCAL_DISPATCH_TURN_TAKEOVER_TIMEOUT_MS,
   type LocalDispatchSnapshot,
@@ -633,7 +634,15 @@ function runQueuedComposerDrainPass(): void {
         const acceptedReview = getThreadFromState(useStore.getState(), threadId)?.claudeCacheReview;
         if (succeeded || acceptedReview?.messageId === messageId) {
           retryStateByThreadId.delete(threadId);
-          awaitingTurnStartsByThreadId.set(threadId, localDispatch);
+          if (
+            nextQueuedTurn.kind !== "chat" ||
+            !nextQueuedTurn.retryMessageId ||
+            !hasServerReceivedSentMessage(
+              getThreadFromState(useStore.getState(), threadId),
+              nextQueuedTurn.retryMessageId,
+            )
+          )
+            awaitingTurnStartsByThreadId.set(threadId, localDispatch);
           useComposerDraftStore.getState().removeQueuedTurn(threadId, nextQueuedTurn.id);
           return;
         }

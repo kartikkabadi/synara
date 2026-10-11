@@ -21,6 +21,7 @@ import { useCallback } from "react";
 import { promoteThreadCreate } from "~/lib/threadCreatePromotion";
 import { waitForDraftThreadDispatchToSettle } from "~/lib/draftThreadDispatch";
 import { runComposerSendOnce } from "~/lib/composerSendOwnership";
+import { retainFailedComposerRetry } from "~/lib/failedComposerRetry";
 import { newCommandId, randomUUID } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import { dispatchThreadNotes } from "~/pinnedMessages";
@@ -61,6 +62,9 @@ import {
 import type { ChatTurnSubmissionInput } from "./chatSendTypes";
 import { waitForSetupScriptTerminalActivity } from "./projectScriptRuntime";
 interface PreparedChatTurn {
+  retryMessageId: MessageId | undefined;
+  retrying: boolean;
+  failedTurnSnapshot: QueuedComposerChatTurn;
   nextThreadEnvMode: DraftThreadEnvMode;
   nextThreadBranch: string | null;
   nextThreadWorktreePath: string | null;
@@ -204,6 +208,9 @@ export function useChatTurnExecution({
   const execute = useCallback(
     async (preparedTurn: PreparedChatTurn): Promise<boolean> => {
       let {
+        retryMessageId,
+        retrying,
+        failedTurnSnapshot,
         nextThreadEnvMode,
         nextThreadBranch,
         nextThreadWorktreePath,
@@ -286,6 +293,7 @@ export function useChatTurnExecution({
       let createdWorktreeForSendPath: string | null = null;
       let switchedToLocalCheckout = false;
       let turnStartSucceeded = false;
+      let retryAlreadyAcknowledged = false;
       let settledLocalBranchUpdatedForSend = false;
       await (async () => {
         // "Work locally" from the setup card: drop any prepared worktree and
@@ -656,6 +664,17 @@ export function useChatTurnExecution({
         });
         await stagedTurnAttachments.runWithDispatch(async (turnAttachments) => {
           if (
+            retryMessageId !== undefined &&
+            hasServerReceivedSentMessage(
+              getThreadFromState(useStore.getState(), threadIdForSend),
+              retryMessageId,
+            )
+          ) {
+            retryAlreadyAcknowledged = true;
+            await stagedTurnAttachments.cleanup();
+            return;
+          }
+          if (
             getThreadFromState(useStore.getState(), threadIdForSend)?.claudeCacheReview != null ||
             isThreadDetailAwaitingVerification(threadIdForSend)
           ) {
@@ -734,15 +753,22 @@ export function useChatTurnExecution({
           );
         }
       })().catch(async (err: unknown) => {
+        retryAlreadyAcknowledged =
+          retryMessageId !== undefined &&
+          hasServerReceivedSentMessage(
+            getThreadFromState(useStore.getState(), threadIdForSend),
+            retryMessageId,
+          );
         // The server already recorded this message, so the turn exists whatever failed
         // around it. Rolling back would delete the promoted thread and hand the sent
         // prompt back to the composer, where it survives reloads and gets sent again.
         if (
           !turnStartSucceeded &&
-          hasServerReceivedSentMessage(
-            getThreadFromState(useStore.getState(), threadIdForSend),
-            messageIdForSend,
-          )
+          (retryAlreadyAcknowledged ||
+            hasServerReceivedSentMessage(
+              getThreadFromState(useStore.getState(), threadIdForSend),
+              messageIdForSend,
+            ))
         ) {
           turnStartSucceeded = true;
         }
@@ -757,7 +783,7 @@ export function useChatTurnExecution({
         );
         // Surface the failure on whichever setup step was active (no-op for
         // sends without a worktree setup in flight).
-        if (!setupCancelled) {
+        if (!setupCancelled && !retryAlreadyAcknowledged) {
           failLocalDispatchWorktreeSetup();
         }
         if (!turnStartSucceeded) {
@@ -843,6 +869,7 @@ export function useChatTurnExecution({
         const isFocusedSend = activeThreadIdRef.current === threadIdForSend;
         if (
           queuedChatTurn !== null &&
+          !retrying &&
           !turnStartSucceeded &&
           activeThreadIdRef.current === threadIdForSend
         ) {
@@ -856,7 +883,7 @@ export function useChatTurnExecution({
             });
         }
         const retryDraft = useComposerDraftStore.getState().draftsByThreadId[threadIdForSend];
-        if (
+        const canRestoreDraft =
           queuedChatTurn === null &&
           !turnStartSucceeded &&
           (!retryDraft ||
@@ -868,8 +895,10 @@ export function useChatTurnExecution({
               retryDraft.fileComments.length === 0 &&
               retryDraft.terminalContexts.length === 0 &&
               retryDraft.pastedTexts.length === 0 &&
-              retryDraft.pullRequestContexts.length === 0))
-        ) {
+              retryDraft.pullRequestContexts.length === 0 &&
+              retryDraft.skills.length === 0 &&
+              retryDraft.mentions.length === 0));
+        if (canRestoreDraft) {
           if (isFocusedSend)
             setOptimisticUserMessages((existing) => {
               const removed = existing.filter((message) => message.id === messageIdForSend);
@@ -947,15 +976,40 @@ export function useChatTurnExecution({
           if (isFocusedSend)
             setComposerTrigger(detectComposerTrigger(promptForSend, promptForSend.length));
         }
-        if (!setupCancelled) {
-          setThreadError(
-            threadIdForSend,
-            err instanceof Error ? err.message : "Failed to send message.",
-          );
+        if (!setupCancelled && !retryAlreadyAcknowledged) {
+          const error = err instanceof Error ? err.message : "Failed to send message.";
+          setThreadError(threadIdForSend, error);
+          if (!turnStartSucceeded && !canRestoreDraft && (queuedChatTurn === null || retrying)) {
+            retainFailedComposerRetry({
+              threadId: threadIdForSend,
+              messageId: messageIdForSend,
+              error,
+              turn: failedTurnSnapshot,
+            });
+            if (isFocusedSend) {
+              setOptimisticUserMessages((existing) => {
+                const removed = existing.filter((message) => message.id === messageIdForSend);
+                for (const message of removed) revokeUserMessagePreviewUrls(message);
+                return existing.filter((message) => message.id !== messageIdForSend);
+              });
+            }
+          }
         }
       });
       sendInFlightRef.current = false;
       worktreeSetupResolutionRef.current = null;
+      if (retryAlreadyAcknowledged) {
+        clearPendingTurnDispatch(threadIdForSend);
+        resetLocalDispatch();
+        if (activeThreadIdRef.current === threadIdForSend) {
+          setOptimisticUserMessages((existing) => {
+            for (const message of existing) {
+              if (message.id === messageIdForSend) revokeUserMessagePreviewUrls(message);
+            }
+            return existing.filter((message) => message.id !== messageIdForSend);
+          });
+        }
+      }
       if (!turnStartSucceeded) {
         if (baseBranchForWorktree && (worktreeSetupResolution?.action ?? null) === null) {
           scheduleFailedWorktreeSetupDispatchReset();

@@ -3012,6 +3012,16 @@ describe("turn dispatch settings", () => {
     });
   });
 
+  it("does not inherit new provider options for an exact failed-send retry", () => {
+    expect(
+      resolveQueuedTurnDispatchSettings(LIVE_SETTINGS, {
+        ...QUEUED_CHAT_TURN,
+        retryMessageId: MessageId.makeUnsafe("failed-message"),
+        providerOptionsForDispatch: undefined,
+      }).providerOptions,
+    ).toBeUndefined();
+  });
+
   it.each(["off", "request", "chat"] as const)(
     "preserves explicit %s intent across every dispatch projection",
     (computerControlMode) => {

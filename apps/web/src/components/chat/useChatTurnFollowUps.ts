@@ -8,6 +8,7 @@ import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useCallback } from "react";
 import { newCommandId, newMessageId, newThreadId, randomUUID } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
+import { retainFailedComposerRetry } from "~/lib/failedComposerRetry";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { formatOutgoingComposerPrompt } from "../../lib/composerSend";
 import { reconcileDeletedThreadFromClient } from "../../lib/deletedThreadClientReconciliation";
@@ -30,6 +31,7 @@ import type { Project } from "../../types";
 import { type Thread } from "../../types";
 import {
   editAndResendDispatchFields,
+  hasServerReceivedSentMessage,
   queuedChatTurnDispatchFields,
   planImplementationDispatchSettings,
   resolveQueuedTurnDispatchSettings,
@@ -216,6 +218,13 @@ export function useChatTurnFollowUps({
     };
     const modelSelectionForPlanDispatch = planDispatchSettings.modelSelection;
     const computerControlSequenceForSend = computerControlChangeSequence.current;
+    const sourceProposedPlan =
+      nextInteractionMode === "default"
+        ? buildSourceProposedPlanReference({
+            threadId: activeThread.id,
+            proposedPlan: activeProposedPlan,
+          })
+        : undefined;
 
     const dispatchPlanFollowUpTurn = async () => {
       await persistThreadSettingsForNextTurn({
@@ -228,13 +237,6 @@ export function useChatTurnFollowUps({
       // while the same-thread implementation turn is starting.
       setComposerDraftInteractionMode(threadIdForSend, nextInteractionMode);
 
-      const sourceProposedPlan =
-        nextInteractionMode === "default"
-          ? buildSourceProposedPlanReference({
-              threadId: activeThread.id,
-              proposedPlan: activeProposedPlan,
-            })
-          : undefined;
       rememberCustomBinaryPathForDispatch({
         threadId: threadIdForSend,
         provider: planDispatchSettings.modelSelection.provider,
@@ -302,13 +304,52 @@ export function useChatTurnFollowUps({
       if (resumeQueueAfterSend) resumeQueueAfterSend();
       return true;
     } catch (err) {
+      if (
+        hasServerReceivedSentMessage(
+          getThreadFromState(useStore.getState(), threadIdForSend),
+          messageIdForSend,
+        )
+      ) {
+        armLocalDispatchAckFallback(threadIdForSend);
+        sendInFlightRef.current = false;
+        resumeQueueAfterSend?.();
+        return true;
+      }
       setOptimisticUserMessages((existing) =>
         existing.filter((message) => message.id !== messageIdForSend),
       );
-      setThreadError(
-        threadIdForSend,
-        err instanceof Error ? err.message : "Failed to send plan follow-up.",
-      );
+      const error = err instanceof Error ? err.message : "Failed to send plan follow-up.";
+      setThreadError(threadIdForSend, error);
+      if (!queuedTurn) {
+        retainFailedComposerRetry({
+          threadId: threadIdForSend,
+          messageId: messageIdForSend,
+          error,
+          turn: {
+            id: randomUUID(),
+            kind: "chat",
+            retryMessageId: messageIdForSend,
+            retryMessageText: outgoingMessageText,
+            createdAt: messageCreatedAt,
+            previewText: trimmed,
+            prompt: trimmed,
+            images: [],
+            files: [],
+            assistantSelections: [],
+            browserAnnotations: [],
+            fileComments: [],
+            terminalContexts: [],
+            pastedTexts: [],
+            pullRequestContexts: [],
+            skills: [],
+            mentions: [],
+            selectedProvider,
+            selectedModel,
+            selectedPromptEffort,
+            ...queuedChatTurnDispatchFields(planDispatchSettings, sourceProposedPlan),
+          },
+        });
+      }
       sendInFlightRef.current = false;
       // The turn RPC failed, so no server turn exists for the watchdog to
       // recover — drop the marker armed when the dispatch began.
