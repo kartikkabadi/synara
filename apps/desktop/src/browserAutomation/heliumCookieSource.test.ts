@@ -555,8 +555,9 @@ describe.skipIf(process.platform !== "darwin")("helium cookie source", () => {
       const derive = crypto.pbkdf2Sync;
       let derived: Buffer | undefined;
       const spy = vi.spyOn(crypto, "pbkdf2Sync").mockImplementation((...args) => {
-        derived = derive(...args);
-        return derived;
+        const result = derive(...args);
+        derived = result;
+        return result;
       });
       syncBuiltinESMExports();
       try {
