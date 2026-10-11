@@ -3012,6 +3012,26 @@ describe("turn dispatch settings", () => {
     });
   });
 
+  it("does not inherit new provider options for an exact failed-send retry", () => {
+    expect(
+      resolveQueuedTurnDispatchSettings(LIVE_SETTINGS, {
+        ...QUEUED_CHAT_TURN,
+        retryMessageId: MessageId.makeUnsafe("failed-message"),
+        providerOptionsForDispatch: undefined,
+      }).providerOptions,
+    ).toBeUndefined();
+  });
+
+  it("keeps the rejected send delivery mode after the live preference changes", () => {
+    expect(
+      resolveQueuedTurnDispatchSettings(LIVE_SETTINGS, {
+        ...QUEUED_CHAT_TURN,
+        retryMessageId: MessageId.makeUnsafe("failed-message"),
+        retryAssistantDeliveryMode: "buffered",
+      }).assistantDeliveryMode,
+    ).toBe("buffered");
+  });
+
   it.each(["off", "request", "chat"] as const)(
     "preserves explicit %s intent across every dispatch projection",
     (computerControlMode) => {

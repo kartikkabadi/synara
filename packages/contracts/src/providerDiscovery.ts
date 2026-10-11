@@ -8,7 +8,7 @@ import { ProcessEnvRecord, TrimmedNonEmptyString } from "./baseSchemas";
 import { ProviderOptionDescriptor } from "./model";
 import { ProviderInstanceId } from "./providerInstance";
 
-const ProviderDiscoveryKind = Schema.Literals([
+export const ProviderDiscoveryKind = Schema.Literals([
   "codex",
   "claudeAgent",
   "cursor",
@@ -50,6 +50,34 @@ export const ProviderMentionReference = Schema.Struct({
 });
 export type ProviderMentionReference = typeof ProviderMentionReference.Type;
 
+// Structured, per-provider description of what compaction Synara can truthfully
+// offer: how manual compaction is invoked (if at all), whether the provider
+// compacts natively on its own, and how observable that lifecycle is.
+export const ProviderCompactionCapabilities = Schema.Struct({
+  manual: Schema.Struct({
+    mode: Schema.Literals(["same-session", "session-rollover", "unsupported"]),
+    mechanism: Schema.Literals(["native-rpc", "native-sdk", "control-command", "unsupported"]),
+    supportsInstructions: Schema.Boolean,
+  }),
+  automatic: Schema.Struct({
+    mode: Schema.Literals(["native", "none", "unknown"]),
+    enabledByDefault: Schema.optional(Schema.Boolean),
+    statusVisibility: Schema.Literals(["exact", "partial", "none"]),
+    triggerVisibility: Schema.Literals(["exact", "derived", "opaque"]),
+  }),
+  telemetry: Schema.Struct({
+    lifecycle: Schema.Literals(["native", "inferred", "none"]),
+    contextUsage: Schema.Literals([
+      "exact",
+      "provider-estimated",
+      "synara-estimated",
+      "processed-total-only",
+      "none",
+    ]),
+  }),
+});
+export type ProviderCompactionCapabilities = typeof ProviderCompactionCapabilities.Type;
+
 export const ProviderComposerCapabilities = Schema.Struct({
   provider: ProviderDiscoveryKind,
   supportsSkillMentions: Schema.Boolean,
@@ -58,6 +86,8 @@ export const ProviderComposerCapabilities = Schema.Struct({
   supportsPluginMentions: Schema.Boolean,
   supportsPluginDiscovery: Schema.Boolean,
   supportsRuntimeModelList: Schema.Boolean,
+  compaction: Schema.optional(ProviderCompactionCapabilities),
+  // Retained for provider adapters and clients predating the structured descriptor.
   supportsThreadCompaction: Schema.optional(Schema.Boolean),
   supportsThreadImport: Schema.optional(Schema.Boolean),
 });

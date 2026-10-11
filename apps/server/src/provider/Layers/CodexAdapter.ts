@@ -33,7 +33,7 @@ import {
   ThreadId,
   TurnId,
 } from "@synara/contracts";
-import { Cause, Effect, Layer, Option, Queue, Schema, ServiceMap, Stream } from "effect";
+import { Cause, Deferred, Effect, Layer, Option, Queue, Schema, ServiceMap, Stream } from "effect";
 
 import {
   ProviderAdapterProcessError,
@@ -358,6 +358,26 @@ function normalizeCodexTokenUsage(value: unknown): ThreadTokenUsageSnapshot | un
       ? { lastReasoningOutputTokens: reasoningOutputTokens }
       : {}),
     compactsAutomatically: true,
+    // The last request's total is the closest provider-reported proxy for
+    // context occupancy; the lifetime total is cumulative, never context.
+    context: {
+      usedTokens,
+      ...(maxTokens !== undefined
+        ? {
+            maxTokens,
+            usedPercent: Math.min(100, (usedTokens / maxTokens) * 100),
+          }
+        : {}),
+      measurement: "provider-reported",
+      confidence: "high",
+    },
+    ...(totalProcessedTokens !== undefined ? { cumulative: { totalProcessedTokens } } : {}),
+    lastTurn: {
+      ...(inputTokens !== undefined ? { inputTokens } : {}),
+      ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+      ...(outputTokens !== undefined ? { outputTokens } : {}),
+      ...(reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
+    },
   };
 }
 
@@ -1389,16 +1409,47 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "thread/compacting") {
+    const compactingPayload = {
+      itemType: "context_compaction",
+      status: "inProgress",
+      title: "Context compaction",
+      detail: event.message ?? "Compacting context",
+      ...(event.payload !== undefined ? { data: event.payload } : {}),
+    } as const;
     return [
       {
         ...runtimeEventBase(event, canonicalThreadId),
+        eventId: EventId.makeUnsafe(`${event.id}:compaction-started`),
+        type: "item.started",
+        payload: compactingPayload,
+      },
+      {
+        ...runtimeEventBase(event, canonicalThreadId),
         type: "item.updated",
+        payload: compactingPayload,
+      },
+    ];
+  }
+
+  if (event.method === "thread/compacted") {
+    return [
+      {
+        ...runtimeEventBase(event, canonicalThreadId),
+        eventId: EventId.makeUnsafe(`${event.id}:compaction-completed`),
+        type: "item.completed",
         payload: {
           itemType: "context_compaction",
-          status: "inProgress",
+          status: "completed",
           title: "Context compaction",
-          detail: event.message ?? "Compacting context",
           ...(event.payload !== undefined ? { data: event.payload } : {}),
+        },
+      },
+      {
+        type: "thread.state.changed",
+        ...runtimeEventBase(event, canonicalThreadId),
+        payload: {
+          state: "compacted",
+          ...(event.payload !== undefined ? { detail: event.payload } : {}),
         },
       },
     ];
@@ -1408,8 +1459,7 @@ function mapToRuntimeEvents(
     event.method === "thread/status/changed" ||
     event.method === "thread/archived" ||
     event.method === "thread/unarchived" ||
-    event.method === "thread/closed" ||
-    event.method === "thread/compacted"
+    event.method === "thread/closed"
   ) {
     return [
       {
@@ -1421,9 +1471,7 @@ function mapToRuntimeEvents(
               ? "archived"
               : event.method === "thread/closed"
                 ? "closed"
-                : event.method === "thread/compacted"
-                  ? "compacted"
-                  : toThreadState(asObject(payload?.thread)?.state ?? payload?.state),
+                : toThreadState(asObject(payload?.thread)?.state ?? payload?.state),
           ...(event.payload !== undefined ? { detail: event.payload } : {}),
         },
       },
@@ -2075,6 +2123,63 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
       PROVIDER_ADAPTER_RUNTIME_EVENT_BUFFER_CAPACITY,
     );
     const shouldSurfaceUnmappedEvent = makeUnmappedProviderEventGate();
+    const compactionPasses = new Map<
+      ThreadId,
+      {
+        originKey: object | undefined;
+        itemId: RuntimeItemId;
+        completed: boolean;
+      }
+    >();
+    const normalizeCompactionItems = (
+      events: ReadonlyArray<ProviderRuntimeEvent>,
+      originKey: object | undefined,
+    ): ReadonlyArray<ProviderRuntimeEvent> => {
+      const normalized: ProviderRuntimeEvent[] = [];
+      for (const event of events) {
+        if (event.type === "session.exited") compactionPasses.delete(event.threadId);
+        if (
+          (event.type !== "item.started" &&
+            event.type !== "item.updated" &&
+            event.type !== "item.completed") ||
+          event.payload.itemType !== "context_compaction"
+        ) {
+          normalized.push(event);
+          continue;
+        }
+        let pass = compactionPasses.get(event.threadId);
+        if (pass?.originKey !== originKey) pass = undefined;
+        if (event.type === "item.completed" && pass?.completed) continue;
+        if (!pass || (pass.completed && event.type === "item.started")) {
+          pass = {
+            originKey,
+            itemId:
+              event.itemId ?? RuntimeItemId.makeUnsafe(`codex-compaction:${crypto.randomUUID()}`),
+            completed: false,
+          };
+          compactionPasses.set(event.threadId, pass);
+          if (event.type === "item.completed")
+            normalized.push({
+              ...event,
+              type: "item.started",
+              eventId: EventId.makeUnsafe(`${event.eventId}:started`),
+              itemId: pass.itemId,
+              payload: { itemType: "context_compaction", status: "inProgress" },
+            });
+        }
+        normalized.push({ ...event, itemId: pass.itemId });
+        if (event.type === "item.completed") pass.completed = true;
+      }
+      return normalized;
+    };
+
+    const pendingCompactions = new Map<
+      ThreadId,
+      {
+        readonly originKey: object | undefined;
+        readonly completion: Deferred.Deferred<void, ProviderAdapterError>;
+      }
+    >();
 
     // Idle-progress backstop for codex turns. Same semantics as
     // AcpTurnIdleWatchdog (any inbound activity resets it, a pending human
@@ -2397,10 +2502,41 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
       );
     };
 
-    const compactThread: NonNullable<CodexAdapterShape["compactThread"]> = (threadId) =>
-      Effect.tryPromise({
-        try: () => manager.compactThread(threadId),
-        catch: (cause) => toRequestError(threadId, "thread/compact/start", cause),
+    const compactThread: NonNullable<CodexAdapterShape["compactThread"]> = (input) =>
+      Effect.gen(function* () {
+        if (input.instructions !== undefined) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "compactThread",
+            issue: "Codex context compaction does not support custom instructions.",
+          });
+        }
+        if (pendingCompactions.has(input.threadId)) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "compactThread",
+            issue: "A compaction is already running for this thread.",
+          });
+        }
+        const origin = manager.getSessionEventOrigin(input.threadId);
+        const completion = Deferred.makeUnsafe<void, ProviderAdapterError>();
+        pendingCompactions.set(input.threadId, { originKey: origin.validationKey, completion });
+        yield* Effect.gen(function* () {
+          yield* Effect.tryPromise({
+            try: () => manager.compactThread(input.threadId),
+            catch: (cause) => toRequestError(input.threadId, "thread/compact/start", cause),
+          });
+          const completed = yield* Deferred.await(completion).pipe(
+            Effect.timeoutOption("5 minutes"),
+          );
+          if (Option.isNone(completed))
+            return yield* toRequestError(
+              input.threadId,
+              "thread/compact/start",
+              new Error("Compaction was acknowledged but its completion was not confirmed."),
+            );
+        }).pipe(Effect.ensuring(Effect.sync(() => pendingCompactions.delete(input.threadId))));
+        return { kind: "same-session" } as const;
       });
 
     const forkThread: CodexAdapterShape["forkThread"] = (input) =>
@@ -2656,7 +2792,10 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
                   }),
                 ),
               );
-              const runtimeEvents = item.runtimeEvents;
+              const runtimeEvents = normalizeCompactionItems(
+                item.runtimeEvents,
+                item.validationKey,
+              );
               if (runtimeEvents.length === 0) {
                 yield* Effect.logDebug("ignoring unhandled Codex provider event", {
                   method: item.nativeEvent.method,
@@ -2666,8 +2805,40 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
                 });
                 return;
               }
-              if (item.trustedClose || !item.isAuthRejected())
+              if (item.trustedClose || !item.isAuthRejected()) {
+                for (const event of runtimeEvents) {
+                  const pending = pendingCompactions.get(event.threadId);
+                  if (!pending || pending.originKey !== item.validationKey) continue;
+                  if (
+                    event.type === "item.completed" &&
+                    event.payload.itemType === "context_compaction"
+                  ) {
+                    if (event.payload.status === "completed")
+                      yield* Deferred.succeed(pending.completion, undefined);
+                    else
+                      yield* Deferred.fail(
+                        pending.completion,
+                        toRequestError(
+                          event.threadId,
+                          "thread/compact/start",
+                          new Error("Provider compaction failed."),
+                        ),
+                      );
+                  } else if (event.type === "session.exited" || event.type === "turn.aborted") {
+                    yield* Deferred.fail(
+                      pending.completion,
+                      toRequestError(
+                        event.threadId,
+                        "thread/compact/start",
+                        new Error(
+                          "Provider exited or was interrupted before compaction completed.",
+                        ),
+                      ),
+                    );
+                  }
+                }
                 yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
+              }
             }),
           {
             prepareConcurrency: 8,
@@ -2705,9 +2876,12 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
         const listener = (event: ProviderEvent) => {
           const origin = manager.getSessionEventOrigin(event.threadId, event.lifecycleGeneration);
           const stampedEvent = stampEvent(event, origin.providerInstanceId);
-          const mappedRuntimeEvents = assignDerivedProviderRuntimeEventIds(
-            mapToRuntimeEvents(stampedEvent, stampedEvent.threadId, origin.codexOptions),
+          const mappedEvents = mapToRuntimeEvents(
+            stampedEvent,
+            stampedEvent.threadId,
+            origin.codexOptions,
           );
+          const mappedRuntimeEvents = assignDerivedProviderRuntimeEventIds(mappedEvents);
           const hasUnmappedEvent = mappedRuntimeEvents.some(
             (runtimeEvent) => runtimeEvent.type === "event.unmapped",
           );

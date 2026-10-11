@@ -5,6 +5,8 @@ import { resolveComputerControlMode } from "./computerControlMode";
 // Exports: Persist middleware transitions and persisted state type.
 
 import {
+  AssistantDeliveryMode,
+  MessageId,
   ModelSelection,
   OrchestrationProposedPlanId,
   OrchestrationThreadPullRequest,
@@ -214,6 +216,9 @@ const PersistedBrowserAnnotationDraft = Schema.Struct({
 
 const PersistedQueuedComposerChatTurn = Schema.Struct({
   id: Schema.String,
+  retryMessageId: Schema.optionalKey(MessageId),
+  retryMessageText: Schema.optionalKey(Schema.String),
+  retryAssistantDeliveryMode: Schema.optionalKey(AssistantDeliveryMode),
   kind: Schema.Literal("chat"),
   createdAt: Schema.String,
   previewText: Schema.String,
@@ -801,6 +806,15 @@ function normalizePersistedQueuedTurns(
         computerControlMode,
         ...(computerControlGeneration !== undefined ? { computerControlGeneration } : {}),
         ...(sourceProposedPlan ? { sourceProposedPlan } : {}),
+        ...(Schema.is(MessageId)(candidate.retryMessageId)
+          ? { retryMessageId: candidate.retryMessageId }
+          : {}),
+        ...(typeof candidate.retryMessageText === "string"
+          ? { retryMessageText: candidate.retryMessageText }
+          : {}),
+        ...(Schema.is(AssistantDeliveryMode)(candidate.retryAssistantDeliveryMode)
+          ? { retryAssistantDeliveryMode: candidate.retryAssistantDeliveryMode }
+          : {}),
         runtimeMode,
         interactionMode,
         envMode,
@@ -1301,6 +1315,13 @@ export function partializeComposerDraftStoreState(
           ),
           ...(queuedTurn.sourceProposedPlan
             ? { sourceProposedPlan: queuedTurn.sourceProposedPlan }
+            : {}),
+          ...(queuedTurn.retryMessageId ? { retryMessageId: queuedTurn.retryMessageId } : {}),
+          ...(queuedTurn.retryMessageText !== undefined
+            ? { retryMessageText: queuedTurn.retryMessageText }
+            : {}),
+          ...(queuedTurn.retryAssistantDeliveryMode !== undefined
+            ? { retryAssistantDeliveryMode: queuedTurn.retryAssistantDeliveryMode }
             : {}),
           runtimeMode: queuedTurn.runtimeMode,
           interactionMode: queuedTurn.interactionMode,

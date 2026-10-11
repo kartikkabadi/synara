@@ -1,8 +1,10 @@
+import { supportsThreadCompactionFromCompaction } from "@synara/shared/providerCompaction";
 import { TurnId } from "@synara/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
   classifyDroidPromptTurnCompletion,
+  droidCompaction,
   extractDroidApproveSpecPlanMarkdown,
   isDroidNestedTaskToolCall,
   isExpectedDroidPlanRejection,
@@ -139,5 +141,12 @@ describe("DroidAdapter runtime event scoping", () => {
     expect(shouldIgnoreDroidInterrupt(oldTurnId, undefined)).toBe(true);
     expect(shouldIgnoreDroidInterrupt(newTurnId, newTurnId)).toBe(false);
     expect(shouldIgnoreDroidInterrupt(undefined, newTurnId)).toBe(false);
+  });
+});
+
+describe("Droid compaction capabilities", () => {
+  it("does not advertise an unimplemented compaction lifecycle", () => {
+    expect(supportsThreadCompactionFromCompaction(droidCompaction)).toBe(false);
+    expect(droidCompaction.automatic.mode).toBe("unknown");
   });
 });

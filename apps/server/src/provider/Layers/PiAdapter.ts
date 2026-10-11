@@ -1,3 +1,4 @@
+import { supportsThreadCompactionFromCompaction } from "@synara/shared/providerCompaction";
 import { providerProcessPriorityEnabled } from "../../providerProcessPriority";
 import { refreshPiOpenCodeCatalog } from "../piOpenCodeCatalog";
 import crypto from "node:crypto";
@@ -21,7 +22,9 @@ import { resetApiProviders } from "@earendil-works/pi-ai/compat";
 import {
   ApprovalRequestId,
   type ChatAttachment,
+  type CompactionTrigger,
   EventId,
+  type ProviderCompactionCapabilities,
   type PiModelSelection,
   type ProviderComposerCapabilities,
   type ProviderListCommandsResult,
@@ -397,6 +400,7 @@ const loadPiCodingAgentModule: () => Promise<PiCodingAgentModule> = lazyModule(
 );
 
 interface PiSessionContext {
+  compactionItemId?: RuntimeItemId | undefined;
   harnessPolicyDelivered?: boolean;
   readonly enableComputerControl?: boolean;
   /**
@@ -532,6 +536,56 @@ export function makePiRuntimeEventBase(
       ? { turnId: context.activeTurnId }
       : {}),
   };
+}
+
+// One provider-owned compaction pass: `compaction_start` opens the
+// context_compaction item lifecycle; `compaction_end` refreshes the usage
+// snapshot (when available) before closing it, so downstream consumers see
+// the post-compaction usage by the time the pass completes.
+export function makePiCompactionRuntimeEvents(input: {
+  readonly makeBase: () => ReturnType<typeof makePiRuntimeEventBase>;
+  readonly itemId: RuntimeItemId;
+  readonly event: Extract<AgentSessionEvent, { type: "compaction_start" | "compaction_end" }>;
+  readonly refreshedUsage?: ThreadTokenUsageSnapshot | undefined;
+}): ProviderRuntimeEvent[] {
+  const { event } = input;
+  const raw = { source: "pi.sdk.event", messageType: event.type, payload: event } as const;
+  const itemId = input.itemId;
+  if (event.type === "compaction_start") {
+    const payload = {
+      itemType: "context_compaction",
+      status: "inProgress",
+      title: "Compacting context",
+    } as const;
+    return [
+      { ...input.makeBase(), itemId, type: "item.started", payload, raw },
+      { ...input.makeBase(), itemId, type: "item.updated", payload, raw },
+    ];
+  }
+  return [
+    ...(input.refreshedUsage !== undefined
+      ? [
+          {
+            ...input.makeBase(),
+            type: "thread.token-usage.updated" as const,
+            payload: { usage: input.refreshedUsage },
+            raw,
+          },
+        ]
+      : []),
+    {
+      ...input.makeBase(),
+      itemId,
+      type: "item.completed",
+      payload: {
+        itemType: "context_compaction",
+        status: event.aborted ? "failed" : "completed",
+        title: "Context compacted",
+        data: event,
+      },
+      raw,
+    },
+  ];
 }
 
 interface PiStoredTurn {
@@ -968,7 +1022,7 @@ function makeSessionSnapshot(context: PiSessionContext): ProviderSession {
   };
 }
 
-function normalizeTokenUsage(
+export function normalizePiTokenUsage(
   stats: ReturnType<PiAgentSession["getSessionStats"]>,
   contextWindow?: number | null,
 ): ThreadTokenUsageSnapshot | undefined {
@@ -1022,6 +1076,27 @@ function normalizeTokenUsage(
     lastInputTokens: inputTokens,
     lastCachedInputTokens: cachedInputTokens,
     lastOutputTokens: outputTokens,
+    // The SDK exposes real per-session context occupancy via
+    // `contextUsage.tokens`/`contextWindow`; without it the context claim is a
+    // Synara estimate derived from cumulative totals.
+    context: {
+      usedTokens,
+      ...(maxTokens !== undefined ? { maxTokens } : {}),
+      ...(usedPercent !== undefined
+        ? { usedPercent }
+        : maxTokens !== undefined
+          ? { usedPercent: Math.min(100, (usedTokens / maxTokens) * 100) }
+          : {}),
+      ...(contextUsageTokens !== undefined
+        ? { measurement: "provider-reported" as const, confidence: "exact" as const }
+        : { measurement: "synara-estimated" as const, confidence: "low" as const }),
+    },
+    cumulative: {
+      inputTokens,
+      cachedInputTokens,
+      outputTokens,
+      totalProcessedTokens,
+    },
   };
 }
 
@@ -2550,7 +2625,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         payload: cause ?? {},
       };
       const stats = context.runtime.session.getSessionStats();
-      const usage = normalizeTokenUsage(stats, context.runtime.session.model?.contextWindow);
+      const usage = normalizePiTokenUsage(stats, context.runtime.session.model?.contextWindow);
       context.lastKnownTokenUsage = usage;
       const failure = errorMessage ? classifyPiTurnFailure(errorMessage) : undefined;
       const leafId = context.runtime.session.sessionManager.getLeafId();
@@ -3184,34 +3259,41 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           return;
         }
         case "compaction_start": {
-          const itemId = RuntimeItemId.makeUnsafe(`pi-compaction-${crypto.randomUUID()}`);
-          offerRuntimeEvent({
-            ...makeEventBase(context),
-            itemId,
-            type: "item.updated",
-            payload: {
-              itemType: "context_compaction",
-              status: "inProgress",
-              title: "Compacting context",
-            },
-            raw: { source: "pi.sdk.event", messageType: event.type, payload: event },
-          } satisfies ProviderRuntimeEvent);
+          context.compactionItemId = RuntimeItemId.makeUnsafe(
+            `pi-compaction-${crypto.randomUUID()}`,
+          );
+          for (const runtimeEvent of makePiCompactionRuntimeEvents({
+            makeBase: () => makeEventBase(context),
+            itemId:
+              context.compactionItemId ??
+              RuntimeItemId.makeUnsafe(`pi-compaction-${crypto.randomUUID()}`),
+            event,
+          })) {
+            offerRuntimeEvent(runtimeEvent);
+          }
           return;
         }
         case "compaction_end": {
-          const itemId = RuntimeItemId.makeUnsafe(`pi-compaction-${crypto.randomUUID()}`);
-          offerRuntimeEvent({
-            ...makeEventBase(context),
-            itemId,
-            type: "item.completed",
-            payload: {
-              itemType: "context_compaction",
-              status: event.aborted ? "failed" : "completed",
-              title: "Context compacted",
-              data: event,
-            },
-            raw: { source: "pi.sdk.event", messageType: event.type, payload: event },
-          } satisfies ProviderRuntimeEvent);
+          // Refresh usage from the SDK stats so the post-compaction snapshot
+          // is provider-reported, not the stale pre-compaction one.
+          const usage = normalizePiTokenUsage(
+            context.runtime.session.getSessionStats(),
+            context.runtime.session.model?.contextWindow,
+          );
+          if (usage) {
+            context.lastKnownTokenUsage = usage;
+          }
+          for (const runtimeEvent of makePiCompactionRuntimeEvents({
+            makeBase: () => makeEventBase(context),
+            itemId:
+              context.compactionItemId ??
+              RuntimeItemId.makeUnsafe(`pi-compaction-${crypto.randomUUID()}`),
+            event,
+            refreshedUsage: usage,
+          })) {
+            offerRuntimeEvent(runtimeEvent);
+          }
+          context.compactionItemId = undefined;
           return;
         }
         case "agent_end": {
@@ -3612,7 +3694,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           type: "thread.started",
           payload: { providerThreadId: runtime.session.sessionId },
         } satisfies ProviderRuntimeEvent);
-        const initialUsage = normalizeTokenUsage(
+        const initialUsage = normalizePiTokenUsage(
           runtime.session.getSessionStats(),
           runtime.session.model?.contextWindow,
         );
@@ -3963,22 +4045,40 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         return snapshotThread(context);
       });
 
-    const compactThread: NonNullable<PiAdapterShape["compactThread"]> = (threadId) =>
-      requireSession(threadId).pipe(
-        Effect.flatMap((context) =>
-          Effect.tryPromise({
-            try: () => context.runtime.session.compact(),
-            catch: (cause) =>
-              new ProviderAdapterRequestError({
-                provider: PROVIDER,
-                method: "thread/compact",
-                detail: toMessage(cause, "Failed to compact Pi thread."),
-                cause,
-              }),
-          }),
-        ),
-        Effect.asVoid,
-      );
+    const compactThread: NonNullable<PiAdapterShape["compactThread"]> = (input) =>
+      Effect.gen(function* () {
+        if (input.instructions !== undefined) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "compactThread",
+            issue: "Pi context compaction does not support custom instructions.",
+          });
+        }
+        const context = yield* requireSession(input.threadId);
+        yield* Effect.tryPromise({
+          try: () => context.runtime.session.compact(),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "thread/compact",
+              detail: toMessage(cause, "Failed to compact Pi thread."),
+              cause,
+            }),
+        });
+        return { kind: "same-session" } as const;
+      });
+
+    // Pi's SDK auto-compacts when `contextTokens > contextWindow -
+    // reserveTokens`; the reserve comes from the session's settings manager
+    // (16,384 by default).
+    const getNativeCompactionTrigger: NonNullable<PiAdapterShape["getNativeCompactionTrigger"]> = (
+      threadId,
+    ) =>
+      Effect.gen(function* () {
+        const context = yield* requireSession(threadId);
+        const reserveTokens = context.runtime.session.settingsManager.getCompactionReserveTokens();
+        return { kind: "remaining-tokens", reserveTokens } satisfies CompactionTrigger;
+      });
 
     const stopAll: PiAdapterShape["stopAll"] = () =>
       settleConcurrentTeardowns(sessions.keys(), stopSession);
@@ -4202,6 +4302,27 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
           }),
       });
 
+    // Manual compaction is `context.runtime.session.compact()`; automatic
+    // compaction triggers when `contextTokens > contextWindow - reserveTokens`
+    // (default reserve 16384), so the trigger is derived from reported usage.
+    const piCompaction: ProviderCompactionCapabilities = {
+      manual: {
+        mode: "same-session",
+        mechanism: "native-sdk",
+        supportsInstructions: false,
+      },
+      automatic: {
+        mode: "native",
+        enabledByDefault: true,
+        statusVisibility: "partial",
+        triggerVisibility: "derived",
+      },
+      telemetry: {
+        lifecycle: "native",
+        contextUsage: "exact",
+      },
+    };
+
     const getComposerCapabilities: NonNullable<PiAdapterShape["getComposerCapabilities"]> = () =>
       Effect.succeed({
         provider: PROVIDER,
@@ -4211,7 +4332,8 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
         supportsPluginMentions: false,
         supportsPluginDiscovery: false,
         supportsRuntimeModelList: true,
-        supportsThreadCompaction: true,
+        compaction: piCompaction,
+        supportsThreadCompaction: supportsThreadCompactionFromCompaction(piCompaction),
         supportsThreadImport: false,
       } satisfies ProviderComposerCapabilities);
 
@@ -4252,6 +4374,7 @@ const makePiAdapter = (options?: PiAdapterLiveOptions) =>
       readThread,
       rollbackThread,
       compactThread,
+      getNativeCompactionTrigger,
       stopAll,
       listModels,
       listSkills,

@@ -236,6 +236,7 @@ export function useComposerDiscovery({
     supportsTextNativeReviewCommand,
     isComposerMenuLoading,
     canCompactThread: supportsThreadCompaction(providerComposerCapabilitiesQuery.data),
+    compactionCapabilities: providerComposerCapabilitiesQuery.data?.compaction,
     isNativeCommandDiscoveryPending:
       providerComposerCapabilitiesQuery.isPending ||
       (supportsNativeSlashCommandDiscovery(providerComposerCapabilitiesQuery.data) &&

@@ -1,3 +1,4 @@
+import { supportsThreadCompactionFromCompaction } from "@synara/shared/providerCompaction";
 import { snapshotProviderTurns } from "../snapshotProviderTurns.ts";
 /**
  * DroidAdapterLive - Factory Droid CLI (`droid exec --output-format acp`) via ACP.
@@ -7,6 +8,7 @@ import { snapshotProviderTurns } from "../snapshotProviderTurns.ts";
 import {
   ApprovalRequestId,
   EventId,
+  type ProviderCompactionCapabilities,
   type ProviderComposerCapabilities,
   type ProviderApprovalDecision,
   type ProviderInteractionMode,
@@ -128,6 +130,14 @@ import { DroidAdapter, type DroidAdapterShape } from "../Services/DroidAdapter.t
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = "droid" as const;
+
+// An advertised command alone does not prove a resumable compaction protocol.
+// Keep unavailable until this adapter implements and verifies its lifecycle.
+export const droidCompaction: ProviderCompactionCapabilities = {
+  manual: { mode: "unsupported", mechanism: "unsupported", supportsInstructions: false },
+  automatic: { mode: "unknown", statusVisibility: "none", triggerVisibility: "opaque" },
+  telemetry: { lifecycle: "none", contextUsage: "provider-estimated" },
+};
 
 export const takeDroidSynaraHarnessPolicyTextPart = (
   state: SynaraHarnessPolicyDeliveryState,
@@ -856,6 +866,11 @@ export function makeDroidAdapter(
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientCapabilities: { elicitation: { form: {} } },
             clientInfo: { name: "Synara", version: "0.0.0" },
+            // Factory ACP exposes no observable compaction lifecycle, so usage
+            // snapshots must not claim automatic compaction.
+            usageCompactsAutomatically: false,
+            // Factory's ACP usage carries no exact token counts.
+            usageContextConfidence: "low",
             ...(agentGatewayCredentials
               ? {
                   buildMcpServers: (initializeResult: Acp.InitializeResponse) =>
@@ -2037,19 +2052,20 @@ export function makeDroidAdapter(
       });
 
     const getComposerCapabilities: NonNullable<DroidAdapterShape["getComposerCapabilities"]> = () =>
-      Effect.succeed({
-        provider: PROVIDER,
-        supportsSkillMentions: false,
-        supportsSkillDiscovery: false,
-        supportsNativeSlashCommandDiscovery: true,
-        supportsPluginMentions: true,
-        supportsPluginDiscovery: true,
-        supportsRuntimeModelList: true,
-        // Droid's TUI has /compact, but ACP currently exposes no compaction RPC
-        // and treats that text as an ordinary model prompt.
-        supportsThreadCompaction: false,
-        supportsThreadImport: true,
-      } satisfies ProviderComposerCapabilities);
+      Effect.gen(function* () {
+        return {
+          provider: PROVIDER,
+          supportsSkillMentions: false,
+          supportsSkillDiscovery: false,
+          supportsNativeSlashCommandDiscovery: true,
+          supportsPluginMentions: true,
+          supportsPluginDiscovery: true,
+          supportsRuntimeModelList: true,
+          compaction: droidCompaction,
+          supportsThreadCompaction: supportsThreadCompactionFromCompaction(droidCompaction),
+          supportsThreadImport: true,
+        } satisfies ProviderComposerCapabilities;
+      });
 
     const listModels: NonNullable<DroidAdapterShape["listModels"]> = (input) =>
       discoveryLock.withPermits(1)(

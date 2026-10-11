@@ -1,7 +1,9 @@
+import { supportsThreadCompactionFromCompaction } from "@synara/shared/providerCompaction";
 // FILE: CursorAdapter.test.ts
 // Purpose: Characterizes Cursor terminal-event account identity.
 // Layer: Provider adapter tests
 
+import { SYNARA_HARNESS_POLICY_MARKER } from "../../agentGateway/harnessPolicy.ts";
 import {
   EventId,
   type ProviderInstanceId,
@@ -10,6 +12,7 @@ import {
 } from "@synara/contracts";
 import { describe, expect, it } from "vitest";
 
+import { cursorCompaction, takeCursorSynaraHarnessPolicyTextPart } from "./CursorAdapter.ts";
 import type * as Acp from "@agentclientprotocol/sdk";
 
 import { cursorPromptUsageSnapshot, stampCursorTerminalEventInstance } from "./CursorAdapter.ts";
@@ -113,5 +116,16 @@ describe("CursorAdapter ACP usage", () => {
       maxTokens: 256_000,
       totalProcessedTokens: 400,
     });
+  });
+});
+
+describe("Cursor compaction capabilities", () => {
+  // Verified against cursor-agent 2026.07.17: the ACP initialize response
+  // advertises no compaction capability, and /compact (`summarize`) exists
+  // only in the interactive TUI bundle.
+  it("stays unsupported because cursor-agent acp proves no compaction path", () => {
+    expect(cursorCompaction.manual.mode).toBe("unsupported");
+    expect(cursorCompaction.manual.mechanism).toBe("unsupported");
+    expect(supportsThreadCompactionFromCompaction(cursorCompaction)).toBe(false);
   });
 });

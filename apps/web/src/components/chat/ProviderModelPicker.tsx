@@ -1032,6 +1032,7 @@ export const ProviderModelPicker = function ProviderModelPicker(props: ProviderM
 
   const triggerButton = (
     <PickerTriggerButton
+      data-testid="provider-model-picker"
       disabled={props.disabled ?? false}
       compact={props.compact ?? false}
       hideLabel={props.hideLabel ?? false}

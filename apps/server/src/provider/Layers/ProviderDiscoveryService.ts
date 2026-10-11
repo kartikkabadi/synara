@@ -73,6 +73,11 @@ const disabledCapabilitiesForProvider = (
   supportsPluginMentions: false,
   supportsPluginDiscovery: false,
   supportsRuntimeModelList: false,
+  compaction: {
+    manual: { mode: "unsupported", mechanism: "unsupported", supportsInstructions: false },
+    automatic: { mode: "unknown", statusVisibility: "none", triggerVisibility: "opaque" },
+    telemetry: { lifecycle: "none", contextUsage: "none" },
+  },
   supportsThreadCompaction: false,
   supportsThreadImport: false,
 });

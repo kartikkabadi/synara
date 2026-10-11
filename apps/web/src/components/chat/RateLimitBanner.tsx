@@ -4,6 +4,7 @@
 // Exports: RateLimitBanner and rate-limit derivation helpers.
 
 import type { OrchestrationThreadActivity } from "@synara/contracts";
+import { useEffect, useState } from "react";
 import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { IconButton } from "../ui/icon-button";
 import { CircleAlertIcon, XIcon } from "~/lib/icons";
@@ -44,10 +45,28 @@ export function deriveLatestRateLimitStatus(
   return null;
 }
 
-function formatResetsAt(resetsAt: string): string {
-  const ms = Date.parse(resetsAt);
-  if (Number.isNaN(ms)) return "";
-  const secondsLeft = Math.max(0, Math.ceil((ms - Date.now()) / 1000));
+export function rateLimitSecondsLeft(resetsAt: string | undefined, now: number): number {
+  const ms = resetsAt ? Date.parse(resetsAt) : NaN;
+  return Number.isFinite(ms) ? Math.max(0, Math.ceil((ms - now) / 1000)) : 0;
+}
+
+export function useRateLimitSecondsLeft(resetsAt: string | undefined): number {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    setNow(Date.now());
+    if (rateLimitSecondsLeft(resetsAt, Date.now()) === 0) return;
+    const tick = () => {
+      setNow(Date.now());
+      if (rateLimitSecondsLeft(resetsAt, Date.now()) === 0) window.clearInterval(timer);
+    };
+    const timer = window.setInterval(tick, 1000);
+    return () => window.clearInterval(timer);
+  }, [resetsAt]);
+  return rateLimitSecondsLeft(resetsAt, now);
+}
+
+function formatResetsAt(secondsLeft: number): string {
+  if (secondsLeft === 0) return "";
   if (secondsLeft < 60) return ` Resets in ${secondsLeft}s.`;
   const minutesLeft = Math.ceil(secondsLeft / 60);
   return ` Resets in ${minutesLeft}m.`;
@@ -60,14 +79,16 @@ export const RateLimitBanner = function RateLimitBanner({
   onDismiss?: () => void;
   rateLimitStatus: RateLimitStatus | null;
 }) {
+  const secondsLeft = useRateLimitSecondsLeft(rateLimitStatus?.resetsAt);
   if (!rateLimitStatus) return null;
 
   const { status, resetsAt, utilization } = rateLimitStatus;
   const isRejected = status === "rejected";
+  if (resetsAt && Number.isFinite(Date.parse(resetsAt)) && secondsLeft === 0) return null;
 
   const message = isRejected
-    ? `Rate limit reached.${resetsAt ? formatResetsAt(resetsAt) : ""}`
-    : `Approaching rate limit${utilization !== undefined ? ` (${Math.round(utilization * 100)}% used)` : ""}.${resetsAt ? formatResetsAt(resetsAt) : ""}`;
+    ? `Rate limit reached.${formatResetsAt(secondsLeft)}`
+    : `Approaching rate limit${utilization !== undefined ? ` (${Math.round(utilization * 100)}% used)` : ""}.${formatResetsAt(secondsLeft)}`;
 
   return (
     <ChatColumnBannerFrame>

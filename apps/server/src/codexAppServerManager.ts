@@ -1,4 +1,5 @@
 import { sshProcessEnv } from "./environment/sshProcessEnv";
+import { supportsThreadCompactionFromCompaction } from "@synara/shared/providerCompaction";
 import { providerProcessPriorityEnabled } from "./providerProcessPriority";
 import type { ChildProcess, ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -8,6 +9,7 @@ import {
   ApprovalRequestId,
   BROWSER_TOOL_NAMES,
   EventId,
+  type ProviderCompactionCapabilities,
   type ProviderStartOptions,
   type ProviderComposerCapabilities,
   ProviderItemId,
@@ -3801,6 +3803,26 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   }
 
   getComposerCapabilities(): ProviderComposerCapabilities {
+    // Manual compaction is the `thread/compact/start` JSON-RPC on the
+    // app-server; automatic compaction is native and surfaced through
+    // `contextCompaction` items and `thread/compacted` notifications.
+    const compaction: ProviderCompactionCapabilities = {
+      manual: {
+        mode: "same-session",
+        mechanism: "native-rpc",
+        supportsInstructions: false,
+      },
+      automatic: {
+        mode: "native",
+        enabledByDefault: true,
+        statusVisibility: "exact",
+        triggerVisibility: "opaque",
+      },
+      telemetry: {
+        lifecycle: "native",
+        contextUsage: "exact",
+      },
+    };
     return {
       provider: "codex",
       supportsSkillMentions: true,
@@ -3809,7 +3831,8 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       supportsPluginMentions: true,
       supportsPluginDiscovery: true,
       supportsRuntimeModelList: true,
-      supportsThreadCompaction: true,
+      compaction,
+      supportsThreadCompaction: supportsThreadCompactionFromCompaction(compaction),
       supportsThreadImport: true,
     };
   }

@@ -784,6 +784,31 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain("h-px flex-1 bg-border");
   });
 
+  it("renders a failed compaction entry", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...makeTimelineBaseProps()}
+        timelineEntries={[
+          {
+            id: "entry-compaction-failed",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-compaction-failed",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              label: "Compaction failed",
+              tone: "error",
+            },
+          },
+        ]}
+        resolvedTheme="light"
+      />,
+    );
+
+    expect(markup).toContain("Compaction failed");
+  });
+
   it("does not reserve a timestamp footer between live status updates and Thinking", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const activeTurnId = TurnId.makeUnsafe("turn-live-status");

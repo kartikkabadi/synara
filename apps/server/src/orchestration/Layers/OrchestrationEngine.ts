@@ -8,6 +8,7 @@ import type {
 } from "@synara/contracts";
 import { OrchestrationCommand, ORCHESTRATION_WS_METHODS } from "@synara/contracts";
 import { makeKeyedDrainableWorker } from "@synara/shared/KeyedDrainableWorker";
+import { TURN_MESSAGE_ALREADY_ACCEPTED } from "@synara/shared/errorMessages";
 import { SIDECHAT_INACTIVITY_EXPIRY_MS, sidechatExpiryMs } from "@synara/shared/sidechatExpiry";
 import {
   Cause,
@@ -1226,6 +1227,63 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             let nextCommandReadModel = commandReadModel;
 
             if (command.type === "thread.turn.start") {
+              // This identity check shares the receipt/event transaction and
+              // maintenance lock. A retry and a delayed original can arrive in
+              // either order, including after projection rollback or restart.
+              const priorMessage = (yield* sql<{ readonly sequence: number }>`
+                SELECT sequence FROM orchestration_events
+                WHERE aggregate_kind = 'thread' AND stream_id = ${command.threadId}
+                  AND event_type = 'thread.message-sent'
+                  AND json_extract(payload_json, '$.role') = 'user'
+                  AND json_extract(payload_json, '$.messageId') = ${command.message.messageId}
+                ORDER BY sequence DESC LIMIT 1
+              `)[0];
+              const editSequence = command.editResendFromRollbackSequence;
+              if (editSequence !== undefined) {
+                const rollback = (yield* sql<{ readonly sequence: number }>`
+                  SELECT sequence FROM orchestration_events
+                  WHERE sequence = ${editSequence}
+                    AND aggregate_kind = 'thread' AND stream_id = ${command.threadId}
+                    AND event_type = 'thread.conversation-rolled-back'
+                    AND json_extract(payload_json, '$.messageId') = ${command.message.messageId}
+                    AND json_extract(payload_json, '$.skipAttachmentPrune') = 1
+                    AND NOT EXISTS (
+                      SELECT 1 FROM orchestration_events AS later
+                      WHERE later.aggregate_kind = 'thread' AND later.stream_id = ${command.threadId}
+                        AND later.sequence > ${editSequence}
+                        AND later.event_type IN (
+                          'thread.conversation-rolled-back', 'thread.reverted',
+                          'thread.message-edit-resend-requested', 'thread.conversation-rollback-requested',
+                          'thread.checkpoint-revert-requested', 'thread.session-stop-requested',
+                          'thread.turn-interrupt-requested', 'thread.archived',
+                          'thread.deleted', 'thread.sidechat-expired'
+                        )
+                    )
+                `)[0];
+                if (!rollback || (priorMessage && priorMessage.sequence >= editSequence)) {
+                  return yield* new OrchestrationCommandInvariantError({
+                    commandType: command.type,
+                    detail: "The edit replay no longer owns this message rollback.",
+                  });
+                }
+              } else {
+                // Imported projection rows may predate the retained event log.
+                // Also reject an identity owned by an assistant message.
+                const existingMessage = priorMessage
+                  ? true
+                  : Option.isSome(
+                      yield* messageRepository.getByThreadAndMessageId({
+                        threadId: command.threadId,
+                        messageId: command.message.messageId,
+                      }),
+                    );
+                if (existingMessage) {
+                  return yield* new OrchestrationCommandInvariantError({
+                    commandType: command.type,
+                    detail: TURN_MESSAGE_ALREADY_ACCEPTED,
+                  });
+                }
+              }
               const attachmentIds = command.message.attachments
                 .filter((attachment) => attachment.type === "image" || attachment.type === "file")
                 .map((attachment) => attachment.id);

@@ -7706,7 +7706,137 @@ describe("ProviderRuntimeIngestion", () => {
     });
   });
 
-  it("projects compacted thread state into context compaction activities", async () => {
+  it("projects configured Claude context windows into normalized thread activities", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "session.configured",
+      eventId: asEventId("evt-session-configured-context-window"),
+      provider: "claudeAgent",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: {
+        config: {
+          model: "claude-opus-4-7[1m]",
+          contextWindow: "1m",
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.kind === "context-window.configured",
+      ),
+    );
+
+    const configuredActivity = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.kind === "context-window.configured",
+    );
+    expect(configuredActivity?.payload).toMatchObject({
+      contextWindow: "1m",
+      maxTokens: 1_000_000,
+    });
+  });
+
+  it("projects Codex camelCase token usage payloads into normalized thread activities", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "thread.token-usage.updated",
+      eventId: asEventId("evt-thread-token-usage-updated-camel"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: {
+        usage: {
+          usedTokens: 126,
+          totalProcessedTokens: 11_839,
+          maxTokens: 258_400,
+          inputTokens: 120,
+          cachedInputTokens: 0,
+          outputTokens: 6,
+          reasoningOutputTokens: 0,
+          lastUsedTokens: 126,
+          lastInputTokens: 120,
+          lastCachedInputTokens: 0,
+          lastOutputTokens: 6,
+          lastReasoningOutputTokens: 0,
+          compactsAutomatically: true,
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.kind === "context-window.updated",
+      ),
+    );
+
+    const usageActivity = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.kind === "context-window.updated",
+    );
+    expect(usageActivity?.payload).toMatchObject({
+      usedTokens: 126,
+      totalProcessedTokens: 11_839,
+      maxTokens: 258_400,
+      inputTokens: 120,
+      cachedInputTokens: 0,
+      outputTokens: 6,
+      reasoningOutputTokens: 0,
+      lastUsedTokens: 126,
+      lastInputTokens: 120,
+      lastOutputTokens: 6,
+      compactsAutomatically: true,
+    });
+  });
+
+  it("projects Claude usage snapshots with context window into normalized thread activities", async () => {
+    const harness = await createHarness();
+    const now = new Date().toISOString();
+
+    harness.emit({
+      type: "thread.token-usage.updated",
+      eventId: asEventId("evt-thread-token-usage-updated-claude-window"),
+      provider: "claudeAgent",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      payload: {
+        usage: {
+          usedTokens: 31_251,
+          lastUsedTokens: 31_251,
+          maxTokens: 200_000,
+          toolUses: 25,
+          durationMs: 43_567,
+        },
+      },
+      raw: {
+        source: "claude.sdk.message",
+        method: "claude/result/success",
+        payload: {},
+      },
+    });
+
+    const thread = await waitForThread(harness.engine, (entry) =>
+      entry.activities.some(
+        (activity: ProviderRuntimeTestActivity) => activity.kind === "context-window.updated",
+      ),
+    );
+
+    const usageActivity = thread.activities.find(
+      (activity: ProviderRuntimeTestActivity) => activity.kind === "context-window.updated",
+    );
+    expect(usageActivity?.payload).toMatchObject({
+      usedTokens: 31_251,
+      lastUsedTokens: 31_251,
+      maxTokens: 200_000,
+      toolUses: 25,
+      durationMs: 43_567,
+    });
+  });
+
+  it("projects compaction item completion, not compacted thread state, into activities", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
 
@@ -7722,6 +7852,19 @@ describe("ProviderRuntimeIngestion", () => {
         detail: { source: "provider" },
       },
     });
+    harness.emit({
+      type: "item.completed",
+      eventId: asEventId("evt-thread-compaction-item"),
+      provider: "codex",
+      createdAt: now,
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-1"),
+      payload: {
+        itemType: "context_compaction",
+        status: "completed",
+        title: "Context compacted",
+      },
+    });
 
     const thread = await waitForThread(harness.engine, (entry) =>
       entry.activities.some(
@@ -7729,11 +7872,12 @@ describe("ProviderRuntimeIngestion", () => {
       ),
     );
 
-    const activity = thread.activities.find(
+    const activities = thread.activities.filter(
       (candidate: ProviderRuntimeTestActivity) => candidate.kind === "context-compaction",
     );
-    expect(activity?.summary).toBe("Context compacted manually");
-    expect(activity?.tone).toBe("info");
+    expect(activities).toHaveLength(1);
+    expect(activities[0]?.summary).toBe("Context compacted");
+    expect(activities[0]?.tone).toBe("info");
   });
 
   it("projects context compaction progress from item.started into thread activities", async () => {
@@ -7799,8 +7943,7 @@ describe("ProviderRuntimeIngestion", () => {
     const thread = await waitForThread(harness.engine, (entry) =>
       entry.activities.some(
         (activity: ProviderRuntimeTestActivity) =>
-          activity.kind === "context-compaction" &&
-          activity.summary === "Context compaction failed",
+          activity.kind === "context-compaction" && activity.summary === "Compaction failed",
       ),
     );
 
@@ -7811,8 +7954,7 @@ describe("ProviderRuntimeIngestion", () => {
     expect(completed?.tone).toBe("info");
     const failed = thread.activities.find(
       (candidate: ProviderRuntimeTestActivity) =>
-        candidate.kind === "context-compaction" &&
-        candidate.summary === "Context compaction failed",
+        candidate.kind === "context-compaction" && candidate.summary === "Compaction failed",
     );
     expect(failed?.tone).toBe("error");
   });

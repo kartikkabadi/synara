@@ -1140,25 +1140,10 @@ export function projectProviderRuntimeActivities(
     }
 
     case "thread.state.changed": {
-      if (event.payload.state !== "compacted") {
-        return [];
-      }
-
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: "info",
-          kind: "context-compaction",
-          summary: "Context compacted manually",
-          payload: toActivityPayload({
-            state: event.payload.state,
-            ...(event.payload.detail !== undefined ? { detail: event.payload.detail } : {}),
-          }),
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ];
+      // Compacted state changes stay bookkeeping-only: every compaction pass
+      // also emits the `context_compaction` item lifecycle, which owns the
+      // single transcript row for the pass.
+      return [];
     }
 
     case "thread.token-usage.updated": {
@@ -1196,7 +1181,7 @@ export function projectProviderRuntimeActivities(
               event.type !== "item.completed"
                 ? "Compacting context"
                 : failed
-                  ? "Context compaction failed"
+                  ? "Compaction failed"
                   : "Context compacted",
             payload: toActivityPayload({
               itemType: event.payload.itemType,

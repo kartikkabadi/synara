@@ -6040,7 +6040,65 @@ describe("deriveWorkLogEntries context window handling", () => {
     expect(entries[0]?.label).toBe("Compacting context");
   });
 
-  it.each(["Compacting context", "Compacting conversation..."])(
+  it("collapses matching canonical compaction lifecycle rows and hides control snapshots", () => {
+    const entries = deriveWorkLogEntries(
+      [
+        makeActivity({
+          id: "z-start",
+          kind: "thread.compaction-started",
+          summary: "start",
+          payload: { requestId: "compact-1" },
+          turnId: null,
+        }),
+        makeActivity({
+          id: "status",
+          kind: "thread.compaction-runtime-status.updated",
+          summary: "status",
+          payload: { owner: "synara" },
+          turnId: null,
+        }),
+        makeActivity({
+          id: "a-complete",
+          kind: "thread.compaction-completed",
+          summary: "complete",
+          payload: { requestId: "compact-1" },
+          turnId: null,
+        }),
+      ],
+      TurnId.makeUnsafe("turn-1"),
+    );
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "z-start",
+      label: "Context compacted",
+      itemType: "context_compaction",
+    });
+  });
+
+  it("keeps different canonical compaction requests separate", () => {
+    const entries = deriveWorkLogEntries(
+      [
+        makeActivity({
+          id: "start",
+          kind: "thread.compaction-started",
+          summary: "start",
+          payload: { requestId: "compact-1" },
+          turnId: null,
+        }),
+        makeActivity({
+          id: "complete",
+          kind: "thread.compaction-completed",
+          summary: "complete",
+          payload: { requestId: "compact-2" },
+          turnId: null,
+        }),
+      ],
+      TurnId.makeUnsafe("turn-1"),
+    );
+    expect(entries).toHaveLength(2);
+  });
+
+  it.each(["Compacting context", "Compacting context…", "Compacting conversation..."])(
     "collapses a %s progress row into its terminal row",
     (summary) => {
       const entries = deriveWorkLogEntries(
@@ -6070,7 +6128,7 @@ describe("deriveWorkLogEntries context window handling", () => {
     },
   );
 
-  it.each(["Compacting context"])(
+  it.each(["Compacting context", "Compacting context…", "Compacting conversation..."])(
     "collapses same-timestamp %s rows regardless of event id order",
     (summary) => {
       const entries = deriveWorkLogEntries(
@@ -6112,7 +6170,7 @@ describe("deriveWorkLogEntries context window handling", () => {
           id: "compaction-progress-2",
           createdAt: "2026-02-23T00:00:01.000Z",
           kind: "context-compaction",
-          summary: "Compacting conversation...",
+          summary: "Compacting context…",
           tone: "info",
         }),
       ],
@@ -6121,7 +6179,7 @@ describe("deriveWorkLogEntries context window handling", () => {
 
     expect(entries).toHaveLength(2);
     expect(entries[0]?.label).toBe("Context compacted");
-    expect(entries[1]?.label).toBe("Compacting conversation...");
+    expect(entries[1]?.label).toBe("Compacting context…");
   });
 });
 

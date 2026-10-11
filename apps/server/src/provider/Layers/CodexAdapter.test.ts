@@ -109,6 +109,8 @@ class FakeCodexManager extends CodexAppServerManager {
 
   public stopAllImpl = vi.fn(() => undefined);
 
+  public compactThreadImpl = vi.fn(async (_threadId: ThreadId): Promise<void> => undefined);
+
   override startSession(input: CodexAppServerStartSessionInput): Promise<ProviderSession> {
     return this.startSessionImpl(input);
   }
@@ -135,6 +137,10 @@ class FakeCodexManager extends CodexAppServerManager {
 
   override rollbackThread(threadId: ThreadId, numTurns: number) {
     return this.rollbackThreadImpl(threadId, numTurns);
+  }
+
+  override compactThread(threadId: ThreadId): Promise<void> {
+    return this.compactThreadImpl(threadId);
   }
 
   override respondToRequest(
@@ -300,6 +306,52 @@ validationLayer("CodexAdapterLive validation", (it) => {
         }),
       );
       assert.equal(validationManager.startSessionImpl.mock.calls.length, 0);
+    }),
+  );
+  it.effect("rejects compaction instructions and returns same-session on compactThread", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const compactThread = adapter.compactThread;
+      assert.notEqual(compactThread, undefined);
+      if (!compactThread) {
+        return;
+      }
+
+      const rejected = yield* compactThread({
+        requestId: "compact-req-1",
+        threadId: asThreadId("thread-1"),
+        trigger: "manual",
+        instructions: "Keep the plan",
+      }).pipe(Effect.result);
+      assert.equal(rejected._tag, "Failure");
+      assert.deepStrictEqual(
+        rejected._tag === "Failure" ? rejected.failure : undefined,
+        new ProviderAdapterValidationError({
+          provider: "codex",
+          operation: "compactThread",
+          issue: "Codex context compaction does not support custom instructions.",
+        }),
+      );
+      assert.equal(validationManager.compactThreadImpl.mock.calls.length, 0);
+
+      validationManager.compactThreadImpl.mockImplementationOnce(async (threadId) => {
+        validationManager.emit("event", {
+          id: asEventId("compact-done"),
+          provider: "codex",
+          threadId,
+          kind: "notification",
+          method: "thread/compacted",
+          createdAt: new Date().toISOString(),
+          payload: {},
+        } satisfies ProviderEvent);
+      });
+      const result = yield* compactThread({
+        requestId: "compact-req-2",
+        threadId: asThreadId("thread-1"),
+        trigger: "manual",
+      });
+      assert.deepStrictEqual(result, { kind: "same-session" });
+      assert.deepStrictEqual(validationManager.compactThreadImpl.mock.calls[0]?.[0], "thread-1");
     }),
   );
 
@@ -2542,14 +2594,31 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         lastOutputTokens: 6,
         lastReasoningOutputTokens: 0,
         compactsAutomatically: true,
+        context: {
+          usedTokens: 126,
+          maxTokens: 258_400,
+          usedPercent: (126 / 258_400) * 100,
+          measurement: "provider-reported",
+          confidence: "high",
+        },
+        cumulative: { totalProcessedTokens: 11_839 },
+        lastTurn: {
+          inputTokens: 120,
+          cachedInputTokens: 0,
+          outputTokens: 6,
+          reasoningOutputTokens: 0,
+        },
       });
     }),
   );
 
-  it.effect("maps thread/compacting notifications to context compaction progress events", () =>
+  it.effect("maps thread/compacting notifications to compaction start and progress events", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+      const eventsFiber = yield* Stream.take(adapter.streamEvents, 2).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
 
       lifecycleManager.emit("event", {
         id: asEventId("evt-codex-thread-compacting"),
@@ -2565,18 +2634,95 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         },
       } satisfies ProviderEvent);
 
-      const firstEvent = yield* Fiber.join(firstEventFiber);
-      assert.equal(firstEvent._tag, "Some");
-      if (firstEvent._tag !== "Some") {
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      assert.deepEqual(
+        events.map((event) => event.type),
+        ["item.started", "item.updated"],
+      );
+      for (const event of events) {
+        assert.equal(event.type === "item.started" || event.type === "item.updated", true);
+        if (event.type !== "item.started" && event.type !== "item.updated") {
+          return;
+        }
+        assert.equal(event.payload.itemType, "context_compaction");
+        assert.equal(event.payload.detail, "Compacting context");
+        assert.equal(event.payload.status, "inProgress");
+      }
+    }),
+  );
+
+  it.effect("maps thread/compacted without republishing stale usage", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const eventsFiber = yield* Stream.take(adapter.streamEvents, 4).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      lifecycleManager.emit("event", {
+        id: asEventId("evt-codex-usage-before-compaction"),
+        kind: "notification",
+        provider: "codex",
+        threadId: asThreadId("thread-native-compact"),
+        turnId: asTurnId("turn-1"),
+        createdAt: new Date().toISOString(),
+        method: "thread/tokenUsage/updated",
+        payload: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          tokenUsage: {
+            total: {
+              inputTokens: 11_833,
+              cachedInputTokens: 3456,
+              outputTokens: 6,
+              reasoningOutputTokens: 0,
+              totalTokens: 11_839,
+            },
+            last: {
+              inputTokens: 120,
+              cachedInputTokens: 0,
+              outputTokens: 6,
+              reasoningOutputTokens: 0,
+              totalTokens: 126,
+            },
+            modelContextWindow: 258_400,
+          },
+        },
+      } satisfies ProviderEvent);
+
+      lifecycleManager.emit("event", {
+        id: asEventId("evt-codex-thread-compacted"),
+        kind: "notification",
+        provider: "codex",
+        threadId: asThreadId("thread-native-compact"),
+        createdAt: new Date().toISOString(),
+        method: "thread/compacted",
+        payload: {
+          threadId: "thread-1",
+          state: "compacted",
+        },
+      } satisfies ProviderEvent);
+
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      assert.deepEqual(
+        events.map((event) => event.type),
+        ["thread.token-usage.updated", "item.started", "item.completed", "thread.state.changed"],
+      );
+
+      const completed = events[2];
+      assert.ok(completed && completed.type === "item.completed");
+      if (completed.type !== "item.completed") {
         return;
       }
-      assert.equal(firstEvent.value.type, "item.updated");
-      if (firstEvent.value.type !== "item.updated") {
+      assert.equal(completed.payload.itemType, "context_compaction");
+      assert.equal(completed.payload.status, "completed");
+
+      const stateChanged = events[3];
+      assert.ok(stateChanged && stateChanged.type === "thread.state.changed");
+      if (stateChanged.type !== "thread.state.changed") {
         return;
       }
-      assert.equal(firstEvent.value.payload.itemType, "context_compaction");
-      assert.equal(firstEvent.value.payload.detail, "Compacting context");
-      assert.equal(firstEvent.value.payload.status, "inProgress");
+      assert.equal(stateChanged.payload.state, "compacted");
     }),
   );
 

@@ -429,6 +429,17 @@ export interface AcpSessionRuntimeOptions {
    */
   readonly buildMcpServers?: (initializeResult: Acp.InitializeResponse) => Array<Acp.McpServer>;
   readonly authenticateMeta?: Record<string, unknown>;
+  /**
+   * Whether usage snapshots from this provider's `usage_update` notifications
+   * may truthfully claim the provider compacts its context automatically.
+   * Omit when there is no evidence of observable automatic compaction.
+   */
+  readonly usageCompactsAutomatically?: boolean;
+  /**
+   * How much to trust the provider's ACP `used`/`size` context estimate.
+   * Defaults to "medium" (an estimate, but grounded in real counts).
+   */
+  readonly usageContextConfidence?: "medium" | "low";
   /** Test/provider policy overrides for session/load transcript replay suppression. */
   readonly loadReplayPolicy?: {
     readonly quietMs?: number;
@@ -1359,6 +1370,8 @@ const makeAcpSessionRuntime = (
             resolveConfigOptionUpdateWaiters,
             skipTranscriptEvents: replay === "bounded-only",
             params: notification,
+            usageCompactsAutomatically: options.usageCompactsAutomatically,
+            usageContextConfidence: options.usageContextConfidence,
           });
         for (const notification of sessionPending.notifications) {
           yield* apply(notification);
@@ -1445,6 +1458,8 @@ const makeAcpSessionRuntime = (
               resolveConfigOptionUpdateWaiters,
               skipTranscriptEvents: false,
               params: notification,
+              usageCompactsAutomatically: options.usageCompactsAutomatically,
+              usageContextConfidence: options.usageContextConfidence,
             });
           }
         }
@@ -1584,6 +1599,8 @@ const makeAcpSessionRuntime = (
             resolveConfigOptionUpdateWaiters,
             skipTranscriptEvents: suppress,
             params: notification,
+            usageCompactsAutomatically: options.usageCompactsAutomatically,
+            usageContextConfidence: options.usageContextConfidence,
           });
         return yield* loadReplayGate === undefined
           ? apply(false)
@@ -2389,6 +2406,8 @@ const processSessionUpdate = ({
   skipTranscriptEvents,
   resolveConfigOptionUpdateWaiters,
   params,
+  usageCompactsAutomatically,
+  usageContextConfidence,
 }: {
   readonly getSessionEpoch: () => Effect.Effect<SessionEpoch>;
   readonly offer: (event: AcpParsedSessionEvent) => Effect.Effect<void>;
@@ -2405,6 +2424,8 @@ const processSessionUpdate = ({
     configOptions: ReadonlyArray<Acp.SessionConfigOption>,
   ) => Effect.Effect<void>;
   readonly params: Acp.SessionNotification;
+  readonly usageCompactsAutomatically?: boolean | undefined;
+  readonly usageContextConfidence?: "medium" | "low" | undefined;
 }): Effect.Effect<void> =>
   Effect.gen(function* () {
     const update = params.update;
@@ -2425,7 +2446,10 @@ const processSessionUpdate = ({
       return;
     }
 
-    const parsed = parseSessionUpdateEvent(params);
+    const parsed = parseSessionUpdateEvent(params, {
+      usageCompactsAutomatically,
+      usageContextConfidence,
+    });
     const modeId = parsed.modeId;
     if (modeId) {
       if (!(yield* isCurrentSessionEpoch(getSessionEpoch, sessionId, epoch))) return;

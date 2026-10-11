@@ -6500,7 +6500,7 @@ const make = Effect.gen(function* () {
       });
     }
     yield* executeEditReplayWorkspaceRestore(workspaceRestorePlan);
-    yield* orchestrationEngine.dispatch({
+    const rollback = yield* orchestrationEngine.dispatch({
       type: "thread.conversation.rollback.complete",
       commandId: serverCommandId("message-edit-rollback-complete"),
       threadId: payload.threadId,
@@ -6524,31 +6524,41 @@ const make = Effect.gen(function* () {
     }
 
     editResendTurnStartKeys.add(editResendTurnStartKey(payload.threadId, payload.messageId));
-    yield* orchestrationEngine.dispatch({
-      type: "thread.turn.start",
-      commandId: serverCommandId("message-edit-resend-turn-start"),
-      threadId: payload.threadId,
-      message: {
-        messageId: payload.messageId,
-        role: "user",
-        text: payload.text,
-        attachments: originalMessage.attachments ?? [],
-        ...(originalMessage.skills !== undefined ? { skills: originalMessage.skills } : {}),
-        ...(originalMessage.mentions !== undefined ? { mentions: originalMessage.mentions } : {}),
-      },
-      ...(payload.modelSelection !== undefined ? { modelSelection: payload.modelSelection } : {}),
-      ...(payload.providerOptions !== undefined
-        ? { providerOptions: payload.providerOptions }
-        : {}),
-      ...computerActivationMetadata(payload),
-      ...(payload.assistantDeliveryMode !== undefined
-        ? { assistantDeliveryMode: payload.assistantDeliveryMode }
-        : {}),
-      dispatchMode: "queue",
-      runtimeMode: payload.runtimeMode,
-      interactionMode: payload.interactionMode,
-      createdAt: payload.createdAt,
-    });
+    yield* orchestrationEngine
+      .dispatch({
+        type: "thread.turn.start",
+        commandId: serverCommandId("message-edit-resend-turn-start"),
+        editResendFromRollbackSequence: rollback.sequence,
+        threadId: payload.threadId,
+        message: {
+          messageId: payload.messageId,
+          role: "user",
+          text: payload.text,
+          attachments: originalMessage.attachments ?? [],
+          ...(originalMessage.skills !== undefined ? { skills: originalMessage.skills } : {}),
+          ...(originalMessage.mentions !== undefined ? { mentions: originalMessage.mentions } : {}),
+        },
+        ...(payload.modelSelection !== undefined ? { modelSelection: payload.modelSelection } : {}),
+        ...(payload.providerOptions !== undefined
+          ? { providerOptions: payload.providerOptions }
+          : {}),
+        ...computerActivationMetadata(payload),
+        ...(payload.assistantDeliveryMode !== undefined
+          ? { assistantDeliveryMode: payload.assistantDeliveryMode }
+          : {}),
+        dispatchMode: "queue",
+        runtimeMode: payload.runtimeMode,
+        interactionMode: payload.interactionMode,
+        createdAt: payload.createdAt,
+      })
+      .pipe(
+        Effect.catchTag("OrchestrationCommandInvariantError", (error) => {
+          editResendTurnStartKeys.delete(
+            editResendTurnStartKey(payload.threadId, payload.messageId),
+          );
+          return Effect.fail(error);
+        }),
+      );
   });
 
   const stopActiveProviderRuntimeForEdit = Effect.fnUntraced(function* (input: {

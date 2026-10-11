@@ -520,6 +520,11 @@ export function deriveWorkLogEntries(
         activity.kind !== "context-window.updated" && activity.kind !== "context-window.configured",
     )
     .filter((activity) => activity.kind !== FAST_MODE_STATE_ACTIVITY_KIND)
+    .filter(
+      (activity) =>
+        activity.kind !== "thread.compaction-runtime-status.updated" &&
+        activity.kind !== "thread.compaction-requested",
+    )
     .filter((activity) => activity.summary !== "Checkpoint captured")
     // Server-side Studio output attribution is environment-panel data, not transcript work.
     .filter((activity) => activity.kind !== STUDIO_OUTPUTS_ACTIVITY_KIND)
@@ -1109,7 +1114,10 @@ function shouldKeepActivityForWorkLog(
   if (activity.kind === "auth.status") return true;
 
   // Thread-level compaction progress has no provider turn id but should stay visible.
-  if (activity.kind === "context-compaction" && activity.turnId === null) {
+  if (
+    (activity.kind === "context-compaction" || activity.kind.startsWith("thread.compaction-")) &&
+    activity.turnId === null
+  ) {
     return true;
   }
 
@@ -1674,6 +1682,13 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     ...(toolCallId ? { toolCallId } : {}),
     ...(toolStatus ? { toolStatus } : {}),
   };
+  const compactionLifecycleLabel = COMPACTION_LIFECYCLE_LABELS[activity.kind];
+  if (compactionLifecycleLabel !== undefined) {
+    entry.label = compactionLifecycleLabel;
+    const requestId = asTrimmedString(payload?.requestId);
+    if (requestId) entry.collapseKey = `compaction:${requestId}`;
+    entry.itemType = "context_compaction";
+  }
   const itemType = extractWorkLogItemType(payload);
   const requestKind = extractWorkLogRequestKind(payload);
   if (payload && typeof payload.detail === "string" && payload.detail.length > 0) {
@@ -2311,15 +2326,34 @@ function mergeSnapshotEntries(
 // terminal row ("Context compacted" / "... failed" / "... manually") as separate
 // activities; fold the terminal row into the in-progress one so the work log
 // shows a single resolving compaction entry instead of a stale spinner row.
+const COMPACTION_LIFECYCLE_LABELS: Record<string, string> = {
+  "thread.compaction-started": "Compacting context…",
+  "thread.compaction-completed": "Context compacted",
+  "thread.compaction-failed": "Compaction failed",
+  "thread.compaction-suspended": "Compaction suspended",
+};
+
 function isContextCompactionProgressLabel(label: string): boolean {
   // Keep resolving progress rows persisted by older servers, too.
-  return label === "Compacting context" || label === "Compacting conversation...";
+  return (
+    label === "Compacting context" ||
+    label === "Compacting context…" ||
+    label === "Compacting conversation..."
+  );
 }
 
 function shouldCollapseContextCompactionEntries(
   previous: DerivedWorkLogEntry,
   next: DerivedWorkLogEntry,
 ): boolean {
+  if (previous.activityKind === "thread.compaction-started") {
+    return (
+      (next.activityKind === "thread.compaction-completed" ||
+        next.activityKind === "thread.compaction-failed") &&
+      previous.collapseKey !== undefined &&
+      previous.collapseKey === next.collapseKey
+    );
+  }
   if (
     previous.activityKind !== "context-compaction" ||
     next.activityKind !== "context-compaction"
@@ -3587,9 +3621,14 @@ function compareActivitiesByOrder(
   // Compaction progress and terminal rows can share a millisecond; keep the
   // progress row first so the work-log collapse can fold the pair (event ids
   // are random and would otherwise order them arbitrarily).
-  if (left.kind === "context-compaction" && right.kind === "context-compaction") {
+  if (
+    (left.kind === "context-compaction" && right.kind === "context-compaction") ||
+    (COMPACTION_LIFECYCLE_LABELS[left.kind] !== undefined &&
+      COMPACTION_LIFECYCLE_LABELS[right.kind] !== undefined)
+  ) {
     const compactionRankComparison =
-      contextCompactionOrderRank(left.summary) - contextCompactionOrderRank(right.summary);
+      contextCompactionOrderRank(COMPACTION_LIFECYCLE_LABELS[left.kind] ?? left.summary) -
+      contextCompactionOrderRank(COMPACTION_LIFECYCLE_LABELS[right.kind] ?? right.summary);
     if (compactionRankComparison !== 0) {
       return compactionRankComparison;
     }

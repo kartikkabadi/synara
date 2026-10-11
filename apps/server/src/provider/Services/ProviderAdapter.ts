@@ -29,6 +29,9 @@ import type {
   ProviderListSkillsInput,
   ProviderInstanceId,
   ProviderStartReviewInput,
+  CompactionTrigger,
+  ProviderCompactionRequest,
+  ProviderCompactionResult,
   ProviderUserInputAnswers,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
@@ -318,7 +321,18 @@ export interface ProviderAdapterShape<TError> {
   /**
    * Trigger provider-native context compaction for a thread when supported.
    */
-  readonly compactThread?: (threadId: ThreadId) => Effect.Effect<void, TError>;
+  readonly compactThread?: (
+    input: ProviderCompactionRequest,
+  ) => Effect.Effect<ProviderCompactionResult, TError>;
+
+  /**
+   * Report the provider-native automatic compaction trigger for a thread when
+   * the provider exposes one. Resolves to undefined when the trigger is not
+   * observable for the thread.
+   */
+  readonly getNativeCompactionTrigger?: (
+    threadId: ThreadId,
+  ) => Effect.Effect<CompactionTrigger | undefined, TError>;
 
   /** Queue native Claude compaction; terminal events report whether it actually compacted. */
   readonly startClaudeCompaction?: (input: {

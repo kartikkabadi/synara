@@ -447,6 +447,10 @@
     "./ownedPosixProcessGroup": {
       "types": "./src/ownedPosixProcessGroup.ts",
       "import": "./src/ownedPosixProcessGroup.ts"
+    },
+    "./providerCompaction": {
+      "types": "./src/providerCompaction.ts",
+      "import": "./src/providerCompaction.ts"
     }
   },
   "scripts": {

@@ -164,6 +164,7 @@ import { makeImportThreadHandler } from "./orchestration/importThreadRoute";
 import { makeProjectImportHandlers } from "./orchestration/projectImportRoute";
 import { makeProjectImportRepository } from "./persistence/projectImportRepository";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
+import { CompactionReactor } from "./orchestration/Services/CompactionReactor";
 import { ProviderCommandReactor } from "./orchestration/Services/ProviderCommandReactor";
 import { SidechatExpiryReactor } from "./orchestration/Services/SidechatExpiryReactor";
 import { ProjectionStateIncompleteError } from "./persistence/Errors";
@@ -511,6 +512,7 @@ const makeWsRpcHandlersLayer = () =>
       const keybindings = yield* Keybindings;
       const open = yield* Open;
       const orchestrationEngine = yield* OrchestrationEngineService;
+      const compactionReactor = yield* CompactionReactor;
       const providerCommandReactor = yield* ProviderCommandReactor;
       const sidechatExpiryReactor = yield* SidechatExpiryReactor;
       const path = yield* Path.Path;
@@ -2632,7 +2634,12 @@ const makeWsRpcHandlersLayer = () =>
             "Failed to get composer capabilities",
           ),
         [WS_METHODS.providerCompactThread]: (input) =>
-          rpcEffect(providerService.compactThread(input), "Failed to compact thread"),
+          rpcEffect(compactionReactor.request(input), "Failed to compact thread"),
+        [WS_METHODS.providerSetCompactionSettings]: (input) =>
+          rpcEffect(
+            compactionReactor.setThreadSettings(input),
+            "Failed to update compaction settings",
+          ),
         [WS_METHODS.providerListCommands]: (input) =>
           rpcEffect(providerDiscoveryService.listCommands(input), "Failed to list commands"),
         [WS_METHODS.providerListSkills]: (input) =>

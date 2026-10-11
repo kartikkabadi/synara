@@ -5,6 +5,8 @@ import type { ComposerComputerControlMode } from "./computerControlMode";
 // Exports: Internal domain primitives plus public facade types.
 
 import {
+  type AssistantDeliveryMode,
+  type MessageId,
   type ModelSelection,
   type OrchestrationLatestTurn,
   type OrchestrationThreadPullRequest,
@@ -128,6 +130,11 @@ export type ModelSelectionByProviderInstance = Partial<Record<ProviderInstanceId
 
 export interface QueuedComposerChatTurn {
   id: string;
+  /** Reuse the original identity for server admission; a late acknowledgement consumes the retry. */
+  retryMessageId?: MessageId;
+  /** Frozen provider text, including context blocks captured by the failed send. */
+  retryMessageText?: string;
+  retryAssistantDeliveryMode?: AssistantDeliveryMode;
   kind: "chat";
   createdAt: string;
   previewText: string;
