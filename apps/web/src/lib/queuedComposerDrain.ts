@@ -10,6 +10,7 @@ import type { AssistantDeliveryMode, MessageId, ThreadId } from "@synara/contrac
 
 import {
   createLocalDispatchSnapshot,
+  hasServerReceivedSentMessage,
   hasLiveTurnTakenOver,
   LOCAL_DISPATCH_TURN_TAKEOVER_TIMEOUT_MS,
   type LocalDispatchSnapshot,
@@ -67,6 +68,7 @@ type QueuedComposerDispatchFn = (input: {
   dispatchMode: "queue" | "steer";
   assistantDeliveryMode: AssistantDeliveryMode;
   messageId?: MessageId;
+  onAlreadyAdmitted?: () => void;
 }) => Promise<boolean>;
 
 const claimedThreadIds = new Set<ThreadId>();
@@ -615,7 +617,9 @@ function runQueuedComposerDrainPass(): void {
       continue;
     }
     const thread = getThreadFromState(useStore.getState(), threadId);
-    const messageId = newMessageId();
+    const messageId =
+      (nextQueuedTurn.kind === "chat" ? nextQueuedTurn.retryMessageId : undefined) ??
+      newMessageId();
     const localDispatch = {
       ...createLocalDispatchSnapshot(thread, { expectedUserMessageId: messageId }),
       startedAt: new Date(nowMs()).toISOString(),
@@ -623,17 +627,30 @@ function runQueuedComposerDrainPass(): void {
     void runLockedQueuedComposerAutoDispatch({
       threadId,
       run: async () => {
+        let alreadyAdmitted = false;
         const succeeded = await dispatchQueuedTurn({
           threadId,
           queuedTurn: nextQueuedTurn,
           dispatchMode: "queue",
           assistantDeliveryMode,
           messageId,
+          onAlreadyAdmitted: () => {
+            alreadyAdmitted = true;
+          },
         });
         const acceptedReview = getThreadFromState(useStore.getState(), threadId)?.claudeCacheReview;
         if (succeeded || acceptedReview?.messageId === messageId) {
           retryStateByThreadId.delete(threadId);
-          awaitingTurnStartsByThreadId.set(threadId, localDispatch);
+          if (
+            !alreadyAdmitted &&
+            (nextQueuedTurn.kind !== "chat" ||
+              !nextQueuedTurn.retryMessageId ||
+              !hasServerReceivedSentMessage(
+                getThreadFromState(useStore.getState(), threadId),
+                nextQueuedTurn.retryMessageId,
+              ))
+          )
+            awaitingTurnStartsByThreadId.set(threadId, localDispatch);
           useComposerDraftStore.getState().removeQueuedTurn(threadId, nextQueuedTurn.id);
           return;
         }

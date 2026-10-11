@@ -6,7 +6,14 @@ import {
   prepareComputerPermissionGuide,
   readLocalComputerPermissionBridge,
 } from "~/lib/computerProvisioning";
-import { useCallback, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { isProviderDeliveryBlockDetail } from "@synara/shared/providerDeliveryBlock";
+import {
+  clearFailedComposerRetry,
+  isCurrentFailedComposerRetry,
+  useFailedComposerRetries,
+  type FailedComposerRetry,
+} from "~/lib/failedComposerRetry";
 import { hasActiveComposerSend } from "~/lib/composerSendOwnership";
 import {
   filterPromptProviderMentionReferences,
@@ -22,6 +29,7 @@ import { appendBrowserAnnotationsToPrompt } from "../../lib/browserAnnotations";
 import { appendPastedTextsToPrompt } from "../../lib/composerPastedText";
 import {
   findPendingBlobComposerAttachments,
+  cloneComposerImageAttachment,
   formatOutgoingComposerPrompt,
   hydratePendingBlobComposerAttachments,
   readFileAsDataUrl,
@@ -42,6 +50,7 @@ import {
   buildExpiredTerminalContextToastCopy,
   createWorktreeSetupResolution,
   deriveComposerSendState,
+  hasServerReceivedSentMessage,
   queuedChatTurnDispatchFields,
   queuedPlanFollowUpDispatchFields,
   resolveBlockedComposerSendReason,
@@ -62,6 +71,7 @@ import { useChatTurnExecution } from "./useChatTurnExecution";
 import { useStore } from "../../store";
 import { getThreadFromState } from "../../threadDerivation";
 import { isThreadDetailAwaitingVerification } from "../../threadDetailAuthority";
+import { derivePendingApprovals, derivePendingUserInputs } from "../../session-logic";
 
 // One toast per chat: pressing Send again refreshes it instead of stacking copies.
 function notifyBlockedComposerSend(threadId: ThreadId, reason: BlockedComposerSendReason): void {
@@ -207,6 +217,51 @@ export function useChatTurnSubmission({
   runProjectScript,
   persistThreadSettingsForNextTurn,
 }: ChatTurnSubmissionInput) {
+  const failedRetry = useFailedComposerRetries((retries) => retries.get(threadId));
+  const isRetryCurrent = useCallback(
+    (retry: FailedComposerRetry) => {
+      const current = getThreadFromState(useStore.getState(), retry.threadId) ?? activeThread;
+      return (
+        isCurrentFailedComposerRetry(retry, {
+          threadId: activeThreadIdRef.current,
+          error: current?.error,
+          acknowledged: hasServerReceivedSentMessage(current, retry.messageId),
+        }) &&
+        !isProviderDeliveryBlockDetail(retry.error) &&
+        current?.claudeCacheReview == null &&
+        !isThreadDetailAwaitingVerification(retry.threadId) &&
+        derivePendingApprovals(current?.activities ?? [], current?.pendingInteractions, {
+          authoritativeHasPending: current?.hasPendingApprovals,
+          latestTurnId: current?.latestTurn?.turnId,
+        }).length === 0 &&
+        derivePendingUserInputs(current?.activities ?? [], current?.pendingInteractions, {
+          authoritativeHasPending: current?.hasPendingUserInput,
+          latestTurnId: current?.latestTurn?.turnId,
+        }).length === 0
+      );
+    },
+    [activeThread, activeThreadIdRef],
+  );
+  useEffect(() => {
+    // Observe off-screen acknowledgements too. A later equal-looking error must
+    // not revive the rejected payload after an intervening clear or replacement.
+    return useStore.subscribe((state, previous) => {
+      for (const retry of useFailedComposerRetries.getState().values()) {
+        const current = getThreadFromState(state, retry.threadId);
+        const before = getThreadFromState(previous, retry.threadId);
+        if (
+          (before && !current) ||
+          (current && current.error !== retry.error) ||
+          (before && current && before.latestTurn?.turnId !== current.latestTurn?.turnId) ||
+          (current?.session?.status === "error" &&
+            before?.session?.updatedAt !== current.session.updatedAt) ||
+          hasServerReceivedSentMessage(current, retry.messageId)
+        ) {
+          clearFailedComposerRetry(retry.threadId);
+        }
+      }
+    });
+  }, []);
   const anchorSentMessagesToTopRef = useRef(settings.anchorSentMessagesToTop);
   useLayoutEffect(() => {
     anchorSentMessagesToTopRef.current = settings.anchorSentMessagesToTop;
@@ -262,6 +317,7 @@ export function useChatTurnSubmission({
       e?: { preventDefault: () => void },
       requestedDispatchMode?: "queue" | "steer",
       queuedTurn?: QueuedComposerChatTurn,
+      retry?: FailedComposerRetry,
     ): Promise<boolean> => {
       const dispatchMode =
         requestedDispatchMode ??
@@ -270,6 +326,15 @@ export function useChatTurnSubmission({
           hasLiveTurn,
         });
       e?.preventDefault();
+      if (retry && !isRetryCurrent(retry)) return false;
+      if (
+        queuedTurn?.retryMessageId &&
+        hasServerReceivedSentMessage(
+          getThreadFromState(useStore.getState(), threadId),
+          queuedTurn.retryMessageId,
+        )
+      )
+        return true;
       const api = readNativeApi();
       const lateSendHandlers = lateComposerSendHandlersRef.current;
       if (
@@ -305,6 +370,7 @@ export function useChatTurnSubmission({
         return false;
       }
       const hasPendingCacheReview = () =>
+        (retry !== undefined && !isRetryCurrent(retry)) ||
         getThreadFromState(useStore.getState(), activeThread.id)?.claudeCacheReview != null ||
         isThreadDetailAwaitingVerification(activeThread.id);
       if (hasPendingCacheReview()) return false;
@@ -318,6 +384,7 @@ export function useChatTurnSubmission({
         threadWorkspaceCwd ?? chatWorkspaceRoot,
       ).catch(() => false);
       sendPreflightInFlightRef.current = false;
+      if (hasPendingCacheReview()) return false;
       if (!editorSaved) {
         setThreadError(
           threadId,
@@ -533,7 +600,7 @@ export function useChatTurnSubmission({
         // Provider mentions are structured turn metadata, and automation definitions persist text only.
         selectedComposerMentionsForSend.length === 0;
       const hasPromptOnlySendableContent = hasNoStructuredComposerContext;
-      if (hasPromptOnlySendableContent) {
+      if (hasPromptOnlySendableContent && !queuedChatTurn?.retryMessageId) {
         const handledSlashCommand =
           await lateSendHandlers.handleStandaloneSlashCommand(trimmedPromptForSend);
         if (handledSlashCommand) {
@@ -554,7 +621,7 @@ export function useChatTurnSubmission({
             })
           : undefined);
       if (hasPendingCacheReview()) return false;
-      if (!hasSendableContent) {
+      if (!hasSendableContent && !queuedChatTurn?.retryMessageText?.trim()) {
         if (expiredTerminalContextCount > 0) {
           const toastCopy = buildExpiredTerminalContextToastCopy(
             expiredTerminalContextCount,
@@ -666,20 +733,31 @@ export function useChatTurnSubmission({
       }
       if (hasPendingCacheReview()) return false;
 
-      const captures = await resolveChatPromptCaptures({
-        api,
-        activeThread,
-        promptForSend,
-        composerImagesForSend,
-        composerFilesForSend,
-        composerAssistantSelectionsForSend,
-      });
+      const captures = queuedChatTurn?.retryMessageId
+        ? { composerImagesForSend }
+        : await resolveChatPromptCaptures({
+            api,
+            activeThread,
+            promptForSend,
+            composerImagesForSend,
+            composerFilesForSend,
+            composerAssistantSelectionsForSend,
+          });
       composerImagesForSend = captures.composerImagesForSend;
       if (hasPendingCacheReview()) return false;
 
-      if (hasQueueableLiveTurn && dispatchMode === "queue" && queuedChatTurn === null) {
-        clearComposerInput(activeThread.id);
-        scheduleComposerFocus();
+      const retryHasLiveTurn =
+        retry !== undefined &&
+        getThreadFromState(useStore.getState(), activeThread.id)?.session?.activeTurnId != null;
+      if (
+        (hasQueueableLiveTurn || retryHasLiveTurn) &&
+        dispatchMode === "queue" &&
+        (queuedChatTurn === null || retry !== undefined)
+      ) {
+        if (queuedChatTurn === null) {
+          clearComposerInput(activeThread.id);
+          scheduleComposerFocus();
+        }
         const queuedImagesForPersistence = await Promise.all(
           composerImagesForSend.map(async (image) => {
             try {
@@ -692,9 +770,18 @@ export function useChatTurnSubmission({
             }
           }),
         );
+        if (retry && hasPendingCacheReview()) return false;
+        clearFailedComposerRetry(activeThread.id);
         enqueueQueuedComposerTurn(activeThread.id, {
           id: randomUUID(),
           kind: "chat",
+          ...(retry ? { retryMessageId: retry.messageId } : {}),
+          ...(queuedChatTurn?.retryMessageText !== undefined
+            ? { retryMessageText: queuedChatTurn.retryMessageText }
+            : {}),
+          ...(queuedChatTurn?.retryAssistantDeliveryMode !== undefined
+            ? { retryAssistantDeliveryMode: queuedChatTurn.retryAssistantDeliveryMode }
+            : {}),
           createdAt: new Date().toISOString(),
           previewText: buildQueuedComposerPreviewText({
             trimmedPrompt: trimmed,
@@ -713,7 +800,9 @@ export function useChatTurnSubmission({
           assistantSelections: composerAssistantSelectionsForSend,
           browserAnnotations: composerBrowserAnnotationsForSend,
           fileComments: composerFileCommentsForSend,
-          terminalContexts: sendableComposerTerminalContexts,
+          terminalContexts: queuedChatTurn?.retryMessageId
+            ? composerTerminalContextsForSend
+            : sendableComposerTerminalContexts,
           pastedTexts: sendableComposerPastedTexts,
           pullRequestContexts: sendableComposerPullRequestContexts,
           skills: selectedComposerSkillsForSend,
@@ -724,6 +813,7 @@ export function useChatTurnSubmission({
           ...queuedChatTurnDispatchFields(dispatchSettings, sourceProposedPlanForSend),
           envMode: envModeForSend,
         });
+        if (retry) setThreadError(activeThread.id, null);
         return true;
       }
       const workspace = await prepareChatSendWorkspace({
@@ -783,7 +873,7 @@ export function useChatTurnSubmission({
         worktreeSetupScriptName,
         worktreeCopiesLocalChanges,
       } = workspace;
-      const messageIdForSend = newMessageId();
+      const messageIdForSend = retry?.messageId ?? queuedChatTurn?.retryMessageId ?? newMessageId();
       const worktreeSetupResolution = baseBranchForWorktree
         ? createWorktreeSetupResolution()
         : null;
@@ -804,14 +894,20 @@ export function useChatTurnSubmission({
           : {}),
       });
 
-      const composerImagesSnapshot = [...composerImagesForSend];
+      const composerImagesSnapshot = retry
+        ? composerImagesForSend.map(cloneComposerImageAttachment)
+        : [...composerImagesForSend];
       const composerFilesSnapshot = [...composerFilesForSend];
       const composerAssistantSelectionsSnapshot = [...composerAssistantSelectionsForSend];
       const composerBrowserAnnotationsSnapshot = composerBrowserAnnotationsForSend.map(
         (annotation) => ({ ...annotation, source: { ...annotation.source } }),
       );
       const composerFileCommentsSnapshot = [...composerFileCommentsForSend];
-      const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
+      const composerTerminalContextsSnapshot = [
+        ...(queuedChatTurn?.retryMessageId
+          ? composerTerminalContextsForSend
+          : sendableComposerTerminalContexts),
+      ];
       const composerPastedTextsSnapshot = [...sendableComposerPastedTexts];
       const composerPullRequestContextsSnapshot = [...sendableComposerPullRequestContexts];
       const composerSkillsSnapshot = [...selectedComposerSkillsForSend];
@@ -844,12 +940,14 @@ export function useChatTurnSubmission({
       const outgoingTextSeed =
         messageTextForSend ||
         (composerImagesSnapshot.length > 0 ? IMAGE_ONLY_BOOTSTRAP_PROMPT : "");
-      const outgoingMessageText = formatOutgoingComposerPrompt({
-        provider: selectedProviderForSend,
-        model: selectedModelForSend,
-        effort: selectedPromptEffortForSend,
-        text: outgoingTextSeed,
-      });
+      const outgoingMessageText =
+        queuedChatTurn?.retryMessageText ??
+        formatOutgoingComposerPrompt({
+          provider: selectedProviderForSend,
+          model: selectedModelForSend,
+          effort: selectedPromptEffortForSend,
+          text: outgoingTextSeed,
+        });
       const mentionedSkillsForSend = filterPromptSkillReferences(
         outgoingMessageText,
         selectedComposerSkillsForSend,
@@ -924,7 +1022,7 @@ export function useChatTurnSubmission({
       );
 
       setThreadError(threadIdForSend, null);
-      if (expiredTerminalContextCount > 0) {
+      if (expiredTerminalContextCount > 0 && !queuedChatTurn?.retryMessageId) {
         const toastCopy = buildExpiredTerminalContextToastCopy(
           expiredTerminalContextCount,
           "omitted",
@@ -955,6 +1053,35 @@ export function useChatTurnSubmission({
       }
 
       const sent = await executePreparedTurn({
+        retryMessageId: retry?.messageId ?? queuedChatTurn?.retryMessageId,
+        retrying: retry !== undefined,
+        failedTurnSnapshot: {
+          id: randomUUID(),
+          kind: "chat",
+          retryMessageId: messageIdForSend,
+          retryMessageText: outgoingMessageText,
+          retryAssistantDeliveryMode: dispatchSettings.assistantDeliveryMode,
+          createdAt: messageCreatedAt,
+          previewText: trimmedPromptForSend || "Failed message",
+          prompt: promptForSend,
+          images: composerImagesSnapshot,
+          files: composerFilesSnapshot,
+          assistantSelections: composerAssistantSelectionsSnapshot,
+          browserAnnotations: composerBrowserAnnotationsSnapshot,
+          fileComments: composerFileCommentsSnapshot,
+          terminalContexts: composerTerminalContextsSnapshot,
+          pastedTexts: composerPastedTextsSnapshot,
+          pullRequestContexts: composerPullRequestContextsSnapshot,
+          skills: composerSkillsSnapshot,
+          mentions: composerMentionsSnapshot,
+          selectedProvider: selectedProviderForSend,
+          selectedModel: selectedModelForSend,
+          selectedPromptEffort: selectedPromptEffortForSend,
+          ...queuedChatTurnDispatchFields(
+            { ...dispatchSettings, interactionMode: interactionModeForSend },
+            sourceProposedPlanForSend,
+          ),
+        },
         nextThreadEnvMode,
         nextThreadBranch,
         nextThreadWorktreePath,
@@ -1014,6 +1141,7 @@ export function useChatTurnSubmission({
     },
     [
       threadId,
+      isRetryCurrent,
       hasLiveTurn,
       lateComposerSendHandlersRef,
       activeThread,
@@ -1109,5 +1237,13 @@ export function useChatTurnSubmission({
       canSendWithProviderHandoff,
     ],
   );
-  return { onSend };
+  const onRetryFailedSend = useCallback(() => {
+    if (!failedRetry || !isRetryCurrent(failedRetry)) return;
+    void onSend(undefined, "queue", failedRetry.turn, failedRetry);
+  }, [failedRetry, isRetryCurrent, onSend]);
+  return {
+    onSend,
+    onRetryFailedSend:
+      failedRetry && activeThread?.error === failedRetry.error ? onRetryFailedSend : undefined,
+  };
 }

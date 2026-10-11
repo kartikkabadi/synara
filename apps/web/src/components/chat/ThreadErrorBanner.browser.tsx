@@ -18,6 +18,41 @@ const LONG_ERROR = [
 describe("ThreadErrorBanner", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("counts down a typed rejection and never starts a retry on its own", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const now = Date.parse("2026-10-10T10:00:00Z");
+    const time = vi.spyOn(Date, "now").mockReturnValue(now);
+    const onRetry = vi.fn();
+    await render(
+      <ThreadErrorBanner
+        error="429 Too Many Requests"
+        onRetry={onRetry}
+        rateLimitStatus={{ status: "rejected", resetsAt: new Date(now + 2_000).toISOString() }}
+      />,
+    );
+    await expect.element(page.getByRole("button", { name: "Retry in 2s" })).toBeDisabled();
+    time.mockReturnValue(now + 2_000);
+    await vi.advanceTimersByTimeAsync(2_000);
+    const retry = page.getByRole("button", { name: "Try again" });
+    await expect.element(retry).toBeEnabled();
+    expect(onRetry).not.toHaveBeenCalled();
+    await retry.click();
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it("requires an owned retry target and excludes delivery quarantine", async () => {
+    const screen = await render(<ThreadErrorBanner error="Socket timed out" />);
+    await expect.element(page.getByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    await screen.rerender(
+      <ThreadErrorBanner
+        error={formatProviderDeliveryBlockDetail("Acceptance is uncertain")}
+        onRetry={vi.fn()}
+      />,
+    );
+    await expect.element(page.getByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   });
 
   it("expands the full multiline error and collapses it accessibly", async () => {

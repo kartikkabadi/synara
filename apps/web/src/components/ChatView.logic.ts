@@ -1785,7 +1785,13 @@ export function resolveQueuedTurnDispatchSettings(
   return {
     ...settings,
     modelSelection: queuedTurn.modelSelection ?? settings.modelSelection,
-    providerOptions: queuedTurn.providerOptionsForDispatch ?? settings.providerOptions,
+    providerOptions:
+      queuedTurn.kind === "chat" && queuedTurn.retryMessageId
+        ? queuedTurn.providerOptionsForDispatch
+        : (queuedTurn.providerOptionsForDispatch ?? settings.providerOptions),
+    assistantDeliveryMode:
+      (queuedTurn.kind === "chat" ? queuedTurn.retryAssistantDeliveryMode : undefined) ??
+      settings.assistantDeliveryMode,
     enableComputerControl,
     computerControlGeneration: queuedTurn.computerControlGeneration ?? 0,
     computerControlMode,

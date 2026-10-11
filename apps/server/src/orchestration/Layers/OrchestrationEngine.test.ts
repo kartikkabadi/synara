@@ -149,7 +149,10 @@ const TestServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "synara-orchestration-engine-test-",
 });
 
-async function createOrchestrationSystem(pipeline?: OrchestrationProjectionPipelineShape) {
+async function createOrchestrationSystem(
+  pipeline?: OrchestrationProjectionPipelineShape,
+  retainedSql?: SqlClient.SqlClient,
+) {
   const ServerConfigLayer = TestServerConfigLayer;
   const orchestrationLayer = OrchestrationEngineLive.pipe(
     Layer.provideMerge(
@@ -161,7 +164,9 @@ async function createOrchestrationSystem(pipeline?: OrchestrationProjectionPipel
     Layer.provideMerge(OrchestrationEventStoreLive),
     Layer.provideMerge(OrchestrationCommandReceiptRepositoryLive),
     Layer.provideMerge(ProviderRuntimeEventRepositoryLive),
-    Layer.provideMerge(SqlitePersistenceMemory),
+    Layer.provideMerge(
+      retainedSql ? Layer.succeed(SqlClient.SqlClient, retainedSql) : SqlitePersistenceMemory,
+    ),
     Layer.provide(ServerSettingsService.layerTest()),
     Layer.provideMerge(ServerConfigLayer),
     Layer.provideMerge(NodeServices.layer),
@@ -200,6 +205,368 @@ async function createOrchestrationSystem(pipeline?: OrchestrationProjectionPipel
 function now() {
   return new Date().toISOString();
 }
+
+describe("OrchestrationEngine turn message identity", () => {
+  async function setup() {
+    const system = await createOrchestrationSystem();
+    const createdAt = now();
+    const projectId = asProjectId("identity-project");
+    const threadId = ThreadId.makeUnsafe("identity-thread");
+    await system.run(
+      system.engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.makeUnsafe("identity-project-create"),
+        projectId,
+        title: "Identity",
+        workspaceRoot: "/tmp/identity",
+        defaultModelSelection: null,
+        createdAt,
+      }),
+    );
+    await system.run(
+      system.engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.makeUnsafe("identity-thread-create"),
+        threadId,
+        projectId,
+        title: "Identity",
+        modelSelection: { provider: "codex", model: "gpt-5-codex" },
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      }),
+    );
+    const command = {
+      type: "thread.turn.start" as const,
+      commandId: CommandId.makeUnsafe("identity-original"),
+      threadId,
+      message: {
+        messageId: asMessageId("identity-message"),
+        role: "user" as const,
+        text: "Exact original",
+        attachments: [],
+      },
+      runtimeMode: "approval-required" as const,
+      interactionMode: "default" as const,
+      createdAt,
+    };
+    return { system, command };
+  }
+
+  it.each(["original", "retry"] as const)(
+    "admits one same-message command when %s arrives first",
+    async (first) => {
+      const { system, command } = await setup();
+      try {
+        const retry = { ...command, commandId: CommandId.makeUnsafe("identity-retry") };
+        const commands = first === "original" ? [command, retry] : [retry, command];
+        const accepted = await system.run(system.engine.dispatch(commands[0]!));
+        await expect(system.run(system.engine.dispatch(commands[1]!))).rejects.toMatchObject({
+          _tag: "OrchestrationCommandInvariantError",
+          detail: expect.stringContaining("already been accepted"),
+        });
+        const events = Array.from(await system.run(Stream.runCollect(system.engine.readEvents(0))));
+        expect(events.filter((event) => event.type === "thread.message-sent")).toHaveLength(1);
+        expect(events.filter((event) => event.type === "thread.turn-start-requested")).toHaveLength(
+          1,
+        );
+        // The accepted command still retries through its existing fingerprint-bound receipt.
+        await expect(system.run(system.engine.dispatch(commands[0]!))).resolves.toEqual(accepted);
+      } finally {
+        await system.dispose();
+      }
+    },
+  );
+
+  it("admits exactly one concurrently dispatched command for the same message", async () => {
+    const { system, command } = await setup();
+    try {
+      const results = await Promise.allSettled(
+        [command, { ...command, commandId: CommandId.makeUnsafe("identity-concurrent-retry") }].map(
+          (next) => system.run(system.engine.dispatch(next)),
+        ),
+      );
+      expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+      const events = Array.from(await system.run(Stream.runCollect(system.engine.readEvents(0))));
+      expect(events.filter((event) => event.type === "thread.turn-start-requested")).toHaveLength(
+        1,
+      );
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  it("queues one accepted message and preserves its separate server promotion", async () => {
+    const { system, command } = await setup();
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.makeUnsafe("identity-running"),
+          threadId: command.threadId,
+          createdAt: now(),
+          session: {
+            threadId: command.threadId,
+            providerName: "codex",
+            status: "running",
+            runtimeMode: "approval-required",
+            activeTurnId: asTurnId("existing-turn"),
+            lastError: null,
+            updatedAt: now(),
+          },
+        }),
+      );
+      await system.run(system.engine.dispatch(command));
+      await expect(
+        system.run(
+          system.engine.dispatch({
+            ...command,
+            commandId: CommandId.makeUnsafe("identity-queued-duplicate"),
+          }),
+        ),
+      ).rejects.toThrow("already been accepted");
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.turn.dispatch-queued",
+          commandId: CommandId.makeUnsafe("identity-promote"),
+          threadId: command.threadId,
+          messageId: command.message.messageId,
+          runtimeMode: command.runtimeMode,
+          interactionMode: command.interactionMode,
+          createdAt: now(),
+        }),
+      );
+      const events = Array.from(await system.run(Stream.runCollect(system.engine.readEvents(0))));
+      expect(events.filter((event) => event.type === "thread.message-sent")).toHaveLength(1);
+      expect(events.filter((event) => event.type === "thread.turn-queued")).toHaveLength(1);
+      expect(events.filter((event) => event.type === "thread.turn-start-requested")).toHaveLength(
+        1,
+      );
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  it("refuses an identity already owned by an assistant message", async () => {
+    const { system, command } = await setup();
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.message.assistant.delta",
+          commandId: CommandId.makeUnsafe("identity-assistant"),
+          threadId: command.threadId,
+          messageId: command.message.messageId,
+          delta: "Assistant output",
+          createdAt: now(),
+        }),
+      );
+      await expect(system.run(system.engine.dispatch(command))).rejects.toThrow(
+        "already been accepted",
+      );
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  it("allows the same message after settlement rejected the original command", async () => {
+    const { system, command } = await setup();
+    try {
+      await expect(
+        system.run(system.engine.dispatch(command, { settleOnly: true })),
+      ).rejects.toMatchObject({ _tag: "OrchestrationCommandPreviouslyRejectedError" });
+      await system.run(
+        system.engine.dispatch({ ...command, commandId: CommandId.makeUnsafe("identity-retry") }),
+      );
+      await expect(system.run(system.engine.dispatch(command))).rejects.toMatchObject({
+        _tag: "OrchestrationCommandPreviouslyRejectedError",
+      });
+      const events = Array.from(await system.run(Stream.runCollect(system.engine.readEvents(0))));
+      expect(events.filter((event) => event.type === "thread.turn-start-requested")).toHaveLength(
+        1,
+      );
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  it("does not replay an accepted message after provider failure or cancellation", async () => {
+    const { system, command } = await setup();
+    try {
+      const accepted = await system.run(system.engine.dispatch(command));
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.makeUnsafe("identity-provider-failed"),
+          createdAt: now(),
+          threadId: command.threadId,
+          session: {
+            threadId: command.threadId,
+            providerName: "codex",
+            status: "error",
+            runtimeMode: "approval-required",
+            activeTurnId: null,
+            lastError: "Provider unavailable",
+            updatedAt: now(),
+          },
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.session.stop",
+          commandId: CommandId.makeUnsafe("identity-stop"),
+          threadId: command.threadId,
+          createdAt: now(),
+        }),
+      );
+      await expect(
+        system.run(
+          system.engine.dispatch({
+            ...command,
+            commandId: CommandId.makeUnsafe("identity-late-original"),
+          }),
+        ),
+      ).rejects.toThrow("already been accepted");
+      await expect(system.run(system.engine.dispatch(command))).resolves.toEqual(accepted);
+      // A distinct human continuation is still admissible after a provider failure.
+      await system.run(
+        system.engine.dispatch({
+          ...command,
+          commandId: CommandId.makeUnsafe("identity-continue"),
+          message: { ...command.message, messageId: asMessageId("identity-continuation") },
+        }),
+      );
+    } finally {
+      await system.dispose();
+    }
+  });
+
+  it.each([0, 1])(
+    "allows one server edit after a %s-turn rollback, including after restart",
+    async (numTurns) => {
+      const { system, command } = await setup();
+      let restarted: Awaited<ReturnType<typeof createOrchestrationSystem>> | undefined;
+      try {
+        await system.run(system.engine.dispatch(command));
+        const rollback = await system.run(
+          system.engine.dispatch({
+            type: "thread.conversation.rollback.complete",
+            commandId: CommandId.makeUnsafe("identity-rollback"),
+            threadId: command.threadId,
+            messageId: command.message.messageId,
+            numTurns,
+            skipAttachmentPrune: true,
+            createdAt: now(),
+          }),
+        );
+        await system.run(system.engine.stop);
+        restarted = await createOrchestrationSystem(undefined, system.sql);
+        // A rollback can erase the projection row; durable admission still rejects a late RPC.
+        await expect(
+          restarted.run(
+            restarted.engine.dispatch({
+              ...command,
+              commandId: CommandId.makeUnsafe("identity-after-rollback"),
+            }),
+          ),
+        ).rejects.toThrow("already been accepted");
+        const edited = {
+          ...command,
+          commandId: CommandId.makeUnsafe("identity-edit"),
+          editResendFromRollbackSequence: rollback.sequence,
+          message: { ...command.message, text: "Edited original" },
+        };
+        await restarted.run(restarted.engine.dispatch(edited));
+        await expect(
+          restarted.run(
+            restarted.engine.dispatch({
+              ...edited,
+              commandId: CommandId.makeUnsafe("identity-edit-twice"),
+            }),
+          ),
+        ).rejects.toThrow("no longer owns");
+        const events = Array.from(
+          await restarted.run(Stream.runCollect(restarted.engine.readEvents(0))),
+        );
+        expect(events.filter((event) => event.type === "thread.turn-start-requested")).toHaveLength(
+          2,
+        );
+      } finally {
+        await restarted?.dispose();
+        await system.dispose();
+      }
+    },
+  );
+
+  it.each(["wrong message", "wrong thread", "superseded", "cancelled"] as const)(
+    "rejects a %s edit rollback reference",
+    async (reason) => {
+      const { system, command } = await setup();
+      try {
+        await system.run(system.engine.dispatch(command));
+        const rollbackCommand = {
+          type: "thread.conversation.rollback.complete" as const,
+          commandId: CommandId.makeUnsafe("identity-rollback"),
+          threadId: command.threadId,
+          messageId:
+            reason === "wrong message" ? asMessageId("unrelated") : command.message.messageId,
+          numTurns: 0,
+          skipAttachmentPrune: true,
+          createdAt: now(),
+        };
+        if (reason === "wrong thread") {
+          const otherThreadId = ThreadId.makeUnsafe("other-identity-thread");
+          await system.run(
+            system.engine.dispatch({
+              type: "thread.create",
+              commandId: CommandId.makeUnsafe("other-thread-create"),
+              threadId: otherThreadId,
+              projectId: asProjectId("identity-project"),
+              title: "Other",
+              modelSelection: { provider: "codex", model: "gpt-5-codex" },
+              runtimeMode: "approval-required",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: null,
+              createdAt: now(),
+            }),
+          );
+          rollbackCommand.threadId = otherThreadId;
+        }
+        const rollback = await system.run(system.engine.dispatch(rollbackCommand));
+        if (reason === "superseded")
+          await system.run(
+            system.engine.dispatch({
+              ...rollbackCommand,
+              commandId: CommandId.makeUnsafe("identity-new-rollback"),
+            }),
+          );
+        if (reason === "cancelled")
+          await system.run(
+            system.engine.dispatch({
+              type: "thread.session.stop",
+              commandId: CommandId.makeUnsafe("identity-stop-edit"),
+              threadId: command.threadId,
+              createdAt: now(),
+            }),
+          );
+        await expect(
+          system.run(
+            system.engine.dispatch({
+              ...command,
+              commandId: CommandId.makeUnsafe("identity-invalid-edit"),
+              editResendFromRollbackSequence: rollback.sequence,
+            }),
+          ),
+        ).rejects.toThrow("no longer owns");
+      } finally {
+        await system.dispose();
+      }
+    },
+  );
+});
 
 describe("OrchestrationEngine", () => {
   it("commits the metadata snapshot cursor before publishing its accepted event", async () => {
@@ -1929,6 +2296,32 @@ describe("OrchestrationEngine", () => {
     await expect(system.run(engine.dispatch(command))).rejects.toThrow(
       "different managed attachment set or owner",
     );
+
+    const duplicateCommandId = CommandId.makeUnsafe("cmd-managed-attachment-duplicate");
+    await expect(
+      system.run(
+        engine.dispatch(
+          {
+            ...command,
+            commandId: duplicateCommandId,
+            message: {
+              ...command.message,
+              attachments: [{ ...command.message.attachments[0]!, id: secondAttachmentId }],
+            },
+          },
+          { attachmentPrincipal: principal },
+        ),
+      ),
+    ).rejects.toThrow("already been accepted");
+    expect(
+      await system.run(repository.findClaimedForCommand({ commandId: duplicateCommandId })),
+    ).toEqual([]);
+    const unusedUpload = await system.run(
+      system.sql<{
+        state: string;
+      }>`SELECT state FROM managed_attachment_blobs WHERE attachment_id = ${secondAttachmentId}`,
+    );
+    expect(unusedUpload).toEqual([{ state: "staged" }]);
 
     const editResendClaim = await system.run(
       repository.claimForAcceptedTurn({

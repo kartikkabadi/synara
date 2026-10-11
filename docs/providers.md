@@ -573,6 +573,24 @@ Use the dedicated [provider guides](https://www.trysynara.com/docs/providers) fo
 installation, authentication, verification, capabilities, update paths, and provider-specific
 failure checks.
 
+## Recover a failed send
+
+Thread errors retain their raw details and copy action. Recognized connection,
+rate-limit, and provider overload errors also show a short explanation. A known
+rate-limit reset counts down without sending anything automatically.
+
+When a rejected send cannot return to the composer because a newer draft is
+already there, **Try again** reuses its captured text, attachments, settings, and
+plan reference. It leaves the newer draft intact and joins the existing queue if
+a turn is running. The retained retry is session-only, with at most 16 threads
+kept; dismissing or replacing its error invalidates it. An explicitly queued
+retry uses the queue's existing persistence and attachment limits. A server
+acknowledgement visible before dispatch consumes the retry. The retry keeps the
+original message identity; server admission rejects a duplicate even if the
+original send arrives later. Edit-and-resend has a separate server-owned replay
+authorization. Delivery quarantine
+continues to offer **Unblock thread** through its existing reconciliation flow.
+
 ## Cancel a blocking question
 
 Blocking questions show **Cancel** whether or not they offer choices. Cancel applies to

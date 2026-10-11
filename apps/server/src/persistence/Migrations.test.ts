@@ -11,7 +11,7 @@ import ProjectPullRequestPinsMigration from "./Migrations/069_ProjectPullRequest
 import PullRequestAutoFixMigration from "./Migrations/130_PullRequestAutoFix.ts";
 import ForkSourceMessageMigration from "./Migrations/134_ProjectionThreadsForkSourceMessage.ts";
 import WorkspaceInitializationMigration from "./Migrations/133_ProjectionTurnsWorkspaceInitialization.ts";
-import ThreadCompactionOperationsMigration from "./Migrations/135_ThreadCompactionOperations.ts";
+import ThreadCompactionOperationsMigration from "./Migrations/136_ThreadCompactionOperations.ts";
 import SpacesMigration from "./Migrations/079_Spaces.ts";
 
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
@@ -712,7 +712,8 @@ managedAttachmentsLegacyLayer("managed attachment migration after private migrat
         [132, "ExternalMcpTurnCapacityRecovery"],
         [133, "ProjectionTurnsWorkspaceInitialization"],
         [134, "ProjectionThreadsForkSourceMessage"],
-        [135, "ThreadCompactionOperations"],
+        [135, "OrchestrationMessageIdentity"],
+        [136, "ThreadCompactionOperations"],
       ]);
 
       const tracker = yield* trackerRows(sql);
@@ -799,7 +800,8 @@ managedAttachmentsLegacyLayer("managed attachment migration after private migrat
           { migration_id: 132, name: "ExternalMcpTurnCapacityRecovery" },
           { migration_id: 133, name: "ProjectionTurnsWorkspaceInitialization" },
           { migration_id: 134, name: "ProjectionThreadsForkSourceMessage" },
-          { migration_id: 135, name: "ThreadCompactionOperations" },
+          { migration_id: 135, name: "OrchestrationMessageIdentity" },
+          { migration_id: 136, name: "ThreadCompactionOperations" },
         ],
       );
       const groupConfigColumns = yield* sql<{ readonly name: string }>`
@@ -966,7 +968,8 @@ agentGatewayRetentionLegacyLayer(
           [132, "ExternalMcpTurnCapacityRecovery"],
           [133, "ProjectionTurnsWorkspaceInitialization"],
           [134, "ProjectionThreadsForkSourceMessage"],
-          [135, "ThreadCompactionOperations"],
+          [135, "OrchestrationMessageIdentity"],
+          [136, "ThreadCompactionOperations"],
         ]);
 
         const columns = yield* sql<{ readonly name: string }>`
@@ -1096,7 +1099,8 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
         [132, "ExternalMcpTurnCapacityRecovery"],
         [133, "ProjectionTurnsWorkspaceInitialization"],
         [134, "ProjectionThreadsForkSourceMessage"],
-        [135, "ThreadCompactionOperations"],
+        [135, "OrchestrationMessageIdentity"],
+        [136, "ThreadCompactionOperations"],
       ]);
 
       const tracker = yield* trackerRows(sql);
@@ -1167,7 +1171,8 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [132, "ExternalMcpTurnCapacityRecovery"],
           [133, "ProjectionTurnsWorkspaceInitialization"],
           [134, "ProjectionThreadsForkSourceMessage"],
-          [135, "ThreadCompactionOperations"],
+          [135, "OrchestrationMessageIdentity"],
+          [136, "ThreadCompactionOperations"],
         ],
       );
 
@@ -1292,7 +1297,8 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
         [132, "ExternalMcpTurnCapacityRecovery"],
         [133, "ProjectionTurnsWorkspaceInitialization"],
         [134, "ProjectionThreadsForkSourceMessage"],
-        [135, "ThreadCompactionOperations"],
+        [135, "OrchestrationMessageIdentity"],
+        [136, "ThreadCompactionOperations"],
       ]);
 
       const tracker = yield* trackerRows(sql);
@@ -1359,7 +1365,8 @@ spacesMigrationCollisionLayer("Spaces migration after the private migration 70 c
           [132, "ExternalMcpTurnCapacityRecovery"],
           [133, "ProjectionTurnsWorkspaceInitialization"],
           [134, "ProjectionThreadsForkSourceMessage"],
-          [135, "ThreadCompactionOperations"],
+          [135, "OrchestrationMessageIdentity"],
+          [136, "ThreadCompactionOperations"],
         ],
       );
       const preservedSpaces = yield* sql<{ readonly spaceId: string }>`

@@ -4,9 +4,20 @@ import {
   APPROVAL_ALREADY_ANSWERED_INVARIANT_MARKER,
   collectErrorMessages,
   describeErrorMessage,
+  isTurnMessageAlreadyAcceptedError,
+  TURN_MESSAGE_ALREADY_ACCEPTED,
 } from "./errorMessages";
 
 describe("errorMessages", () => {
+  it("recognizes only the stable duplicate message rejection through RPC wrapping", () => {
+    expect(
+      isTurnMessageAlreadyAcceptedError({
+        message: "RPC rejected",
+        cause: new Error(TURN_MESSAGE_ALREADY_ACCEPTED),
+      }),
+    ).toBe(true);
+    expect(isTurnMessageAlreadyAcceptedError(new Error("Provider unavailable"))).toBe(false);
+  });
   it("uses Error messages", () => {
     expect(describeErrorMessage(new Error("native binding missing"), "fallback")).toBe(
       "native binding missing",

@@ -1,7 +1,8 @@
 import { MessageId, ThreadId } from "@synara/contracts";
+import { TURN_MESSAGE_ALREADY_ACCEPTED } from "@synara/shared/errorMessages";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { QueuedComposerTurn } from "../composerDraftStore";
+import { useComposerDraftStore, type QueuedComposerTurn } from "../composerDraftStore";
 import { resetComposerDraftStore } from "../composerDraftStoreTestFixtures";
 import { useStore } from "../store";
 import { initialState } from "../storeState";
@@ -11,12 +12,14 @@ import * as composerSend from "./composerSend";
 
 const nativeApiMocks = vi.hoisted(() => ({
   dispatchCommand: vi.fn(async () => undefined),
+  subscribeThread: vi.fn(async () => undefined),
 }));
 
 vi.mock("../nativeApi", () => ({
   readNativeApi: () => ({
     orchestration: {
       dispatchCommand: nativeApiMocks.dispatchCommand,
+      subscribeThread: nativeApiMocks.subscribeThread,
     },
   }),
 }));
@@ -77,6 +80,8 @@ describe("dispatchQueuedComposerTurnHeadless", () => {
     resetComposerDraftStore();
     useStore.setState(initialState);
     nativeApiMocks.dispatchCommand.mockClear();
+    nativeApiMocks.subscribeThread.mockReset();
+    nativeApiMocks.subscribeThread.mockResolvedValue(undefined);
     useStore.setState(makeState(makeThread({ id: THREAD_ID })));
   });
 
@@ -149,6 +154,129 @@ describe("dispatchQueuedComposerTurnHeadless", () => {
       }),
     );
   });
+
+  it("replays frozen text without clearing a newer composer draft", async () => {
+    const queuedTurn = makeQueuedChatTurn();
+    if (queuedTurn.kind !== "chat") throw new Error("Expected a chat fixture");
+    queuedTurn.retryMessageId = MessageId.makeUnsafe("original-message");
+    queuedTurn.retryMessageText = "Original prompt\nOriginal captured terminal context";
+    queuedTurn.retryAssistantDeliveryMode = "buffered";
+    useComposerDraftStore.getState().setPrompt(THREAD_ID, "Newer unsent draft");
+    const before = useComposerDraftStore.getState().draftsByThreadId[THREAD_ID];
+    const accepted = await dispatchQueuedComposerTurnHeadless({
+      threadId: THREAD_ID,
+      queuedTurn,
+      dispatchMode: "queue",
+      assistantDeliveryMode: "streaming",
+    });
+    expect(accepted).toBe(true);
+    expect(nativeApiMocks.dispatchCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "thread.turn.start",
+        assistantDeliveryMode: "buffered",
+        message: expect.objectContaining({
+          messageId: queuedTurn.retryMessageId,
+          text: queuedTurn.retryMessageText,
+        }),
+      }),
+    );
+    expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]).toBe(before);
+  });
+
+  it("consumes a definite duplicate rejection after upload cleanup even if refresh fails", async () => {
+    const queuedTurn = makeQueuedChatTurn();
+    if (queuedTurn.kind !== "chat") throw new Error("Expected a chat fixture");
+    queuedTurn.retryMessageId = MessageId.makeUnsafe("original-message");
+    useStore.setState(
+      makeState(
+        makeThread({
+          id: THREAD_ID,
+          modelSelection: queuedTurn.modelSelection,
+          runtimeMode: queuedTurn.runtimeMode,
+        }),
+      ),
+    );
+    useComposerDraftStore.getState().setPrompt(THREAD_ID, "Newer unsent draft");
+    const draft = useComposerDraftStore.getState().draftsByThreadId[THREAD_ID];
+    const cleanup = vi.fn(async () => undefined);
+    vi.spyOn(composerSend, "stageUploadComposerAttachments").mockResolvedValue({
+      attachments: [],
+      cleanup,
+      commit: vi.fn(),
+      runWithDispatch: (dispatch) => dispatch([]),
+    });
+    nativeApiMocks.dispatchCommand.mockRejectedValueOnce(new Error(TURN_MESSAGE_ALREADY_ACCEPTED));
+    nativeApiMocks.subscribeThread.mockRejectedValueOnce(new Error("Disconnected during refresh"));
+    const onAlreadyAdmitted = vi.fn();
+    expect(
+      await dispatchQueuedComposerTurnHeadless({
+        threadId: THREAD_ID,
+        queuedTurn,
+        dispatchMode: "queue",
+        assistantDeliveryMode: "streaming",
+        onAlreadyAdmitted,
+      }),
+    ).toBe(true);
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(onAlreadyAdmitted).toHaveBeenCalledOnce();
+    expect(nativeApiMocks.subscribeThread).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: THREAD_ID }),
+    );
+    expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]).toBe(draft);
+  });
+
+  it.each(["before preparation", "during uploads"] as const)(
+    "consumes a retry acknowledged %s and releases abandoned staged uploads",
+    async (when) => {
+      const queuedTurn = makeQueuedChatTurn();
+      if (queuedTurn.kind !== "chat") throw new Error("Expected a chat fixture");
+      const messageId = MessageId.makeUnsafe("original-message");
+      queuedTurn.retryMessageId = messageId;
+      const idle = makeThread({ id: THREAD_ID, modelSelection: queuedTurn.modelSelection });
+      const acknowledge = () =>
+        useStore.setState(
+          makeState({
+            ...idle,
+            messages: [
+              {
+                id: messageId,
+                role: "user",
+                text: "original",
+                createdAt: idle.createdAt,
+                streaming: false,
+              },
+            ],
+          }),
+        );
+      useStore.setState(makeState(idle));
+      const cleanup = vi.fn(async () => undefined);
+      const stage = vi
+        .spyOn(composerSend, "stageUploadComposerAttachments")
+        .mockImplementation(async () => {
+          acknowledge();
+          return {
+            attachments: [],
+            cleanup,
+            commit: vi.fn(),
+            runWithDispatch: (dispatch) => dispatch([]),
+          };
+        });
+      if (when === "before preparation") acknowledge();
+      expect(
+        await dispatchQueuedComposerTurnHeadless({
+          threadId: THREAD_ID,
+          queuedTurn,
+          dispatchMode: "queue",
+          assistantDeliveryMode: "streaming",
+        }),
+      ).toBe(true);
+      expect(nativeApiMocks.dispatchCommand).not.toHaveBeenCalledWith(
+        expect.objectContaining({ type: "thread.turn.start" }),
+      );
+      if (when === "before preparation") expect(stage).not.toHaveBeenCalled();
+      else expect(cleanup).toHaveBeenCalledOnce();
+    },
+  );
 
   it("dispatches a snapshotted plan follow-up as its own turn kind", async () => {
     const succeeded = await dispatchQueuedComposerTurnHeadless({

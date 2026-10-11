@@ -82,6 +82,7 @@ import { getLocalFolderBrowseRootPath } from "~/lib/localFolderMentions";
 import { findProviderStatus, resolveVoiceTranscriptionTarget } from "~/lib/providerAvailability";
 import { resolveProviderInstanceLabel } from "~/lib/providerInstancePresentation";
 import { holdQueuedComposerTurnsForStop } from "~/lib/queuedComposerDrain";
+import { clearFailedComposerRetry } from "~/lib/failedComposerRetry";
 import { resolveAuxiliaryTextGenerationSelection } from "~/lib/textGenerationCapabilities";
 import { cn, isMacNavigatorPlatform, newCommandId, newThreadId, randomUUID } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
@@ -2900,6 +2901,8 @@ export default function ChatView({
   const setThreadError = useCallback(
     (targetThreadId: ThreadId | null, error: string | null) => {
       if (!targetThreadId) return;
+      // Invalidate even an equal-string rewrite: recovery belongs to one failed send.
+      clearFailedComposerRetry(targetThreadId);
       if (getThreadFromState(useStore.getState(), targetThreadId)) {
         setStoreThreadError(targetThreadId, error);
         return;
@@ -4529,7 +4532,7 @@ export default function ChatView({
     },
   );
 
-  const { onSend: submitComposerTurn } = useChatTurnSubmission({
+  const { onSend: submitComposerTurn, onRetryFailedSend } = useChatTurnSubmission({
     threadId,
     hasLiveTurn,
     canSendWithProviderHandoff,
@@ -6913,6 +6916,14 @@ export default function ChatView({
                     conversationOnly={isCoordinatorConversation}
                     hubWorkItemsByMessageId={hubWorkItemsByMessageId}
                     threadError={activeThread?.error ?? null}
+                    rateLimitStatus={activeRateLimitStatus}
+                    {...(onRetryFailedSend ? { onRetryThreadError: onRetryFailedSend } : {})}
+                    retryThreadErrorDisabled={
+                      isSendBusy ||
+                      isConnecting ||
+                      pendingApprovals.length > 0 ||
+                      pendingUserInputs.length > 0
+                    }
                     recoverableTurnId={
                       activeLatestTurnState === "error" ? activeLatestTurnId : null
                     }
