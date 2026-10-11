@@ -11,7 +11,7 @@ vi.mock("~/lib/utils", async (importOriginal) => ({
   isMacNavigatorPlatform: () => false,
 }));
 
-import { ThemePackEditor } from "./ThemePackEditor";
+import { ThemePackEditor, ThemeVisualPresetPicker } from "./ThemePackEditor";
 import { DEFAULT_THEME_STATE, getCodeThemeSeed, parseStoredThemeState } from "~/theme/theme.logic";
 
 const root = document.documentElement;
@@ -126,5 +126,39 @@ it.each(["dark", "light"] as const)(
     const fontFamily = getComputedStyle(preview.element()).fontFamily;
     expect(fontFamily).toContain("system-ui");
     expect(fontFamily).not.toContain("Inter");
+  },
+);
+
+it.each(["Parthenon", "Attic valley"])(
+  "applies %s to both modes and preserves window controls",
+  async (label) => {
+    const stored = { ...DEFAULT_THEME_STATE, mode: "light", systemUiFont: false };
+    localStorage.setItem("synara:theme", JSON.stringify(stored));
+    await render(
+      <>
+        <ThemeVisualPresetPicker />
+        <ThemePackEditor variant="light" />
+      </>,
+    );
+    await page.getByRole("button", { name: new RegExp(`^${label}`) }).click();
+    const id = label === "Parthenon" ? "parthenon" : "attic-valley";
+    await expect
+      .poll(() => root.style.getPropertyValue("--app-wallpaper-image"))
+      .toBe(`url("/theme-wallpapers/${id}.webp")`);
+    const saved = parseStoredThemeState(localStorage.getItem("synara:theme"));
+    expect(saved.chromeThemes.light.wallpaper?.id).toBe(id);
+    expect(saved.chromeThemes.dark.wallpaper?.id).toBe(id);
+    expect(saved.translucency).toEqual(stored.translucency);
+    expect(saved.systemUiFont).toBe(false);
+    await expect.element(page.getByRole("radio", { name: "Solid", exact: true })).toBeVisible();
+    await expect
+      .element(page.getByRole("slider", { name: "Light theme wallpaper opacity" }))
+      .toBeVisible();
+    await page.getByRole("combobox", { name: "Light theme wallpaper", exact: true }).click();
+    await page.getByRole("option", { name: "None", exact: true }).click();
+    await expect.poll(() => root.style.getPropertyValue("--app-wallpaper-image")).toBe("none");
+    expect(
+      parseStoredThemeState(localStorage.getItem("synara:theme")).chromeThemes.dark.wallpaper?.id,
+    ).toBe(id);
   },
 );

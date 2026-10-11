@@ -6,6 +6,9 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_THEME_STATE,
+  applyThemeVisualPreset,
+  normalizeThemeWallpaper,
+  resolveThemeWallpaper,
   buildResolvedThemeTokens,
   buildThemeCssVariables,
   canParseThemeShareString,
@@ -537,5 +540,39 @@ describe("window translucency", () => {
     expect(resetThemeVariant(edited, "dark").translucency.dark).toEqual(
       DEFAULT_THEME_STATE.translucency.dark,
     );
+  });
+});
+
+describe("local visual packs", () => {
+  it.each(["parthenon", "attic-valley"])(
+    "persists %s without changing mode or window preferences",
+    (id) => {
+      const initial = setWindowTranslucency(
+        { ...DEFAULT_THEME_STATE, mode: "dark", systemUiFont: false },
+        "dark",
+        { sidebarOnly: false, opacity: 64, blur: 15 },
+      );
+      const selected = applyThemeVisualPreset(initial, id);
+      const saved = parseStoredThemeState(JSON.stringify(selected));
+      expect(saved.mode).toBe(initial.mode);
+      expect(saved.systemUiFont).toBe(false);
+      expect(saved.translucency).toEqual(initial.translucency);
+      for (const variant of ["dark", "light"] as const) {
+        expect(resolveThemeWallpaper(saved.chromeThemes[variant], variant).id).toBe(id);
+        const css = buildThemeCssVariables(resolveThemePack(saved, variant), variant);
+        expect(css.variables["--app-wallpaper-image"]).toBe(`url("/theme-wallpapers/${id}.webp")`);
+      }
+    },
+  );
+
+  it("refuses external wallpaper paths and bounds malformed persisted values", () => {
+    const fallback = resolveThemeWallpaper(DEFAULT_THEME_STATE.chromeThemes.light, "light");
+    expect(
+      normalizeThemeWallpaper(
+        { id: "https://example.invalid/private", blur: Infinity, dim: -1, opacity: 99 },
+        fallback,
+      ),
+    ).toEqual({ ...fallback, dim: 0, opacity: 0.7 });
+    expect(applyThemeVisualPreset(DEFAULT_THEME_STATE, "unknown")).toBe(DEFAULT_THEME_STATE);
   });
 });
