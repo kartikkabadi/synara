@@ -71,6 +71,12 @@ and the final response. Reasoning items also end with their SDK message. Retries
 message items while the overall turn remains active until Pi settles. This applies to newly
 received messages; previously stored concatenated replies are not rewritten.
 
+In Ask for approval mode, Pi pauses shell commands, file changes and extension tools for a
+decision. Read-only built-in tools and Synara gateway tools keep their existing permission
+boundaries. Always allow grants an extension tool for the session, or all tools when approving
+a command or file change. Cancel and session stop settle pending requests. Steering interrupts
+the current run, including retry backoff, then starts a new turn after that run stops.
+
 Claude's readable reasoning appears as compact progress text between tool actions while it works.
 Open a reasoning row to read its available detail. This text comes from the running provider;
 Synara does not make another model request to generate it. Models that do not return readable

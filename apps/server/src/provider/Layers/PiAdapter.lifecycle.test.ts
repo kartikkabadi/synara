@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -8,12 +8,14 @@ import {
   getCurrentSystemPrompt,
   getCurrentTools,
   type AssistantMessage,
+  type JsonObject,
   type Tool,
 } from "@earendil-works/pi-ai";
 import type {
   AgentSession,
   AgentSessionEvent,
   InlineExtension,
+  ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Effect, Layer, Schema, Stream } from "effect";
 import { ApprovalRequestId, ThreadId, ProviderRuntimeEvent, type TurnId } from "@synara/contracts";
@@ -82,12 +84,17 @@ afterEach(() => {
 });
 
 type ResponseKind = "success" | "error" | "overflow" | "partial-error" | "tool" | "until-abort";
-function responses(...kinds: ResponseKind[]) {
+type ScriptedStep =
+  | ResponseKind
+  | {
+      readonly toolCall: { readonly name: string; readonly arguments: JsonObject };
+    };
+function responses(...steps: ScriptedStep[]) {
   let calls = 0;
   captured.stream = (model, context, options) => {
     captured.modelSystemPrompts.push(getCurrentSystemPrompt(context.messages));
     captured.modelTools.push(getCurrentTools(context.messages));
-    const kind = kinds[calls++] ?? "success";
+    const step = steps[calls++] ?? "success";
     const stream = createAssistantMessageEventStream();
     const message: AssistantMessage = {
       role: "assistant",
@@ -107,6 +114,32 @@ function responses(...kinds: ResponseKind[]) {
       timestamp: Date.now(),
     };
     stream.push({ type: "start", partial: message });
+    if (typeof step !== "string") {
+      const call = {
+        type: "toolCall" as const,
+        id: `scripted-${calls}`,
+        name: step.toolCall.name,
+        arguments: step.toolCall.arguments,
+      };
+      message.content.push(call);
+      stream.push({ type: "toolcall_start", contentIndex: 0, partial: { ...message } });
+      stream.push({
+        type: "toolcall_delta",
+        contentIndex: 0,
+        delta: JSON.stringify(step.toolCall.arguments),
+        partial: { ...message },
+      });
+      stream.push({
+        type: "toolcall_end",
+        contentIndex: 0,
+        toolCall: call,
+        partial: { ...message },
+      });
+      message.stopReason = "toolUse";
+      stream.push({ type: "done", reason: "toolUse", message });
+      return stream;
+    }
+    const kind = step;
     if (kind === "error" || kind === "overflow") {
       message.stopReason = "error";
       message.errorMessage =
@@ -163,7 +196,10 @@ async function withAdapter(
   run: (adapter: PiAdapterShape, events: ProviderRuntimeEvent[], cwd: string) => Promise<void>,
   delayMs = 100,
   credentials?: AgentGatewayCredentialsShape,
-  startSessionOverrides?: { readonly enableComputerControl?: boolean },
+  startSessionOverrides?: {
+    readonly enableComputerControl?: boolean;
+    readonly runtimeMode?: "approval-required" | "full-access";
+  },
   gatewayFetchOverride?: AgentGatewayMcpFetch,
 ) {
   vi.stubEnv("PI_OFFLINE", "1");
@@ -224,7 +260,7 @@ async function withAdapter(
       yield* adapter.startSession({
         threadId,
         cwd,
-        runtimeMode: "full-access",
+        runtimeMode: startSessionOverrides?.runtimeMode ?? "full-access",
         providerOptions: { pi: { agentDir: cwd } },
         modelSelection: { provider: "pi", model: "openai/gpt-4o" },
         ...(startSessionOverrides?.enableComputerControl !== undefined
@@ -616,7 +652,7 @@ it("waits for prompt rejection even when the SDK has finished its agent cycle", 
   });
 });
 
-it("keeps steering during backoff inside the same logical turn", async () => {
+it("interrupts a retrying turn and redispatches steering as a fresh turn", async () => {
   responses("error", "success", "success");
   await withAdapter(async (adapter, events) => {
     const turn = await send(adapter);
@@ -625,10 +661,16 @@ it("keeps steering during backoff inside the same logical turn", async () => {
     const steered = await Effect.runPromise(
       adapter.steerTurn!({ threadId, input: "Also check this" }),
     );
-    expect(steered.turnId).toBe(turn.turnId);
-    await waitFor(() => expect(completions(events)).toHaveLength(1));
+    // Steering is an urgent redirect: the retrying turn is interrupted and the
+    // steered text starts its own turn.
+    expect(steered.turnId).not.toBe(turn.turnId);
+    await waitFor(() => expect(completions(events)).toHaveLength(2));
     expect(completions(events)[0]).toMatchObject({
       turnId: turn.turnId,
+      payload: { state: "interrupted" },
+    });
+    expect(completions(events)[1]).toMatchObject({
+      turnId: steered.turnId,
       payload: { state: "completed" },
     });
     expect(
@@ -637,6 +679,283 @@ it("keeps steering during backoff inside the same logical turn", async () => {
           message.role === "user" && JSON.stringify(message.content).includes("Also check this"),
       ),
     ).toBe(true);
+  });
+});
+
+it("requests approval for a gated tool and executes it once accepted", async () => {
+  responses({ toolCall: { name: "bash", arguments: { command: "echo approved" } } }, "success");
+  await withAdapter(
+    async (adapter, events) => {
+      await send(adapter);
+      await waitFor(() =>
+        expect(events.some((event) => event.type === "request.opened")).toBe(true),
+      );
+      const opened = events.find((event) => event.type === "request.opened")!;
+      expect(opened.payload).toMatchObject({
+        requestType: "command_execution_approval",
+        detail: "echo approved",
+      });
+      await Effect.runPromise(
+        adapter.respondToRequest(
+          threadId,
+          ApprovalRequestId.makeUnsafe(opened.requestId!),
+          "accept",
+        ),
+      );
+      await waitFor(() => expect(completions(events)).toHaveLength(1));
+      expect(completions(events)[0]).toMatchObject({ payload: { state: "completed" } });
+      expect(
+        captured.sessions[0]!.messages.some(
+          (message) =>
+            message.role === "toolResult" &&
+            !message.isError &&
+            JSON.stringify(message.content).includes("approved"),
+        ),
+      ).toBe(true);
+      const resolved = events.find((event) => event.type === "request.resolved");
+      expect(resolved?.payload).toMatchObject({
+        requestType: "command_execution_approval",
+        decision: "accept",
+      });
+    },
+    100,
+    undefined,
+    { runtimeMode: "approval-required" },
+  );
+});
+
+it("blocks a gated tool when the approval is declined", async () => {
+  responses(
+    { toolCall: { name: "write", arguments: { path: "out.txt", content: "x" } } },
+    "success",
+  );
+  await withAdapter(
+    async (adapter, events, cwd) => {
+      await send(adapter);
+      await waitFor(() =>
+        expect(events.some((event) => event.type === "request.opened")).toBe(true),
+      );
+      const opened = events.find((event) => event.type === "request.opened")!;
+      expect(opened.payload).toMatchObject({
+        requestType: "file_change_approval",
+        detail: "out.txt",
+      });
+      await Effect.runPromise(
+        adapter.respondToRequest(
+          threadId,
+          ApprovalRequestId.makeUnsafe(opened.requestId!),
+          "decline",
+        ),
+      );
+      await waitFor(() => expect(completions(events)).toHaveLength(1));
+      const session = captured.sessions[0]!;
+      expect(
+        session.messages.some(
+          (message) =>
+            message.role === "toolResult" && JSON.stringify(message.content).includes("declined"),
+        ),
+      ).toBe(true);
+      expect(existsSync(path.join(cwd, "out.txt"))).toBe(false);
+    },
+    100,
+    undefined,
+    { runtimeMode: "approval-required" },
+  );
+});
+
+it("auto-allows subsequent gated calls after an always-allow decision", async () => {
+  responses(
+    { toolCall: { name: "bash", arguments: { command: "echo one" } } },
+    { toolCall: { name: "bash", arguments: { command: "echo two" } } },
+    "success",
+  );
+  await withAdapter(
+    async (adapter, events) => {
+      await send(adapter);
+      await waitFor(() =>
+        expect(events.some((event) => event.type === "request.opened")).toBe(true),
+      );
+      const opened = events.find((event) => event.type === "request.opened")!;
+      await Effect.runPromise(
+        adapter.respondToRequest(
+          threadId,
+          ApprovalRequestId.makeUnsafe(opened.requestId!),
+          "acceptForSession",
+        ),
+      );
+      await waitFor(() => expect(completions(events)).toHaveLength(1));
+      expect(events.filter((event) => event.type === "request.opened")).toHaveLength(1);
+      expect(completions(events)[0]).toMatchObject({ payload: { state: "completed" } });
+    },
+    100,
+    undefined,
+    { runtimeMode: "approval-required" },
+  );
+});
+
+it("does not prompt in full-access mode", async () => {
+  const calls = responses({ toolCall: { name: "bash", arguments: { command: "echo free" } } });
+  await withAdapter(async (adapter, events) => {
+    await send(adapter);
+    await waitFor(() => expect(completions(events)).toHaveLength(1));
+    expect(events.some((event) => event.type === "request.opened")).toBe(false);
+    expect(calls()).toBe(2);
+  });
+});
+
+it("allows read-only tools on the first approval-required turn", async () => {
+  responses("tool", "success");
+  await withAdapter(
+    async (adapter, events) => {
+      await send(adapter);
+      await waitFor(() => expect(completions(events)).toHaveLength(1));
+      expect(events.some((event) => event.type === "request.opened")).toBe(false);
+    },
+    100,
+    undefined,
+    { runtimeMode: "approval-required" },
+  );
+});
+
+it.each(["interrupt", "stop", "steer"] as const)(
+  "resolves a parked approval exactly once on %s without writing the file",
+  async (action) => {
+    responses(
+      { toolCall: { name: "write", arguments: { path: "blocked.txt", content: "x" } } },
+      "success",
+    );
+    await withAdapter(
+      async (adapter, events, cwd) => {
+        const turn = await send(adapter);
+        await waitFor(() =>
+          expect(events.some((event) => event.type === "request.opened")).toBe(true),
+        );
+        const opened = events.find((event) => event.type === "request.opened")!;
+        if (action === "stop") await Effect.runPromise(adapter.stopSession(threadId));
+        else if (action === "steer") {
+          const next = await Effect.runPromise(
+            adapter.steerTurn!({ threadId, input: "New direction" }),
+          );
+          expect(next.turnId).not.toBe(turn.turnId);
+          await waitFor(() => expect(completions(events)).toHaveLength(2));
+          expect(completions(events)[0]).toMatchObject({
+            turnId: turn.turnId,
+            payload: { state: "interrupted" },
+          });
+          expect(completions(events)[1]).toMatchObject({
+            turnId: next.turnId,
+            payload: { state: "completed" },
+          });
+        } else await Effect.runPromise(adapter.interruptTurn(threadId, turn.turnId));
+        await waitFor(() =>
+          expect(events.filter((event) => event.type === "request.resolved")).toHaveLength(1),
+        );
+        expect(events.find((event) => event.type === "request.resolved")).toMatchObject({
+          requestId: opened.requestId,
+          turnId: turn.turnId,
+          payload: { decision: "cancel" },
+        });
+        expect(existsSync(path.join(cwd, "blocked.txt"))).toBe(false);
+      },
+      100,
+      undefined,
+      { runtimeMode: "approval-required" },
+    );
+  },
+);
+
+it("keeps extension vetoes authoritative before asking for approval", async () => {
+  captured.extensions.push((api) => {
+    api.on("tool_call", () => ({ block: true, reason: "Blocked by extension" }));
+  });
+  responses(
+    { toolCall: { name: "write", arguments: { path: "vetoed.txt", content: "x" } } },
+    "success",
+  );
+  await withAdapter(
+    async (adapter, events, cwd) => {
+      await send(adapter);
+      await waitFor(() => expect(completions(events)).toHaveLength(1));
+      expect(events.some((event) => event.type === "request.opened")).toBe(false);
+      expect(existsSync(path.join(cwd, "vetoed.txt"))).toBe(false);
+    },
+    100,
+    undefined,
+    { runtimeMode: "approval-required" },
+  );
+});
+
+it("gates an extension replacing read and scopes its session grant to that tool", async () => {
+  const executed: string[] = [];
+  captured.extensions.push((api) => {
+    for (const name of ["read", "other_extension_tool"]) {
+      api.registerTool({
+        name,
+        label: name,
+        description: name,
+        parameters: { type: "object", properties: {} } as ToolDefinition["parameters"],
+        execute: async () => {
+          executed.push(name);
+          return { content: [{ type: "text", text: "Done" }], details: {} };
+        },
+      });
+    }
+  });
+  responses(
+    { toolCall: { name: "read", arguments: {} } },
+    { toolCall: { name: "read", arguments: {} } },
+    { toolCall: { name: "other_extension_tool", arguments: {} } },
+    "success",
+  );
+  await withAdapter(
+    async (adapter, events) => {
+      await send(adapter);
+      await waitFor(() =>
+        expect(events.filter((event) => event.type === "request.opened")).toHaveLength(1),
+      );
+      const first = events.find((event) => event.type === "request.opened")!;
+      expect(first.payload).toMatchObject({ requestType: "tool_approval" });
+      expect(executed).toEqual([]);
+      await Effect.runPromise(
+        adapter.respondToRequest(
+          threadId,
+          ApprovalRequestId.makeUnsafe(first.requestId),
+          "acceptForSession",
+        ),
+      );
+      await waitFor(() =>
+        expect(events.filter((event) => event.type === "request.opened")).toHaveLength(2),
+      );
+      const second = events.filter((event) => event.type === "request.opened")[1]!;
+      expect(executed).toEqual(["read", "read"]);
+      await Effect.runPromise(
+        adapter.respondToRequest(
+          threadId,
+          ApprovalRequestId.makeUnsafe(second.requestId),
+          "decline",
+        ),
+      );
+      await waitFor(() => expect(completions(events)).toHaveLength(1));
+      expect(executed).toEqual(["read", "read"]);
+      const resolved = events.filter((event) => event.type === "request.resolved");
+      expect(resolved).toHaveLength(2);
+      expect(new Set(events.map((event) => event.eventId)).size).toBe(events.length);
+    },
+    100,
+    undefined,
+    { runtimeMode: "approval-required" },
+  );
+});
+
+it("rejects an unknown approval request id", async () => {
+  responses("success");
+  await withAdapter(async (adapter) => {
+    const failure = await Effect.runPromise(
+      adapter
+        .respondToRequest(threadId, ApprovalRequestId.makeUnsafe("missing-request"), "accept")
+        .pipe(Effect.flip),
+    );
+    expect(failure).toMatchObject({ method: "request/respond" });
   });
 });
 
@@ -943,7 +1262,7 @@ it.each(["adapter", "extension"] as const)(
       const turn = await send(adapter);
       const session = captured.sessions[0]!;
       await waitFor(() => expect(session.isRetrying).toBe(true));
-      await Effect.runPromise(adapter.steerTurn!({ threadId, input: "Queued steering" }));
+      await session.steer("Queued steering");
       let resumed!: (result: string) => void;
       const resumedRun = new Promise<string>((resolve) => {
         resumed = resolve;
@@ -1179,9 +1498,7 @@ it("cancels retry and queued steering before awaiting gateway teardown drainage"
       const turn = await send(adapter);
       const session = captured.sessions[0]!;
       await waitFor(() => expect(session.isRetrying).toBe(true));
-      await Effect.runPromise(
-        adapter.steerTurn!({ threadId, input: "Do not restart this queued work" }),
-      );
+      await session.steer("Do not restart this queued work");
       const stopped = Effect.runPromise(adapter.stopSession(threadId));
       try {
         await waitFor(() => expect(credentials.cancelSessionTurnRequests).toHaveBeenCalled());
