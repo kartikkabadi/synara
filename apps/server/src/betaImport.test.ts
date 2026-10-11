@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -779,9 +780,9 @@ describe("runBetaImportIfRequested", () => {
     ]);
   });
 
-  it.skipIf(process.platform === "win32")(
-    "preserves differently cased sibling worktrees in projections and replay events",
-    async () => {
+  it.each([false, true])(
+    "uses filesystem identity for differently cased worktrees (source alias: %s)",
+    async (useSourceAlias) => {
       const root = makeRoot();
       const stableHome = await seedStableHome(root);
       const { DatabaseSync } = await import("node:sqlite");
@@ -791,7 +792,11 @@ describe("runBetaImportIfRequested", () => {
       );
       stableDb.exec("CREATE TABLE orchestration_events (event_type TEXT, payload_json TEXT)");
       const sourcePath = join(stableHome, "worktree");
-      const siblingPath = join(root, ".SYNARA", "worktree");
+      const siblingHome = join(root, ".SYNARA");
+      mkdirSync(siblingHome, { recursive: true });
+      const siblingPath = join(siblingHome, "worktree");
+      const expectedSiblingPath =
+        realpathSync(siblingHome) === realpathSync(stableHome) ? null : siblingPath;
       stableDb
         .prepare("INSERT INTO projection_threads VALUES (?, ?)")
         .run(sourcePath, siblingPath);
@@ -806,7 +811,9 @@ describe("runBetaImportIfRequested", () => {
       stableDb.close();
       const betaHome = join(root, ".synara-beta");
       const betaState = join(betaHome, "userdata");
-      writeMarker(betaHome, stableHome);
+      const sourceHome = useSourceAlias ? join(root, "stable-alias") : stableHome;
+      if (useSourceAlias) symlinkSync(stableHome, sourceHome, "dir");
+      writeMarker(betaHome, sourceHome);
 
       expect((await run({ betaHomeDir: betaHome, stateDir: betaState })).ok).toBe(true);
 
@@ -814,14 +821,14 @@ describe("runBetaImportIfRequested", () => {
       try {
         expect(betaDb.prepare("SELECT * FROM projection_threads").get()).toEqual({
           worktree_path: null,
-          associated_worktree_path: siblingPath,
+          associated_worktree_path: expectedSiblingPath,
         });
         const events = betaDb
           .prepare("SELECT payload_json FROM orchestration_events")
           .all() as Array<{ payload_json: string }>;
         expect(events.map((event) => JSON.parse(event.payload_json))).toEqual([
-          { worktreePath: null, associatedWorktreePath: siblingPath },
-          { worktreePath: null, associatedWorktreePath: siblingPath },
+          { worktreePath: null, associatedWorktreePath: expectedSiblingPath },
+          { worktreePath: null, associatedWorktreePath: expectedSiblingPath },
         ]);
       } finally {
         betaDb.close();

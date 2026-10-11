@@ -30,7 +30,10 @@ import {
 } from "node:fs";
 import * as asyncFs from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
+
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { Effect } from "effect";
 
 import {
   BETA_IMPORT_REQUEST_FILE_NAME,
@@ -43,6 +46,7 @@ import {
   isContainedPath,
   resolveRealPathForCreateWithinRoot,
 } from "./workspace/realPathContainment";
+import { realpathNearestExisting } from "./realpathNearestExisting";
 
 /** Entries that describe this install's live runtime, not user data. */
 const EXCLUDED_STATE_ENTRIES = new Set([
@@ -371,11 +375,21 @@ async function clearSourceHomeWorktreePaths(
         }>
       ).map((row) => row.name),
     );
-    // A path inside the source home is the resolved home plus a separator
-    // (or the home itself); a sibling like `<home>-backup` must not match.
-    const prefix = sourceHomeDir.endsWith(sep) ? sourceHomeDir : `${sourceHomeDir}${sep}`;
-    // Keep POSIX sibling paths case-sensitive; Windows paths ignore ASCII case.
-    const pathCollation = process.platform === "win32" ? "NOCASE" : "BINARY";
+    // Resolve each distinct pointer once, including missing worktree suffixes.
+    // Filesystem identity handles case-insensitive volumes and source aliases.
+    const canonicalPaths = new Map<string, string>();
+    const pointsIntoSourceHome = async (candidate: string): Promise<boolean> => {
+      if (!isAbsolute(candidate)) return false;
+      let canonicalPath = canonicalPaths.get(candidate);
+      if (canonicalPath === undefined) {
+        canonicalPath = await Effect.runPromise(
+          realpathNearestExisting(candidate).pipe(Effect.provide(NodeServices.layer)),
+        );
+        canonicalPaths.set(candidate, canonicalPath);
+      }
+      return isContainedPath(sourceHomeDir, canonicalPath);
+    };
+    database.exec("BEGIN");
     for (const table of ["threads", "projection_threads"] as const) {
       if (!tables.has(table)) continue;
       const columns = new Set(
@@ -389,32 +403,41 @@ async function clearSourceHomeWorktreePaths(
         columns.has(column),
       );
       if (nullables.length === 0) continue;
-      // One UPDATE per column: a combined `SET a = NULL, b = NULL WHERE a … OR
-      // b …` would null b on rows where only a matched (and vice versa).
+      // Clear each matching field separately so an external associated path survives.
       for (const column of nullables) {
-        database
+        const paths = database
           .prepare(
-            `UPDATE ${table} SET ${column} = NULL
-             WHERE ${column} = ? COLLATE ${pathCollation}
-                OR substr(${column}, 1, length(?)) = ? COLLATE ${pathCollation}`,
+            `SELECT rowid AS rowId, ${column} AS path FROM ${table} WHERE typeof(${column}) = 'text'`,
           )
-          .run(sourceHomeDir, prefix, prefix);
+          .all() as Array<{ rowId: number; path: string }>;
+        const clearPath = database.prepare(`UPDATE ${table} SET ${column} = NULL WHERE rowid = ?`);
+        for (const { rowId, path } of paths) {
+          if (await pointsIntoSourceHome(path)) clearPath.run(rowId);
+        }
       }
     }
     // Replayed canonical events must not restore pointers removed above.
     if (tables.has("orchestration_events")) {
       for (const key of ["worktreePath", "associatedWorktreePath"] as const) {
-        database
+        const paths = database
           .prepare(
-            `UPDATE orchestration_events
-             SET payload_json = json_set(payload_json, '$.${key}', NULL)
+            `SELECT rowid AS rowId, json_extract(payload_json, '$.${key}') AS path
+             FROM orchestration_events
              WHERE event_type IN ('thread.created', 'thread.meta-updated')
-               AND (json_extract(payload_json, '$.${key}') = ? COLLATE ${pathCollation}
-                    OR substr(json_extract(payload_json, '$.${key}'), 1, length(?)) = ? COLLATE ${pathCollation})`,
+               AND json_type(payload_json, '$.${key}') = 'text'`,
           )
-          .run(sourceHomeDir, prefix, prefix);
+          .all() as Array<{ rowId: number; path: string }>;
+        const clearPath = database.prepare(
+          `UPDATE orchestration_events
+           SET payload_json = json_set(payload_json, '$.${key}', NULL)
+           WHERE rowid = ?`,
+        );
+        for (const { rowId, path } of paths) {
+          if (await pointsIntoSourceHome(path)) clearPath.run(rowId);
+        }
       }
     }
+    database.exec("COMMIT");
   } finally {
     database.close();
   }
@@ -592,9 +615,7 @@ export async function runBetaImportIfRequested(input: {
       );
       // De-point before commit: a failure here fails the import while beta's
       // live database is still untouched.
-      for (const sourcePath of new Set([sourceHomeDir, realSourceHome])) {
-        await clearSourceHomeWorktreePaths(join(stagedStateDir, "state.sqlite"), sourcePath);
-      }
+      await clearSourceHomeWorktreePaths(join(stagedStateDir, "state.sqlite"), realSourceHome);
       const copiedEntries = copyStateEntries(sourceStateDir, stagedStateDir, input.stateDir);
       const pendingStorage = await asyncFs.lstat(pendingStoragePath).catch((error: unknown) => {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
