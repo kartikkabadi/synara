@@ -1,0 +1,9 @@
+.env
+node_modules/
+test-results/
+artifacts/
+.synara-home-*/
+server.log
+web.log
+bun.lock
+playwright-report/
