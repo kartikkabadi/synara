@@ -779,6 +779,9 @@ export function useChatTurnSubmission({
           ...(queuedChatTurn?.retryMessageText !== undefined
             ? { retryMessageText: queuedChatTurn.retryMessageText }
             : {}),
+          ...(queuedChatTurn?.retryAssistantDeliveryMode !== undefined
+            ? { retryAssistantDeliveryMode: queuedChatTurn.retryAssistantDeliveryMode }
+            : {}),
           createdAt: new Date().toISOString(),
           previewText: buildQueuedComposerPreviewText({
             trimmedPrompt: trimmed,
@@ -870,7 +873,7 @@ export function useChatTurnSubmission({
         worktreeSetupScriptName,
         worktreeCopiesLocalChanges,
       } = workspace;
-      const messageIdForSend = newMessageId();
+      const messageIdForSend = retry?.messageId ?? queuedChatTurn?.retryMessageId ?? newMessageId();
       const worktreeSetupResolution = baseBranchForWorktree
         ? createWorktreeSetupResolution()
         : null;
@@ -1057,6 +1060,7 @@ export function useChatTurnSubmission({
           kind: "chat",
           retryMessageId: messageIdForSend,
           retryMessageText: outgoingMessageText,
+          retryAssistantDeliveryMode: dispatchSettings.assistantDeliveryMode,
           createdAt: messageCreatedAt,
           previewText: trimmedPromptForSend || "Failed message",
           prompt: promptForSend,

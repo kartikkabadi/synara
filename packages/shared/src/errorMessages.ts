@@ -14,6 +14,15 @@ export const THREAD_NOT_ARCHIVED_INVARIANT_MARKER = "is not archived for command
 // this marker as an instruction to refresh the already-settled request.
 export const APPROVAL_ALREADY_ANSWERED_INVARIANT_MARKER = "was already answered.";
 
+export const TURN_MESSAGE_ALREADY_ACCEPTED =
+  "This message has already been accepted. Wait for the chat to refresh.";
+
+export function isTurnMessageAlreadyAcceptedError(error: unknown): boolean {
+  return collectErrorMessages(error).some((message) =>
+    message.includes(TURN_MESSAGE_ALREADY_ACCEPTED),
+  );
+}
+
 export function collectErrorMessages(
   error: unknown,
   messages: string[] = [],

@@ -322,6 +322,40 @@ describe("queued composer drain watcher", () => {
     useStore.setState(initialState);
   });
 
+  it("keeps the original retry identity in dispatch and the cache review takeover gate", async () => {
+    seedThread(makeThread({ id: THREAD_ID, session: makeSession("ready") }));
+    const retryMessageId = MessageId.makeUnsafe("original-failed-message");
+    const queuedTurn = { ...makeQueuedChatTurn("retry"), retryMessageId };
+    useComposerDraftStore.getState().enqueueQueuedTurn(THREAD_ID, queuedTurn);
+    await flushDrain();
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ messageId: retryMessageId }));
+    expect(isQueuedComposerAwaitingTurnStart(THREAD_ID)).toBe(true);
+    seedThread(
+      makeThread({
+        id: THREAD_ID,
+        session: makeSession("ready"),
+        claudeCacheReview: { ...makeCacheReview(), messageId: retryMessageId },
+      }),
+    );
+    await flushDrain();
+    expect(isQueuedComposerAwaitingTurnStart(THREAD_ID)).toBe(false);
+  });
+
+  it("consumes a duplicate retry without waiting for a new turn acknowledgement", async () => {
+    seedThread(makeThread({ id: THREAD_ID, session: makeSession("ready") }));
+    dispatch.mockImplementationOnce(async ({ onAlreadyAdmitted }) => {
+      onAlreadyAdmitted?.();
+      return true;
+    });
+    useComposerDraftStore.getState().enqueueQueuedTurn(THREAD_ID, {
+      ...makeQueuedChatTurn("duplicate"),
+      retryMessageId: MessageId.makeUnsafe("original-message"),
+    });
+    await flushDrain();
+    expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.queuedTurns).toEqual([]);
+    expect(isQueuedComposerAwaitingTurnStart(THREAD_ID)).toBe(false);
+  });
+
   it.each(["cached", "failed"] as const)(
     "holds %s history queues until authoritative detail returns",
     async (sync) => {

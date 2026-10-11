@@ -29,9 +29,10 @@ export function retainFailedComposerRetry(retry: FailedComposerRetry): void {
   useFailedComposerRetries.setState(next, true);
 }
 
-export function clearFailedComposerRetry(threadId: ThreadId): void {
+export function clearFailedComposerRetry(threadId: ThreadId, expectedMessageId?: MessageId): void {
   const current = useFailedComposerRetries.getState();
-  if (!current.has(threadId)) return;
+  const retry = current.get(threadId);
+  if (!retry || (expectedMessageId !== undefined && retry.messageId !== expectedMessageId)) return;
   const next = new Map(current);
   next.delete(threadId);
   useFailedComposerRetries.setState(next, true);

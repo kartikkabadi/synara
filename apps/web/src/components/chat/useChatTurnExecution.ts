@@ -15,13 +15,14 @@ import {
   type ProviderStartOptions,
 } from "@synara/contracts";
 import { buildTemporaryWorktreeBranchName } from "@synara/shared/git";
+import { isTurnMessageAlreadyAcceptedError } from "@synara/shared/errorMessages";
 import { getDefaultModel } from "@synara/shared/model";
 import { providerSupportsNativeTurnSteering } from "@synara/shared/providerMetadata";
 import { useCallback } from "react";
 import { promoteThreadCreate } from "~/lib/threadCreatePromotion";
 import { waitForDraftThreadDispatchToSettle } from "~/lib/draftThreadDispatch";
 import { runComposerSendOnce } from "~/lib/composerSendOwnership";
-import { retainFailedComposerRetry } from "~/lib/failedComposerRetry";
+import { clearFailedComposerRetry, retainFailedComposerRetry } from "~/lib/failedComposerRetry";
 import { newCommandId, randomUUID } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import { dispatchThreadNotes } from "~/pinnedMessages";
@@ -45,6 +46,10 @@ import { clearPendingTurnDispatch } from "../../pendingTurnDispatch";
 import { useStore } from "../../store";
 import { getThreadFromState } from "../../threadDerivation";
 import { isThreadDetailAwaitingVerification } from "../../threadDetailAuthority";
+import {
+  buildThreadSubscribeInput,
+  clearThreadDetailResumeCursor,
+} from "../../threadDetailResumeCursors";
 import { buildModelSelection } from "../../providerModelOptions";
 import { type Thread } from "../../types";
 import {
@@ -753,12 +758,18 @@ export function useChatTurnExecution({
           );
         }
       })().catch(async (err: unknown) => {
+        const retryAlreadyAdmitted =
+          retryMessageId !== undefined && isTurnMessageAlreadyAcceptedError(err);
         retryAlreadyAcknowledged =
           retryMessageId !== undefined &&
-          hasServerReceivedSentMessage(
-            getThreadFromState(useStore.getState(), threadIdForSend),
-            retryMessageId,
-          );
+          (retryAlreadyAdmitted ||
+            hasServerReceivedSentMessage(
+              getThreadFromState(useStore.getState(), threadIdForSend),
+              retryMessageId,
+            ));
+        if (retryAlreadyAcknowledged && retryMessageId !== undefined) {
+          clearFailedComposerRetry(threadIdForSend, retryMessageId);
+        }
         // The server already recorded this message, so the turn exists whatever failed
         // around it. Rolling back would delete the promoted thread and hand the sent
         // prompt back to the composer, where it survives reloads and gets sent again.
@@ -781,6 +792,12 @@ export function useChatTurnExecution({
           (staged) => staged.cleanup(),
           () => undefined,
         );
+        if (retryAlreadyAdmitted) {
+          clearThreadDetailResumeCursor(threadIdForSend);
+          void api.orchestration
+            .subscribeThread(buildThreadSubscribeInput(threadIdForSend))
+            .catch(() => {});
+        }
         // Surface the failure on whichever setup step was active (no-op for
         // sends without a worktree setup in flight).
         if (!setupCancelled && !retryAlreadyAcknowledged) {

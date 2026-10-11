@@ -585,7 +585,10 @@ plan reference. It leaves the newer draft intact and joins the existing queue if
 a turn is running. The retained retry is session-only, with at most 16 threads
 kept; dismissing or replacing its error invalidates it. An explicitly queued
 retry uses the queue's existing persistence and attachment limits. A server
-acknowledgement visible before dispatch consumes the retry. Delivery quarantine
+acknowledgement visible before dispatch consumes the retry. The retry keeps the
+original message identity; server admission rejects a duplicate even if the
+original send arrives later. Edit-and-resend has a separate server-owned replay
+authorization. Delivery quarantine
 continues to offer **Unblock thread** through its existing reconciliation flow.
 
 ## Cancel a blocking question

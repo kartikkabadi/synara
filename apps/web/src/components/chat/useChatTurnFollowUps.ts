@@ -330,6 +330,7 @@ export function useChatTurnFollowUps({
             kind: "chat",
             retryMessageId: messageIdForSend,
             retryMessageText: outgoingMessageText,
+            retryAssistantDeliveryMode: planDispatchSettings.assistantDeliveryMode,
             createdAt: messageCreatedAt,
             previewText: trimmed,
             prompt: trimmed,

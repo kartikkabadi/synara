@@ -4,6 +4,7 @@
 // Exports: dispatchQueuedComposerTurnHeadless
 
 import type { AssistantDeliveryMode, MessageId, ThreadId } from "@synara/contracts";
+import { isTurnMessageAlreadyAcceptedError } from "@synara/shared/errorMessages";
 
 import {
   hasServerReceivedSentMessage,
@@ -19,6 +20,10 @@ import {
 } from "../session-logic";
 import { useStore } from "../store";
 import { getThreadFromState } from "../threadDerivation";
+import {
+  buildThreadSubscribeInput,
+  clearThreadDetailResumeCursor,
+} from "../threadDetailResumeCursors";
 import { appendAssistantSelectionsToPrompt } from "./assistantSelections";
 import { appendBrowserAnnotationsToPrompt } from "./browserAnnotations";
 import {
@@ -44,6 +49,7 @@ export async function dispatchQueuedComposerTurnHeadless(input: {
   dispatchMode: "queue" | "steer";
   assistantDeliveryMode: AssistantDeliveryMode;
   messageId?: MessageId;
+  onAlreadyAdmitted?: () => void;
 }): Promise<boolean> {
   return runComposerSendOnce(input.threadId, async () => {
     await waitForDraftThreadDispatchToSettle(input.threadId);
@@ -66,7 +72,10 @@ async function dispatchQueuedComposerTurnOnce(
 
   const createdAt = new Date().toISOString();
   const queuedTurn = input.queuedTurn;
-  const messageId = input.messageId ?? newMessageId();
+  const messageId =
+    (queuedTurn.kind === "chat" ? queuedTurn.retryMessageId : undefined) ??
+    input.messageId ??
+    newMessageId();
   const retryAcknowledged = () =>
     queuedTurn.kind === "chat" &&
     queuedTurn.retryMessageId !== undefined &&
@@ -230,7 +239,8 @@ async function dispatchQueuedComposerTurnOnce(
           ...(queuedTurn.providerOptionsForDispatch
             ? { providerOptions: queuedTurn.providerOptionsForDispatch }
             : {}),
-          assistantDeliveryMode: input.assistantDeliveryMode,
+          assistantDeliveryMode:
+            queuedTurn.retryAssistantDeliveryMode ?? input.assistantDeliveryMode,
           dispatchMode: input.dispatchMode,
           runtimeMode: queuedTurn.runtimeMode,
           interactionMode: queuedTurn.interactionMode,
@@ -249,12 +259,20 @@ async function dispatchQueuedComposerTurnOnce(
         });
     });
     return true;
-  } catch {
+  } catch (error) {
     await turnAttachmentsPromise.then(
       (staged) => staged.cleanup(),
       () => undefined,
     );
     clearPendingTurnDispatch(input.threadId);
+    if (queuedTurn.retryMessageId && isTurnMessageAlreadyAcceptedError(error)) {
+      input.onAlreadyAdmitted?.();
+      clearThreadDetailResumeCursor(input.threadId);
+      void api.orchestration
+        .subscribeThread(buildThreadSubscribeInput(input.threadId))
+        .catch(() => {});
+      return true;
+    }
     return (
       retryAcknowledged() ||
       hasServerReceivedSentMessage(

@@ -31,6 +31,7 @@ describe("composerDraftStore persisted-state hydration", () => {
     if (retry.kind !== "chat") throw new Error("Expected a chat fixture");
     retry.retryMessageId = MessageId.makeUnsafe("failed-message");
     retry.retryMessageText = "Exact original context\nSecond line";
+    retry.retryAssistantDeliveryMode = "buffered";
     useComposerDraftStore.getState().enqueueQueuedTurn(threadId, retry);
     const persisted = normalizeCurrentPersistedComposerDraftStoreState(
       JSON.parse(
@@ -41,6 +42,7 @@ describe("composerDraftStore persisted-state hydration", () => {
     expect(hydrated.queuedTurns[0]).toMatchObject({
       retryMessageId: retry.retryMessageId,
       retryMessageText: retry.retryMessageText,
+      retryAssistantDeliveryMode: "buffered",
     });
   });
 

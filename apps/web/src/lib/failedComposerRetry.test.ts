@@ -23,6 +23,15 @@ function makeRetry(id = "thread-1"): FailedComposerRetry {
 afterEach(() => useFailedComposerRetries.setState(new Map(), true));
 
 describe("failed composer retry ownership", () => {
+  it("consumes an accepted retry without clearing a newer message on the same thread", () => {
+    const retry = makeRetry();
+    retainFailedComposerRetry(retry);
+    clearFailedComposerRetry(retry.threadId, MessageId.makeUnsafe("older-message"));
+    expect(useFailedComposerRetries.getState().get(retry.threadId)).toBe(retry);
+    clearFailedComposerRetry(retry.threadId, retry.messageId);
+    expect(useFailedComposerRetries.getState().has(retry.threadId)).toBe(false);
+  });
+
   it("rejects dismissed, replaced, acknowledged, and other-thread actions", () => {
     const retry = makeRetry();
     const current = { threadId: retry.threadId, error: retry.error, acknowledged: false };

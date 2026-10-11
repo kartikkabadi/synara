@@ -5,6 +5,7 @@ import { resolveComputerControlMode } from "./computerControlMode";
 // Exports: Persist middleware transitions and persisted state type.
 
 import {
+  AssistantDeliveryMode,
   MessageId,
   ModelSelection,
   OrchestrationProposedPlanId,
@@ -217,6 +218,7 @@ const PersistedQueuedComposerChatTurn = Schema.Struct({
   id: Schema.String,
   retryMessageId: Schema.optionalKey(MessageId),
   retryMessageText: Schema.optionalKey(Schema.String),
+  retryAssistantDeliveryMode: Schema.optionalKey(AssistantDeliveryMode),
   kind: Schema.Literal("chat"),
   createdAt: Schema.String,
   previewText: Schema.String,
@@ -810,6 +812,9 @@ function normalizePersistedQueuedTurns(
         ...(typeof candidate.retryMessageText === "string"
           ? { retryMessageText: candidate.retryMessageText }
           : {}),
+        ...(Schema.is(AssistantDeliveryMode)(candidate.retryAssistantDeliveryMode)
+          ? { retryAssistantDeliveryMode: candidate.retryAssistantDeliveryMode }
+          : {}),
         runtimeMode,
         interactionMode,
         envMode,
@@ -1314,6 +1319,9 @@ export function partializeComposerDraftStoreState(
           ...(queuedTurn.retryMessageId ? { retryMessageId: queuedTurn.retryMessageId } : {}),
           ...(queuedTurn.retryMessageText !== undefined
             ? { retryMessageText: queuedTurn.retryMessageText }
+            : {}),
+          ...(queuedTurn.retryAssistantDeliveryMode !== undefined
+            ? { retryAssistantDeliveryMode: queuedTurn.retryAssistantDeliveryMode }
             : {}),
           runtimeMode: queuedTurn.runtimeMode,
           interactionMode: queuedTurn.interactionMode,

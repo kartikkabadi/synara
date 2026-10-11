@@ -1,4 +1,5 @@
 import { MessageId, ThreadId } from "@synara/contracts";
+import { TURN_MESSAGE_ALREADY_ACCEPTED } from "@synara/shared/errorMessages";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useComposerDraftStore, type QueuedComposerTurn } from "../composerDraftStore";
@@ -11,12 +12,14 @@ import * as composerSend from "./composerSend";
 
 const nativeApiMocks = vi.hoisted(() => ({
   dispatchCommand: vi.fn(async () => undefined),
+  subscribeThread: vi.fn(async () => undefined),
 }));
 
 vi.mock("../nativeApi", () => ({
   readNativeApi: () => ({
     orchestration: {
       dispatchCommand: nativeApiMocks.dispatchCommand,
+      subscribeThread: nativeApiMocks.subscribeThread,
     },
   }),
 }));
@@ -77,6 +80,8 @@ describe("dispatchQueuedComposerTurnHeadless", () => {
     resetComposerDraftStore();
     useStore.setState(initialState);
     nativeApiMocks.dispatchCommand.mockClear();
+    nativeApiMocks.subscribeThread.mockReset();
+    nativeApiMocks.subscribeThread.mockResolvedValue(undefined);
     useStore.setState(makeState(makeThread({ id: THREAD_ID })));
   });
 
@@ -155,6 +160,7 @@ describe("dispatchQueuedComposerTurnHeadless", () => {
     if (queuedTurn.kind !== "chat") throw new Error("Expected a chat fixture");
     queuedTurn.retryMessageId = MessageId.makeUnsafe("original-message");
     queuedTurn.retryMessageText = "Original prompt\nOriginal captured terminal context";
+    queuedTurn.retryAssistantDeliveryMode = "buffered";
     useComposerDraftStore.getState().setPrompt(THREAD_ID, "Newer unsent draft");
     const before = useComposerDraftStore.getState().draftsByThreadId[THREAD_ID];
     const accepted = await dispatchQueuedComposerTurnHeadless({
@@ -167,10 +173,56 @@ describe("dispatchQueuedComposerTurnHeadless", () => {
     expect(nativeApiMocks.dispatchCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "thread.turn.start",
-        message: expect.objectContaining({ text: queuedTurn.retryMessageText }),
+        assistantDeliveryMode: "buffered",
+        message: expect.objectContaining({
+          messageId: queuedTurn.retryMessageId,
+          text: queuedTurn.retryMessageText,
+        }),
       }),
     );
     expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]).toBe(before);
+  });
+
+  it("consumes a definite duplicate rejection after upload cleanup even if refresh fails", async () => {
+    const queuedTurn = makeQueuedChatTurn();
+    if (queuedTurn.kind !== "chat") throw new Error("Expected a chat fixture");
+    queuedTurn.retryMessageId = MessageId.makeUnsafe("original-message");
+    useStore.setState(
+      makeState(
+        makeThread({
+          id: THREAD_ID,
+          modelSelection: queuedTurn.modelSelection,
+          runtimeMode: queuedTurn.runtimeMode,
+        }),
+      ),
+    );
+    useComposerDraftStore.getState().setPrompt(THREAD_ID, "Newer unsent draft");
+    const draft = useComposerDraftStore.getState().draftsByThreadId[THREAD_ID];
+    const cleanup = vi.fn(async () => undefined);
+    vi.spyOn(composerSend, "stageUploadComposerAttachments").mockResolvedValue({
+      attachments: [],
+      cleanup,
+      commit: vi.fn(),
+      runWithDispatch: (dispatch) => dispatch([]),
+    });
+    nativeApiMocks.dispatchCommand.mockRejectedValueOnce(new Error(TURN_MESSAGE_ALREADY_ACCEPTED));
+    nativeApiMocks.subscribeThread.mockRejectedValueOnce(new Error("Disconnected during refresh"));
+    const onAlreadyAdmitted = vi.fn();
+    expect(
+      await dispatchQueuedComposerTurnHeadless({
+        threadId: THREAD_ID,
+        queuedTurn,
+        dispatchMode: "queue",
+        assistantDeliveryMode: "streaming",
+        onAlreadyAdmitted,
+      }),
+    ).toBe(true);
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(onAlreadyAdmitted).toHaveBeenCalledOnce();
+    expect(nativeApiMocks.subscribeThread).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: THREAD_ID }),
+    );
+    expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]).toBe(draft);
   });
 
   it.each(["before preparation", "during uploads"] as const)(

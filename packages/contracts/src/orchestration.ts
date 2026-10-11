@@ -1681,6 +1681,9 @@ export const ThreadTurnStartCommand = Schema.Struct({
     Schema.withDecodingDefault(() => DEFAULT_PROVIDER_INTERACTION_MODE),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  // Server-only: the edit reactor may reuse a message identity once after its
+  // exact rollback completion. The client schema deliberately omits this field.
+  editResendFromRollbackSequence: Schema.optional(NonNegativeInt),
   // Server-only (quit resume): accept the turn only while the thread is not archived,
   // has nothing in flight, and no turn finished on its own since the record was
   // taken (the recorded turn itself, or any later one). Clients cannot set it:
