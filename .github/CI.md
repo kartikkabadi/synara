@@ -6,6 +6,14 @@ changes run typechecking, five unit partitions, six stable browser partitions,
 desktop build, native Windows regression and migration lineage. Docs-only
 detection and nightly geometry ownership are unchanged.
 
+CI also accepts a manual run for a selected branch with
+`gh workflow run ci.yml --repo OWNER/synara --ref BRANCH`.
+Manual runs always execute every required lane, including for a branch with no
+code difference from `main`. They keep the same checks and aggregate gate; they
+do not publish a release or trigger a schedule. GitHub requires the workflow file
+to exist on the repository's default branch. See
+[manual workflow runs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
+
 After workspace setup and CI contract validation, `static-fast` uses GitHub
 Actions' native `parallel` group for identity, Windows boundary, formatting,
 lint and release smoke. These checks read the installed workspace; release
