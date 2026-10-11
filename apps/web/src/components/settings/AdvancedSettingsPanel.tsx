@@ -21,6 +21,7 @@ import { useStore } from "~/store";
 import { createAllThreadsMessagelessSelector, createThreadShellsSelector } from "~/storeSelectors";
 import { useSettingsRestoreSignal } from "./SettingControls";
 import { SettingsRow, SettingsSection } from "./SettingsPanelPrimitives";
+import { UncertainRevertJobsSection } from "./UncertainRevertJobsSection";
 
 export function AdvancedSettingsPanel(props: {
   active: boolean;
@@ -233,6 +234,8 @@ export function AdvancedSettingsPanel(props: {
           ) : null}
         </SettingsRow>
       </SettingsSection>
+
+      <UncertainRevertJobsSection />
 
       <SettingsSection title="About">
         <SettingsRow

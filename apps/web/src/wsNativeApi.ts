@@ -638,6 +638,13 @@ export function createWsNativeApi(): NativeApi {
       getProfileTokenStats: (input) =>
         transport.request(WS_METHODS.statsGetProfileTokenStats, input),
     },
+    controlPlane: {
+      listUncertainRevertJobs: (input) =>
+        transport.request(WS_METHODS.controlPlaneListUncertainRevertJobs, input),
+      getJob: (input) => transport.request(WS_METHODS.controlPlaneGetJob, input),
+      resolveUncertainJob: (input) =>
+        transport.request(WS_METHODS.controlPlaneResolveUncertainJob, input),
+    },
     provider: {
       getComposerCapabilities: (input) =>
         transport.request(WS_METHODS.providerGetComposerCapabilities, input),

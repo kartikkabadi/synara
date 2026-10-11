@@ -110,6 +110,17 @@ describe("ControlPlaneKernel startup (fail-closed rollout)", () => {
     },
   );
 
+  it.each(["job", "jobsPage"])("rejects addons missing the operator method %s", (missingMethod) => {
+    withTempDir((dir) => {
+      const stubPath = path.join(dir, "legacy-store.cjs");
+      const methods = ["close", "commit", "claimJobs", "extendLease", "recoverClaim", "recoverTransaction", "jobs", "job", "jobsPage", "projectionGet", "projectionVersion", "streamVersion", "eventsAfter"];
+      const store = methods.filter((method) => method !== missingMethod).map((method) => `${method}() {}`).join(",");
+      writeFileSync(stubPath, `module.exports = { Store: { open() { return { ${store} }; } }, newId() { return ""; } };\n`);
+      vi.stubEnv("SYNARA_CONTROL_PLANE_ADDON_PATH", stubPath);
+      expectKernelFailure(makeControlPlaneKernelAtPath(path.join(dir, "control-plane.db"), "on"), "AddonIncompatible", missingMethod);
+    });
+  });
+
   it("a store instance missing methods fails the open handshake", () => {
     withTempDir((dir) => {
       const stubPath = path.join(dir, "stub-store.cjs");
@@ -223,6 +234,79 @@ describe.skipIf(!addonAvailable)("ControlPlaneKernel (native addon smoke)", () =
 
         const id = yield* kernel.newId();
         assert.match(id, /^[0-9a-f]{32}$/);
+      }),
+    ),
+  );
+
+  it.effect("looks up jobs, pages them, and resolves uncertain jobs", () =>
+    withTempKernel((kernel) =>
+      Effect.gen(function* () {
+        const now = 1_000;
+        const payload = new TextEncoder().encode("{}");
+        const enqueue = (jobId: string) =>
+          kernel.commit({
+            committedAtMs: now,
+            enqueueJobs: [{ jobId, queue: "checkpoint-revert", partitionKey: jobId, payload }],
+          });
+        const first = yield* kernel.newId();
+        const second = yield* kernel.newId();
+        yield* enqueue(first);
+        yield* enqueue(second);
+
+        const missing = yield* kernel.job(yield* kernel.newId());
+        assert.isNull(missing);
+
+        const pageOne = yield* kernel.jobsPage({
+          queue: "checkpoint-revert",
+          afterSequence: 0,
+          limit: 1,
+        });
+        assert.deepEqual(
+          pageOne.jobs.map((job) => job.jobId),
+          [first],
+        );
+        const pageTwo = yield* kernel.jobsPage({
+          queue: "checkpoint-revert",
+          afterSequence: pageOne.nextAfterSequence,
+          limit: 1,
+        });
+        assert.deepEqual(
+          pageTwo.jobs.map((job) => job.jobId),
+          [second],
+        );
+
+        // Let both leases expire so maintenance marks the jobs uncertain.
+        yield* kernel.claimJobs({
+          queue: "checkpoint-revert",
+          workerId: "worker-1",
+          nowMs: now,
+          leaseMs: 100,
+          limit: 2,
+        });
+        yield* kernel.claimJobs({
+          queue: "checkpoint-revert",
+          workerId: "worker-2",
+          nowMs: now + 1_000,
+          leaseMs: 100,
+          limit: 1,
+        });
+        const uncertain = yield* kernel.jobsPage({
+          queue: "checkpoint-revert",
+          state: "uncertain",
+          afterSequence: 0,
+          limit: 10,
+        });
+        assert.deepEqual(uncertain.jobs.map((job) => job.jobId).sort(), [first, second].sort());
+
+        yield* kernel.resolveUncertainJobs({
+          committedAtMs: now + 1_000,
+          resolutions: [
+            { jobId: first, resolution: "markSucceeded" },
+            { jobId: second, resolution: "markDead" },
+          ],
+        });
+        assert.equal((yield* kernel.job(first))?.state, "succeeded");
+        assert.equal((yield* kernel.job(second))?.state, "dead");
       }),
     ),
   );
