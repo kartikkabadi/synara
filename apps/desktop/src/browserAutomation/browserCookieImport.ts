@@ -157,7 +157,14 @@ export class BrowserCookieImport {
             ...(stage ? { stage } : {}),
           };
         }
-        await assertTarget();
+        // A successful sync already transferred into the leased session. A
+        // changed visible target cannot undo it; preserve flush/restore metadata.
+        // Actual navigation/takeover cancellation still rejects below.
+        try {
+          await assertTarget();
+        } catch {
+          // Persist the completed transfer in its original leased session.
+        }
         interrupt.signal.throwIfAborted();
         await runtime.webContents.session.cookies.flushStore();
         try {

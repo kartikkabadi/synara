@@ -405,3 +405,8 @@ and username and is consumed by its save; autosaved agent captures remain
 pending. Failed vault initialization erases its allocated key buffer. A
 provenance write failure retains already committed credentials rather than
 risking deletion of an existing login.
+
+After a completed cookie transfer, a changed visible destination alone does not
+discard the original leased session’s flush and restore metadata. Actual
+navigation or takeover cancellation still rejects; interrupted work is never
+reported as durable success.
