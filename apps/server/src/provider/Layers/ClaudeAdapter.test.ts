@@ -6484,7 +6484,7 @@ await agent("Draft the spec", { label: "delta-agent", phase: "Two" });
         if (descriptor?.type === "select") {
           assert.deepEqual(
             descriptor.options.map((option) => option.id),
-            expected,
+            [...expected],
           );
         }
       }

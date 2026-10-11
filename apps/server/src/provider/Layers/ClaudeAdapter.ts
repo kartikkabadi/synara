@@ -1202,7 +1202,7 @@ function mapClaudeModelInfo(model: ModelInfo): ProviderListModelsResult["models"
               (option) =>
                 option.controlSource !== "api-effort" &&
                 (option.apiEffortValue === undefined ||
-                  sdkEfforts?.includes(option.apiEffortValue)),
+                  sdkEfforts?.some((effort) => effort === option.apiEffortValue)),
             ),
           ],
         };
