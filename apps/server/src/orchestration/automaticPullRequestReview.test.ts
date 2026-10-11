@@ -11,7 +11,7 @@ describe("dispatchAutomaticPullRequestReview", () => {
     const thread = {
       id: ThreadId.makeUnsafe("thread-review"),
       modelSelection: { provider: "codex", model: "gpt-5-codex" },
-      runtimeMode: "local",
+      runtimeMode: "approval-required",
       interactionMode: "default",
       latestTurn: null,
       session: null,
