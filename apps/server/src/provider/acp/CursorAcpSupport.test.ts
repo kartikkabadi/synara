@@ -205,30 +205,34 @@ describe("buildCursorCliModelListCommand", () => {
 });
 
 describe("makeCursorAcpRuntime", () => {
-  it("selects on-demand authentication so session start skips the OAuth login page", async () => {
-    const fakeRuntime = {} as AcpSessionRuntimeShape;
-    let capturedOptions: AcpSessionRuntimeOptions | undefined;
-    const layerSpy = vi.spyOn(AcpSessionRuntime, "layer").mockImplementation((options) => {
-      capturedOptions = options;
-      return Layer.succeed(AcpSessionRuntime, fakeRuntime);
-    });
+  it.each([undefined, "never"] as const)(
+    "preserves the authentication policy %s, defaulting to on-demand",
+    async (authPolicy) => {
+      const fakeRuntime = {} as AcpSessionRuntimeShape;
+      let capturedOptions: AcpSessionRuntimeOptions | undefined;
+      const layerSpy = vi.spyOn(AcpSessionRuntime, "layer").mockImplementation((options) => {
+        capturedOptions = options;
+        return Layer.succeed(AcpSessionRuntime, fakeRuntime);
+      });
 
-    try {
-      const runtime = await Effect.runPromise(
-        makeCursorAcpRuntime({
-          childProcessSpawner: {} as ChildProcessSpawner.ChildProcessSpawner["Service"],
-          cursorSettings: undefined,
-          cwd: "/tmp/project",
-          clientInfo: { name: "Synara", version: "0.0.0" },
-        }).pipe(Effect.scoped),
-      );
+      try {
+        const runtime = await Effect.runPromise(
+          makeCursorAcpRuntime({
+            childProcessSpawner: {} as ChildProcessSpawner.ChildProcessSpawner["Service"],
+            cursorSettings: undefined,
+            ...(authPolicy ? { authPolicy } : {}),
+            cwd: "/tmp/project",
+            clientInfo: { name: "Synara", version: "0.0.0" },
+          }).pipe(Effect.scoped),
+        );
 
-      expect(runtime).toBe(fakeRuntime);
-      expect(capturedOptions?.authPolicy).toBe("on-demand");
-    } finally {
-      layerSpy.mockRestore();
-    }
-  });
+        expect(runtime).toBe(fakeRuntime);
+        expect(capturedOptions?.authPolicy).toBe(authPolicy ?? "on-demand");
+      } finally {
+        layerSpy.mockRestore();
+      }
+    },
+  );
 });
 
 describe("flattenCursorAcpModelChoices", () => {

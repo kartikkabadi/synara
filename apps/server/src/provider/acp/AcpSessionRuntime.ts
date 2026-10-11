@@ -409,8 +409,9 @@ export interface AcpSessionRuntimeOptions {
    * - "on-demand": attempt session setup without authenticate; if it fails with a
    *   verified auth-required error, resolve the advertised auth method,
    *   authenticate once, and retry the same setup operation once.
+   * - "never": passive probes never authenticate or retry an auth challenge.
    */
-  readonly authPolicy?: "always" | "on-demand";
+  readonly authPolicy?: "always" | "on-demand" | "never";
   /**
    * Provider-specific predicate consulted during on-demand auth. After session
    * setup returns while still unauthenticated, if this returns true the session
@@ -2037,15 +2038,17 @@ const makeAcpSessionRuntime = (
         });
 
         const setup =
-          options.authPolicy === "on-demand"
-            ? runSessionSetup.pipe(
-                Effect.catchCause((cause) =>
-                  causeIndicatesAuthRequired(cause)
-                    ? runAuthenticate.pipe(Effect.andThen(runSessionSetup))
-                    : Effect.failCause(cause),
-                ),
-              )
-            : runAuthenticate.pipe(Effect.andThen(runSessionSetup));
+          options.authPolicy === "never"
+            ? runSessionSetup
+            : options.authPolicy === "on-demand"
+              ? runSessionSetup.pipe(
+                  Effect.catchCause((cause) =>
+                    causeIndicatesAuthRequired(cause)
+                      ? runAuthenticate.pipe(Effect.andThen(runSessionSetup))
+                      : Effect.failCause(cause),
+                  ),
+                )
+              : runAuthenticate.pipe(Effect.andThen(runSessionSetup));
 
         const { sessionId, sessionSetupResult, sessionSetupMethod } = yield* setup;
 

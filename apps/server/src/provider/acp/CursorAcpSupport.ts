@@ -149,7 +149,7 @@ export const makeCursorAcpRuntime = (
         spawn: buildCursorAcpSpawnInput(input.cursorSettings, input.cwd),
         // Authenticate on demand only: always-auth makes cursor-agent re-open the
         // OAuth login page on every session start (#1341); same pattern as Devin.
-        authPolicy: "on-demand",
+        authPolicy: input.authPolicy ?? "on-demand",
         authMethodId: "cursor_login",
         authenticateMeta: { headless: true },
         clientCapabilities: CURSOR_PARAMETERIZED_MODEL_PICKER_CAPABILITIES,

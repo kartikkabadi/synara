@@ -66,6 +66,10 @@ Slow Git work in one workspace leaves other workspaces free to progress. Recover
 completed captures and undo outcomes; an interrupted operation with an uncertain outcome
 is reported for inspection instead of automatically changing the workspace again.
 
+Cursor background model discovery never requests interactive authentication. If its ACP probe
+needs authentication, discovery falls back to the headless CLI model list. Starting or resuming
+a Cursor chat still authenticates on demand.
+
 Pi preserves separate assistant messages within a turn, including progress before tool calls
 and the final response. Reasoning items also end with their SDK message. Retries start new
 message items while the overall turn remains active until Pi settles. This applies to newly

@@ -1838,6 +1838,8 @@ export function makeCursorAdapter(
       };
       const runCursorAcpModelDiscovery = Effect.gen(function* () {
         const runtime = yield* makeCursorAcpRuntime({
+          // Passive catalog reads must not open an interactive login flow.
+          authPolicy: "never",
           cursorSettings: effectiveAcpSettings,
           childProcessSpawner,
           cwd: process.cwd(),
