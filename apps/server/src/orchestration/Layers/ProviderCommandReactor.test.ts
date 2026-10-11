@@ -42,6 +42,7 @@ import type { DeepPartial } from "@synara/shared/Struct";
 import { SIDECHAT_INACTIVITY_EXPIRY_MS } from "@synara/shared/sidechatExpiry";
 import {
   Duration,
+  Clock,
   Deferred,
   Effect,
   Exit,
@@ -56,6 +57,7 @@ import {
   ServiceMap,
   Stream,
 } from "effect";
+import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -335,6 +337,7 @@ describe("ProviderCommandReactor", () => {
     readonly startReactor?: boolean;
     readonly interruptTurn?: ProviderServiceShape["interruptTurn"];
     readonly commandEventTimeout?: Duration.Duration;
+    readonly clock?: Clock.Clock;
     readonly preTurnBaselineTimeout?: Duration.Duration;
     readonly cacheResponseTimeout?: Duration.Duration;
     readonly gatewayOperationCompletionWaitTimeout?: Duration.Duration;
@@ -873,7 +876,10 @@ describe("ProviderCommandReactor", () => {
     let reactorStarted = false;
     const startReactor = async () => {
       if (reactorStarted) return;
-      const start = reactor.start.pipe(Scope.provide(harnessScope));
+      const scopedStart = reactor.start.pipe(Scope.provide(harnessScope));
+      const start = input?.clock
+        ? scopedStart.pipe(Effect.provideService(Clock.Clock, input.clock))
+        : scopedStart;
       await Effect.runPromise(
         input?.logMessages
           ? start.pipe(
@@ -1625,6 +1631,7 @@ describe("ProviderCommandReactor", () => {
       >,
       ingestRuntimeEvents = false,
       commandEventTimeout?: Duration.Duration,
+      clock?: Clock.Clock,
     ) {
       let observation = expiredCacheObservation();
       const startClaudeCompaction = vi.fn<
@@ -1637,6 +1644,7 @@ describe("ProviderCommandReactor", () => {
         startClaudeCompaction,
         ingestRuntimeEvents,
         ...(commandEventTimeout ? { commandEventTimeout } : {}),
+        ...(clock ? { clock } : {}),
         ...(cancelClaudeCompactionDiscovery ? { cancelClaudeCompactionDiscovery } : {}),
       });
       return {
@@ -3298,10 +3306,14 @@ describe("ProviderCommandReactor", () => {
     });
 
     it("keeps an operator retried slow cache response alive beyond the command deadline", async () => {
+      const clockScope = await Effect.runPromise(Scope.make("sequential"));
+      scopes.add(clockScope);
+      const clock = await Effect.runPromise(TestClock.make().pipe(Scope.provide(clockScope)));
       const { harness, startClaudeCompaction } = await createCompactionHarness(
         undefined,
         false,
         Duration.millis(100),
+        clock,
       );
       const review = await sendHeldMessage(harness);
       startClaudeCompaction.mockImplementationOnce(() =>
@@ -3318,22 +3330,27 @@ describe("ProviderCommandReactor", () => {
       );
       await respondToReview(harness, review, "compact");
       const uncertain = (await readHarnessThread(harness))!.claudeCacheReview!;
+      expect(startClaudeCompaction).toHaveBeenCalledOnce();
+      expect(uncertain.status).toBe("uncertain");
+      expect(uncertain.compactionResponseEventSequence).toEqual(expect.any(Number));
       const release = Deferred.makeUnsafe<void>();
       startClaudeCompaction.mockImplementation((input) =>
         Deferred.await(release).pipe(Effect.as(input)),
       );
       const retry = Effect.runPromise(
-        harness.reactor.reconcileDelivery({
-          threadId: ThreadId.makeUnsafe("thread-1"),
-          eventSequence: uncertain.compactionResponseEventSequence!,
-          expectedState: "uncertain",
-          outcome: "safe_retry",
-          reconciledBy: "operator-confirmed-never-executed",
-        }),
+        harness.reactor
+          .reconcileDelivery({
+            threadId: ThreadId.makeUnsafe("thread-1"),
+            eventSequence: uncertain.compactionResponseEventSequence!,
+            expectedState: "uncertain",
+            outcome: "safe_retry",
+            reconciledBy: "operator-confirmed-never-executed",
+          })
+          .pipe(Effect.provideService(Clock.Clock, clock)),
       );
       try {
         await waitFor(() => startClaudeCompaction.mock.calls.length === 2);
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        await Effect.runPromise(clock.adjust(Duration.millis(200)).pipe(Scope.provide(clockScope)));
         expect((await readHarnessThread(harness))?.claudeCacheReview?.status).toBe("compacting");
         const threadId = ThreadId.makeUnsafe("thread-during-retried-compaction");
         await Effect.runPromise(
