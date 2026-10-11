@@ -1962,6 +1962,8 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
                 "--no-index",
                 "--patch",
                 "--no-color",
+                "--no-ext-diff",
+                "--no-textconv",
                 "--src-prefix=a/",
                 "--dst-prefix=b/",
                 "--",
@@ -2088,7 +2090,7 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
         const tracked = yield* executeGit(
           "GitCore.readUnstagedPatch.trackedPatch",
           cwd,
-          ["diff", "--patch", "--no-color", "--no-ext-diff"],
+          ["diff", "--patch", "--no-color", "--no-ext-diff", "--no-textconv"],
           {
             allowNonZeroExit: true,
             timeoutMs: WORKING_TREE_DIFF_TIMEOUT_MS,
@@ -2110,7 +2112,7 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
       executeGit(
         "GitCore.readStagedPatch",
         cwd,
-        ["diff", "--cached", "--patch", "--no-color", "--no-ext-diff"],
+        ["diff", "--cached", "--patch", "--no-color", "--no-ext-diff", "--no-textconv"],
         {
           allowNonZeroExit: true,
           timeoutMs: WORKING_TREE_DIFF_TIMEOUT_MS,
@@ -2221,6 +2223,7 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
             "--patch",
             "--no-color",
             "--no-ext-diff",
+            "--no-textconv",
             headExists ? "HEAD" : EMPTY_TREE_OBJECT_ID,
             ...(filePath === undefined ? [] : ["--", ...paths.map((path) => `:(literal)${path}`)]),
           ],
@@ -2315,7 +2318,15 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
         const tracked = yield* executeGit(
           "GitCore.readBranchPatch.trackedPatch",
           cwd,
-          ["diff", "--patch", "--minimal", "--no-color", "--no-ext-diff", mergeBase],
+          [
+            "diff",
+            "--patch",
+            "--minimal",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            mergeBase,
+          ],
           {
             timeoutMs: WORKING_TREE_DIFF_TIMEOUT_MS,
             maxOutputBytes: 10_000_000,
@@ -2545,7 +2556,7 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
               const tracked = yield* executeGit(
                 "GitCore.readRefPatch.trackedPatch",
                 cwd,
-                ["diff", "--patch", "--no-color", "--no-ext-diff", resolvedRef],
+                ["diff", "--patch", "--no-color", "--no-ext-diff", "--no-textconv", resolvedRef],
                 {
                   env,
                   timeoutMs: WORKING_TREE_DIFF_TIMEOUT_MS,
@@ -2737,7 +2748,7 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
         const stagedPatch = yield* executeGit(
           "GitCore.prepareCommitContext.stagedPatch",
           cwd,
-          ["diff", "--cached", "--patch", "--minimal"],
+          ["diff", "--cached", "--patch", "--minimal", "--no-ext-diff", "--no-textconv"],
           GIT_MUTATION_OPTIONS,
         ).pipe(Effect.map((result) => result.stdout));
 
@@ -2954,7 +2965,7 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
             execute({
               operation: "GitCore.readRangeContext.diffPatch",
               cwd,
-              args: ["diff", "--patch", "--minimal", range],
+              args: ["diff", "--patch", "--minimal", "--no-ext-diff", "--no-textconv", range],
               maxOutputBytes: 10_000_000,
             }),
           ],
@@ -3287,13 +3298,22 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
             executeGit(
               "GitCore.readWorktreeStateHash.staged",
               cwd,
-              ["diff", "--cached", "--binary", "--full-index", "HEAD", "--"],
+              [
+                "diff",
+                "--cached",
+                "--binary",
+                "--full-index",
+                "--no-ext-diff",
+                "--no-textconv",
+                "HEAD",
+                "--",
+              ],
               { maxOutputBytes: WORKTREE_TRANSFER_MAX_OUTPUT_BYTES },
             ),
             executeGit(
               "GitCore.readWorktreeStateHash.unstaged",
               cwd,
-              ["diff", "--binary", "--full-index", "--"],
+              ["diff", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", "--"],
               { maxOutputBytes: WORKTREE_TRANSFER_MAX_OUTPUT_BYTES },
             ),
             listWorktreeTransferPaths(cwd),
@@ -3338,7 +3358,7 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
             executeGit(
               "GitCore.copyCheckoutChanges.patch",
               sourceCwd,
-              ["diff", "--binary", "--full-index", "HEAD", "--"],
+              ["diff", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", "HEAD", "--"],
               { maxOutputBytes: WORKTREE_TRANSFER_MAX_OUTPUT_BYTES },
             ).pipe(Effect.map((result) => result.stdout)),
             listWorktreeTransferPaths(sourceCwd),
@@ -3433,7 +3453,7 @@ export const makeGitCore = (options?: { executeOverride?: GitCoreShape["execute"
             executeGit(
               "GitCore.snapshotWorktree.patch",
               input.cwd,
-              ["diff", "--binary", "--full-index", "HEAD", "--"],
+              ["diff", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", "HEAD", "--"],
               { maxOutputBytes: WORKTREE_TRANSFER_MAX_OUTPUT_BYTES },
             ).pipe(Effect.map((result) => result.stdout)),
             listWorktreeTransferPaths(input.cwd),
