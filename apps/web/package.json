@@ -50,7 +50,7 @@
     "effect": "catalog:",
     "html-to-image": "^1.11.13",
     "i18next": "^26.4.4",
-    "katex": "^0.16.45",
+    "katex": "^0.19.1",
     "lexical": "^0.41.0",
     "micromark-util-decode-string": "2.0.1",
     "monaco-editor": "0.57.0",
