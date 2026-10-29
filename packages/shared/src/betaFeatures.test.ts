@@ -4,7 +4,10 @@ import {
   desktopFlavorFromBundleId,
   desktopFlavorFromProtocol,
   GROUPS_BETA_FEATURE,
+  INLINE_VISUALS_BETA_FEATURE,
   isBetaFeatureEnabled,
+  MCP_CONNECTORS_BETA_FEATURE,
+  NATIVE_EDITOR_BETA_FEATURE,
 } from "./betaFeatures";
 import {
   SYNARA_BETA_BUNDLE_ID,
@@ -48,6 +51,29 @@ describe("isBetaFeatureEnabled", () => {
       expect(isBetaFeatureEnabled(GROUPS_BETA_FEATURE, flavor)).toBe(true);
     }
   });
+
+  it("offers inline visuals in Stable and all other flavors", () => {
+    expect(isBetaFeatureEnabled(INLINE_VISUALS_BETA_FEATURE, "production")).toBe(true);
+    for (const flavor of ["beta", "development", "canary", "cua", "unknown"] as const) {
+      expect(isBetaFeatureEnabled(INLINE_VISUALS_BETA_FEATURE, flavor)).toBe(true);
+    }
+  });
+
+  it.each([MCP_CONNECTORS_BETA_FEATURE, NATIVE_EDITOR_BETA_FEATURE])(
+    "offers %s in Stable and all other flavors",
+    (feature) => {
+      for (const flavor of [
+        "production",
+        "beta",
+        "development",
+        "canary",
+        "cua",
+        "unknown",
+      ] as const) {
+        expect(isBetaFeatureEnabled(feature, flavor)).toBe(true);
+      }
+    },
+  );
 
   it("enables the rail sidebar layout in both Beta and Stable", () => {
     expect(isBetaFeatureEnabled("sidebarV2", "beta")).toBe(true);

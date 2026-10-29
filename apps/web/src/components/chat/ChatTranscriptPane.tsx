@@ -48,6 +48,7 @@ import {
   CHAT_COLUMN_GUTTER_CLASS_NAME,
 } from "./composerPickerStyles";
 import { ImportedHistoryButton, useImportedHistory } from "~/projectImport/ImportedHistoryButton";
+import { useTranslation } from "~/i18n";
 
 interface ChatTranscriptPaneProps {
   activeThreadId: string;
@@ -107,6 +108,8 @@ interface ChatTranscriptPaneProps {
   onMessagesTouchMove: TouchEventHandler<HTMLDivElement>;
   onMessagesTouchStart: TouchEventHandler<HTMLDivElement>;
   onMessagesWheel: WheelEventHandler<HTMLDivElement>;
+  onEmbeddedScrollIntent?: ((upward: boolean) => void) | undefined;
+  onSendVisualChoice?: ComponentProps<typeof MessagesTimeline>["onSendVisualChoice"];
   onIsAtEndChange: (isAtEnd: boolean) => void;
   onNavigate?: () => void;
   onCloseAgentActivityDetail?: () => void;
@@ -210,6 +213,8 @@ export function ChatTranscriptPane({
   onMessagesTouchMove,
   onMessagesTouchStart,
   onMessagesWheel,
+  onEmbeddedScrollIntent,
+  onSendVisualChoice,
   onIsAtEndChange,
   onNavigate,
   onCloseAgentActivityDetail,
@@ -256,6 +261,8 @@ export function ChatTranscriptPane({
   onResolveWorktreeSetup,
   findHighlightStore: findHighlightStoreProp,
 }: ChatTranscriptPaneProps) {
+  const { t } = useTranslation();
+
   // The composer floats over the transcript's bottom edge, so the scroll-to-bottom
   // affordance rides above it on the same inset the transcript content uses.
   const scrollButtonFrameStyle: CSSProperties | undefined =
@@ -393,6 +400,7 @@ export function ChatTranscriptPane({
           <SubagentRunContext.Provider value={subagentRunContextValue}>
             <MessagesTimeline
               key={activeThreadId}
+              heightCacheScope={activeThreadId}
               {...(onStopBackgroundTask ? { onStopBackgroundTask } : {})}
               subagentThread={subagentThread ?? null}
               historyHeader={
@@ -458,6 +466,9 @@ export function ChatTranscriptPane({
               onMessagesClickCapture={onMessagesClickCapture}
               onMessagesMouseUp={onMessagesMouseUp}
               onMessagesWheel={onMessagesWheel}
+              onEmbeddedScrollIntent={onEmbeddedScrollIntent}
+              onSendVisualChoice={onSendVisualChoice}
+              threadId={activeThreadId}
               onMessagesPointerDown={onMessagesPointerDown}
               onMessagesPointerUp={onMessagesPointerUp}
               onMessagesPointerCancel={onMessagesPointerCancel}
@@ -521,7 +532,7 @@ export function ChatTranscriptPane({
               type="button"
               onClick={onScrollToBottom}
               data-scroll-anchor-ignore
-              aria-label="Scroll to bottom"
+              aria-label={t("common:terminal_scrollToBottom")}
               aria-hidden={!scrollButtonVisible}
               tabIndex={scrollButtonVisible ? 0 : -1}
               className={cn(

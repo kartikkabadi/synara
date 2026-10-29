@@ -1,16 +1,19 @@
 // FILE: MessagesTimeline.logic.ts
-// Purpose: Owns the pure row-derivation helpers used by the transcript hot path.
+// Purpose: Owns row derivation and localized labels used by the transcript hot path.
 // Layer: Web chat presentation helpers
 // Exports: row derivation, structural sharing, copy/timer helpers
 
 import {
+  type InlineVisualActivityPayload,
   type MessageId,
   type OrchestrationLatestTurn,
   type OrchestrationThreadActivity,
   type TurnId,
 } from "@synara/contracts";
+import { readInlineVisualEmbedIds } from "@synara/shared/inlineVisual";
+import { t } from "~/i18n";
 import { type TimelineEntry, type WorkLogEntry, formatElapsed } from "../../session-logic";
-import type { WorkLogUserInputExchangeItem } from "../../workLog";
+import { isCodexRuntimeWarningType, type WorkLogUserInputExchangeItem } from "../../workLog";
 import { normalizeCompactToolLabel as normalizeCompactToolLabelValue } from "../../lib/toolCallLabel";
 import { isCodexActivityStatusWorkEntry } from "./agentActivity.logic";
 import {
@@ -54,7 +57,7 @@ export function canSubmitUserMessageEdit(input: {
 // A turn can interleave tool work and intermediate assistant narration
 // (preambles), so the collapsed panel keeps both in chronological order.
 export type CollapsedTurnItem =
-  | { kind: "work"; id: string; entry: WorkLogEntry }
+  | { kind: "work"; id: string; entry: WorkLogEntry; backgroundTaskConsumed?: true }
   | { kind: "narration"; id: string; message: ChatMessage };
 
 // A settled turn's collapsed items re-chunked for rendering: consecutive
@@ -488,16 +491,58 @@ export function deriveTurnTimingByTurnId(input: {
   return timings;
 }
 
-// "“Run delayed echo” finished", or a count when several tasks woke the turn.
-export function formatTurnResumedBy(resumedBy: ReadonlyArray<TurnResumedBy>): string {
+// A background task still running when its turn ended stays pinned under the
+// folded turn's header: its status is the turn's lasting result. One the turn
+// started and settled itself (a dev server it stopped) folds with its work.
+// A successful later response can also consume that exact task completion.
+export function isPinnedBackgroundTaskEntry(
+  entry: WorkLogEntry,
+  turnEndedAt: string | null,
+  backgroundTaskConsumed = false,
+): boolean {
+  const task = entry.backgroundTask;
+  if (!task) return false;
+  if (task.completedAt === null || turnEndedAt === null) return true;
+  const completedMs = Date.parse(task.completedAt);
+  const endedMs = Date.parse(turnEndedAt);
+  if (Number.isNaN(completedMs) || Number.isNaN(endedMs)) return true;
+  if (backgroundTaskConsumed && task.status === "finished") return false;
+  return completedMs > endedMs;
+}
+
+const TURN_RESUMED_TASK_MESSAGES = {
+  finished: "chat:turnResumedTaskFinished",
+  failed: "chat:turnResumedTaskFailed",
+  stopped: "chat:turnResumedTaskStopped",
+  updated: "chat:turnResumedTaskUpdated",
+} as const;
+
+const TURN_RESUMED_TASKS_MESSAGES = {
+  finished: "chat:turnResumedTasksFinished",
+  failed: "chat:turnResumedTasksFailed",
+  stopped: "chat:turnResumedTasksStopped",
+  updated: "chat:turnResumedTasksUpdated",
+} as const;
+
+// React callers pass their hook translator so the compiler observes locale changes.
+// Whole messages keep outcome grammar localizable without translating provider descriptions.
+export function formatTurnResumedBy(
+  resumedBy: ReadonlyArray<TurnResumedBy>,
+  translate: typeof t = t,
+): string {
   if (resumedBy.length === 1) {
-    const [only] = resumedBy;
-    return `“${only!.description ?? "Background task"}” ${only!.outcome}`;
+    const only = resumedBy[0]!;
+    return translate(TURN_RESUMED_TASK_MESSAGES[only.outcome], {
+      description: only.description ?? translate("chat:backgroundTask"),
+    });
   }
   const outcomes = new Set(resumedBy.map((item) => item.outcome));
-  return outcomes.size === 1
-    ? `${resumedBy.length} background tasks ${resumedBy[0]!.outcome}`
-    : `${resumedBy.length} background tasks ended`;
+  return translate(
+    outcomes.size === 1
+      ? TURN_RESUMED_TASKS_MESSAGES[resumedBy[0]!.outcome]
+      : "chat:turnResumedTasksEnded",
+    { count: resumedBy.length },
+  );
 }
 
 // The text of a settled turn header, without the clock time or icon:
@@ -505,20 +550,29 @@ export function formatTurnResumedBy(resumedBy: ReadonlyArray<TurnResumedBy>): st
 // limit reached", "Resumed: “Run delayed echo” finished · 3s".
 export function formatTurnHeaderLabel(
   header: Pick<TurnHeader, "elapsed" | "outcome" | "reason" | "resumedBy">,
+  translate: typeof t = t,
 ): string {
   switch (header.outcome) {
     case "stopped":
-      return header.elapsed ? `Stopped by you after ${header.elapsed}` : "Stopped by you";
+      return header.elapsed
+        ? translate("chat:turnStoppedByYouAfter", { elapsed: header.elapsed })
+        : translate("chat:turnStoppedByYou");
     case "interrupted": {
-      const base = header.elapsed ? `Interrupted after ${header.elapsed}` : "Interrupted";
+      const base = header.elapsed
+        ? translate("chat:turnInterruptedAfter", { elapsed: header.elapsed })
+        : translate("chat:runStatus_interrupted");
       return header.reason ? `${base} · ${header.reason}` : base;
     }
     case "completed":
       if (header.resumedBy && header.resumedBy.length > 0) {
-        const resumed = `Resumed: ${formatTurnResumedBy(header.resumedBy)}`;
-        return header.elapsed ? `${resumed} · ${header.elapsed}` : resumed;
+        const task = formatTurnResumedBy(header.resumedBy, translate);
+        return header.elapsed
+          ? translate("chat:turnResumedAfter", { task, elapsed: header.elapsed })
+          : translate("chat:turnResumed", { task });
       }
-      return header.elapsed ? `Worked for ${header.elapsed}` : "Details";
+      return header.elapsed
+        ? translate("chat:turnWorkedFor", { elapsed: header.elapsed })
+        : translate("common:detail_details");
   }
 }
 
@@ -584,6 +638,9 @@ export type MessagesTimelineRow =
       // Set on the terminal assistant, or the request if an interrupted turn
       // produced no assistant/work rows.
       turnHeader?: TurnHeader;
+      // Set when a kept visual row opens the response and renders this header,
+      // so the header sits above the visuals and the answer instead of between.
+      turnHeaderRowId?: string;
       // Set on the last row of a stopped turn that has no settled header.
       turnEndMarker?: TurnEndMarker;
       durationStart: string;
@@ -618,6 +675,20 @@ export type MessagesTimelineRow =
       id: string;
       createdAt: string;
       entry: WorkLogEntry & { userInputExchange: ReadonlyArray<WorkLogUserInputExchangeItem> };
+    }
+  | {
+      // A visual the agent published with `synara_show_visual`. Like the plan
+      // card and answered questions it stays visible when the turn folds.
+      kind: "inline-visual";
+      id: string;
+      createdAt: string;
+      visual: InlineVisualActivityPayload;
+      turnId?: TurnId;
+      // The settled terminal message whose turn header this row renders above
+      // its visual: set on the first visual a settled turn keeps.
+      turnHeaderSource?: Extract<MessagesTimelineRow, { kind: "message" }>;
+      // Set when a stopped turn without a settled header ends on this visual.
+      turnEndMarker?: TurnEndMarker;
     }
   | { kind: "working"; id: string; createdAt: string | null }
   | {
@@ -676,7 +747,10 @@ export function resolveWorkEntryJumpTarget(
         (item) => item.kind === "work" && item.entry.id === entryId,
       )
     ) {
-      return { rowIndex, expandCollapsedWorkMessageId: row.message.id };
+      return {
+        rowIndex: turnHeaderRowIndex(rows, rowIndex),
+        expandCollapsedWorkMessageId: row.message.id,
+      };
     }
   }
   return null;
@@ -725,7 +799,7 @@ export function resolveThreadFindJumpTarget(
       continue;
     }
     return {
-      rowIndex,
+      rowIndex: turnHeaderRowIndex(rows, rowIndex),
       visibleMessageId: row.message.id,
       expandCollapsedWorkMessageId: row.message.id,
       collapsedNarrationMessageId: messageId,
@@ -733,6 +807,16 @@ export function resolveThreadFindJumpTarget(
   }
 
   return null;
+}
+
+// The row that renders a settled message's turn header, and so its folded
+// work: the message's own row, or the first visual its turn kept.
+function turnHeaderRowIndex(rows: readonly MessagesTimelineRow[], messageRowIndex: number): number {
+  const row = rows[messageRowIndex];
+  const headerRowId = row?.kind === "message" ? row.turnHeaderRowId : undefined;
+  if (headerRowId === undefined) return messageRowIndex;
+  const headerRowIndex = rows.findIndex((candidate) => candidate.id === headerRowId);
+  return headerRowIndex >= 0 ? headerRowIndex : messageRowIndex;
 }
 
 export function computeMessageDurationStart(
@@ -939,16 +1023,28 @@ export function deriveTerminalAssistantMessageIds(
   return terminalAssistantMessageIds;
 }
 
-// Server-posted coordinator notices and provider handoff boundaries keep their own
-// row: they are not turn work, so they never merge into or fold with a turn.
+// Thread-scoped notices and provider handoff boundaries keep their own row:
+// they are not turn work, so they never merge into or fold with a turn.
 export function isStandaloneWorkEntry(
   entry: Pick<
     WorkLogEntry,
-    "synaraWorkerNotice" | "providerHandoff" | "turnFailure" | "subagentRun"
+    | "synaraWorkerNotice"
+    | "providerHandoff"
+    | "turnFailure"
+    | "subagentRun"
+    | "activityKind"
+    | "nativeEventType"
+    | "turnId"
   >,
 ): boolean {
   return Boolean(
-    entry.synaraWorkerNotice || entry.providerHandoff || entry.turnFailure || entry.subagentRun,
+    entry.synaraWorkerNotice ||
+    entry.providerHandoff ||
+    entry.turnFailure ||
+    entry.subagentRun ||
+    (entry.activityKind === "runtime.warning" &&
+      entry.turnId == null &&
+      isCodexRuntimeWarningType(entry.nativeEventType)),
   );
 }
 
@@ -976,13 +1072,13 @@ export function deriveMessagesTimelineRows(input: {
   conversationOnly?: boolean;
 }): MessagesTimelineRow[] {
   const nextRows: MessagesTimelineRow[] = [];
+  const embeddedVisualOwners = collectInlineVisualEmbedOwners(input.timelineEntries);
   // A finished background task wakes the agent into a new response, so it ends
   // the previous response and starts the next one's clock like a user message.
   const responseMessages = input.timelineEntries.flatMap((entry): TimelineDurationMessage[] =>
     entry.kind === "message"
       ? [entry.message]
-      : entry.kind === "work" &&
-          (entry.entry.backgroundTaskCompletion || entry.entry.monitorNotification)
+      : entry.kind === "work" && wakesAgent(entry.entry)
         ? [{ id: entry.id, role: "user", createdAt: entry.createdAt }]
         : [],
   );
@@ -1082,6 +1178,29 @@ export function deriveMessagesTimelineRows(input: {
           }
           continue;
         }
+        const inlineVisual = runEntry.entry.inlineVisual;
+        if (inlineVisual) {
+          // A visual the reply places renders inside that message. One the
+          // running turn has not placed yet waits for its reply instead of
+          // showing above it and then jumping into the text.
+          if (
+            embeddedVisualOwners.has(inlineVisual.visualId) ||
+            (input.activeTurnInProgress === true &&
+              runEntry.entry.turnId != null &&
+              runEntry.entry.turnId === input.activeTurnId)
+          ) {
+            continue;
+          }
+          flushPendingWorkGroup({ attachToPreviousAssistant: false });
+          nextRows.push({
+            kind: "inline-visual",
+            id: runEntry.id,
+            createdAt: runEntry.createdAt,
+            visual: inlineVisual,
+            ...(runEntry.entry.turnId ? { turnId: runEntry.entry.turnId } : {}),
+          });
+          continue;
+        }
         const userInputExchange = runEntry.entry.userInputExchange;
         if (userInputExchange) {
           flushPendingWorkGroup({ attachToPreviousAssistant: false });
@@ -1091,11 +1210,7 @@ export function deriveMessagesTimelineRows(input: {
             createdAt: runEntry.createdAt,
             entry: { ...runEntry.entry, userInputExchange },
           });
-        } else if (
-          isStandaloneWorkEntry(runEntry.entry) ||
-          runEntry.entry.backgroundTaskCompletion ||
-          runEntry.entry.monitorNotification
-        ) {
+        } else if (isStandaloneWorkEntry(runEntry.entry) || wakesAgent(runEntry.entry)) {
           flushPendingWorkGroup();
           nextRows.push({
             kind: "work",
@@ -1287,6 +1402,9 @@ function markInterruptedTurnsWithoutHeader(
       for (const entry of row.groupedEntries) {
         if (entry.turnId) lastRowIndexByTurnId.set(entry.turnId, index);
       }
+    } else if (row.kind === "inline-visual" && row.turnId) {
+      // A visual published before the stop still belongs above the stop line.
+      lastRowIndexByTurnId.set(row.turnId, index);
     } else if (
       row.kind === "message" &&
       row.message.role === "user" &&
@@ -1301,7 +1419,7 @@ function markInterruptedTurnsWithoutHeader(
     const timing = turnTimingByTurnId.get(turnId);
     if (!timing || (!timing.interrupted && !timing.failed) || headedTurnIds.has(turnId)) continue;
     const row = rows[index]!;
-    if (row.kind !== "work" && row.kind !== "message") continue;
+    if (row.kind !== "work" && row.kind !== "message" && row.kind !== "inline-visual") continue;
     row.turnEndMarker = {
       elapsed:
         timing.startedAt && timing.completedAt
@@ -1331,6 +1449,14 @@ function markInterruptedTurnsWithoutHeader(
   }
 }
 
+function earliestTimestamp(a: string, b: string): string {
+  const aMs = Date.parse(a);
+  const bMs = Date.parse(b);
+  if (Number.isNaN(aMs)) return b;
+  if (Number.isNaN(bMs)) return a;
+  return bMs < aMs ? b : a;
+}
+
 // The live turn starts at the request that opened it, so its header slots in
 // right after it: requests queued behind the live turn stay below its work. A
 // turn with no request of its own that a background task woke starts at that
@@ -1346,7 +1472,13 @@ function findLiveTurnHeaderInsertion(
   const completionBoundary = () => ({
     index: lastCompletionIndex + 1,
     resumedBy: collectResumedBy(rows, lastCompletionIndex),
-    resumedStartedAt: completionRow?.kind === "work" ? completionRow.createdAt : null,
+    resumedStartedAt:
+      completionRow?.kind === "work"
+        ? collectWakeEntries(rows, lastCompletionIndex).reduce(
+            (start, entry) => earliestTimestamp(start, entry.createdAt),
+            completionRow.createdAt,
+          )
+        : null,
   });
   if (activeTurnId !== null) {
     const requestIndex = rows.findLastIndex(
@@ -1389,9 +1521,15 @@ function findLiveTurnHeaderInsertion(
 // Returns the terminal assistant only when it is still the transcript tail.
 // A newer user message means the next turn has begun but has not produced text yet.
 function isBackgroundTaskCompletionRow(row: MessagesTimelineRow): boolean {
-  return (
-    row.kind === "work" &&
-    row.groupedEntries.some((entry) => entry.backgroundTaskCompletion || entry.monitorNotification)
+  return row.kind === "work" && row.groupedEntries.some(wakesAgent);
+}
+
+// A finished background task or Monitor event that woke the idle agent. One
+// that arrived mid-turn is ordinary work inside that turn.
+function wakesAgent(entry: WorkLogEntry): boolean {
+  return Boolean(
+    entry.backgroundTaskCompletion ||
+    (entry.monitorNotification && !entry.monitorNotification.midTurn),
   );
 }
 
@@ -1437,18 +1575,14 @@ function collapseSettledTurns(
     ? findTailTerminalAssistantMessageId(rows, terminalAssistantMessageIds)
     : null;
 
+  // Match the exact native completion activity, not a reused task id, label,
+  // or timestamp (task.updated can settle a row before task.completed wakes us).
+  const consumedCompletions = new Map<string, WorkLogEntry>();
+
   const collectWorkItems = (entries: ReadonlyArray<WorkLogEntry>, into: CollapsedTurnItem[]) => {
     for (const entry of entries) {
       into.push({ kind: "work", id: entry.id, entry });
     }
-  };
-
-  const earliestTimestamp = (a: string, b: string): string => {
-    const aMs = Date.parse(a);
-    const bMs = Date.parse(b);
-    if (Number.isNaN(aMs)) return b;
-    if (Number.isNaN(bMs)) return a;
-    return bMs < aMs ? b : a;
   };
 
   for (let pass = rows.length - 1; pass >= 0; pass -= 1) {
@@ -1476,8 +1610,11 @@ function collapseSettledTurns(
     // mini-turns can have distinct turnIds inside one assistant answer, so the
     // user message boundary is the stable UI grouping point.
     const foldIndices: number[] = [];
+    // Scanning backwards, so this ends as the earliest visual the turn keeps.
+    let firstKeptVisual: Extract<MessagesTimelineRow, { kind: "inline-visual" }> | null = null;
     let wokenAt: string | null = null;
     let resumedBy: TurnResumedBy[] | null = null;
+    let wakeEntries: WorkLogEntry[] = [];
     for (let scan = pass - 1; scan >= 0; scan -= 1) {
       const prev = rows[scan]!;
       // The response started where a background task woke the agent; every
@@ -1485,6 +1622,7 @@ function collapseSettledTurns(
       if (isBackgroundTaskCompletionRow(prev)) {
         wokenAt = prev.kind === "work" ? prev.createdAt : null;
         resumedBy = collectResumedBy(rows, scan);
+        wakeEntries = collectWakeEntries(rows, scan);
         break;
       }
       if (prev.kind === "work") {
@@ -1508,9 +1646,14 @@ function collapseSettledTurns(
         foldIndices.push(scan);
         continue;
       }
-      if (prev.kind === "proposed-plan" || prev.kind === "user-input") {
-        // The plan card and answered questions stay visible, but they should not strand earlier
-        // narration/work outside the final turn header disclosure.
+      if (
+        prev.kind === "proposed-plan" ||
+        prev.kind === "user-input" ||
+        prev.kind === "inline-visual"
+      ) {
+        // The plan card, answered questions, and visuals stay visible, but they should not
+        // strand earlier narration/work outside the final turn header disclosure.
+        if (prev.kind === "inline-visual") firstKeptVisual = prev;
         continue;
       }
       break;
@@ -1606,7 +1749,14 @@ function collapseSettledTurns(
     }
     // A provider can open the turn a woken response belongs to only when it
     // replies; that response started when the background task finished.
-    if (wokenAt !== null) turnStart = wokenAt;
+    if (wokenAt !== null) {
+      // Consecutive wakes share this response. Its clock starts at the first,
+      // while the latest wake below still guards against a stale turn end.
+      turnStart = wakeEntries.reduce(
+        (start, entry) => earliestTimestamp(start, entry.createdAt),
+        wokenAt,
+      );
+    }
     // A provider can reuse the launching turn id for a notification response.
     // An earlier terminal record belongs to the launch, not the resumed work.
     const responseTiming =
@@ -1631,6 +1781,34 @@ function collapseSettledTurns(
       resumedBy,
     };
 
+    // Only a successful, settled response consumes its wake. Until then the
+    // launching row keeps the task visible; unrelated later replies cannot do so.
+    // Reused-turn timing can retain an old end before the wake: discarding that
+    // duration must not discard an explicit failure/stop outcome as success.
+    if (
+      header.outcome === "completed" &&
+      !turnTiming?.failed &&
+      !turnTiming?.stoppedByUser &&
+      !turnTiming?.interrupted &&
+      wokenAt !== null &&
+      responseEnd &&
+      Date.parse(responseEnd) >= Date.parse(wokenAt)
+    ) {
+      const consumedWakeEntries = wakeEntries.filter((entry) => {
+        const completion = entry.backgroundTaskCompletion;
+        if (!completion || (completion.outcome ?? "finished") !== "finished") return false;
+        consumedCompletions.set(entry.id, entry);
+        return true;
+      });
+      // Keep the wake's details available in Worked without duplicating a
+      // completed notification between the two genuine final answers.
+      if (options.collapseWork) {
+        collapsedItems.unshift(
+          ...consumedWakeEntries.map((entry) => ({ kind: "work" as const, id: entry.id, entry })),
+        );
+      }
+    }
+
     if (!options.collapseWork) {
       const firstAssistant = foldIndices
         .map((index) => rows[index]!)
@@ -1642,6 +1820,12 @@ function collapseSettledTurns(
       continue;
     }
     row.turnHeader = header;
+    if (firstKeptVisual) {
+      // The header opens the whole response; kept visuals belong to the answer
+      // below it. Their row renders it, so a live frame never changes parent.
+      row.turnHeaderRowId = firstKeptVisual.id;
+      firstKeptVisual.turnHeaderSource = row;
+    }
     if (collapsedItems.length > 0) {
       row.collapsedTurnItems = collapsedItems;
       delete row.leadingWorkEntries;
@@ -1655,30 +1839,61 @@ function collapseSettledTurns(
       pass -= foldIndices.length;
     }
   }
+
+  if (consumedCompletions.size === 0) return;
+  for (const row of rows) {
+    if (row.kind !== "message" || !row.collapsedTurnItems) continue;
+    for (const item of row.collapsedTurnItems) {
+      if (item.kind !== "work") continue;
+      const task = item.entry.backgroundTask;
+      if (!task || task.status !== "finished" || task.completedAt === null) continue;
+      const wake = task.completionActivityId
+        ? consumedCompletions.get(task.completionActivityId)
+        : undefined;
+      const completion = wake?.backgroundTaskCompletion;
+      if (
+        !completion ||
+        completion.taskId !== task.taskId ||
+        (completion.taskType !== null &&
+          task.taskType !== null &&
+          completion.taskType !== task.taskType) ||
+        (wake?.turnId && item.entry.turnId && wake.turnId !== item.entry.turnId)
+      )
+        continue;
+      item.backgroundTaskConsumed = true;
+    }
+  }
 }
 
 // The background tasks whose completion rows end at `index`, oldest first.
+function collectWakeEntries(
+  rows: ReadonlyArray<MessagesTimelineRow>,
+  index: number,
+): WorkLogEntry[] {
+  const entries: WorkLogEntry[] = [];
+  for (let scan = index; scan >= 0; scan -= 1) {
+    const row = rows[scan]!;
+    if (!isBackgroundTaskCompletionRow(row) || row.kind !== "work") break;
+    entries.unshift(...row.groupedEntries.filter(wakesAgent));
+  }
+  return entries;
+}
+
 function collectResumedBy(
   rows: ReadonlyArray<MessagesTimelineRow>,
   index: number,
 ): TurnResumedBy[] | null {
-  const resumedBy: TurnResumedBy[] = [];
-  for (let scan = index; scan >= 0; scan -= 1) {
-    const row = rows[scan]!;
-    if (!isBackgroundTaskCompletionRow(row) || row.kind !== "work") break;
-    for (const entry of row.groupedEntries.toReversed()) {
-      const completion = entry.backgroundTaskCompletion;
-      const monitor = entry.monitorNotification;
-      if (!completion && !monitor) continue;
-      resumedBy.unshift({
-        description: completion?.description ?? monitor?.name ?? null,
-        outcome:
-          completion?.outcome ??
-          (monitor?.outcome === "completed" ? "finished" : monitor?.outcome) ??
-          "finished",
-      });
-    }
-  }
+  const resumedBy = collectWakeEntries(rows, index).map((entry): TurnResumedBy => {
+    const completion = entry.backgroundTaskCompletion;
+    const monitor = entry.monitorNotification;
+    return {
+      description: completion?.description ?? monitor?.name ?? null,
+      outcome:
+        completion?.outcome ??
+        (monitor?.outcome === "completed" ? "finished" : monitor?.outcome) ??
+        "finished",
+    };
+  });
   return resumedBy.length > 0 ? resumedBy : null;
 }
 
@@ -1932,7 +2147,10 @@ function collapsedTurnItemsEqual(
     const other = right[index]!;
     if (item.kind !== other.kind || item.id !== other.id) return false;
     if (item.kind === "work" && other.kind === "work") {
-      return workLogEntryContentEqual(item.entry, other.entry);
+      return (
+        item.backgroundTaskConsumed === other.backgroundTaskConsumed &&
+        workLogEntryContentEqual(item.entry, other.entry)
+      );
     }
     if (item.kind === "narration" && other.kind === "narration") {
       return item.message === other.message;
@@ -1994,6 +2212,7 @@ function workLogBackgroundTasksEqual(
     a.description === b.description &&
     a.startedAt === b.startedAt &&
     a.completedAt === b.completedAt &&
+    a.completionActivityId === b.completionActivityId &&
     a.exitCode === b.exitCode
   );
 }
@@ -2030,6 +2249,17 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "user-input":
       return a.entry.userInputExchange === (b as typeof a).entry.userInputExchange;
 
+    case "inline-visual": {
+      const bv = b as typeof a;
+      return (
+        a.visual === bv.visual &&
+        turnEndMarkersEqual(a.turnEndMarker, bv.turnEndMarker) &&
+        (a.turnHeaderSource === undefined || bv.turnHeaderSource === undefined
+          ? a.turnHeaderSource === bv.turnHeaderSource
+          : isRowUnchanged(a.turnHeaderSource, bv.turnHeaderSource))
+      );
+    }
+
     case "work":
       return (
         a.createdAt === (b as typeof a).createdAt &&
@@ -2047,6 +2277,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.inlineWorkGroupId === bm.inlineWorkGroupId &&
         collapsedTurnItemsEqual(a.collapsedTurnItems, bm.collapsedTurnItems) &&
         turnHeadersEqual(a.turnHeader, bm.turnHeader) &&
+        a.turnHeaderRowId === bm.turnHeaderRowId &&
         turnEndMarkersEqual(a.turnEndMarker, bm.turnEndMarker) &&
         a.durationStart === bm.durationStart &&
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
@@ -2062,4 +2293,43 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return a.message === bm.message && a.segmentIndex === bm.segmentIndex;
     }
   }
+}
+
+/** Every visual the transcript holds, by id, for replies that place them in their text. */
+export function collectInlineVisuals(
+  timelineEntries: ReadonlyArray<TimelineEntry>,
+): ReadonlyMap<string, InlineVisualActivityPayload> {
+  const visuals = new Map<string, InlineVisualActivityPayload>();
+  for (const entry of timelineEntries) {
+    if (entry.kind === "work" && entry.entry.inlineVisual) {
+      visuals.set(entry.entry.inlineVisual.visualId, entry.entry.inlineVisual);
+    }
+  }
+  return visuals;
+}
+
+/** Only the last visible assistant reply in the publishing turn can place its visual. */
+export function collectInlineVisualEmbedOwners(
+  entries: ReadonlyArray<TimelineEntry>,
+): ReadonlyMap<string, string> {
+  const turnByVisual = new Map<string, string>();
+  const replyByTurn = new Map<string, { id: string; text: string }>();
+  for (const entry of entries) {
+    if (entry.kind === "work" && entry.entry.inlineVisual && entry.entry.turnId) {
+      turnByVisual.set(entry.entry.inlineVisual.visualId, entry.entry.turnId);
+    } else if (
+      (entry.kind === "message" || entry.kind === "message-segment") &&
+      entry.message.role === "assistant" &&
+      entry.message.turnId
+    ) {
+      replyByTurn.set(entry.message.turnId, entry.message);
+    }
+  }
+  const owners = new Map<string, string>();
+  for (const [turnId, reply] of replyByTurn) {
+    for (const id of readInlineVisualEmbedIds(reply.text)) {
+      if (turnByVisual.get(id) === turnId) owners.set(id, reply.id);
+    }
+  }
+  return owners;
 }

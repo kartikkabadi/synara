@@ -1,7 +1,5 @@
 import {
-  CONTEXT_WINDOW_METER_GEOMETRY,
   type ContextWindowSnapshot,
-  contextWindowMeterSectorPath,
   deriveContextWindowMeterDisplay,
   formatContextWindowTokens,
   formatCostUsd,
@@ -11,6 +9,7 @@ import { useNowMs } from "~/hooks/useNowMs";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { ClaudeCacheDetails } from "./ClaudeCacheDetails";
 import { Button } from "../ui/button";
+import { useTranslation } from "~/i18n";
 
 export function ContextWindowMeter(props: {
   usage: ContextWindowSnapshot;
@@ -25,14 +24,15 @@ export function ContextWindowMeter(props: {
     onCompact: () => Promise<boolean>;
   };
 }) {
+  const { t } = useTranslation();
+
   const { usage, cumulativeCostUsd, activeWindowLabel, pendingWindowLabel } = props;
   const [open, setOpen] = useState(false);
   const nowMs = useNowMs(open && usage.claudeCache != null, 10_000);
   const display = deriveContextWindowMeterDisplay(usage);
-  // Never an empty dial once anything is used: a sliver keeps "some" distinct from "none".
-  const sectorPath = contextWindowMeterSectorPath(
-    display.normalizedPercentage > 0 ? Math.max(display.normalizedPercentage, 4) : 0,
-  );
+  const radius = 6;
+  const circumference = 2 * Math.PI * radius;
+  const dashOffset = circumference - (display.normalizedPercentage / 100) * circumference;
 
   return (
     <Popover
@@ -55,34 +55,30 @@ export function ContextWindowMeter(props: {
             <span className="relative flex h-4 w-4 items-center justify-center">
               <svg
                 viewBox="0 0 16 16"
-                className="absolute inset-0 h-full w-full"
+                className="-rotate-90 absolute inset-0 h-full w-full transform-gpu"
                 aria-hidden="true"
-                data-context-window-meter-glyph=""
               >
                 <circle
-                  cx={CONTEXT_WINDOW_METER_GEOMETRY.center}
-                  cy={CONTEXT_WINDOW_METER_GEOMETRY.center}
-                  r={CONTEXT_WINDOW_METER_GEOMETRY.outlineRadius}
+                  cx="8"
+                  cy="8"
+                  r={radius}
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="1.5"
-                  className="text-muted-foreground/45 dark:text-muted-foreground/55"
+                  strokeWidth="2"
+                  className="text-muted-foreground/25 dark:text-muted-foreground/40"
                 />
-                {/* The faint disc is the remaining window, so the sector reads as a share of it. */}
                 <circle
-                  cx={CONTEXT_WINDOW_METER_GEOMETRY.center}
-                  cy={CONTEXT_WINDOW_METER_GEOMETRY.center}
-                  r={CONTEXT_WINDOW_METER_GEOMETRY.pieRadius}
-                  fill="currentColor"
-                  className="text-muted-foreground/20 dark:text-muted-foreground/30"
+                  cx="8"
+                  cy="8"
+                  r={radius}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeDasharray={circumference}
+                  strokeDashoffset={dashOffset}
+                  className="text-primary transition-[stroke-dashoffset] duration-500 ease-out motion-reduce:transition-none dark:text-[var(--color-text-foreground)]"
                 />
-                {sectorPath ? (
-                  <path
-                    d={sectorPath}
-                    fill="currentColor"
-                    className="text-primary dark:text-[var(--color-text-foreground)]"
-                  />
-                ) : null}
               </svg>
             </span>
           </button>
@@ -90,10 +86,13 @@ export function ContextWindowMeter(props: {
       />
       <PopoverPopup tooltipStyle side="top" align="end" className="w-max max-w-none px-3 py-2">
         <div className="space-y-1.5 leading-tight">
-          <div className="text-ui-sm font-medium text-muted-foreground">Context window</div>
+          <div className="text-ui-sm font-medium text-muted-foreground">
+            {t("chat:sessionStatus_contextWindow")}
+          </div>
           {pendingWindowLabel ? (
             <div className="text-ui leading-snug text-muted-foreground">
-              Current session: {activeWindowLabel ?? "Unknown"}
+              {t("chat:sessionStatus_currentSessionLabel")}{" "}
+              {activeWindowLabel ?? t("common:common_unknown")}
             </div>
           ) : null}
           {display.usedPercentageLabel ? (
@@ -104,50 +103,55 @@ export function ContextWindowMeter(props: {
                   <span className="mx-1">⋅</span>
                   <span>{display.tokenUsageLabel}</span>
                   <span>/</span>
-                  <span>{formatContextWindowTokens(usage.maxTokens)} context used</span>
+                  <span>
+                    {formatContextWindowTokens(usage.maxTokens)} {t("chat:contextUsed")}
+                  </span>
                 </>
               ) : (
-                <span className="ml-1">context used</span>
+                <span className="ml-1">{t("chat:contextUsed")}</span>
               )}
             </div>
           ) : (
             <div className="text-ui leading-snug text-foreground">
-              {display.tokenUsageLabel} tokens used so far
+              {display.tokenUsageLabel} {t("chat:tokensUsedSoFar")}
             </div>
           )}
           {usage.maxTokens !== null ? (
             <div className="text-ui leading-snug text-muted-foreground">
-              Active context limit: {formatContextWindowTokens(usage.maxTokens)} tokens
+              {t("chat:activeContextLimit")} {formatContextWindowTokens(usage.maxTokens)}{" "}
+              {t("chat:tokens")}
             </div>
           ) : null}
           {props.showClaudeCache && activeWindowLabel ? (
             <div className="max-w-72 space-y-1 text-ui leading-snug text-muted-foreground">
-              <div>Auto-compact target: {activeWindowLabel}</div>
-              <p className="leading-relaxed">
-                The session's auto-compact target can be lower than the model's supported window.
-              </p>
+              <div>
+                {t("chat:autoCompactTarget")} {activeWindowLabel}
+              </div>
+              <p className="leading-relaxed">{t("chat:theSessionSAutoCompactTargetCanBeLower")}</p>
             </div>
           ) : null}
           {pendingWindowLabel ? (
             <div className="text-ui leading-snug text-muted-foreground">
-              Next turn: {pendingWindowLabel}
+              {t("chat:sessionStatus_nextTurn")} {pendingWindowLabel}
             </div>
           ) : null}
           {(usage.totalProcessedTokens ?? null) !== null &&
           (usage.totalProcessedTokens ?? 0) > usage.usedTokens ? (
             <div className="text-ui leading-snug text-muted-foreground">
-              {usage.tokenAccountingVersion === 1 ? "Estimated total processed" : "Total processed"}
-              : {formatContextWindowTokens(usage.totalProcessedTokens ?? null)} tokens
+              {usage.tokenAccountingVersion === 1
+                ? t("chat:estimatedTotalProcessed")
+                : t("chat:totalProcessed")}
+              : {formatContextWindowTokens(usage.totalProcessedTokens ?? null)} {t("chat:tokens")}
             </div>
           ) : null}
           {usage.compactsAutomatically ? (
             <div className="text-ui leading-snug text-muted-foreground">
-              Automatically compacts its context when needed.
+              {t("chat:automaticallyCompactsItsContextWhenNeeded")}
             </div>
           ) : null}
           {cumulativeCostUsd !== null && cumulativeCostUsd !== undefined ? (
             <div className="text-ui leading-snug text-muted-foreground">
-              Session cost: {formatCostUsd(cumulativeCostUsd)}
+              {t("chat:sessionCost")} {formatCostUsd(cumulativeCostUsd)}
             </div>
           ) : null}
           {usage.claudeCache || props.showClaudeCache ? (
@@ -166,11 +170,13 @@ export function ContextWindowMeter(props: {
                   void props.compactAction?.onCompact();
                 }}
               >
-                {props.compactAction.isSubmitting ? "Starting compaction..." : "Compact now"}
+                {props.compactAction.isSubmitting
+                  ? t("chat:startingCompaction")
+                  : t("chat:compactNow")}
               </Button>
               <p className="text-ui leading-relaxed text-muted-foreground">
                 {props.compactAction.disabledReason ??
-                  "Compaction processes this conversation and consumes usage. Later turns use its summary."}
+                  t("chat:compactionProcessesThisConversationAndConsumesUsageLaterTurns")}
               </p>
             </div>
           ) : null}
