@@ -11,7 +11,7 @@ import {
   deriveProviderInstances,
   providerStartOptionsFromInstance,
 } from "@synara/shared/providerInstances";
-import { Effect, FileSystem, Layer, Schema } from "effect";
+import { Effect, FileSystem, Layer, Schema, Stream } from "effect";
 import { isBetaFeatureEnabled } from "@synara/shared/betaFeatures";
 import { describe, expect, it } from "vitest";
 import { providerDisabledSettingsMessage } from "./provider/enabledProviderAdapter";
@@ -22,6 +22,7 @@ import {
   redactServerSettingsForClient,
   ServerSettingsLive,
   ServerSettingsService,
+  withoutNewThreadDefaultsOnlyChanges,
 } from "./serverSettings";
 import {
   ServerSettings as ServerSettingsSchema,
@@ -40,6 +41,41 @@ const runWithSettings = <A, E>(
 ) => Effect.runPromise(effect.pipe(Effect.provide(testLayer)) as Effect.Effect<A, E, never>);
 
 describe("ServerSettingsService", () => {
+  it("defaults usage-limit recovery off and persists policy invalidation across restart", async () => {
+    expect(Schema.decodeSync(ServerSettingsSchema)({})).toMatchObject({
+      autoResumeAfterUsageLimits: false,
+      usageLimitRecoveryEpoch: 0,
+    });
+    const result = await runWithSettings(
+      Effect.gen(function* () {
+        const service = yield* ServerSettingsService;
+        const config = yield* ServerConfig;
+        yield* service.start;
+        yield* service.updateSettings({ autoResumeAfterUsageLimits: true });
+        yield* service.updateSettings({ autoResumeAfterUsageLimits: false });
+        yield* service.updateSettings({ autoResumeAfterUsageLimits: false });
+        yield* service.updateSettings({ autoResumeAfterUsageLimits: true });
+        // Public settings patches cannot restore an earlier server-owned epoch.
+        const spoofed = Schema.decodeUnknownSync(ServerSettingsPatchSchema)({
+          usageLimitRecoveryEpoch: 0,
+        });
+        yield* service.updateSettings(spoofed);
+        return yield* Effect.gen(function* () {
+          const restarted = yield* ServerSettingsService;
+          yield* restarted.start;
+          return yield* restarted.getSettings;
+        }).pipe(
+          Effect.provide(
+            ServerSettingsLive.pipe(
+              Layer.provide(Layer.merge(NodeServices.layer, Layer.succeed(ServerConfig, config))),
+            ),
+          ),
+        );
+      }),
+    );
+    expect(result).toMatchObject({ autoResumeAfterUsageLimits: true, usageLimitRecoveryEpoch: 1 });
+  });
+
   it("defaults keep awake to off", () => {
     expect(Schema.decodeSync(ServerSettingsSchema)({}).keepAwakeMode).toBe("off");
   });
@@ -831,6 +867,54 @@ describe("ServerSettingsService", () => {
 
 const ompGatedOff = (feature: string) => feature !== "omp";
 const stableFeatureEnabled = (feature: string) => isBetaFeatureEnabled(feature, "production");
+
+describe("withoutNewThreadDefaultsOnlyChanges", () => {
+  it("drops changes that only touched the shared new-chat defaults", async () => {
+    const picked: ServerSettings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      newThreadDefaults: { ...DEFAULT_SERVER_SETTINGS.newThreadDefaults, runtimeMode: "auto" },
+    };
+    const keepAwake: ServerSettings = { ...picked, keepAwakeMode: "always" };
+    const passed = await Effect.runPromise(
+      withoutNewThreadDefaultsOnlyChanges(
+        Stream.fromIterable([picked, keepAwake]),
+        DEFAULT_SERVER_SETTINGS,
+      ).pipe(Stream.runCollect),
+    );
+    expect(Array.from(passed)).toEqual([keepAwake]);
+  });
+
+  it("persists the shared new-chat defaults through an update", async () => {
+    const settings = await runWithSettings(
+      Effect.gen(function* () {
+        const service = yield* ServerSettingsService;
+        yield* service.start;
+        yield* service.updateSettings({
+          newThreadDefaults: {
+            modelSelectionByProvider: {
+              codex: { provider: "codex", model: "gpt-5.5", options: { fastMode: true } },
+            },
+            activeProvider: "codex",
+          },
+        });
+        return yield* service.updateSettings({
+          newThreadDefaults: {
+            modelSelectionByProvider: { codex: { provider: "codex", model: "gpt-5.5" } },
+            runtimeMode: "approval-required",
+          },
+        });
+      }),
+    );
+
+    expect(settings.newThreadDefaults).toEqual({
+      modelSelectionByProvider: {
+        codex: { provider: "codex", instanceId: "codex", model: "gpt-5.5" },
+      },
+      activeProvider: "codex",
+      runtimeMode: "approval-required",
+    });
+  });
+});
 
 describe("gateBetaOnlyProviders", () => {
   const withOmpEnabled: ServerSettings = {

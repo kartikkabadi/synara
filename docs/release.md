@@ -41,6 +41,7 @@ version, release notes and lockfile are final.
 - Publishes one versioned GitHub Release with all produced files.
   - Versions with a suffix after `X.Y.Z` (for example `1.2.3-alpha.1`) are published as GitHub prereleases.
   - A `beta` prerelease identifier (`vX.Y.Z-beta.N`) selects the beta lane: the desktop artifact builds with `--flavor beta`, updater manifests publish under the `beta` channel, and the release never becomes Latest, never bumps `main` versions, and never touches the npm `latest` dist-tag. See [Beta channel](../BETA.md).
+  - A `remote` prerelease identifier (`vX.Y.Z-remote.N`) selects **Synara Remote**, a separate early-access app and `remote` update lane. From Remote .14, publication requires macOS ARM64, Windows x64 and Linux x64 artifacts and the three `remote` manifests, with no `latest` aliases. Windows has a dedicated NSIS GUID and Linux a dedicated executable/window class. These releases never become Latest, publish the CLI or alter Stable/Beta data. See [Remote identity](../BETA.md#synara-remote-early-access).
   - Stable clean-lane releases are GitHub Latest; the 0.4.x compatibility release remains historical.
 - Publishes default `latest*.yml` metadata plus byte-identical `synara*.yml` aliases on every stable release so existing packaged binaries keep working.
 - Keeps the historical 0.4.x compatibility release unchanged; current stable payloads stay on their own GitHub Latest release.
@@ -247,6 +248,11 @@ after merge and before the next release: the exact fingerprint changes with that
 logic, so an unmerged candidate cannot reuse the old producer's artifacts. Native
 preparation within its own run still works and can be validated before merge.
 
+Portable outputs require the editor language worker alongside the server entrypoints.
+The packaged runtime smoke starts that worker with an isolated TypeScript fixture,
+checking a real diagnostic that depends on the packaged standard-library declarations.
+Missing workers or stripped declarations block qualification.
+
 Portable outputs are same-run artifacts, never cross-release caches. Import
 rejects archive links and unexpected paths before extraction into an isolated
 directory, verifies the complete file inventory, source, lockfile and build
@@ -299,6 +305,8 @@ does not modify signed historical releases. Recheck a newly built and published 
 plist and native payload before refreshing the cask; the old audit failure remains
 unresolved until a matching release is available. Metadata inspection and macOS 15
 startup checks do not establish runtime behavior on macOS 13.
+
+Remote .35 pins cloudflared 2026.10.3 with hashes of the downloaded assets (macOS tarballs, not extracted Mach-O files). The vendor macOS executable declares macOS 15, as the previous pin did. The app's macOS 13 declaration does not qualify the Remote connector on macOS 13–14. Inspect the bundled helper separately; after nested signing its bytes differ from the vendor binary, so retain both download provenance and the final signed artifact proof. Never lower deployment metadata or disable certificate verification to bypass an incompatible helper.
 
 Both native macOS release runners use macOS 15. Native helpers and the pinned
 Cua apple-metal bridge build with Xcode 16.4's macOS 15 SDK. A separate macOS 26
@@ -398,16 +406,53 @@ Before startup smoke and artifact upload, the Windows job scans each final
 installer with Microsoft Defender. The guard enables protection and removes
 the hosted image's exclusions inside that disposable runner, updates security
 intelligence, verifies the actual file is not excluded, and requires an explicit
-clean scan plus unchanged installer bytes. If the configured update source returns
-definitions older than 24 hours, it retries Microsoft's direct MMPC source.
+clean scan plus unchanged installer bytes. The configured signature source gets
+at most three attempts; exhausted errors or definitions older than 24 hours
+require a successful update from Microsoft's direct MMPC source, also bounded
+to three attempts. Failed default updates reach MMPC before any intermediate
+state/readiness RPC, because the same platform transition can make reads fail.
+Between failed MMPC attempts, bounded service/engine readiness recovery may
+restart a stopped WinDefend before retrying; this does not delay the first direct
+fallback. The readiness gate also runs after a successful update. Each call allows
+at most 120 seconds and all calls share 240 seconds of readiness time; time spent
+outside readiness checks does not consume that budget. The existing ten-minute
+qualification timeout remains a final fail-closed bound on slower vendor calls.
+Every failed attempt is preserved. No scan may proceed on a reported fresh state
+without a successful update call. Full error records and independent final
+evidence captures preserve the original failure; incomplete evidence also blocks
+publication.
 An older local timestamp then requires the installed version to match the latest
 version fetched from Microsoft's security intelligence page; unavailable or
 ambiguous vendor data fails closed. Missing signatures or Defender's own
 out-of-date status also block the scan. Detection, remediation, stale
 intelligence, a missing file, or a scan error blocks publication. Scan evidence
-is retained as `windows-defender-x64`, including on failure. Cloud participation
-and sample-submission settings are not changed. This server scan does not replace
-Windows 11 browser-download qualification.
+is retained as `windows-defender-x64`, including on failure. Final evidence is
+captured independently so one failing status read does not mask the original
+scan/update error or suppress the remaining captures.
+
+For this disposable GitHub-hosted public-release qualification only, the guard
+also enables cloud protection (`MAPSReporting=2`), automatic safe sample submission
+(`SubmitSamplesConsent=1`), and block at first sight. Safe samples may be sent to
+Microsoft; this does not authorize changing a user's machine or submitting private
+artifacts. These preferences must remain enabled before and after scanning, and
+`MpCmdRun -ValidateMapsConnection` must succeed before scanning; its output and
+exit code are retained. Configured cloud protection alone does not prove MAPS
+connectivity. See Microsoft's [block-at-first-sight guidance](https://learn.microsoft.com/en-us/defender-endpoint/configure-block-at-first-sight-microsoft-defender-antivirus)
+and [network validation guidance](https://learn.microsoft.com/en-us/defender-endpoint/configure-network-connections-microsoft-defender-antivirus).
+
+Run `pwsh -NoProfile -NonInteractive -File scripts/verify-windows-defender.test.ps1`
+for mocked guard contracts, including cloud-policy failure, failed MAPS, bounded
+update/fallback, unready service/engine, changed bytes, detections and incomplete
+evidence. These contracts do not qualify real Defender or a particular installer.
+Changes to the guard also run `Windows Defender Prerequisites` on a disposable
+Windows runner: the real guard scans a copied, Microsoft-signed system probe that
+is never executed, retaining its hash and live service/signature/MAPS evidence.
+The public system binary is not uploaded as evidence. That probe qualifies only
+the prerequisites and cannot qualify Synara's installer or its browser reputation.
+Each final release artifact still requires its own live scan. This server scan
+does not replace Windows 11 browser-download qualification, prove that the cloud
+classified a particular installer, or establish that an antivirus download block
+has been fixed.
 
 Signing, provenance, and startup smoke alone do not establish Microsoft Defender
 acceptance. For a reported antivirus block, collect the exact artifact hash,

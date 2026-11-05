@@ -1,3 +1,4 @@
+import { remoteConnectionsUnavailableReason } from "./remoteFeaturePolicy";
 import { ProjectionPendingInteractionRepositoryLive } from "./persistence/Layers/ProjectionPendingInteractions";
 import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/ProviderSessionRuntime";
 import http from "node:http";
@@ -39,6 +40,7 @@ import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnap
 import { ProjectionPendingInteractionRepository } from "./persistence/Services/ProjectionPendingInteractions";
 import { ThreadDeletionReactor } from "./orchestration/Services/ThreadDeletionReactor";
 import { ThreadSnoozeReactor } from "./orchestration/Services/ThreadSnoozeReactor";
+import { UsageLimitRecoveryReactor } from "./orchestration/Services/UsageLimitRecoveryReactor";
 import {
   claimQuitResumeRecordAtStartup,
   captureCrashResumeRecord,
@@ -61,6 +63,8 @@ import { makeBoundedNodeHttpServer } from "./nodeHttpServer";
 import { websocketRpcRouteLayer } from "./wsRpc";
 import { recoverGitHandoffOperations } from "./gitHandoffOperations";
 import { externalMcpRouteLayer } from "./externalMcp/httpRoute";
+import { hostRemoteWebSocketRouteLayer } from "./remoteSessions";
+import { hostConnectionRouteLayer } from "./hostConnections/httpRoute";
 import { ExternalMcpGateway } from "./externalMcp/Services/ExternalMcpGateway";
 import { ExternalMcpService } from "./externalMcp/Services/ExternalMcpService";
 import { mcpConnectorsRouteLayer } from "./mcpConnectors/httpRoute";
@@ -97,6 +101,7 @@ export interface ServerShape {
     | ServerSettingsService
     | ThreadDeletionReactor
     | ThreadSnoozeReactor
+    | UsageLimitRecoveryReactor
     | SqlClient.SqlClient
   >;
   readonly stopSignal: Effect.Effect<void, never>;
@@ -197,6 +202,7 @@ export const createEffectServer = Effect.fn(function* (
   const keepAwake = yield* KeepAwakeService;
   const threadDeletionReactor = yield* ThreadDeletionReactor;
   const threadSnoozeReactor = yield* ThreadSnoozeReactor;
+  const usageLimitRecoveryReactor = yield* UsageLimitRecoveryReactor;
   const readiness = yield* makeServerReadiness;
 
   // Start the runtime before serving config snapshots. This both performs the
@@ -232,6 +238,9 @@ export const createEffectServer = Effect.fn(function* (
     websocketRpcRouteLayer,
     agentGatewayRouteLayer,
     externalMcpRouteLayer,
+    ...(remoteConnectionsUnavailableReason(config.stateDir)
+      ? []
+      : [hostRemoteWebSocketRouteLayer, hostConnectionRouteLayer]),
     mcpConnectorsRouteLayer,
   );
   const httpApp = yield* HttpRouter.toHttpEffect(routesLayer);
@@ -299,6 +308,7 @@ export const createEffectServer = Effect.fn(function* (
       automationRunReactor,
       threadDeletionReactor,
       threadSnoozeReactor,
+      usageLimitRecoveryReactor,
       providerSessionReaper,
       providerRuntimeReconciler,
       { start: () => keepAwake.start },

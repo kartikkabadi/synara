@@ -1,5 +1,10 @@
 import { providerProcessPriorityEnabled } from "../../providerProcessPriority";
 import { claudeTurnResultUsage, type ClaudeResultUsageBaseline } from "../claudeResultUsage.ts";
+import {
+  claudeUsageLimitWindows,
+  usageLimitResetAt,
+  type UsageLimitWindows,
+} from "../usageLimit.ts";
 import { restoreClaudeImportedCopyDates } from "../claudeImportedCopyDates.ts";
 /**
  * ClaudeAdapterLive - Scoped live implementation for the Claude Agent provider adapter.
@@ -72,6 +77,7 @@ import {
 import {
   applyClaudePromptEffortPrefix,
   getClaudeContextWindowSuffix,
+  getDefaultEffort,
   getDefaultModel,
   getEffectiveClaudeCodeEffort,
   getModelCapabilities,
@@ -286,6 +292,7 @@ interface ClaudeTurnState {
   readonly assistantTextBlockOrder: Array<AssistantTextBlockState>;
   readonly capturedProposedPlanKeys: Set<string>;
   readonly sawFileChange: boolean;
+  usageLimitWindows?: UsageLimitWindows;
   readonly assistantError?: {
     readonly code: SDKAssistantMessageError;
     readonly message: string;
@@ -1100,7 +1107,7 @@ function readClaudeModelRefusalFallback(message: unknown): ClaudeModelRefusalFal
   };
 }
 
-// VCS transitions and publication notices arrive as untyped system messages;
+// Git and published-change notifications stream as untyped system messages;
 // match structurally so SDK type drift stays inert.
 interface ClaudeVcsStateChange {
   readonly kind?: string;
@@ -1121,8 +1128,8 @@ function readClaudeVcsStateChange(message: unknown): ClaudeVcsStateChange | unde
     return undefined;
   }
   if (record.subtype === "code_change_published") {
-    // The SDK does not model this notice. Invalidate only; the owned workspace
-    // supplies authoritative branch and PR data instead of the publication payload.
+    // Claude's publication fields are scraped, unverified hints. Trigger the
+    // existing repo-scoped Git/forge lookup without trusting its URL or branch.
     return { kind: "code_change_published" };
   }
   if (record.subtype !== "vcs_state_changed") {
@@ -1189,12 +1196,16 @@ function toPermissionMode(value: unknown): PermissionMode | undefined {
 function claudeModelCapabilities(model: ModelInfo): ModelCapabilities {
   const base = getModelCapabilities(PROVIDER, model.resolvedModel ?? model.value);
   const apiEfforts = model.supportsEffort === false ? [] : model.supportedEffortLevels;
+  // The CLI lists levels without its default. Keep the catalog default, which an unset
+  // effort resolves to, or menus show the first level while the default is dropped.
+  const defaultEffort = getDefaultEffort(base);
   const nativeEfforts: EffortOption[] | undefined = apiEfforts?.map((value) => ({
     value,
     label:
       base.reasoningEffortLevels.find((level) => level.value === value)?.label ??
       (value === "xhigh" ? "Extra High" : value.charAt(0).toUpperCase() + value.slice(1)),
     controlSource: "api-effort",
+    ...(value === defaultEffort ? { isDefault: true as const } : {}),
   }));
   const modes = nativeEfforts?.length
     ? base.reasoningEffortLevels.filter((level) =>
@@ -2988,6 +2999,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       context: ClaudeSessionContext,
       message: string,
       cause?: unknown,
+      errorCode?: string,
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
         if (cause !== undefined) {
@@ -3005,6 +3017,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           payload: {
             message,
             class: "provider_error",
+            ...(errorCode ? { errorCode } : {}),
             ...(cause !== undefined ? { detail: cause } : {}),
           },
           providerRefs: nativeProviderRefs(context),
@@ -3947,6 +3960,17 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             ...(result?.usage ? { usage: result.usage } : {}),
             ...(turnResultUsage ? { modelUsage: turnResultUsage.modelUsage } : {}),
             claudeResultObserved: result !== undefined,
+            ...(turnState.assistantError ? { errorCode: turnState.assistantError.code } : {}),
+            ...(status === "failed" && turnState.assistantError?.code === "rate_limit"
+              ? {
+                  usageLimit: {
+                    resetAt: usageLimitResetAt(
+                      turnState.usageLimitWindows,
+                      Date.parse(stamp.createdAt),
+                    ),
+                  },
+                }
+              : {}),
             tokenAccountingVersion: 1,
             mainLoopTokens,
             mainLoopCacheReadTokens,
@@ -5008,6 +5032,16 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             },
           };
         }
+        if (message.error === "rate_limit" && context.turnState && "api_error_params" in message) {
+          // The SDK can throttle unchanged rate_limit_event frames; a typed refusal
+          // still carries its current structured limit info on the assistant error.
+          const windows = claudeUsageLimitWindows(
+            context.turnState.usageLimitWindows,
+            message.api_error_params,
+            Date.now(),
+          );
+          if (windows !== undefined) context.turnState.usageLimitWindows = windows;
+        }
         const content = message.message?.content;
         if (Array.isArray(content)) {
           for (const block of content) {
@@ -5236,7 +5270,20 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         }
 
         if (status === "failed") {
-          yield* emitRuntimeError(context, errorMessage ?? "Claude turn failed.");
+          // The terminal failure carries quota evidence atomically with recovery admission.
+          // A preliminary session failure would let completion push outrun that decision.
+          if (assistantError?.code === "rate_limit") {
+            yield* emitRuntimeWarning(context, errorMessage ?? "Claude turn failed.", {
+              errorCode: assistantError.code,
+            });
+          } else {
+            yield* emitRuntimeError(
+              context,
+              errorMessage ?? "Claude turn failed.",
+              undefined,
+              assistantError?.code,
+            );
+          }
         }
 
         // Retry in case the CLI had not yet written the notification at turn start.
@@ -5489,9 +5536,9 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
           }
           const isTerminalStatus =
             status === "completed" || status === "failed" || status === "killed";
-          // A late non-terminal patch from a task settled at turn end would
-          // mark it live again; the task ended with its turn.
-          if (!isTerminalStatus && context.turnEndSettledTaskIds.has(message.task_id)) {
+          // Terminal evidence wins over queued progress/status patches. Only
+          // task_started can reopen the same native id for a resumed run.
+          if (!isTerminalStatus && context.terminalTaskIds.has(message.task_id)) {
             return;
           }
           if (isTerminalStatus) {
@@ -5967,9 +6014,9 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
             return;
           }
           case "task_progress": {
-            // Zombie tail of a foreground task settled at turn end: projecting
-            // it would mark the task live again.
-            if (context.turnEndSettledTaskIds.has(message.task_id)) {
+            // A late progress message cannot resurrect a terminal task, whether
+            // it settled with its turn or through its own lifecycle notification.
+            if (context.terminalTaskIds.has(message.task_id)) {
               return;
             }
             yield* emitTaskUsageSnapshot(context, message);
@@ -6111,11 +6158,17 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
               },
             });
             return;
+          case "commands_changed":
+            // A refreshed slash-command list. supportedCommands() already returns the
+            // latest push, and commands are read on demand, so there is nothing to show.
+            return;
           case "background_tasks_changed": {
             // REPLACE semantics: the payload is the full live background set.
             // Announce only newly backgrounded work with a one-line notice;
             // removals settle through their own task lifecycle events.
-            const tasks = Array.isArray(message.tasks) ? message.tasks : [];
+            const tasks = Array.isArray(message.tasks)
+              ? message.tasks.filter((task) => !context.terminalTaskIds.has(task.task_id))
+              : [];
             const added = tasks.filter((task) => !context.knownBackgroundTaskIds.has(task.task_id));
             context.knownBackgroundTaskIds.clear();
             for (const task of tasks) {
@@ -6141,11 +6194,7 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
                 ownedAdded.length === 1
                   ? labels[0]!
                   : `${ownedAdded.length} tasks: ${labels.join(", ")}`.slice(0, 200);
-              yield* emitRuntimeWarning(
-                owner,
-                notice,
-                ownedTasks.length === tasks.length ? message : { ...message, tasks: ownedTasks },
-              );
+              yield* emitRuntimeWarning(owner, notice, { ...message, tasks: ownedTasks });
             }
             return;
           }
@@ -6231,6 +6280,15 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
         }
 
         if (message.type === "rate_limit_event") {
+          if (context.turnState) {
+            const windows = claudeUsageLimitWindows(
+              context.turnState.usageLimitWindows,
+              message,
+              Date.parse(stamp.createdAt),
+            );
+            if (windows === undefined) delete context.turnState.usageLimitWindows;
+            else context.turnState.usageLimitWindows = windows;
+          }
           yield* offerRuntimeEvent(context, {
             ...base,
             type: "account.rate-limits.updated",
@@ -8575,10 +8633,10 @@ function makeClaudeAdapter(options?: ClaudeAdapterLiveOptions) {
       Effect.gen(function* () {
         const context = yield* requireSession(threadId);
         if (!context.subagentRuns.has(providerThreadId)) {
-          return yield* new ProviderAdapterRequestError({
+          return yield* new ProviderAdapterValidationError({
             provider: PROVIDER,
-            method: "turn/steerSubagent",
-            detail: `Subagent '${providerThreadId}' already finished; the message was not delivered.`,
+            operation: "turn/steerSubagent",
+            issue: `Subagent '${providerThreadId}' already finished; the message was not delivered.`,
           });
         }
         // The PreToolUse hook channel is text-only: project every attachment

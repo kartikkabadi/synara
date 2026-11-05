@@ -602,6 +602,7 @@
   "chooseAnotherWindow": "选择其他窗口",
   "editQueuedFollowUp": "编辑排队中的追问",
   "messageThisSubagent": "向此子智能体发送消息",
+  "subagentReadOnly": "此子智能体为只读",
   "searchingMentions": "正在搜索提及项…",
   "snapshotBrowserPage": "获取浏览器页面快照",
   "switchingToLocal": "正在切换到本地…",
@@ -1050,5 +1051,9 @@
   "turnInterruptedAfter": "{{elapsed}} 后中断",
   "turnResumedAfter": "已恢复：{{task}} · {{elapsed}}",
   "turnResumed": "已恢复：{{task}}",
-  "turnWorkedFor": "已工作 {{elapsed}}"
+  "turnWorkedFor": "已工作 {{elapsed}}",
+  "usageLimitResumeAt": "用量已达限额 · 将于 {{time}} 继续",
+  "usageLimitAwaitingHost": "已到重置时间 · 正在等待电脑",
+  "cancelUsageLimitResume": "取消自动恢复",
+  "usageLimitResuming": "正在电脑上继续…"
 }

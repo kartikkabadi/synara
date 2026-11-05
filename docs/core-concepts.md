@@ -8,7 +8,7 @@ work** — its conversation, provider session, working environment, tool activit
 | Concept          | Meaning                                                             |
 | ---------------- | ------------------------------------------------------------------- |
 | Workspace        | The complete Synara application and the projects available in it    |
-| Project          | A local folder, preferably a Git repository                         |
+| Project          | A folder on its execution computer, preferably a Git repository     |
 | Task             | One durable unit of work inside a project                           |
 | Goal             | An explicit persistent objective attached to one task               |
 | Turn             | One user instruction followed by the provider's work and response   |
@@ -55,6 +55,9 @@ decoration pauses while its chat is hidden.
   filed in any Space count. If none remains, New thread reopens an unsent draft.
   Actions on other threads keep the current chat open.
   Both Archive and Done offer an **Undo** toast; undoing an action on the open thread returns to it.
+  Connected-computer rows expose **Pin**, **Archive**, and **Done/Undo** on hover or keyboard focus,
+  including in Priority. The controls replace the remote badge while visible and always act on
+  that chat’s owning computer; disconnected rows cannot make changes.
 - **Code review** — pull requests and issues from the GitHub repositories of your projects, with a
   detail pane and three actions on every item (see [Code review](#code-review))
 - **Tasks** (Stable and Beta) — a to-do list for anything you need to do, with or without
@@ -107,9 +110,10 @@ You do not need every surface open at once. Bring each one in when it answers a 
 running, what changed, whether the UI works, or whether the task is safe to ship.
 
 Desktop quit requests ask for confirmation even when no chats are running. On macOS,
-⌘Q quits the application after confirmation; ⌘W confirms closing the window while the
-application and its running chats stay active. Quitting with no open window uses a
-native confirmation. With an open window and running chats, the quit dialog lists the work that
+⌘Q quits the application after confirmation. Cmd/Ctrl+W closes the focused terminal or
+workspace view, or the active open chat tab when available. If no surface handles the chord,
+macOS ⌘W confirms closing the window while the application and its running chats stay active.
+Quitting with no open window uses a native confirmation. With an open window and running chats, the quit dialog lists the work that
 will stop and offers to resume it automatically on the next launch. On macOS and Linux, a SIGINT
 or SIGTERM from a terminal or a script, such as `bun run canary:stop`, shuts the app down without
 asking.
@@ -128,7 +132,21 @@ thread's model picker cannot change its account in place.
 
 ## Projects
 
-A project is the folder Synara works with.
+A project is the folder Synara works with. When remote connections are available, **Create project**
+lets you name it, choose a computer, and browse a source folder on that computer. A new chat's
+**Run on** picker chooses its computer; the project picker then shows that computer's folders.
+Existing chats and drafts keep their original computer when you open work elsewhere.
+
+Connected computers share the same Projects, Chats, Pinned, and Activity lists. A remote row names
+its computer; opening it changes the selected chat without switching the whole app. Empty remote
+folders stay in the project picker until they have a chat, are pinned, or are the active new project.
+Projects with the same name or path on different computers remain separate physical folders.
+
+The selected computer also owns chat creation from keyboard shortcuts and search, and terminal
+creation from the desktop menu. If that connection is unavailable, these actions ask you to
+reconnect instead of creating work locally. Window appearance, zoom, and app keybindings belong
+to the controlling app; project-script shortcuts stay with the project on its computer. Opening
+Keybindings from a remote chat takes you to the controlling app's settings.
 
 Wherever a project appears (sidebar rows, pinned rail shortcuts, hover cards, search, pickers, and the
 Edit project preview), its glyph is the project's local favicon when one is available, with a folder
@@ -193,6 +211,9 @@ outcome for that turn. Agent, automatic, steering, and historical interruptions 
 say **Interrupted**; provider failures retain their reason even after Stop intent. Background commands
 keep one row as they run and settle; a completion that wakes the provider starts a separate **Resumed**
 response with its own live and settled duration, even when the provider reuses the launch's turn ID.
+For Claude tasks, a terminal task report wins over late progress and background snapshots. The task
+becomes live again only when Claude explicitly starts or resumes it; a new user message does not
+require stopping genuinely independent background work.
 
 **Stop** settles the turn once the provider accepts the interrupt and no provider turn is still
 running, even if the provider had already finished and its final events are still arriving.
@@ -271,13 +292,22 @@ not offer a generic Retry because an error message alone cannot prove that resen
 Messages queued above the composer while a turn runs are sent one by one after it completes.
 If you press Stop, or the turn fails or hits a usage limit, the queue pauses instead: it
 stays visible with **Queue paused** and the reason. **Resume** sends the queue in order;
+if the provider session stopped, it starts the session again once the server connection is open.
 **Edit** moves the next queued message back into the composer. Sending a new message
 yourself goes first, and the queue resumes once that turn completes. The pause is per
 thread and survives a reload. A message already shown in the conversation was accepted by
 the server rather than queued here, and the server still sends it after a Stop.
 
+Send waits for selected images to finish preparing. If preparation fails while a send is waiting,
+the message stays unsent and its text and successfully prepared attachments remain in the composer.
+Select a readable image before retrying; a failed intake does not block later valid sends.
+
 Turn off **Settings → General → Move sent messages to top** to keep new messages at the bottom
 of the conversation and follow replies as they stream.
+
+**Settings → Providers → Resume after usage limits** is off by default. When enabled, a supported provider's definitive failed turn with a known future reset can schedule a server-owned continuation in the same task. The failed turn remains in the transcript. The task shows its reset time, and **Stop** cancels that recovery episode. The owning computer must be running; desktop, web, and iOS clients can disconnect. A restarted host restores pending waits. It cannot wake a sleeping or powered-off computer. A Stop issued while a send is still being accepted also prevents that send from scheduling a recovery later.
+
+The continuation checks the saved conversation and workspace before repeating operations. Already accepted user messages take priority. Manual sends, Stop, pause, archive/delete, goal changes, model/account/route changes, or disabling the setting cancel the pending recovery; re-enabling does not restore cancelled waits. Unknown resets, an uncertain delivery, and providers still performing their own retry remain under existing manual or native recovery controls. Unsent composer drafts stay on their client.
 
 For work that should continue across several turns, set a deliberate
 [thread goal](https://www.trysynara.com/docs/features/thread-goals). A goal can continue after a
@@ -583,6 +613,18 @@ uses an alias. Include the extension for other files, such as `[[guide.pdf]]`.
 Regular Markdown links remain relative to the document directory. Code, escaped
 Wiki syntax, embeds, and heading/block links are left literal; this is basic file
 navigation rather than full Obsidian support.
+
+### Sending files to a connected computer
+
+A photo or file is uploaded to the computer that owns the conversation before
+its message is sent. The message references that managed upload; a path on the
+controlling device is not a path on the destination computer. Changing the
+selected computer does not retarget an upload or its cancellation.
+
+Desktop remote workspaces use the controlling window for authenticated file
+transfers. Workspace frames receive only the requested resource bytes, without
+native credentials or a broader filesystem grant. Image previews load near the
+viewport and release their temporary bytes after scrolling away.
 
 ### Images in chat replies
 

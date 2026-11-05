@@ -1,3 +1,4 @@
+import { REMOTE_AGENT_GATEWAY_CAPABILITY } from "./remoteAgentGateway";
 import { Schema } from "effect";
 
 import { NonNegativeInt } from "./baseSchemas";
@@ -41,6 +42,7 @@ export const WS_NEGOTIATE_QUERY = {
 export const WS_GITHUB_PROJECT_PROVISIONING_CAPABILITY = "projects.github-provisioning";
 export const WS_PROJECT_FILE_WATCH_CAPABILITY = "projects.file-watch";
 export const WS_TURN_DISPATCH_SETTLEMENT_CAPABILITY = "orchestration.turn-dispatch-settlement";
+export const WS_USAGE_LIMIT_RECOVERY_CAPABILITY = "orchestration.usage-limit-recovery";
 export const WS_THREAD_GOAL_VISIBLE_START_CAPABILITY = "orchestration.thread-goal-visible-start";
 export const WS_SERVER_RUNTIME_STATUS_CAPABILITY = "server.runtime-status";
 export const WS_GIT_ACTION_RECOVERY_CAPABILITY = "git.action-recovery";
@@ -60,6 +62,7 @@ export const WS_CLIENT_REQUIRED_CAPABILITIES = [
 ] as const;
 
 export const WS_SERVER_CAPABILITIES = [
+  REMOTE_AGENT_GATEWAY_CAPABILITY,
   ...WS_CLIENT_REQUIRED_CAPABILITIES,
   // Optional feature capability: older servers may omit it without making the
   // rest of a newer client unusable during a staggered rollout.
@@ -67,6 +70,7 @@ export const WS_SERVER_CAPABILITIES = [
   WS_PROJECT_FILE_WATCH_CAPABILITY,
   WS_TURN_DISPATCH_SETTLEMENT_CAPABILITY,
   WS_THREAD_GOAL_VISIBLE_START_CAPABILITY,
+  WS_USAGE_LIMIT_RECOVERY_CAPABILITY,
   WS_GIT_ACTION_RECOVERY_CAPABILITY,
   WS_SERVER_RUNTIME_STATUS_CAPABILITY,
   // Single-handshake connect: negotiation is available over plain HTTP at
@@ -87,6 +91,8 @@ export const WsBootstrapNegotiateInput = Schema.Struct({
 export type WsBootstrapNegotiateInput = typeof WsBootstrapNegotiateInput.Type;
 
 export const WsBootstrapNegotiateResult = Schema.Struct({
+  /** Controller reservation for a single remote renderer stream; never a credential. */
+  remoteAttachmentId: Schema.optional(Schema.String),
   protocolEpoch: Schema.Int,
   negotiatedRevision: NonNegativeInt,
   serverBuild: Schema.String,

@@ -3,6 +3,7 @@ import {
   buildStalePendingRequestFailureDetail,
   pendingRequestInstanceKey,
 } from "@synara/shared/threadSummary";
+import { applyServerSettingsPatch } from "@synara/shared/serverSettings";
 // Production CSS is part of the behavior under test because row height depends on it.
 import "../index.css";
 
@@ -15,7 +16,9 @@ import {
   DEFAULT_AUTOMATION_STOP_AFTER_CONSECUTIVE_FAILURES,
   DEFAULT_MODEL_BY_PROVIDER,
   EventId,
+  type ExecutionEnvironmentDescriptor,
   MessageId,
+  type McpConnectorProposal,
   DEVICE_WS_METHODS,
   COMPUTER_WS_METHODS,
   ORCHESTRATION_WS_METHODS,
@@ -24,6 +27,8 @@ import {
   type ProjectId,
   type ProjectAgentOverview,
   type ServerConfig,
+  type ServerSettingsPatch,
+  type ServerSettingsView,
   SpaceId,
   ThreadId,
   TurnId,
@@ -116,6 +121,16 @@ import { useTemporaryThreadStore } from "../temporaryThreadStore";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { resetRetainedThreadDetailSubscriptionsForTests } from "../threadDetailSubscriptionRetention";
 import { useWorkspacePathsStore } from "../workspacePathsStore";
+import { readExecutionContext } from "../lib/hosts/executionContext";
+import {
+  addWorkspaceSession,
+  removeWorkspaceSession,
+  updateWorkspaceSession,
+} from "../lib/hosts/workspaceSessions";
+import { WorkspacePanels } from "./hosts/WorkspacePanels";
+
+vi.mock("../lib/hosts/executionContext", { spy: true });
+vi.mock("./hosts/WorkspacePanels", { spy: true });
 import { getWorkspaceEditorSession } from "../lib/workspaceEditorSession";
 import { resetWsNativeApiForTest } from "../wsNativeApi";
 import { trackWsTurnSettlement } from "../wsTransportEvents";
@@ -168,11 +183,13 @@ interface WsRequestEnvelope {
 interface TestFixture {
   snapshot: OrchestrationReadModel;
   serverConfig: ServerConfig;
+  serverSettings: ServerSettingsView;
   providerStatusesSnapshot: ServerConfig["providers"] | null;
   welcome: WsWelcomePayload;
   gitBranchByCwd: Record<string, string>;
   projectAgentOverviews: Record<string, unknown>;
   projectAgentSummariesPending?: boolean;
+  connectorProposals: McpConnectorProposal[];
 }
 
 let fixture: TestFixture;
@@ -317,6 +334,8 @@ function createSnapshotForTargetUser(options: {
   targetText: string;
   targetAttachmentCount?: number;
   sessionStatus?: OrchestrationSessionStatus;
+  // The selection stored on the thread, which a started chat's composer shows.
+  modelSelection?: OrchestrationReadModel["threads"][number]["modelSelection"];
 }): OrchestrationReadModel {
   const messages: Array<OrchestrationReadModel["threads"][number]["messages"][number]> = [];
 
@@ -376,7 +395,7 @@ function createSnapshotForTargetUser(options: {
         id: THREAD_ID,
         projectId: PROJECT_ID,
         title: THREAD_TITLE,
-        modelSelection: {
+        modelSelection: options.modelSelection ?? {
           provider: "codex",
           model: "gpt-5",
         },
@@ -547,9 +566,11 @@ function buildFixture(snapshot: OrchestrationReadModel): TestFixture {
   return {
     snapshot,
     serverConfig: createBaseServerConfig(),
+    serverSettings: createBrowserTestServerSettings(NOW_ISO),
     providerStatusesSnapshot: null,
     gitBranchByCwd: {},
     projectAgentOverviews: {},
+    connectorProposals: [],
     welcome: {
       cwd: "/repo/project",
       projectName: "Project",
@@ -1293,7 +1314,34 @@ function resolveWsRpc(body: WsRequestEnvelope["body"]): unknown {
     return createAutomationDefinitionFromCreateRequest(body);
   }
   if (tag === WS_METHODS.serverGetSettings) {
-    return createBrowserTestServerSettings(NOW_ISO);
+    return fixture.serverSettings;
+  }
+  if (tag === WS_METHODS.serverUpdateSettings) {
+    // Answers like the server: the stored settings with the patch applied, so the
+    // shared new-chat defaults a mount migrates are not read back as empty.
+    const { _tag: _updateTag, ...patch } = body;
+    fixture = {
+      ...fixture,
+      serverSettings: applyServerSettingsPatch(
+        fixture.serverSettings,
+        patch as ServerSettingsPatch,
+      ),
+    };
+    return fixture.serverSettings;
+  }
+  if (tag === WS_METHODS.serverListMcpConnectorProposals) {
+    return fixture.connectorProposals;
+  }
+  if (tag === WS_METHODS.serverResolveMcpConnectorProposal) {
+    const proposal = fixture.connectorProposals.find(
+      (candidate) => candidate.proposalId === body.proposalId,
+    );
+    if (!proposal || body.resolution !== "dismissed") return null;
+    const dismissed = { ...proposal, state: "dismissed" as const };
+    fixture.connectorProposals = fixture.connectorProposals.map((candidate) =>
+      candidate === proposal ? dismissed : candidate,
+    );
+    return { proposal: dismissed, authorizationUrl: null };
   }
   if (tag === WS_METHODS.serverGetConfig) {
     return fixture.serverConfig;
@@ -2416,6 +2464,7 @@ describe("ChatView transcript geometry (full app)", () => {
     attachmentUploadBarrier = null;
     attachmentCancelBarrier = null;
     localStorage.clear();
+    useOpenThreadTabsStore.setState({ threadIds: [] });
     acknowledgeStartupAnnouncementsForTest(createBaseServerConfig());
     // Clearing localStorage does not reset the live Zustand dock state.
     useRightDockStore.setState({ dockStateByThreadId: {} });
@@ -2620,6 +2669,101 @@ describe("ChatView transcript geometry (full app)", () => {
         releaseSend();
         restoreApi();
         await reopened.cleanup();
+      }
+    },
+  );
+
+  it.each([
+    {
+      name: "finished native Codex child",
+      creationSource: "provider_native" as const,
+      provider: "codex" as const,
+      running: false,
+      disabled: true,
+    },
+    {
+      name: "running native Codex child",
+      creationSource: "provider_native" as const,
+      provider: "codex" as const,
+      running: true,
+      disabled: true,
+    },
+    {
+      name: "running native Claude child",
+      creationSource: "provider_native" as const,
+      provider: "claudeAgent" as const,
+      running: true,
+      disabled: false,
+    },
+    {
+      name: "finished app-owned child",
+      creationSource: null,
+      provider: "codex" as const,
+      running: false,
+      disabled: false,
+    },
+  ])(
+    "keeps the $name composer in its lifecycle state",
+    async ({ creationSource, provider, running, disabled }) => {
+      const base = createSnapshotForTargetUser({
+        targetMessageId: MessageId.makeUnsafe("child-composer-user"),
+        targetText: "Child task",
+        sessionStatus: running ? "running" : "ready",
+      });
+      const childTurnId = TurnId.makeUnsafe("child-composer-turn");
+      const snapshot: OrchestrationReadModel = {
+        ...base,
+        threads: [
+          {
+            ...base.threads[0]!,
+            creationSource,
+            modelSelection:
+              provider === "claudeAgent"
+                ? { provider, model: "claude-haiku-4-5" }
+                : { provider, model: "gpt-5" },
+            parentThreadId: OTHER_THREAD_ID,
+            latestTurn: {
+              turnId: childTurnId,
+              state: running ? "running" : "completed",
+              requestedAt: NOW_ISO,
+              startedAt: NOW_ISO,
+              completedAt: running ? null : NOW_ISO,
+              assistantMessageId: null,
+            },
+            session: {
+              ...base.threads[0]!.session!,
+              status: running ? "running" : "ready",
+              providerName: provider,
+              activeTurnId: running ? childTurnId : null,
+            },
+          },
+        ],
+      };
+      const draftText = "keep this child draft";
+      useComposerDraftStore.getState().setPrompt(THREAD_ID, draftText);
+      const mounted = await mountChatView({ viewport: DEFAULT_VIEWPORT, snapshot });
+      try {
+        const editor = document.querySelector<HTMLElement>('[data-testid="composer-editor"]');
+        expect(editor).not.toBeNull();
+        await vi.waitFor(() => expect(editor?.textContent ?? "").toContain(draftText));
+        expect(editor?.getAttribute("contenteditable")).toBe(disabled ? "false" : "true");
+        if (running) {
+          expect(
+            document.querySelector<HTMLButtonElement>('button[aria-label="Stop generation"]')
+              ?.disabled,
+          ).toBe(false);
+        } else {
+          const sendButton = await waitForSendButton();
+          expect(sendButton.disabled).toBe(disabled);
+        }
+        expect(useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.prompt).toBe(
+          draftText,
+        );
+        expect(wsRequests.some((request) => turnStartText(request)?.includes(draftText))).toBe(
+          false,
+        );
+      } finally {
+        await mounted.cleanup();
       }
     },
   );
@@ -4001,13 +4145,15 @@ describe("ChatView transcript geometry (full app)", () => {
       await page.getByRole("button", { name: "Toggle thread sidebar", exact: true }).click();
       const rail = page.getByRole("navigation", { name: "Primary" });
       await expect.element(rail.getByRole("button", { name: "Home", exact: true })).toBeVisible();
-      await expect
-        .element(rail.getByRole("button", { name: "Settings", exact: true }))
-        .toBeVisible();
       // Customize has no shell slot to anchor to on phones; it opens beside the sheet's rail.
       await rail.getByRole("button", { name: "More", exact: true }).click();
       await page.getByRole("menuitem", { name: "Customize…", exact: true }).click();
       await expect.element(page.getByRole("button", { name: "Done", exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Done", exact: true }).click();
+      // Settings remains available from the account menu while using the local-only mode.
+      await rail.getByRole("button", { name: "Sign in", exact: true }).click();
+      await page.getByRole("menuitem", { name: /^Settings\b/ }).click();
+      await expect.poll(() => mounted.router.state.location.pathname).toBe("/settings");
     } finally {
       await mounted.cleanup();
     }
@@ -5689,7 +5835,8 @@ describe("ChatView transcript geometry (full app)", () => {
         )!;
         const clamp = row.querySelector<HTMLElement>('[data-user-message-clamp="true"]')!;
         expect(clamp).toBeTruthy();
-        const text = clamp.firstElementChild!;
+        const text = clamp.querySelector<HTMLElement>(".chat-markdown--user")!;
+        expect(text?.textContent).toBe(userText);
         const lineHeightPx = Number.parseFloat(getComputedStyle(text).lineHeight);
         expect(lineHeightPx).toBeGreaterThan(0);
         expect(clamp.scrollHeight).toBeGreaterThan(clamp.clientHeight);
@@ -8724,14 +8871,17 @@ describe("ChatView transcript geometry (full app)", () => {
         { provider: "codex", model: "gpt-5.4", effort: "medium", fastMode: true, thinking: null },
       ]),
     );
-    useComposerDraftStore.getState().setModelSelection(THREAD_ID, {
+    // A started chat's composer shows the selection stored on the thread.
+    const storedSelection = {
       provider: "codex",
       model: "gpt-5.4",
       options: { reasoningEffort: "medium", fastMode: true },
-    });
+    } as const;
+    useComposerDraftStore.getState().setModelSelection(THREAD_ID, storedSelection);
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
+        modelSelection: storedSelection,
         targetMessageId: "msg-user-target-hotkey" as MessageId,
         targetText: "hotkey target",
       }),
@@ -8822,14 +8972,17 @@ describe("ChatView transcript geometry (full app)", () => {
 
   it("keeps the model picker open for 1500ms after the latest Shift+Tab press", async () => {
     localStorage.setItem("synara:app-settings:v1", JSON.stringify({ composerEffortSlider: true }));
-    useComposerDraftStore.getState().setModelSelection(THREAD_ID, {
+    // A started chat's composer shows the selection stored on the thread.
+    const storedSelection = {
       provider: "codex",
       model: "gpt-5.4",
       options: { reasoningEffort: "low" },
-    });
+    } as const;
+    useComposerDraftStore.getState().setModelSelection(THREAD_ID, storedSelection);
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
+        modelSelection: storedSelection,
         targetMessageId: "msg-user-effort-preview-timer" as MessageId,
         targetText: "effort preview timer",
       }),
@@ -8875,14 +9028,17 @@ describe("ChatView transcript geometry (full app)", () => {
 
   it("keeps a manually opened model picker open after the effort shortcut timer expires", async () => {
     localStorage.setItem("synara:app-settings:v1", JSON.stringify({ composerEffortSlider: true }));
-    useComposerDraftStore.getState().setModelSelection(THREAD_ID, {
+    // A started chat's composer shows the selection stored on the thread.
+    const storedSelection = {
       provider: "codex",
       model: "gpt-5.4",
       options: { reasoningEffort: "medium" },
-    });
+    } as const;
+    useComposerDraftStore.getState().setModelSelection(THREAD_ID, storedSelection);
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
+        modelSelection: storedSelection,
         targetMessageId: "msg-user-effort-preview-manual-picker" as MessageId,
         targetText: "manual model picker",
       }),
@@ -8919,14 +9075,17 @@ describe("ChatView transcript geometry (full app)", () => {
 
   it("keeps the existing slider menu open when choosing another model after Shift+Tab", async () => {
     localStorage.setItem("synara:app-settings:v1", JSON.stringify({ composerEffortSlider: true }));
-    useComposerDraftStore.getState().setModelSelection(THREAD_ID, {
+    // A started chat's composer shows the selection stored on the thread.
+    const storedSelection = {
       provider: "codex",
       model: "gpt-5.4",
       options: { reasoningEffort: "medium" },
-    });
+    } as const;
+    useComposerDraftStore.getState().setModelSelection(THREAD_ID, storedSelection);
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
+        modelSelection: storedSelection,
         targetMessageId: "msg-user-effort-shortcut-model-selection" as MessageId,
         targetText: "choose model from effort shortcut",
       }),
@@ -8978,14 +9137,17 @@ describe("ChatView transcript geometry (full app)", () => {
 
   it("opens the existing model picker effort menu when its slider setting is disabled", async () => {
     localStorage.setItem("synara:app-settings:v1", JSON.stringify({ composerEffortSlider: false }));
-    useComposerDraftStore.getState().setModelSelection(THREAD_ID, {
+    // A started chat's composer shows the selection stored on the thread.
+    const storedSelection = {
       provider: "codex",
       model: "gpt-5.4",
       options: { reasoningEffort: "medium" },
-    });
+    } as const;
+    useComposerDraftStore.getState().setModelSelection(THREAD_ID, storedSelection);
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
+        modelSelection: storedSelection,
         targetMessageId: "msg-user-effort-shortcut-menu-setting" as MessageId,
         targetText: "effort menu setting",
       }),
@@ -10118,14 +10280,17 @@ describe("ChatView transcript geometry (full app)", () => {
     const sentQueuedPrompt = () =>
       wsRequests.some((request) => turnStartText(request)?.includes(queuedPrompt) === true);
 
-    async function mountPausedQueue(kind: "chat" | "plan-follow-up" = "chat") {
+    async function mountPausedQueue(
+      kind: "chat" | "plan-follow-up" = "chat",
+      sessionStatus: OrchestrationSessionStatus = "ready",
+    ) {
       const baseSnapshot =
         kind === "plan-follow-up"
           ? createSnapshotWithSettledPlanAwaitingFollowUp()
           : createSnapshotForTargetUser({
               targetMessageId: "msg-user-paused-queue-target" as MessageId,
               targetText: "paused queue target",
-              sessionStatus: "ready",
+              sessionStatus,
             });
       const snapshot: OrchestrationReadModel = {
         ...baseSnapshot,
@@ -10133,10 +10298,10 @@ describe("ChatView transcript geometry (full app)", () => {
           thread.id === THREAD_ID
             ? {
                 ...thread,
-                // Claude settles a stopped turn as "completed"; the recorded Stop still holds.
+                // A stopped provider process leaves its turn failed and session closed.
                 latestTurn: {
                   turnId: stoppedTurnId,
-                  state: "completed",
+                  state: sessionStatus === "stopped" ? "error" : "completed",
                   requestedAt: NOW_ISO,
                   startedAt: NOW_ISO,
                   completedAt: NOW_ISO,
@@ -10182,8 +10347,10 @@ describe("ChatView transcript geometry (full app)", () => {
       if (kind === "plan-follow-up") {
         useComposerDraftStore.getState().setInteractionMode(THREAD_ID, "plan");
       }
-      // Same tick as the enqueue: the Stop action recorded this turn before it settled.
-      useComposerDraftStore.getState().pauseQueuedTurnsAfterStop(THREAD_ID, stoppedTurnId);
+      if (sessionStatus !== "stopped") {
+        // Same tick as the enqueue: the Stop action recorded this turn before it settled.
+        useComposerDraftStore.getState().pauseQueuedTurnsAfterStop(THREAD_ID, stoppedTurnId);
+      }
 
       await vi.waitFor(
         () => {
@@ -10218,6 +10385,32 @@ describe("ChatView transcript geometry (full app)", () => {
           useComposerDraftStore.getState().draftsByThreadId[THREAD_ID]?.queueStoppedTurnId ?? null,
         ).toBe(null);
       } finally {
+        await mounted.cleanup();
+        restoreNativeApi();
+      }
+    });
+
+    it("restarts a queued turn after the provider session closed and only after Resume", async () => {
+      const restoreNativeApi = installDeterministicSendNativeApi();
+      const mounted = await mountPausedQueue("chat", "stopped");
+      try {
+        emitWsTransportState("closed");
+        await page.getByRole("button", { name: "Resume", exact: true }).click();
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        expect(wsRequests.some((request) => turnStartText(request)?.includes(queuedPrompt))).toBe(
+          false,
+        );
+        expect(document.querySelectorAll('[data-testid="queued-follow-up-row"]')).toHaveLength(1);
+
+        emitWsTransportState("open");
+        await vi.waitFor(() => {
+          expect(
+            wsRequests.filter((request) => turnStartText(request)?.includes(queuedPrompt)),
+          ).toHaveLength(1);
+          expect(document.querySelectorAll('[data-testid="queued-follow-up-row"]')).toHaveLength(0);
+        });
+      } finally {
+        emitWsTransportState("open");
         await mounted.cleanup();
         restoreNativeApi();
       }
@@ -11028,6 +11221,60 @@ describe("ChatView transcript geometry (full app)", () => {
     }
   });
 
+  it("opens a thread in the latest project from the Home tab strip", async () => {
+    useLatestProjectStore.setState({ latestProjectId: PROJECT_ID });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: withActiveHomeChatThread(
+        createSnapshotForTargetUser({
+          targetMessageId: "msg-home-tab-new-thread" as MessageId,
+          targetText: "Home conversation",
+        }),
+      ),
+    });
+
+    try {
+      await page.getByRole("button", { name: "New thread in this workspace" }).click();
+      const path = await waitForURL(
+        mounted.router,
+        (value) => UUID_ROUTE_RE.test(value),
+        "The tab strip should open a draft in the latest project.",
+      );
+      expect(
+        useComposerDraftStore.getState().getDraftThread(path.slice(1) as ThreadId)?.projectId,
+      ).toBe(PROJECT_ID);
+      await expect
+        .element(page.getByRole("button", { name: "New thread in this workspace" }))
+        .toBeVisible();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens project creation from the Home tab strip when no project is available", async () => {
+    const snapshot = withActiveHomeChatThread(
+      createSnapshotForTargetUser({
+        targetMessageId: "msg-home-tab-no-project" as MessageId,
+        targetText: "Home conversation",
+      }),
+    );
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: {
+        ...snapshot,
+        projects: snapshot.projects.filter((project) => project.kind !== "project"),
+      },
+    });
+    try {
+      await page.getByRole("button", { name: "New thread in this workspace" }).click();
+      await expect
+        .element(page.getByRole("heading", { name: "Create project" }))
+        .toBeInTheDocument();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("keeps the project environment when global New thread creates a draft from Home", async () => {
     useLatestProjectStore.setState({ latestProjectId: PROJECT_ID });
     useProjectEnvironmentStore.setState({ envModeByProjectId: { [PROJECT_ID]: "worktree" } });
@@ -11692,6 +11939,10 @@ describe("ChatView transcript geometry (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+      await expect.element(page.getByRole("navigation", { name: "Open threads" })).toBeVisible();
+      await expect
+        .element(page.getByRole("button", { name: "New thread in this workspace" }))
+        .not.toBeInTheDocument();
     } finally {
       await mounted.cleanup();
     }
@@ -11786,6 +12037,7 @@ describe("ChatView transcript geometry (full app)", () => {
       // must keep focus in the one now on screen.
       const settledComposerEditor = await waitForComposerEditor();
       settledComposerEditor.focus();
+      await waitForLayout();
 
       const originalRequestAnimationFrame = window.requestAnimationFrame;
       let frameRequestCount = 0;
@@ -12275,7 +12527,7 @@ describe("ChatView transcript geometry (full app)", () => {
 
       await page.getByRole("button", { name: "New space", exact: true }).click();
       await expect.element(page.getByRole("heading", { name: "New space" })).toBeInTheDocument();
-      await page.getByLabelText("Name").fill("Focus");
+      await page.getByLabelText("Name", { exact: true }).fill("Focus");
       await page.getByRole("button", { name: "Create space", exact: true }).click();
 
       // The nested editor closes, the space.create command is dispatched, and
@@ -14168,6 +14420,134 @@ describe("ChatView transcript geometry (full app)", () => {
     }
   });
 
+  it.each(["shortcut", "palette", "native terminal"] as const)(
+    "keeps the selected remote owner for the outer %s action",
+    async (action) => {
+      const controller = {
+        environmentId: "controller-test",
+        label: "This computer",
+        channel: "dev",
+        capabilities: { remoteConnections: true },
+      } as ExecutionEnvironmentDescriptor;
+      vi.mocked(readExecutionContext).mockReturnValue({
+        controller,
+        execution: controller,
+        remote: null,
+      });
+      // Keep the real controlling shell and router; the remote execution boundary is
+      // represented by its registered owner actions instead of loading a second app.
+      vi.mocked(WorkspacePanels).mockReturnValue(null);
+      const menuListeners = new Set<(action: string) => void>();
+      const previousBridge = Object.getOwnPropertyDescriptor(window, "desktopBridge");
+      let restored = false;
+      const restoreBridges = () => {
+        if (restored) return;
+        restored = true;
+        vi.mocked(readExecutionContext).mockRestore();
+        vi.mocked(WorkspacePanels).mockRestore();
+        if (previousBridge) Object.defineProperty(window, "desktopBridge", previousBridge);
+        else delete window.desktopBridge;
+      };
+      onTestFinished(restoreBridges);
+      const snapshot = createSnapshotForTargetUser({
+        targetMessageId: MessageId.makeUnsafe("remote-owner-action"),
+        targetText: "Preserve the selected computer",
+      });
+      const mounted = await mountChatView({
+        viewport: DEFAULT_VIEWPORT,
+        snapshot,
+        configureFixture: (nextFixture) => {
+          nextFixture.serverConfig = {
+            ...nextFixture.serverConfig,
+            keybindings: [
+              {
+                command: "chat.new",
+                shortcut: {
+                  key: "o",
+                  metaKey: false,
+                  ctrlKey: false,
+                  shiftKey: true,
+                  altKey: false,
+                  modKey: true,
+                },
+              },
+            ],
+          };
+        },
+      });
+      const navigation = {
+        newChat: vi.fn().mockResolvedValue("/remote-draft"),
+        createChat: vi.fn().mockResolvedValue(undefined),
+        openTerminal: vi.fn(),
+        browseFolders: vi.fn(),
+        createProject: vi.fn(),
+        openProject: vi.fn(),
+        navigate: vi.fn(),
+        recover: vi.fn(),
+      };
+      try {
+        await waitForServerConfigToApply();
+        Object.defineProperty(window, "desktopBridge", {
+          configurable: true,
+          value: {
+            ...window.desktopBridge,
+            getWsUrl: () => "",
+            setTheme: async () => {},
+            browser: { ...window.desktopBridge?.browser },
+            onMenuAction: (listener: (action: string) => void) => {
+              menuListeners.add(listener);
+              return () => menuListeners.delete(listener);
+            },
+          },
+        });
+        addWorkspaceSession({
+          hostId: "remote-owner-test",
+          hostName: "Remote computer",
+          wsPath: "/ws/remote/owner-test",
+          executionScope: {
+            environmentId: "remote-owner-test",
+            accountAuthority: "https://account.example",
+            userId: "alice",
+            organizationId: "org",
+            channel: "dev",
+          },
+        });
+        updateWorkspaceSession("remote-owner-test", {
+          navigation,
+          summary: { state: "open", path: "/remote-thread", projects: [], threads: [] },
+        });
+        await mounted.router.navigate({
+          to: "/remote",
+          search: { environment: "remote-owner-test", path: "/remote-thread" },
+        });
+        await waitForLayout();
+        if (action === "shortcut") {
+          document.querySelector<HTMLElement>('[data-testid="new-thread-button"]')!.focus();
+          await dispatchConfiguredShortcutWhenReady(window, { key: "o", shiftKey: true });
+        } else if (action === "palette") {
+          await page.getByRole("button", { name: "Search", exact: true }).click();
+          await page.getByPlaceholder("Search chats or run a command").fill("New chat");
+          await page.getByRole("option", { name: /^New chat/ }).click();
+        } else {
+          for (const listener of menuListeners) listener("new-terminal-tab");
+        }
+        await vi.waitFor(() => {
+          expect(mounted.router.state.location.pathname).toBe("/remote");
+          if (action === "native terminal") expect(navigation.openTerminal).toHaveBeenCalledOnce();
+          else
+            expect(navigation.createChat).toHaveBeenCalledWith(
+              action === "shortcut" ? "chat.new" : "chat.newChat",
+            );
+        });
+        expect(useComposerDraftStore.getState().draftThreadsByThreadId).toEqual({});
+      } finally {
+        await mounted.cleanup();
+        removeWorkspaceSession("remote-owner-test");
+        restoreBridges();
+      }
+    },
+  );
+
   it("creates a new thread from the global chat.new shortcut", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -16058,7 +16438,9 @@ describe("ChatView transcript geometry (full app)", () => {
       },
     });
     try {
-      await waitForComposerEditor();
+      await expect
+        .element(page.getByTestId("composer-editor"))
+        .toHaveAttribute("contenteditable", "false");
       const capsule = await waitForElement(
         () => document.querySelector<HTMLElement>('[data-testid="running-agents-capsule"]'),
         "Nested agents must remain visible while their root runtime is alive.",
@@ -16295,6 +16677,108 @@ describe("ChatView transcript geometry (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the MCP proposal in the transcript recap after its final answer", async () => {
+    const base = createSnapshotWithInlineToolOverflow({ active: false });
+    const createdAt = isoAt(1_107);
+    const proposal: McpConnectorProposal = {
+      proposalId: "paper-proposal",
+      threadId: THREAD_ID,
+      action: "add",
+      state: "pending",
+      connector: {
+        connectorId: "pending-paper",
+        presetId: null,
+        name: "Paper",
+        transport: "stdio",
+        command: "/opt/example/paper",
+        args: ["mcp"],
+        envKeys: [],
+        serverName: "paper_connector",
+        authKind: "none",
+        status: "unreachable",
+        createdAt,
+        updatedAt: createdAt,
+      },
+    };
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: {
+        ...base,
+        threads: base.threads.map((thread) =>
+          thread.id === THREAD_ID
+            ? {
+                ...thread,
+                activities: [
+                  ...thread.activities,
+                  {
+                    id: EventId.makeUnsafe("paper-proposed"),
+                    kind: "mcp.connector.proposed",
+                    tone: "info",
+                    summary: "Add connector: Paper",
+                    createdAt,
+                    turnId: null,
+                    payload: { proposalId: proposal.proposalId },
+                  },
+                ],
+              }
+            : thread,
+        ),
+      },
+      configureFixture: (fixture) => {
+        fixture.connectorProposals = [
+          proposal,
+          {
+            ...proposal,
+            proposalId: "other-proposal",
+            threadId: OTHER_THREAD_ID,
+            connector: { ...proposal.connector, name: "Other connector" },
+          },
+        ];
+      },
+    });
+    try {
+      const card = page.getByRole("region", { name: "Paper connector proposal", exact: true });
+      const answer = page.getByText("Wrapped up the inline tool review.", { exact: true });
+      const assertRecapPlacement = async () => {
+        await expect.element(card).toBeVisible();
+        await expect.element(answer).toBeVisible();
+        const cardElement = card.element();
+        const answerElement = answer.element();
+        const answerRow = answerElement.closest("[data-timeline-row-kind='message']");
+        expect(answerRow?.getAttribute("data-message-id")).toBe("msg-assistant-inline-tools");
+        expect(cardElement.closest("[data-timeline-row-kind='message']")).toBe(answerRow);
+        expect(
+          answerElement.compareDocumentPosition(cardElement) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+        expect(cardElement.closest("[data-chat-composer-form='true']")).toBeNull();
+        expect(
+          page.getByRole("region", { name: "Other connector connector proposal" }).query(),
+        ).toBeNull();
+      };
+
+      await vi.waitFor(() =>
+        expect(findInlineToolsTurnDisclosure()?.getAttribute("aria-expanded")).toBe("false"),
+      );
+      await assertRecapPlacement();
+      expect(document.body.textContent).not.toContain("Used 6 tools");
+
+      findInlineToolsTurnDisclosure()!.click();
+      await vi.waitFor(() => expect(document.body.textContent).toContain("Used 6 tools"));
+      await assertRecapPlacement();
+      findInlineToolsTurnDisclosure()!.click();
+      await vi.waitFor(() =>
+        expect(findInlineToolsTurnDisclosure()?.getAttribute("aria-expanded")).toBe("false"),
+      );
+      await assertRecapPlacement();
+
+      await card.getByRole("button", { name: "Dismiss", exact: true }).click();
+      await expect.element(card.getByText("Dismissed", { exact: true })).toBeVisible();
+      await assertRecapPlacement();
     } finally {
       await mounted.cleanup();
     }
@@ -16610,6 +17094,9 @@ describe("ChatView transcript geometry (full app)", () => {
           await expect
             .element(page.getByRole("button", { name: /Visual follow up/ }))
             .toBeVisible();
+          await userEvent.unhover(
+            document.querySelector<HTMLElement>('[data-slot="sidebar-container"]')!,
+          );
           const before = wsRequests.filter((request) =>
             turnStartText(request)?.includes("Follow up from visual"),
           ).length;
